@@ -14,6 +14,8 @@ PLAT_TO_CMAKE = {
     'win-arm64': 'ARM64',
 }
 
+base_path = os.path.abspath(os.path.dirname(__file__))
+
 
 # A CMakeExtension needs a sourcedir instead of a file list.
 # The name must be the _single_ output extension from the CMake build.
@@ -117,15 +119,39 @@ class CMakeBuild(build_ext):
         )
 
 
+with open(os.path.join(base_path, 'CMakeLists.txt'), 'r', encoding='utf-8') as f:
+    regex = re.compile(r'VERSION "([A-Za-z0-9.]+)"$', re.MULTILINE)
+    version = re.findall(regex, f.read())[0]
+
+    if version.count('.') == 3:
+        major, minor, path_, tweak = version.split('.')
+        version = f'{major}.{minor}.{path_}.dev{tweak}'
+
+with open(os.path.join(base_path, 'README.md'), 'r', encoding='utf-8') as f:
+    readme = f.read()
+
 # The information here can also be placed in setup.cfg - better separation of
 # logic and declaration, and simpler if you include description/version in a file.
 setup(
-    name='webrtc',
-    version='0.0.1',
+    name='wrtc',    # webrtc for some reasons isn't allowed but looks like free...
+    version=version,
+    author='Il`ya Semyonov',
+    author_email='ilya@marshal.dev',
+    # license='', # TODO
+    url='https://github.com/MarshalX/python-webrtc',
     description='',
-    long_description='',
+    long_description=readme,
+    long_description_content_type='text/markdown',
+    classifiers=[
+        'Development Status :: 1 - Planning',
+        'Natural Language :: English',
+        'Intended Audience :: Developers',
+    ],
+    python_requires='~=3.6',
     ext_modules=[CMakeExtension('python-webrtc')],
     cmdclass={'build_ext': CMakeBuild},
     zip_safe=False,
-    python_requires='>=3.6',
+    project_urls={
+        'Author': 'https://github.com/MarshalX',
+    }
 )
