@@ -24,11 +24,14 @@ target_link_libraries(${MODULE} PRIVATE
 )
 
 target_compile_definitions(${MODULE} PRIVATE
-    -DNAPI_VERSION=3
     -DUSE_BUILTIN_SW_CODECS
 )
 
 if(WIN32)
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT /GR-")
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd /GR- -D_HAS_ITERATOR_DEBUGGING=0")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /FORCE:UNRESOLVED")
+
   target_link_libraries(${MODULE} PRIVATE
       dmoguids.lib
       msdmo.lib
@@ -36,6 +39,13 @@ if(WIN32)
       winmm.lib
       wmcodecdspuuid.lib
       ws2_32.lib
+  )
+
+  target_compile_definitions(${MODULE} PRIVATE
+      -D_WINSOCKAPI_
+      -DNOGDI
+      -DNOMINMAX
+      -DWEBRTC_WIN
   )
 else()
   target_include_directories(${MODULE} SYSTEM PRIVATE
@@ -71,6 +81,16 @@ else()
       -DWEBRTC_POSIX=1
   )
 
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_options(${MODULE} PRIVATE
+        -g
+    )
+
+    target_compile_definitions(${MODULE} PRIVATE
+        -DDEBUG
+    )
+  endif()
+
   if(APPLE)
     target_link_libraries(${MODULE} PRIVATE
         "-framework AppKit"
@@ -104,5 +124,11 @@ else()
     target_compile_definitions(${MODULE} PRIVATE
         -DWEBRTC_LINUX
     )
+
+    target_compile_options(${MODULE} PRIVATE
+        -fpermissive
+    )
+
+    # TODO
   endif()
 endif()

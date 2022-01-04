@@ -10,6 +10,10 @@ project(python-webrtc
     VERSION "0.0.0.1"
 )
 
+include(ExternalProject)
+find_package(Git REQUIRED)
+find_package(Threads REQUIRED)
+
 get_filename_component(third_party_loc "third_party" REALPATH)
 get_filename_component(project_loc "python-webrtc/cpp/" REALPATH)
 get_filename_component(src_loc "${project_loc}/src" REALPATH)
@@ -116,7 +120,7 @@ set_property(TARGET libc++abi APPEND PROPERTY IMPORTED_CONFIGURATIONS DEBUG)
 set_target_properties(libc++abi PROPERTIES IMPORTED_OBJECTS_DEBUG "${libc++abi_objects}" IMPORTED_OBJECTS "${libc++abi_objects}")
 
 
-# webrtc
+# libwebrtc
 set(WEBRTC_REVISION branch-heads/4515) # m92
 
 list(APPEND GN_GEN_ARGS
