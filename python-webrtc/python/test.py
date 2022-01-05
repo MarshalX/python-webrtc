@@ -4,7 +4,7 @@ import webrtc
 if __name__ == '__main__':
     webrtc.ping()
 
-    # factory = webrtc.RTCPeerConnectionFactory.GetOrCreateDefault()
+    # factory = webrtc.PeerConnectionFactory.GetOrCreateDefault()
     # factory.Release()
     # factory.Dispose()
 
@@ -16,5 +16,7 @@ if __name__ == '__main__':
     for enum in enums:
         print(f'{enum!r} = {enum.__members__}')
 
-    # while True:
-    #     pass
+    pc = webrtc.RTCPeerConnection()
+
+    while True:
+        pass

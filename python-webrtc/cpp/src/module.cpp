@@ -2,6 +2,7 @@
 
 // TODO move to "interfaces" subdir
 #include "peer_connection_factory.h"
+#include "rtc_peer_connection.h"
 #include "enums/enums.h"
 
 namespace py = pybind11;
@@ -18,4 +19,5 @@ PYBIND11_MODULE(webrtc, m) {
   // TODO
   // python_webrtc::Interfaces::Init(m);
   python_webrtc::PeerConnectionFactory::Init(m);
+  python_webrtc::RTCPeerConnection::Init(m);
 }

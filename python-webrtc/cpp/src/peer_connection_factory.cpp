@@ -112,12 +112,12 @@ namespace python_webrtc {
     result = rtc::InitializeSSL();
     assert(result);
 
-    py::class_<PeerConnectionFactory>(m, "RTCPeerConnectionFactory")
+    py::class_<PeerConnectionFactory>(m, "PeerConnectionFactory")
         .def(py::init<>())
         .def("GetOrCreateDefault", &PeerConnectionFactory::GetOrCreateDefault)
         .def("Release", &PeerConnectionFactory::Release)
         .def("factory", &PeerConnectionFactory::factory)
-        // TODO
+//         TODO mb
 //        .def("getNetworkManager", &PeerConnectionFactory::getNetworkManager)
 //        .def("getSocketFactory", &PeerConnectionFactory::getSocketFactory)
         .def("Dispose", &PeerConnectionFactory::Dispose);
