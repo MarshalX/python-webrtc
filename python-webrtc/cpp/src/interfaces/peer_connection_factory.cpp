@@ -2,6 +2,8 @@
 // Created by Il'ya Semyonov on 1/4/22.
 //
 
+#include "peer_connection_factory.h"
+
 #include <api/create_peerconnection_factory.h>
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
@@ -9,8 +11,6 @@
 #include <api/video_codecs/builtin_video_decoder_factory.h>
 #include <p2p/base/basic_packet_socket_factory.h>
 #include <rtc_base/ssl_adapter.h>
-
-#include "peer_connection_factory.h"
 
 namespace python_webrtc {
 
@@ -105,15 +105,15 @@ namespace python_webrtc {
     rtc::CleanupSSL();
   }
 
-  void PeerConnectionFactory::Init(py::module &m) {
+  void PeerConnectionFactory::Init(pybind11::module &m) {
     bool result;
     (void) result;
 
     result = rtc::InitializeSSL();
     assert(result);
 
-    py::class_<PeerConnectionFactory>(m, "PeerConnectionFactory")
-        .def(py::init<>())
+    pybind11::class_<PeerConnectionFactory>(m, "PeerConnectionFactory")
+        .def(pybind11::init<>())
         .def("GetOrCreateDefault", &PeerConnectionFactory::GetOrCreateDefault)
         .def("Release", &PeerConnectionFactory::Release)
         .def("factory", &PeerConnectionFactory::factory)

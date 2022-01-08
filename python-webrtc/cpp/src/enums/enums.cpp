@@ -7,14 +7,18 @@
 #include "webrtc/peer_connection_state.h"
 #include "webrtc/ice_connection_state.h"
 #include "webrtc/ice_gathering_state.h"
+#include "webrtc/sdp_type.h"
 
 namespace python_webrtc {
 
   void Enums::Init(pybind11::module &m) {
     // webrtc
+
     PeerConnectionState::Init(m);
     IceConnectionState::Init(m);
     IceGatheringState::Init(m);
+
+    SdpType::Init(m);
 
     // python_webrtc
   }

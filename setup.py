@@ -148,7 +148,7 @@ setup(
         'Intended Audience :: Developers',
     ],
     python_requires='~=3.6',
-    ext_modules=[CMakeExtension('python-webrtc')],
+    ext_modules=[CMakeExtension('python_webrtc')],
     cmdclass={'build_ext': CMakeBuild},
     zip_safe=False,
     project_urls={

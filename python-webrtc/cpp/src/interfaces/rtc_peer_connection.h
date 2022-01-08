@@ -8,6 +8,9 @@
 #include <webrtc/api/scoped_refptr.h>
 
 #include <pybind11/pybind11.h>
+#include <pybind11/functional.h>
+
+#include "python-webrtc/cpp/src/models/python_webrtc/rtc_session_description.h"
 
 namespace python_webrtc {
 
@@ -19,7 +22,11 @@ namespace python_webrtc {
 
     ~RTCPeerConnection();
 
+    void CreateOffer(std::function<void(RTCSessionDescription)>&);
+
     static void Init(pybind11::module &m);
+
+    void SaveLastSdp(const RTCSessionDescriptionInit& lastSdp);
 
     // PeerConnectionObserver implementation.
     void OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState new_state) override;
@@ -48,6 +55,8 @@ namespace python_webrtc {
   private:
 //    someStructWith2FieldMinAndMax _port_range;
     rtc::scoped_refptr<webrtc::PeerConnectionInterface> _jinglePeerConnection;
+
+    RTCSessionDescriptionInit _lastSdp;
 
     PeerConnectionFactory *_factory;
     bool _shouldReleaseFactory;

@@ -1,4 +1,4 @@
-// TODO update copyright after solving questions with licence
+// TODO update copyright after solving questions with licence (just BSD?)
 //
 // Created by Il'ya Semyonov on 1/4/22.
 //
@@ -10,8 +10,6 @@
 #include <webrtc/modules/audio_device/include/audio_device.h>
 
 #include <pybind11/pybind11.h>
-
-namespace py = pybind11;
 
 namespace rtc {
 
@@ -47,7 +45,7 @@ namespace python_webrtc {
 
     rtc::PacketSocketFactory *getSocketFactory() { return _socketFactory.get(); }
 
-    static void Init(py::module &m);
+    static void Init(pybind11::module &m);
 
     static void Dispose();
 

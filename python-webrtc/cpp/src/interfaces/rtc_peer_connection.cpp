@@ -7,6 +7,7 @@
 #include <webrtc/p2p/client/basic_port_allocator.h>
 
 #include "peer_connection_factory.h"
+#include "create_session_description_observer.h"
 
 namespace python_webrtc {
 
@@ -51,11 +52,31 @@ namespace python_webrtc {
 
   void RTCPeerConnection::Init(pybind11::module &m) {
     pybind11::class_<RTCPeerConnection>(m, "RTCPeerConnection")
-        .def(py::init<>());
+        .def(pybind11::init<>())
+        .def("CreateOffer", &RTCPeerConnection::CreateOffer);
+  }
+
+  void RTCPeerConnection::SaveLastSdp(const RTCSessionDescriptionInit& lastSdp) {
+    _lastSdp = lastSdp;
+  }
+
+  void RTCPeerConnection::CreateOffer(std::function<void(RTCSessionDescription)> &onSuccess) {
+    if (!_jinglePeerConnection || _jinglePeerConnection->signaling_state() == webrtc::PeerConnectionInterface::SignalingState::kClosed) {
+//      TODO call onFail
+        return;
+    }
+
+    auto observer = new rtc::RefCountedObject<CreateSessionDescriptionObserver>(this, onSuccess);
+//     TODO bind options
+    auto options = webrtc::PeerConnectionInterface::RTCOfferAnswerOptions();
+    _jinglePeerConnection->CreateOffer(observer, options);
   }
 
   void RTCPeerConnection::OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState new_state) {
-
+//    TODO call python callback
+    if (new_state == webrtc::PeerConnectionInterface::kClosed) {
+//      TODO stop
+    }
   }
 
   void RTCPeerConnection::OnIceConnectionChange(webrtc::PeerConnectionInterface::IceConnectionState new_state) {

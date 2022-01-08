@@ -3,7 +3,7 @@ cmake_policy(SET CMP0076 NEW)
 
 include(ExternalProject)
 
-project(python-webrtc
+project(python_webrtc
     LANGUAGES C CXX
     DESCRIPTION "Python binding for WebRTC"
     HOMEPAGE_URL "https://github.com/MarshalX/python-webrtc"
@@ -242,5 +242,5 @@ set(libc++abi_include_dir "${libwebrtc_source_dir}/src/buildtools/third_party/li
 add_subdirectory(${third_party_loc}/pybind11)
 
 # python-webrtc
-set(MODULE python-webrtc)
+set(MODULE python_webrtc)
 add_subdirectory(${project_loc})
