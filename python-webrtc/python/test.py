@@ -1,3 +1,5 @@
+import asyncio
+
 import webrtc
 
 
@@ -10,40 +12,93 @@ a=msid-semantic: WMS
 '''
 
 
+class Event(asyncio.Event):
+    def set(self):
+        self._loop.call_soon_threadsafe(super().set)
+
+
+class AsyncWrapper:
+    def __init__(self, func: callable):
+        self.__event = Event()
+        self.__func = func
+
+        self.__result = None
+
+    def set(self):
+        self.__event.set()
+
+    def _on_success(self, result):
+        self.__result = result
+        self.set()
+
+    def _on_fail(self, error):
+        # TODO reraise. error should be exception created from cpp side
+        pass
+
+    async def run(self, timeout=10):
+        self.__func(self._on_success)  # TODO pass _on_fail
+        await asyncio.wait_for(self.__event.wait(), timeout)
+        return self.__result
+
+    def __await__(self):
+        return self.run().__await__()
+
+
+toAsync = AsyncWrapper
+
+
 def idle():
     while True:
         pass
 
 
-webrtc.ping()
+async def test_async(peer_connection):
+    async def _1():
+        while True:
+            sdp = await toAsync(peer_connection.CreateOffer)
+            print('_1', sdp)
+            await asyncio.sleep(0.1)
 
-# factory = webrtc.PeerConnectionFactory.GetOrCreateDefault()
-# factory.Release()
-# factory.Dispose()
+    async def _2():
+        import random
+        while True:
+            print('_2', random.randint(0, 10**6))
+            await asyncio.sleep(0.1)
 
-enums = [
-    webrtc.RTCPeerConnectionState,
-    webrtc.RTCIceConnectionState,
-    webrtc.RTCIceGatheringState,
-    webrtc.RTCSdpType,
-]
-for enum in enums:
-    print(f'{enum!r} = {enum.__members__}')
-
-pc = webrtc.RTCPeerConnection()
-
-# sdp string should be valid. need to bind exception on invalid
-answer_sdp = webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, VALID_SDP)
-answer = webrtc.RTCSessionDescription(answer_sdp)
-
-offer = None
+    await asyncio.gather(
+        _1(),
+        _2(),
+    )
 
 
-def on_sdp(sdp: webrtc.RTCSessionDescription):
-    global offer
-    offer = sdp
+async def main():
+    webrtc.ping()
 
+    # factory = webrtc.PeerConnectionFactory.GetOrCreateDefault()
+    # factory.Release()
+    # factory.Dispose()
 
-pc.CreateOffer(on_sdp)
+    enums = [
+        webrtc.RTCPeerConnectionState,
+        webrtc.RTCIceConnectionState,
+        webrtc.RTCIceGatheringState,
+        webrtc.RTCSdpType,
+    ]
+    for enum in enums:
+        print(f'{enum!r} = {enum.__members__}')
 
-idle()
+    # sdp string should be valid. need to bind exception on invalid
+    answer_sdp = webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, VALID_SDP)
+    answer = webrtc.RTCSessionDescription(answer_sdp)
+
+    pc = webrtc.RTCPeerConnection()
+    local_sdp = await toAsync(pc.CreateOffer)
+
+    print('Local SDP', local_sdp)
+
+    await test_async(pc)
+
+    idle()
+
+if __name__ == '__main__':
+    asyncio.get_event_loop().run_until_complete(main())
