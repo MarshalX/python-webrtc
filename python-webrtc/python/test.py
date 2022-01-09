@@ -22,12 +22,15 @@ class AsyncWrapper:
         self.__event = Event()
         self.__func = func
 
+        self.__args_for_run = []
+        self.__kwargs_for_run = {}
+
         self.__result = None
 
     def set(self):
         self.__event.set()
 
-    def _on_success(self, result):
+    def _on_success(self, result=None):    # TODO many results mb
         self.__result = result
         self.set()
 
@@ -36,9 +39,15 @@ class AsyncWrapper:
         pass
 
     async def run(self, timeout=10):
-        self.__func(self._on_success)  # TODO pass _on_fail
+        self.__func(self._on_success, *self.__args_for_run, **self.__kwargs_for_run)  # TODO pass _on_fail
         await asyncio.wait_for(self.__event.wait(), timeout)
         return self.__result
+
+    def __call__(self, *args, **kwargs):
+        self.__args_for_run = args
+        self.__kwargs_for_run = kwargs
+
+        return self
 
     def __await__(self):
         return self.run().__await__()
@@ -55,7 +64,7 @@ def idle():
 async def test_async(peer_connection):
     async def _1():
         while True:
-            sdp = await toAsync(peer_connection.CreateOffer)
+            sdp = await toAsync(peer_connection.createOffer)
             print('_1', sdp)
             await asyncio.sleep(0.1)
 
@@ -92,11 +101,19 @@ async def main():
     answer = webrtc.RTCSessionDescription(answer_sdp)
 
     pc = webrtc.RTCPeerConnection()
-    local_sdp = await toAsync(pc.CreateOffer)
+    local_sdp = await toAsync(pc.createOffer)
 
     print('Local SDP', local_sdp)
 
-    await test_async(pc)
+    # after that the PC should be closed before exit from script
+    await toAsync(pc.setLocalDescription)(local_sdp)
+
+    # await toAsync(pc.setRemoteDescription)(local_sdp)
+    # answer_sdp = await toAsync(pc.createAnswer)
+
+    # print('Answer SDP', answer_sdp)
+
+    # await test_async(pc)
 
     idle()
 

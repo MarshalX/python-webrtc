@@ -23,6 +23,9 @@ namespace python_webrtc {
     ~RTCPeerConnection();
 
     void CreateOffer(std::function<void(RTCSessionDescription)>&);
+    void CreateAnswer(std::function<void(RTCSessionDescription)>&);
+    void SetLocalDescription(std::function<void()>&, RTCSessionDescription&);
+    void SetRemoteDescription(std::function<void()>&, RTCSessionDescription&);
 
     static void Init(pybind11::module &m);
 

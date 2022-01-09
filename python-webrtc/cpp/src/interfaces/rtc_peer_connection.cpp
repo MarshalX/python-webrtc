@@ -8,6 +8,7 @@
 
 #include "peer_connection_factory.h"
 #include "create_session_description_observer.h"
+#include "set_session_description_observer.h"
 
 namespace python_webrtc {
 
@@ -53,7 +54,10 @@ namespace python_webrtc {
   void RTCPeerConnection::Init(pybind11::module &m) {
     pybind11::class_<RTCPeerConnection>(m, "RTCPeerConnection")
         .def(pybind11::init<>())
-        .def("CreateOffer", &RTCPeerConnection::CreateOffer);
+        .def("createOffer", &RTCPeerConnection::CreateOffer)
+        .def("createAnswer", &RTCPeerConnection::CreateAnswer)
+        .def("setLocalDescription", &RTCPeerConnection::SetLocalDescription)
+        .def("setRemoteDescription", &RTCPeerConnection::SetRemoteDescription);
   }
 
   void RTCPeerConnection::SaveLastSdp(const RTCSessionDescriptionInit& lastSdp) {
@@ -63,13 +67,63 @@ namespace python_webrtc {
   void RTCPeerConnection::CreateOffer(std::function<void(RTCSessionDescription)> &onSuccess) {
     if (!_jinglePeerConnection || _jinglePeerConnection->signaling_state() == webrtc::PeerConnectionInterface::SignalingState::kClosed) {
 //      TODO call onFail
+//      "Failed to execute 'createOffer' on 'RTCPeerConnection': The RTCPeerConnection's signalingState is 'closed'."
         return;
     }
 
     auto observer = new rtc::RefCountedObject<CreateSessionDescriptionObserver>(this, onSuccess);
-//     TODO bind options
+//     TODO bind RTCOfferOptions (voice_activity_detection, iceRestart, offerToReceiveAudio, offerToReceiveVideo)
     auto options = webrtc::PeerConnectionInterface::RTCOfferAnswerOptions();
     _jinglePeerConnection->CreateOffer(observer, options);
+  }
+
+  void RTCPeerConnection::CreateAnswer(std::function<void(RTCSessionDescription)> &onSuccess) {
+    if (!_jinglePeerConnection || _jinglePeerConnection->signaling_state() == webrtc::PeerConnectionInterface::SignalingState::kClosed) {
+//      TODO call onFail
+//      "Failed to execute 'createAnswer' on 'RTCPeerConnection': The RTCPeerConnection's signalingState is 'closed'."
+      return;
+    }
+
+    auto observer = new rtc::RefCountedObject<CreateSessionDescriptionObserver>(this, onSuccess);
+//       TODO bind RTCAnswerOptions (voice_activity_detection)
+    auto options = webrtc::PeerConnectionInterface::RTCOfferAnswerOptions();
+    _jinglePeerConnection->CreateAnswer(observer, options);
+  }
+
+  void RTCPeerConnection::SetLocalDescription(std::function<void()> &onSuccess, RTCSessionDescription &description) {
+//    TODO accept RTCSessionDescriptionInit too
+    if (description.getSdp().empty()) {
+//      TODO use lastSdp
+      _lastSdp.sdp;
+    }
+
+    auto* raw_description = static_cast<webrtc::SessionDescriptionInterface*>(description);
+    std::unique_ptr<webrtc::SessionDescriptionInterface> raw_description_ptr(raw_description);
+
+    if (!_jinglePeerConnection || _jinglePeerConnection->signaling_state() == webrtc::PeerConnectionInterface::SignalingState::kClosed) {
+//      TODO call onFail
+//      "Failed to execute 'setLocalDescription' on 'RTCPeerConnection': The RTCPeerConnection's signalingState is 'closed'."
+      return;
+    }
+
+    auto observer = new rtc::RefCountedObject<SetSessionDescriptionObserver>(onSuccess);
+    _jinglePeerConnection->SetLocalDescription(observer, raw_description_ptr.release());
+  }
+
+  void RTCPeerConnection::SetRemoteDescription(std::function<void()> &onSuccess, RTCSessionDescription &description) {
+//    TODO accept RTCSessionDescriptionInit too
+
+    auto* raw_description = static_cast<webrtc::SessionDescriptionInterface*>(description);
+    std::unique_ptr<webrtc::SessionDescriptionInterface> raw_description_ptr(raw_description);
+
+    if (!_jinglePeerConnection || _jinglePeerConnection->signaling_state() == webrtc::PeerConnectionInterface::SignalingState::kClosed) {
+//      TODO call onFail
+//      "Failed to execute 'setRemoteDescription' on 'RTCPeerConnection': The RTCPeerConnection's signalingState is 'closed'."
+      return;
+    }
+
+    auto observer = new rtc::RefCountedObject<SetSessionDescriptionObserver>(onSuccess);
+    _jinglePeerConnection->SetRemoteDescription(observer, raw_description_ptr.release());
   }
 
   void RTCPeerConnection::OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState new_state) {
