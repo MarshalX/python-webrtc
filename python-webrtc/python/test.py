@@ -92,6 +92,7 @@ async def main():
         webrtc.RTCIceConnectionState,
         webrtc.RTCIceGatheringState,
         webrtc.RTCSdpType,
+        webrtc.MediaStreamTrackState,
     ]
     for enum in enums:
         print(f'{enum!r} = {enum.__members__}')
@@ -114,6 +115,8 @@ async def main():
     # print('Answer SDP', answer_sdp)
 
     # await test_async(pc)
+
+    print(webrtc.MediaStreamTrack)
 
     idle()
 
