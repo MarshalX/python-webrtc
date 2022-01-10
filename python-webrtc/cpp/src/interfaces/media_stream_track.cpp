@@ -82,7 +82,7 @@ namespace python_webrtc {
     return false;
   }
 
-  MediaStreamTrack MediaStreamTrack::Clone() {
+  MediaStreamTrack *MediaStreamTrack::Clone() {
     auto label = rtc::CreateRandomUuid();
     rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> clonedTrack = nullptr;
 
@@ -94,9 +94,9 @@ namespace python_webrtc {
       clonedTrack = _factory->factory()->CreateVideoTrack(label, videoTrack->GetSource());
     }
 
-    auto clonedMediaStreamTrack = MediaStreamTrack(_factory, clonedTrack);
+    auto clonedMediaStreamTrack = new MediaStreamTrack(_factory, clonedTrack);
     if (_ended) {
-      clonedMediaStreamTrack.Stop();
+      clonedMediaStreamTrack->Stop();
     }
     return clonedMediaStreamTrack;
   }

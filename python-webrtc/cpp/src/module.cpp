@@ -3,6 +3,7 @@
 #include "enums/enums.h"
 #include "models/models.h"
 #include "interfaces/interfaces.h"
+#include "functions/functions.h"
 
 namespace py = pybind11;
 
@@ -16,4 +17,5 @@ PYBIND11_MODULE(webrtc, m) {
   python_webrtc::Enums::Init(m);
   python_webrtc::Models::Init(m);
   python_webrtc::Interfaces::Init(m);
+  python_webrtc::Functions::Init(m);
 }

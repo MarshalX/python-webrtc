@@ -41,7 +41,7 @@ namespace python_webrtc {
 
     bool GetMuted();
 
-    MediaStreamTrack Clone();
+    MediaStreamTrack *Clone();
 
     bool active() { return !_ended && _track->state() == webrtc::MediaStreamTrackInterface::TrackState::kLive; }
 

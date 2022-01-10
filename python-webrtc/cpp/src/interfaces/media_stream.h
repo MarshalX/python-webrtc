@@ -9,6 +9,7 @@
 #include <webrtc/api/scoped_refptr.h>
 
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include "peer_connection_factory.h"
 #include "media_stream_track.h"
@@ -56,7 +57,7 @@ namespace python_webrtc {
 
     void RemoveTrack(MediaStreamTrack *);
 
-    MediaStream Clone();
+    MediaStream *Clone();
 
   private:
     class Impl {

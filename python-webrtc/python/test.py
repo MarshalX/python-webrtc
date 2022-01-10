@@ -116,8 +116,24 @@ async def main():
 
     # await test_async(pc)
 
-    print(webrtc.MediaStreamTrack)
-    print(webrtc.MediaStream)
+    def get_dir(o):
+        return [m for m in dir(o) if not m.startswith('__')]
+
+    # TODO should be asynced?
+    stream = webrtc.getUserMedia()
+    print(repr(stream), get_dir(stream))
+    # <webrtc.MediaStream object at 0x10623e3f0> ['active', 'addTrack', 'clone', 'getAudioTracks',
+    # 'getTrackById', 'getTracks', 'getVideoTracks', 'id', 'removeTrack']
+    for track in stream.getTracks():
+        print(repr(track), get_dir(track))
+        # <webrtc.MediaStreamTrack object at 0x10623a1f0> ['clone', 'enabled', 'id', 'kind',
+        # 'muted', 'readyState', 'stop']
+
+        # TODO
+        # pc.addTrack(track, stream);
+
+        # TODO SIGSEGV
+        # track.enabled = False
 
     idle()
 

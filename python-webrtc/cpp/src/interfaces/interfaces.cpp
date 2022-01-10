@@ -12,9 +12,9 @@
 namespace python_webrtc {
 
   void Interfaces::Init(pybind11::module &m) {
-    python_webrtc::PeerConnectionFactory::Init(m);
-    python_webrtc::RTCPeerConnection::Init(m);
-    python_webrtc::MediaStreamTrack::Init(m);
-    python_webrtc::MediaStream::Init(m);
+    PeerConnectionFactory::Init(m);
+    RTCPeerConnection::Init(m);
+    MediaStreamTrack::Init(m);
+    MediaStream::Init(m);
   }
 }

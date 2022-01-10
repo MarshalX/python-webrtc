@@ -179,7 +179,7 @@ namespace python_webrtc {
     }
   }
 
-  MediaStream MediaStream::Clone() {
+  MediaStream *MediaStream::Clone() {
     auto clonedStream = _impl._factory->factory()->CreateLocalMediaStream(rtc::CreateRandomUuid());
 
     for (auto const &track: this->tracks()) {
@@ -196,7 +196,7 @@ namespace python_webrtc {
       }
     }
 
-    return {_impl._factory, clonedStream};
+    return new MediaStream(_impl._factory, clonedStream);
   }
 
 } // namespace python_webrtc
