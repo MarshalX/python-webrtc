@@ -117,6 +117,7 @@ async def main():
     # await test_async(pc)
 
     print(webrtc.MediaStreamTrack)
+    print(webrtc.MediaStream)
 
     idle()
 

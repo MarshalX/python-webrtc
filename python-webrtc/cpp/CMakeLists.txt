@@ -4,7 +4,7 @@ file(GLOB_RECURSE MODULE_SRC ${src_loc}/*.cpp ${src_loc}/*.h)
 
 pybind11_add_module(${MODULE} ${MODULE_SRC})
 
-set_property(TARGET ${MODULE} PROPERTY CXX_STANDARD 14)
+set_property(TARGET ${MODULE} PROPERTY CXX_STANDARD 17)
 
 target_include_directories(${MODULE} SYSTEM PRIVATE
     ${libwebrtc_source_dir}

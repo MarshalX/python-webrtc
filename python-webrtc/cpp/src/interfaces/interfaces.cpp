@@ -7,6 +7,7 @@
 #include "peer_connection_factory.h"
 #include "rtc_peer_connection.h"
 #include "media_stream_track.h"
+#include "media_stream.h"
 
 namespace python_webrtc {
 
@@ -14,5 +15,6 @@ namespace python_webrtc {
     python_webrtc::PeerConnectionFactory::Init(m);
     python_webrtc::RTCPeerConnection::Init(m);
     python_webrtc::MediaStreamTrack::Init(m);
+    python_webrtc::MediaStream::Init(m);
   }
 }
