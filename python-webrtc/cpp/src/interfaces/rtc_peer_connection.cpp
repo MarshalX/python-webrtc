@@ -57,28 +57,35 @@ namespace python_webrtc {
         .def("createOffer", &RTCPeerConnection::CreateOffer)
         .def("createAnswer", &RTCPeerConnection::CreateAnswer)
         .def("setLocalDescription", &RTCPeerConnection::SetLocalDescription)
-        .def("setRemoteDescription", &RTCPeerConnection::SetRemoteDescription);
+        .def("setRemoteDescription", &RTCPeerConnection::SetRemoteDescription)
+        .def("addTrack", &RTCPeerConnection::AddTrack);
   }
 
-  void RTCPeerConnection::SaveLastSdp(const RTCSessionDescriptionInit& lastSdp) {
+  void RTCPeerConnection::SaveLastSdp(const RTCSessionDescriptionInit &lastSdp) {
     _lastSdp = lastSdp;
   }
 
   void RTCPeerConnection::CreateOffer(std::function<void(RTCSessionDescription)> &onSuccess) {
-    if (!_jinglePeerConnection || _jinglePeerConnection->signaling_state() == webrtc::PeerConnectionInterface::SignalingState::kClosed) {
+    if (!_jinglePeerConnection ||
+        _jinglePeerConnection->signaling_state() == webrtc::PeerConnectionInterface::SignalingState::kClosed) {
 //      TODO call onFail
 //      "Failed to execute 'createOffer' on 'RTCPeerConnection': The RTCPeerConnection's signalingState is 'closed'."
-        return;
+      return;
     }
 
     auto observer = new rtc::RefCountedObject<CreateSessionDescriptionObserver>(this, onSuccess);
+
 //     TODO bind RTCOfferOptions (voice_activity_detection, iceRestart, offerToReceiveAudio, offerToReceiveVideo)
     auto options = webrtc::PeerConnectionInterface::RTCOfferAnswerOptions();
+    options.offer_to_receive_audio = 1;
+    options.offer_to_receive_video = 0;
+
     _jinglePeerConnection->CreateOffer(observer, options);
   }
 
   void RTCPeerConnection::CreateAnswer(std::function<void(RTCSessionDescription)> &onSuccess) {
-    if (!_jinglePeerConnection || _jinglePeerConnection->signaling_state() == webrtc::PeerConnectionInterface::SignalingState::kClosed) {
+    if (!_jinglePeerConnection ||
+        _jinglePeerConnection->signaling_state() == webrtc::PeerConnectionInterface::SignalingState::kClosed) {
 //      TODO call onFail
 //      "Failed to execute 'createAnswer' on 'RTCPeerConnection': The RTCPeerConnection's signalingState is 'closed'."
       return;
@@ -97,10 +104,11 @@ namespace python_webrtc {
       _lastSdp.sdp;
     }
 
-    auto* raw_description = static_cast<webrtc::SessionDescriptionInterface*>(description);
+    auto *raw_description = static_cast<webrtc::SessionDescriptionInterface *>(description);
     std::unique_ptr<webrtc::SessionDescriptionInterface> raw_description_ptr(raw_description);
 
-    if (!_jinglePeerConnection || _jinglePeerConnection->signaling_state() == webrtc::PeerConnectionInterface::SignalingState::kClosed) {
+    if (!_jinglePeerConnection ||
+        _jinglePeerConnection->signaling_state() == webrtc::PeerConnectionInterface::SignalingState::kClosed) {
 //      TODO call onFail
 //      "Failed to execute 'setLocalDescription' on 'RTCPeerConnection': The RTCPeerConnection's signalingState is 'closed'."
       return;
@@ -113,10 +121,11 @@ namespace python_webrtc {
   void RTCPeerConnection::SetRemoteDescription(std::function<void()> &onSuccess, RTCSessionDescription &description) {
 //    TODO accept RTCSessionDescriptionInit too
 
-    auto* raw_description = static_cast<webrtc::SessionDescriptionInterface*>(description);
+    auto *raw_description = static_cast<webrtc::SessionDescriptionInterface *>(description);
     std::unique_ptr<webrtc::SessionDescriptionInterface> raw_description_ptr(raw_description);
 
-    if (!_jinglePeerConnection || _jinglePeerConnection->signaling_state() == webrtc::PeerConnectionInterface::SignalingState::kClosed) {
+    if (!_jinglePeerConnection ||
+        _jinglePeerConnection->signaling_state() == webrtc::PeerConnectionInterface::SignalingState::kClosed) {
 //      TODO call onFail
 //      "Failed to execute 'setRemoteDescription' on 'RTCPeerConnection': The RTCPeerConnection's signalingState is 'closed'."
       return;
@@ -124,6 +133,30 @@ namespace python_webrtc {
 
     auto observer = new rtc::RefCountedObject<SetSessionDescriptionObserver>(onSuccess);
     _jinglePeerConnection->SetRemoteDescription(observer, raw_description_ptr.release());
+  }
+
+  std::optional<std::reference_wrapper<RTCRtpSender>> RTCPeerConnection::AddTrack(MediaStreamTrack *mediaStreamTrack,
+                                                                                  std::optional<std::reference_wrapper<MediaStream>> stream) {
+    if (!_jinglePeerConnection) {
+      // TODO raise
+      // "Cannot addTrack; RTCPeerConnection is closed"
+      return {};
+    }
+
+    std::vector<std::string> streamIds;
+    if (stream != std::nullopt) {
+      streamIds.emplace_back(stream->get().stream()->id());
+    }
+
+    auto result = _jinglePeerConnection->AddTrack(mediaStreamTrack->track(), streamIds);
+    if (!result.ok()) {
+      // TODO raise
+      // result.error() // RTCError
+      return {};
+    }
+
+    auto rtpSender = RTCRtpSender(_factory, result.value());
+    return rtpSender;
   }
 
   void RTCPeerConnection::OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState new_state) {

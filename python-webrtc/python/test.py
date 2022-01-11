@@ -102,12 +102,12 @@ async def main():
     answer = webrtc.RTCSessionDescription(answer_sdp)
 
     pc = webrtc.RTCPeerConnection()
-    local_sdp = await toAsync(pc.createOffer)
 
-    print('Local SDP', local_sdp)
+    # local_sdp = await toAsync(pc.createOffer)
+    # print('Local SDP', local_sdp)
 
     # after that the PC should be closed before exit from script
-    await toAsync(pc.setLocalDescription)(local_sdp)
+    # await toAsync(pc.setLocalDescription)(local_sdp)
 
     # await toAsync(pc.setRemoteDescription)(local_sdp)
     # answer_sdp = await toAsync(pc.createAnswer)
@@ -129,11 +129,16 @@ async def main():
         # <webrtc.MediaStreamTrack object at 0x10623a1f0> ['clone', 'enabled', 'id', 'kind',
         # 'muted', 'readyState', 'stop']
 
-        # TODO
-        # pc.addTrack(track, stream);
+        sender = pc.addTrack(track, stream)
+
+        print(repr(sender), get_dir(sender))
 
         # TODO SIGSEGV
         # track.enabled = False
+
+    local_sdp = await toAsync(pc.createOffer)
+    print('Local SDP with track', local_sdp)
+    print(local_sdp.sdp)
 
     idle()
 

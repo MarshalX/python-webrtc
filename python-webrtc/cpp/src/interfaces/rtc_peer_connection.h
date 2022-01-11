@@ -4,13 +4,19 @@
 
 #pragma once
 
+#include <optional>
+
 #include <webrtc/api/peer_connection_interface.h>
 #include <webrtc/api/scoped_refptr.h>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/functional.h>
 
-#include "python-webrtc/cpp/src/models/python_webrtc/rtc_session_description.h"
+#include "../models/python_webrtc/rtc_session_description.h"
+
+#include "media_stream_track.h"
+#include "media_stream.h"
+#include "rtc_rtp_sender.h"
 
 namespace python_webrtc {
 
@@ -22,14 +28,19 @@ namespace python_webrtc {
 
     ~RTCPeerConnection();
 
-    void CreateOffer(std::function<void(RTCSessionDescription)>&);
-    void CreateAnswer(std::function<void(RTCSessionDescription)>&);
-    void SetLocalDescription(std::function<void()>&, RTCSessionDescription&);
-    void SetRemoteDescription(std::function<void()>&, RTCSessionDescription&);
+    void CreateOffer(std::function<void(RTCSessionDescription)> &);
+
+    void CreateAnswer(std::function<void(RTCSessionDescription)> &);
+
+    void SetLocalDescription(std::function<void()> &, RTCSessionDescription &);
+
+    void SetRemoteDescription(std::function<void()> &, RTCSessionDescription &);
+
+    std::optional<std::reference_wrapper<RTCRtpSender>> AddTrack(MediaStreamTrack *, std::optional<std::reference_wrapper<MediaStream>>);
 
     static void Init(pybind11::module &m);
 
-    void SaveLastSdp(const RTCSessionDescriptionInit& lastSdp);
+    void SaveLastSdp(const RTCSessionDescriptionInit &lastSdp);
 
     // PeerConnectionObserver implementation.
     void OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState new_state) override;
@@ -55,6 +66,7 @@ namespace python_webrtc {
                     const std::vector<rtc::scoped_refptr<webrtc::MediaStreamInterface>> &streams) override;
 
     void OnTrack(rtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) override;
+
   private:
 //    someStructWith2FieldMinAndMax _port_range;
     rtc::scoped_refptr<webrtc::PeerConnectionInterface> _jinglePeerConnection;
