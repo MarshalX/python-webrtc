@@ -18,6 +18,10 @@
 #include "media_stream.h"
 #include "rtc_rtp_sender.h"
 
+namespace webrtc {
+  struct PeerConnectionDependencies;
+}
+
 namespace python_webrtc {
 
   class PeerConnectionFactory;
@@ -26,7 +30,7 @@ namespace python_webrtc {
   public:
     explicit RTCPeerConnection();
 
-    ~RTCPeerConnection();
+    ~RTCPeerConnection() override;
 
     void CreateOffer(std::function<void(RTCSessionDescription)> &);
 
@@ -41,6 +45,8 @@ namespace python_webrtc {
     static void Init(pybind11::module &m);
 
     void SaveLastSdp(const RTCSessionDescriptionInit &lastSdp);
+
+    void Close();
 
     // PeerConnectionObserver implementation.
     void OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState new_state) override;

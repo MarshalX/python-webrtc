@@ -9,7 +9,7 @@
 namespace python_webrtc {
 
   void Functions::Init(pybind11::module &m) {
-    m.def("getUserMedia", &GetUserMedia);
+    m.def("getUserMedia", &GetUserMedia, pybind11::return_value_policy::move);
   }
 
 }

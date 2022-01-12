@@ -83,9 +83,9 @@ async def test_async(peer_connection):
 async def main():
     webrtc.ping()
 
-    # factory = webrtc.PeerConnectionFactory.GetOrCreateDefault()
-    # factory.Release()
-    # factory.Dispose()
+    # factory = webrtc.PeerConnectionFactory.getOrCreateDefault()
+    # factory.gelease()
+    # factory.dispose()
 
     enums = [
         webrtc.RTCPeerConnectionState,

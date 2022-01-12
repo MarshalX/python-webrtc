@@ -17,7 +17,7 @@ namespace python_webrtc {
     _shouldReleaseFactory = true;
 
 //    TODO get from python
-    auto configuration = new webrtc::PeerConnectionInterface::RTCConfiguration();
+    auto configuration = webrtc::PeerConnectionInterface::RTCConfiguration();
 
     auto portAllocator = std::unique_ptr<cricket::PortAllocator>(new cricket::BasicPortAllocator(
         _factory->getNetworkManager(),
@@ -30,13 +30,18 @@ namespace python_webrtc {
 
     portAllocator->SetPortRange(0, 65535); // TODO get from config or default
 
-//    TODO switch to CreatePeerConnectionOrError instead, because CreatePeerConnection is deprecated
-    _jinglePeerConnection = _factory->factory()->CreatePeerConnection(
-        *configuration, // TODO pass rtc configurator
-        std::move(portAllocator),
-        nullptr,
-        this
-    );
+    webrtc::PeerConnectionDependencies dependencies(this);
+    dependencies.allocator = std::move(portAllocator);
+
+    auto result =  _factory->factory()->CreatePeerConnectionOrError(
+        configuration, std::move(dependencies));
+
+    if (!result.ok()) {
+      // TODO raise smth
+      return;
+    }
+
+    _jinglePeerConnection = result.MoveValue();
   }
 
   RTCPeerConnection::~RTCPeerConnection() {
@@ -58,7 +63,8 @@ namespace python_webrtc {
         .def("createAnswer", &RTCPeerConnection::CreateAnswer)
         .def("setLocalDescription", &RTCPeerConnection::SetLocalDescription)
         .def("setRemoteDescription", &RTCPeerConnection::SetRemoteDescription)
-        .def("addTrack", &RTCPeerConnection::AddTrack);
+        .def("addTrack", &RTCPeerConnection::AddTrack)
+        .def("close", &RTCPeerConnection::Close);
   }
 
   void RTCPeerConnection::SaveLastSdp(const RTCSessionDescriptionInit &lastSdp) {
@@ -157,6 +163,28 @@ namespace python_webrtc {
 
     auto rtpSender = RTCRtpSender(_factory, result.value());
     return rtpSender;
+  }
+
+  void RTCPeerConnection::Close() {
+    if (_jinglePeerConnection) {
+      _jinglePeerConnection->Close();
+    }
+
+    if (_jinglePeerConnection->GetConfiguration().sdp_semantics == webrtc::SdpSemantics::kUnifiedPlan) {
+      for (const auto& transceiver : _jinglePeerConnection->GetTransceivers()) {
+        auto track = MediaStreamTrack(_factory, transceiver->receiver()->track());
+        track.OnPeerConnectionClosed();
+      }
+    }
+
+    _jinglePeerConnection = nullptr;
+
+    if (_factory) {
+      if (_shouldReleaseFactory) {
+        PeerConnectionFactory::Release();
+      }
+      _factory = nullptr;
+    }
   }
 
   void RTCPeerConnection::OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState new_state) {

@@ -114,13 +114,9 @@ namespace python_webrtc {
 
     pybind11::class_<PeerConnectionFactory>(m, "PeerConnectionFactory")
         .def(pybind11::init<>())
-        .def("GetOrCreateDefault", &PeerConnectionFactory::GetOrCreateDefault)
-        .def("Release", &PeerConnectionFactory::Release)
-        .def("factory", &PeerConnectionFactory::factory)
-//         TODO mb
-//        .def("getNetworkManager", &PeerConnectionFactory::getNetworkManager)
-//        .def("getSocketFactory", &PeerConnectionFactory::getSocketFactory)
-        .def("Dispose", &PeerConnectionFactory::Dispose);
+        .def("getOrCreateDefault", &PeerConnectionFactory::GetOrCreateDefault)
+        .def("release", &PeerConnectionFactory::Release)
+        .def("dispose", &PeerConnectionFactory::Dispose);
   }
 
 } // namespace python_webrtc

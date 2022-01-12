@@ -6,7 +6,7 @@
 
 namespace python_webrtc {
 
-  static MediaStream *GetUserMedia() {
+  static std::unique_ptr<MediaStream> GetUserMedia() {
     // TODO GetUserMediaImpl should be asynced method ?
     auto factory = PeerConnectionFactory::GetOrCreateDefault();
     auto stream = factory->factory()->CreateLocalMediaStream(rtc::CreateRandomUuid());
@@ -29,7 +29,7 @@ namespace python_webrtc {
 //      stream->AddTrack(track);
     }
 
-    return new MediaStream(factory, stream);
+    return std::make_unique<MediaStream>(factory, stream);
   }
 
 } // namespace python_webrtc

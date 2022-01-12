@@ -25,7 +25,7 @@ ExternalProject_Add(
     project_depot_tools
 
     GIT_REPOSITORY    https://chromium.googlesource.com/chromium/tools/depot_tools.git
-    GIT_TAG           e0de6a88e5385ee9cd38d5e87f97456bbad8e7d2
+    GIT_TAG           650096367cd9900e499052c49179b33b68fa1ac9
 
     PREFIX            ${third_party_loc}/depot_tools/prefix
     TMP_DIR           ${third_party_loc}/depot_tools/tmp
@@ -53,6 +53,8 @@ add_dependencies(libc++ libwebrtc)
 set(libc++_objects
     algorithm.o
     any.o
+    atomic.o
+    barrier.o
     bind.o
     charconv.o
     chrono.o
@@ -63,6 +65,7 @@ set(libc++_objects
     functional.o
     future.o
     hash.o
+    ios.instantiations.o
     ios.o
     iostream.o
     locale.o
@@ -72,6 +75,7 @@ set(libc++_objects
     new.o
     optional.o
     random.o
+    random_shuffle.o
     regex.o
     shared_mutex.o
     stdexcept.o
@@ -127,8 +131,8 @@ list(APPEND GN_GEN_ARGS
     rtc_build_examples=false
     rtc_use_x11=false
     rtc_enable_protobuf=false
-#    rtc_use_gtk=false
-#    rtc_include_pulse_audio=false
+    rtc_use_gtk=false
+    rtc_include_pulse_audio=false
     rtc_include_tests=false
 )
 if ("$ENV{TARGET_ARCH}" STREQUAL "arm")
@@ -140,9 +144,12 @@ if ("$ENV{TARGET_ARCH}" STREQUAL "arm")
       fatal_linker_warnings=false
   )
 elseif ("$ENV{TARGET_ARCH}" STREQUAL "arm64")
+  if(NOT APPLE)
+    list(APPEND GN_GEN_ARGS
+        target_os="linux"
+    )
+  endif()
   list(APPEND GN_GEN_ARGS
-      # TODO fix mb for linux
-#      target_os="linux"
       target_cpu="arm64"
       rtc_build_tools=true
       treat_warnings_as_errors=false
@@ -157,11 +164,13 @@ endif()
 if (WIN32)
   list(APPEND GN_GEN_ARGS is_clang=false)
 endif()
+
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
   list(APPEND GN_GEN_ARGS is_debug=true)
 else()
   list(APPEND GN_GEN_ARGS is_debug=false)
 endif()
+
 string(REPLACE ";" " " GN_GEN_ARGS "${GN_GEN_ARGS}")
 
 if(WIN32)
@@ -184,10 +193,12 @@ if (WIN32)
 else()
   set(byproducts
       ${libc++_objects}
-      ${libc++abi_objects}
       ${libwebrtc_binary_dir}/obj/libwebrtc.a
       ${libwebrtc_binary_dir}/obj/pc/libpeerconnection.a
   )
+  if (NOT APPLE)
+      list(APPEND byproducts ${libc++abi_objects})
+  endif()
 endif()
 
 ExternalProject_Add(

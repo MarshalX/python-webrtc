@@ -59,8 +59,13 @@ else()
       -lc
       -lm
       libc++
-      libc++abi
   )
+
+  if(NOT APPLE)
+    target_link_libraries(${MODULE} PRIVATE
+        libc++abi
+    )
+  endif()
 
   target_compile_options(${MODULE} PRIVATE
 #      -fno-rtti doesnt allowed with pybind11
@@ -84,6 +89,8 @@ else()
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_options(${MODULE} PRIVATE
         -g
+#        -fsanitize=address
+#        -fno-omit-frame-pointer
     )
 
     target_compile_definitions(${MODULE} PRIVATE
@@ -96,6 +103,15 @@ else()
         "-framework AppKit"
         "-framework AVFoundation"
     )
+
+    if ("$ENV{TARGET_ARCH}" STREQUAL "arm64")
+      target_compile_options(${MODULE} PRIVATE
+          -arch arm64
+      )
+      target_link_options(${MODULE} PRIVATE
+          -arch arm64
+      )
+    endif()
 
     target_compile_options(${MODULE} PRIVATE
         -Weverything
