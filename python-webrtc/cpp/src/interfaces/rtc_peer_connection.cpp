@@ -33,7 +33,7 @@ namespace python_webrtc {
     webrtc::PeerConnectionDependencies dependencies(this);
     dependencies.allocator = std::move(portAllocator);
 
-    auto result =  _factory->factory()->CreatePeerConnectionOrError(
+    auto result = _factory->factory()->CreatePeerConnectionOrError(
         configuration, std::move(dependencies));
 
     if (!result.ok()) {
@@ -63,7 +63,12 @@ namespace python_webrtc {
         .def("createAnswer", &RTCPeerConnection::CreateAnswer)
         .def("setLocalDescription", &RTCPeerConnection::SetLocalDescription)
         .def("setRemoteDescription", &RTCPeerConnection::SetRemoteDescription)
-        .def("addTrack", &RTCPeerConnection::AddTrack)
+        .def("addTrack",
+             pybind11::overload_cast<MediaStreamTrack &, std::optional<std::reference_wrapper<MediaStream>>>(
+                 &RTCPeerConnection::AddTrack))
+        .def("addTrack",
+             pybind11::overload_cast<MediaStreamTrack &, const std::vector<MediaStream *> &>(
+                 &RTCPeerConnection::AddTrack))
         .def("close", &RTCPeerConnection::Close);
   }
 
@@ -141,8 +146,8 @@ namespace python_webrtc {
     _jinglePeerConnection->SetRemoteDescription(observer, raw_description_ptr.release());
   }
 
-  std::optional<std::reference_wrapper<RTCRtpSender>> RTCPeerConnection::AddTrack(MediaStreamTrack *mediaStreamTrack,
-                                                                                  std::optional<std::reference_wrapper<MediaStream>> stream) {
+  std::unique_ptr<RTCRtpSender> RTCPeerConnection::AddTrack(
+      MediaStreamTrack &mediaStreamTrack, const std::vector<MediaStream *> &mediaStreams) {
     if (!_jinglePeerConnection) {
       // TODO raise
       // "Cannot addTrack; RTCPeerConnection is closed"
@@ -150,19 +155,44 @@ namespace python_webrtc {
     }
 
     std::vector<std::string> streamIds;
-    if (stream != std::nullopt) {
-      streamIds.emplace_back(stream->get().stream()->id());
+    streamIds.reserve(mediaStreams.size());
+    for (auto const &stream: mediaStreams) {
+      streamIds.emplace_back(stream->stream()->id());
     }
 
-    auto result = _jinglePeerConnection->AddTrack(mediaStreamTrack->track(), streamIds);
+    auto result = _jinglePeerConnection->AddTrack(mediaStreamTrack.track(), streamIds);
     if (!result.ok()) {
       // TODO raise
       // result.error() // RTCError
       return {};
     }
 
-    auto rtpSender = RTCRtpSender(_factory, result.value());
-    return rtpSender;
+    auto rtpSender = result.value();
+    return std::make_unique<RTCRtpSender>(_factory, rtpSender);
+  }
+
+  std::unique_ptr<RTCRtpSender> RTCPeerConnection::AddTrack(
+      MediaStreamTrack &mediaStreamTrack, std::optional<std::reference_wrapper<MediaStream>> mediaStream) {
+    if (!_jinglePeerConnection) {
+      // TODO raise
+      // "Cannot addTrack; RTCPeerConnection is closed"
+      return {};
+    }
+
+    std::vector<std::string> streamIds;
+    if (mediaStream != std::nullopt) {
+      streamIds.emplace_back(mediaStream->get().stream()->id());
+    }
+
+    auto result = _jinglePeerConnection->AddTrack(mediaStreamTrack.track(), streamIds);
+    if (!result.ok()) {
+      // TODO raise
+      // result.error() // RTCError
+      return {};
+    }
+
+    auto rtpSender = result.value();
+    return std::make_unique<RTCRtpSender>(_factory, rtpSender);
   }
 
   void RTCPeerConnection::Close() {
@@ -171,7 +201,7 @@ namespace python_webrtc {
     }
 
     if (_jinglePeerConnection->GetConfiguration().sdp_semantics == webrtc::SdpSemantics::kUnifiedPlan) {
-      for (const auto& transceiver : _jinglePeerConnection->GetTransceivers()) {
+      for (const auto &transceiver: _jinglePeerConnection->GetTransceivers()) {
         auto track = MediaStreamTrack(_factory, transceiver->receiver()->track());
         track.OnPeerConnectionClosed();
       }

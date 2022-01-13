@@ -33,7 +33,7 @@ namespace python_webrtc {
 
     explicit MediaStream(MediaStream *);
 
-    explicit MediaStream(std::vector<MediaStreamTrack *>);
+    explicit MediaStream(std::vector<MediaStreamTrack>);
 
     MediaStream(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::MediaStreamInterface>);
 
@@ -57,7 +57,7 @@ namespace python_webrtc {
 
     void RemoveTrack(MediaStreamTrack *);
 
-    MediaStream *Clone();
+    std::unique_ptr<MediaStream> Clone();
 
   private:
     class Impl {
@@ -77,7 +77,7 @@ namespace python_webrtc {
 
       explicit Impl(PeerConnectionFactory *factory = nullptr);
 
-      Impl(std::vector<MediaStreamTrack *> &&tracks, PeerConnectionFactory *factory = nullptr);
+      Impl(std::vector<MediaStreamTrack> &&tracks, PeerConnectionFactory *factory = nullptr);
 
       Impl(rtc::scoped_refptr<webrtc::MediaStreamInterface> &&stream, PeerConnectionFactory *factory = nullptr);
 

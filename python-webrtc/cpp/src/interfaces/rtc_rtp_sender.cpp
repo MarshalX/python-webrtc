@@ -18,10 +18,10 @@ namespace python_webrtc {
         .def_property_readonly("track", &RTCRtpSender::GetTrack);
   }
 
-  std::optional<MediaStreamTrack *> RTCRtpSender::GetTrack() {
+  std::optional<MediaStreamTrack> RTCRtpSender::GetTrack() {
     auto track = _sender->track();
     if (track) {
-      return new MediaStreamTrack(_factory, track);
+      return MediaStreamTrack(_factory, track);
     }
 
     return {};

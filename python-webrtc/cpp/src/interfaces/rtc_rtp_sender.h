@@ -8,6 +8,7 @@
 #include <webrtc/api/scoped_refptr.h>
 
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include "peer_connection_factory.h"
 #include "media_stream_track.h"
@@ -22,7 +23,7 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
-    std::optional<MediaStreamTrack *> GetTrack();
+    std::optional<MediaStreamTrack> GetTrack();
 
 //    TODO
 //    void GetTransport();

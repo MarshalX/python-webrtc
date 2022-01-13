@@ -15,8 +15,7 @@ namespace python_webrtc {
 
   class MediaStreamTrack : public webrtc::ObserverInterface {
   public:
-    // TODO smart pointer for the track?
-    explicit MediaStreamTrack(PeerConnectionFactory *, webrtc::MediaStreamTrackInterface *);
+    explicit MediaStreamTrack(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::MediaStreamTrackInterface>);
 
     ~MediaStreamTrack() override;
 
@@ -41,7 +40,7 @@ namespace python_webrtc {
 
     bool GetMuted();
 
-    MediaStreamTrack *Clone();
+    std::unique_ptr<MediaStreamTrack> Clone();
 
     bool active() { return !_ended && _track->state() == webrtc::MediaStreamTrackInterface::TrackState::kLive; }
 

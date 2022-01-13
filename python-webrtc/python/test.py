@@ -130,7 +130,8 @@ async def main():
         # 'muted', 'readyState', 'stop']
 
         sender = pc.addTrack(track, stream)
-
+        sender2 = pc.addTrack(track, [stream])
+        print(sender.track)
         print(repr(sender), get_dir(sender))
 
         # TODO SIGSEGV

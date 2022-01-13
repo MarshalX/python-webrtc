@@ -8,11 +8,11 @@
 
 namespace python_webrtc {
 
-  MediaStreamTrack::MediaStreamTrack(PeerConnectionFactory *factory, webrtc::MediaStreamTrackInterface *track) {
+  MediaStreamTrack::MediaStreamTrack(PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track) {
     _factory = factory;
 
-    // TODO smart pointer and move?
-    _track = track;
+    _track = std::move(track);
+    // FIXME cant invoke OnChanged() correctly. segfault
     _track->RegisterObserver(this);
 
 //    TODO mb remove
@@ -82,7 +82,7 @@ namespace python_webrtc {
     return false;
   }
 
-  MediaStreamTrack *MediaStreamTrack::Clone() {
+  std::unique_ptr<MediaStreamTrack> MediaStreamTrack::Clone() {
     auto label = rtc::CreateRandomUuid();
     rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> clonedTrack = nullptr;
 
@@ -94,7 +94,7 @@ namespace python_webrtc {
       clonedTrack = _factory->factory()->CreateVideoTrack(label, videoTrack->GetSource());
     }
 
-    auto clonedMediaStreamTrack = new MediaStreamTrack(_factory, clonedTrack);
+    auto clonedMediaStreamTrack = std::make_unique<MediaStreamTrack>(_factory, clonedTrack);
     if (_ended) {
       clonedMediaStreamTrack->Stop();
     }
