@@ -12,7 +12,6 @@ namespace python_webrtc {
     _factory = factory;
 
     _track = std::move(track);
-    // FIXME cant invoke OnChanged() correctly. segfault
     _track->RegisterObserver(this);
 
 //    TODO mb remove

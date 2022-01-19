@@ -5,6 +5,7 @@
 #include "models.h"
 
 #include "python_webrtc/rtc_session_description.h"
+#include "python_webrtc/rtc_on_data_event.h"
 
 namespace python_webrtc {
 
@@ -13,6 +14,7 @@ namespace python_webrtc {
 
     RTCSessionDescriptionInit::Init(m);
     RTCSessionDescription::Init(m);
+    RTCOnDataEvent::Init(m);
 
     // webrtc
   }

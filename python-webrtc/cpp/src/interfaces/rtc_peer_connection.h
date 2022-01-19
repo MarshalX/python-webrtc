@@ -4,8 +4,6 @@
 
 #pragma once
 
-#include <optional>
-
 #include <webrtc/api/peer_connection_interface.h>
 #include <webrtc/api/scoped_refptr.h>
 

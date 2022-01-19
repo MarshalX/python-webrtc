@@ -5,6 +5,7 @@
 #include "peer_connection_factory.h"
 
 #include <api/create_peerconnection_factory.h>
+#include <api/task_queue/default_task_queue_factory.h>
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
 #include <api/video_codecs/builtin_video_encoder_factory.h>
@@ -36,6 +37,13 @@ namespace python_webrtc {
 
     result = _signalingThread->Start();
     assert(result);
+
+    _workerThread->Invoke<void>(RTC_FROM_HERE, [this]() {
+      auto taskQuery = webrtc::CreateDefaultTaskQueueFactory();
+      _audioDeviceModule = webrtc::AudioDeviceModule::Create(
+          webrtc::AudioDeviceModule::AudioLayer::kDummyAudio,
+          taskQuery.release());
+    });
 
     _factory = webrtc::CreatePeerConnectionFactory(
         _workerThread.get(),

@@ -13,8 +13,14 @@ a=msid-semantic: WMS
 
 
 class Event(asyncio.Event):
+
+    def __init__(self):
+        # TODO
+        self.loop = asyncio.events._get_running_loop()
+        super().__init__()
+
     def set(self):
-        self._loop.call_soon_threadsafe(super().set)
+        self.loop.call_soon_threadsafe(super().set)
 
 
 class AsyncWrapper:
@@ -93,13 +99,14 @@ async def main():
         webrtc.RTCIceGatheringState,
         webrtc.RTCSdpType,
         webrtc.MediaStreamTrackState,
+        webrtc.MediaStreamSourceState,
     ]
     for enum in enums:
         print(f'{enum!r} = {enum.__members__}')
 
     # sdp string should be valid. need to bind exception on invalid
-    answer_sdp = webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, VALID_SDP)
-    answer = webrtc.RTCSessionDescription(answer_sdp)
+    # answer_sdp = webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, VALID_SDP)
+    # answer = webrtc.RTCSessionDescription(answer_sdp)
 
     pc = webrtc.RTCPeerConnection()
 
@@ -120,26 +127,38 @@ async def main():
         return [m for m in dir(o) if not m.startswith('__')]
 
     # TODO should be asynced?
-    stream = webrtc.getUserMedia()
-    print(repr(stream), get_dir(stream))
+    # stream = webrtc.getUserMedia()
+    # print(repr(stream), get_dir(stream))
     # <webrtc.MediaStream object at 0x10623e3f0> ['active', 'addTrack', 'clone', 'getAudioTracks',
     # 'getTrackById', 'getTracks', 'getVideoTracks', 'id', 'removeTrack']
-    for track in stream.getTracks():
-        print(repr(track), get_dir(track))
+    # for track in stream.getTracks():
+    #     print(repr(track), get_dir(track))
         # <webrtc.MediaStreamTrack object at 0x10623a1f0> ['clone', 'enabled', 'id', 'kind',
         # 'muted', 'readyState', 'stop']
 
-        sender = pc.addTrack(track, stream)
-        sender2 = pc.addTrack(track, [stream])
-        print(sender.track)
-        print(repr(sender), get_dir(sender))
+        # sender = pc.addTrack(track, stream)
+        # sender2 = pc.addTrack(track, [stream])
+        # print(sender.track)
+        # print(repr(sender), get_dir(sender))
 
         # TODO SIGSEGV
+        # issue with return value? cuz it works in RTCAudioSource
         # track.enabled = False
 
-    local_sdp = await toAsync(pc.createOffer)
-    print('Local SDP with track', local_sdp)
-    print(local_sdp.sdp)
+    length = int(48000 * 16 / 8 / 100 * 1)  # 960
+    data = b'\0' * length
+    frame = webrtc.RTCOnDataEvent(data, length)
+
+    source = webrtc.RTCAudioSource()
+    track = source.createTrack()
+    track.enabled = False
+
+    pc.addTrack(track, None)
+    source.onData(frame)
+
+    # local_sdp = await toAsync(pc.createOffer)
+    # print('Local SDP with track', local_sdp)
+    # print(local_sdp.sdp)
 
     idle()
 

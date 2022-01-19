@@ -68,7 +68,6 @@ else()
   endif()
 
   target_compile_options(${MODULE} PRIVATE
-#      -fno-rtti doesnt allowed with pybind11
       -fvisibility=hidden
       -nostdinc++
       -nodefaultlibs

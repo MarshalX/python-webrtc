@@ -4,8 +4,6 @@
 
 #pragma once
 
-#include <optional>
-
 #include <webrtc/api/scoped_refptr.h>
 
 #include <pybind11/pybind11.h>
@@ -79,7 +77,7 @@ namespace python_webrtc {
 
       Impl(std::vector<MediaStreamTrack> &&tracks, PeerConnectionFactory *factory = nullptr);
 
-      Impl(rtc::scoped_refptr<webrtc::MediaStreamInterface> &&stream, PeerConnectionFactory *factory = nullptr);
+      Impl(rtc::scoped_refptr<webrtc::MediaStreamInterface> stream, PeerConnectionFactory *factory = nullptr);
 
 //      TODO
 //      Impl(const RTCMediaStreamInit& init, PeerConnectionFactory* factory = nullptr);

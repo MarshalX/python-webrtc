@@ -21,6 +21,7 @@ import os
 import json
 import time
 import asyncio
+import threading
 
 from test import Event, toAsync
 import webrtc
@@ -30,7 +31,7 @@ import pyrogram
 from pytgcalls.mtproto.pyrogram_bridge import PyrogramBridge
 
 
-REMOTE_ANSWER_EVENT = Event()
+REMOTE_ANSWER_EVENT = None
 remote_sdp = None
 
 
@@ -103,7 +104,7 @@ a=rtcp:1 IN IP4 0.0.0.0
 a=rtcp-mux
 a=rtcp-fb:111 transport-cc
 a=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level
-a=sendrecv
+a=recvonly
 """
     # a=sendrecv
 
@@ -121,11 +122,49 @@ async def group_call_update_callback(update):
     REMOTE_ANSWER_EVENT.set()
 
 
+def send_audio_data(audio_source):
+    def get_ms_time():
+        return round(time.time() * 1000)
+
+    last_read_ms = 0
+
+    length = int(480 * 16 / 8 * 2)  # 2 channels with 16 bits per sample in 48khz
+
+    f = open('test.raw', 'rb')
+
+    while True:
+        start_time = get_ms_time()
+
+        if last_read_ms == 0 or start_time - last_read_ms >= 10:
+            data = f.read(length)
+            if not data:   # eof
+                f.close()
+                break
+
+            event_data = webrtc.RTCOnDataEvent(data, length // 4)   # 2 channels
+            event_data.channelCount = 2
+            audio_source.onData(event_data)
+
+            last_read_ms = start_time
+
+        delta_time = get_ms_time() - start_time
+        if delta_time < 10:
+            time.sleep((10 - delta_time) / 1000)
+
+
 async def main(client, input_peer):
+    global REMOTE_ANSWER_EVENT
+    REMOTE_ANSWER_EVENT = Event()
+
     pc = webrtc.RTCPeerConnection()
-    stream = webrtc.getUserMedia()
-    for track in stream.getTracks():
-        pc.addTrack(track, stream)
+
+    # stream = webrtc.getUserMedia()
+    # for track in stream.getTracks():
+    #     pc.addTrack(track, stream)
+
+    audio_source = webrtc.RTCAudioSource()
+    track = audio_source.createTrack()
+    pc.addTrack(track, None)
 
     local_sdp = await toAsync(pc.createOffer)
     await toAsync(pc.setLocalDescription)(local_sdp)
@@ -151,6 +190,10 @@ async def main(client, input_peer):
     answer_sdp = webrtc.RTCSessionDescription(answer_sdp_init)
     # TODO allow to pass RTCSessionDescriptionInit
     await toAsync(pc.setRemoteDescription)(answer_sdp)
+
+    thread = threading.Thread(target=send_audio_data, args=(audio_source,))
+    thread.daemon = True
+    thread.start()
 
     await pyrogram.idle()
 

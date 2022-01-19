@@ -27,8 +27,8 @@ namespace python_webrtc {
     }
   }
 
-  MediaStream::Impl::Impl(rtc::scoped_refptr<webrtc::MediaStreamInterface> &&stream, PeerConnectionFactory *factory)
-      : _factory(factory ? factory : PeerConnectionFactory::GetOrCreateDefault()), _stream(stream),
+  MediaStream::Impl::Impl(rtc::scoped_refptr<webrtc::MediaStreamInterface> stream, PeerConnectionFactory *factory)
+      : _factory(factory ? factory : PeerConnectionFactory::GetOrCreateDefault()), _stream(std::move(stream)),
         _shouldReleaseFactory(!factory) {}
 
   MediaStream::Impl::~Impl() {
@@ -133,8 +133,8 @@ namespace python_webrtc {
   std::vector<MediaStreamTrack> MediaStream::GetTracks() {
     auto tracks = std::vector<MediaStreamTrack>();
 
-    for (auto const &track: this->tracks()) {
-      tracks.emplace_back(_impl._factory, track);
+    for (auto track: this->tracks()) {
+      tracks.emplace_back(_impl._factory, std::move(track));
     }
 
     return tracks;

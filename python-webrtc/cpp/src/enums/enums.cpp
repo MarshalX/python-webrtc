@@ -9,6 +9,7 @@
 #include "webrtc/ice_gathering_state.h"
 #include "webrtc/sdp_type.h"
 #include "webrtc/track_state.h"
+#include "webrtc/source_state.h"
 
 namespace python_webrtc {
 
@@ -22,6 +23,7 @@ namespace python_webrtc {
     SdpType::Init(m);
 
     TrackState::Init(m);
+    SourceState::Init(m);
 
     // python_webrtc
   }
