@@ -11,7 +11,7 @@ static void ping() {
   py::print("pong");
 }
 
-PYBIND11_MODULE(webrtc, m) {
+PYBIND11_MODULE(wrtc, m) {
   m.def("ping", &ping);
 
   python_webrtc::Enums::Init(m);
