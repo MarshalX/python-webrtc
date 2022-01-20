@@ -144,6 +144,36 @@ else()
         -fpermissive
     )
 
-    # TODO
+    if ("$ENV{TARGET_ARCH}" STREQUAL "arm" OR "$ENV{TARGET_ARCH}" STREQUAL "arm64")
+      set(CMAKE_SYSTEM_NAME Linux)
+      set(CMAKE_SYSTEM_PROCESSOR "$ENV{TARGET_ARCH}")
+      set(tools $ENV{ARM_TOOLS_PATH})
+
+      set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+      set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+      set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+      set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+
+      if ("$ENV{TARGET_ARCH}" STREQUAL "arm")
+        set(CMAKE_SYSROOT ${libwebrtc_source_dir}/src/build/linux/debian_sid_arm-sysroot)
+        target_compile_options(${MODULE} PRIVATE
+            -march=armv7-a
+            -mfloat-abi=hard
+            -mtune=generic-armv7-a
+            -mfpu=neon
+        )
+        set(CMAKE_C_COMPILER ${tools}/bin/arm-linux-gnueabihf-gcc)
+        set(CMAKE_CXX_COMPILER ${tools}/bin/arm-linux-gnueabihf-g++)
+      else()
+        set(CMAKE_SYSROOT ${libwebrtc_source_dir}/src/build/linux/debian_sid_arm64-sysroot)
+        set(CMAKE_C_COMPILER ${tools}/bin/aarch64-linux-gnu-gcc)
+        set(CMAKE_CXX_COMPILER ${tools}/bin/aarch64-linux-gnu-g++)
+      endif()
+    else()
+      target_compile_options(${MODULE} PRIVATE
+          -B${libwebrtc_source_dir}/src/third_party/binutils/Linux_x64/Release/bin
+          --sysroot=${libwebrtc_source_dir}/src/build/linux/debian_sid_amd64-sysroot
+      )
+    endif()
   endif()
 endif()

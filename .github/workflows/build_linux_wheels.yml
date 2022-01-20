@@ -1,0 +1,37 @@
+name: Build and publish Linux wheels
+on:
+  push:
+    branches:
+      - main
+      - pypi-dev
+      - ci-dev
+    paths:
+      - '.github/workflows/build_linux_wheels.yml'
+      - 'python-webrtc/cpp/**'
+      - 'CMakeLists.txt'
+      - 'setup.py'
+jobs:
+  build_wheels_for_linux:
+    name: Build and publish wheels for Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clone.
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
+      - name: Build wheels.
+        uses: pypa/cibuildwheel@v2.3.1
+        env:
+          # TODO install deps in docker
+          CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
+          CIBW_BUILD: cp3*-*
+          CIBW_SKIP: cp36-*
+          CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
+
+      - name: Upload artifacts.
+        uses: actions/upload-artifact@v2
+        with:
+          name: "wrtc for Linux (Intel)"
+          path: ./wheelhouse/*.whl

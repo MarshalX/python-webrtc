@@ -248,10 +248,9 @@ endif()
 set(libc++_include_dir "${libwebrtc_source_dir}/src/buildtools/third_party/libc++/trunk/include")
 set(libc++abi_include_dir "${libwebrtc_source_dir}/src/buildtools/third_party/libc++abi/trunk/include")
 
-
 # pybind11
 add_subdirectory(${third_party_loc}/pybind11)
 
-# python-webrtc
-set(MODULE python_webrtc)
+# python binding
+set(MODULE wrtc)
 add_subdirectory(${project_loc})

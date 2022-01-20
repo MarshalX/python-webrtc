@@ -1,0 +1,45 @@
+name: Build and publish macOS wheels
+on:
+  push:
+    branches:
+      - main
+      - pypi-dev
+      - ci-dev
+    paths:
+      - '.github/workflows/build_macos_wheels.yml'
+      - 'python-webrtc/cpp/**'
+      - 'CMakeLists.txt'
+      - 'setup.py'
+jobs:
+  build_wheels_for_macos:
+    name: Build and publish wheels for macOS
+    runs-on: macos-latest
+
+    env:
+      WEBRTC_CACHE_KEY: "1"
+
+    steps:
+      - name: Clone.
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
+      - name: WebRTC cache.
+        uses: actions/cache@v2
+        with:
+          path: third_party/libwebrtc
+          key: ${{ runner.os }}-cache-webrtc-${{ env.WEBRTC_CACHE_KEY }}
+
+      - name: Build wheels.
+        uses: pypa/cibuildwheel@v2.3.1
+        env:
+          CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
+          CIBW_BUILD: cp3*-*
+          CIBW_SKIP: cp36-*
+          CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
+
+      - name: Upload artifacts.
+        uses: actions/upload-artifact@v2
+        with:
+          name: "wrtc for macOS (Intel)"
+          path: ./wheelhouse/*.whl
