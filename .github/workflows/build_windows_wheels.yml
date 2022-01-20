@@ -30,22 +30,30 @@ jobs:
         run: |
           git config --global core.longpaths true
 
+      - name: Move repository to disk C.
+        shell: bash
+        run: |
+          move ${GITHUB_REPOSITORY##*/} C:/${GITHUB_REPOSITORY##*/}
+
       - name: WebRTC cache.
         uses: actions/cache@v2
         with:
-          path: third_party/libwebrtc
+          path: "C:/${GITHUB_REPOSITORY##*/}/third_party/libwebrtc"
           key: ${{ runner.os }}-cache-webrtc-${{ env.WEBRTC_CACHE_KEY }}
 
       - name: Build wheels.
-        uses: pypa/cibuildwheel@v2.3.1
+        working-directory: "C:/${GITHUB_REPOSITORY##*/}"
         env:
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
           CIBW_SKIP: cp36-*
-      #          CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
+          CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
+        run: |
+          pip install cibuildwheel==2.3.1
+          cibuildwheel
 
       - name: Upload artifacts.
         uses: actions/upload-artifact@v2
         with:
           name: "wrtc wheels for Windows"
-          path: .\wheelhouse\*.whl
+          path: "C:/${GITHUB_REPOSITORY##*/}/wheelhouse/*.whl"
