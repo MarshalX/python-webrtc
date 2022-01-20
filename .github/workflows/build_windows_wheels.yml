@@ -32,16 +32,16 @@ jobs:
 
       - name: Move repository to disk C.
         run: |
-          move %GITHUB_REPOSITORY% C:/%GITHUB_REPOSITORY%
+          move . C:/src
 
       - name: WebRTC cache.
         uses: actions/cache@v2
         with:
-          path: "C:/${GITHUB_REPOSITORY##*/}/third_party/libwebrtc"
+          path: "C:/src/third_party/libwebrtc"
           key: ${{ runner.os }}-cache-webrtc-${{ env.WEBRTC_CACHE_KEY }}
 
       - name: Build wheels.
-        working-directory: "C:/${GITHUB_REPOSITORY##*/}"
+        working-directory: "C:/src"
         env:
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
@@ -55,4 +55,4 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: "wrtc wheels for Windows"
-          path: "C:/${GITHUB_REPOSITORY##*/}/wheelhouse/*.whl"
+          path: "C:/src/wheelhouse/*.whl"
