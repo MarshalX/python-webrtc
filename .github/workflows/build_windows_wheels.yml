@@ -32,7 +32,7 @@ jobs:
 
       - name: Move repository to disk C.
         run: |
-          move . C:/src
+          xcopy . C:\src\ /E/H
 
       - name: WebRTC cache.
         uses: actions/cache@v2
