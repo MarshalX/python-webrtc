@@ -11,7 +11,8 @@ on:
       - 'CMakeLists.txt'
       - 'setup.py'
 jobs:
-  # TODO migrate to disk C because on D not enough space...
+  # Disk C is used to bypass limitation of default disk space
+  # ref: https://github.com/actions/virtual-environments/issues/1341
   build_wheels_for_windows:
     name: Build and publish wheels for Windows
     runs-on: windows-latest
