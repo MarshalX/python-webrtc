@@ -5,7 +5,13 @@ on:
       - main
       - pypi-dev
       - ci-dev
+    paths:
+      - '.github/workflows/build_windows_wheels.yml'
+      - 'python-webrtc/cpp/**'
+      - 'CMakeLists.txt'
+      - 'setup.py'
 jobs:
+  # TODO migrate to disk C because on D not enough space...
   build_wheels_for_windows:
     name: Build and publish wheels for Windows
     runs-on: windows-latest
@@ -35,11 +41,11 @@ jobs:
         env:
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
-          CIBW_SKIP: cp35-* cp36-*
+          CIBW_SKIP: cp36-*
       #          CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
 
       - name: Upload artifacts.
         uses: actions/upload-artifact@v2
         with:
           name: "wrtc wheels for Windows"
-          path: dist\
+          path: .\wheelhouse\*.whl

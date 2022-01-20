@@ -5,6 +5,11 @@ on:
       - main
       - pypi-dev
       - ci-dev
+    paths:
+      - '.github/workflows/build_macos_wheels.yml'
+      - 'python-webrtc/cpp/**'
+      - 'CMakeLists.txt'
+      - 'setup.py'
 jobs:
   build_wheels_for_macos:
     name: Build and publish wheels for macOS
@@ -30,11 +35,11 @@ jobs:
         env:
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
-          CIBW_SKIP: cp35-* cp36-*
-      #          CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
+          CIBW_SKIP: cp36-*
+          CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
 
       - name: Upload artifacts.
         uses: actions/upload-artifact@v2
         with:
           name: "wrtc for macOS (Intel)"
-          path: dist/
+          path: ./wheelhouse/*.whl
