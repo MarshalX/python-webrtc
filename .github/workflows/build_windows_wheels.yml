@@ -32,7 +32,7 @@ jobs:
 
       - name: Move repository to disk C.
         run: |
-          move ${GITHUB_REPOSITORY##*/} C:/${GITHUB_REPOSITORY##*/}
+          move %GITHUB_REPOSITORY% C:/%GITHUB_REPOSITORY%
 
       - name: WebRTC cache.
         uses: actions/cache@v2
