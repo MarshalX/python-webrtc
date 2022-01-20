@@ -1,0 +1,37 @@
+name: Build and publish macOS wheels
+on:
+  push:
+    branches:
+      - main
+      - pypi-dev
+      - ci-dev
+jobs:
+  build_wheels_for_macos:
+    name: Build and publish wheels for macOS
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [
+          #           TODO universal2?
+            "x86_64",
+          #            "arm64"
+        ]
+    steps:
+      - name: Clone.
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.3.1
+        env:
+          CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
+          CIBW_BUILD: cp3*-*
+          CIBW_SKIP: cp35-* cp36-*
+          CIBW_TEST_COMMAND: python -c "import python_webrtc; python_webrtc.ping()"
+
+      - name: Upload artifacts.
+        uses: actions/upload-artifact@v2
+        with:
+          name: "Wheels for macOS"
+          path: dist/
