@@ -31,7 +31,6 @@ jobs:
           git config --global core.longpaths true
 
       - name: Move repository to disk C.
-        shell: bash
         run: |
           move ${GITHUB_REPOSITORY##*/} C:/${GITHUB_REPOSITORY##*/}
 
