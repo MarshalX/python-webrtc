@@ -20,8 +20,8 @@ jobs:
     strategy:
       matrix:
         arch: [
-            "x32",
-#            "x64",
+#            "x32",
+            "x64",
         ]
 
     env:
@@ -59,6 +59,7 @@ jobs:
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
           CIBW_SKIP: cp36-*
+          # because after each build there is some strange local changes and the next build can't check out
           CIBW_BEFORE_TEST: rmdir C:\src\third_party\depot_tools /s /q
           CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
         run: |
@@ -73,6 +74,7 @@ jobs:
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
           CIBW_SKIP: cp36-*
+          # because after each build there is some strange local changes and the next build can't check out
           CIBW_BEFORE_TEST: rmdir C:\src\third_party\depot_tools /s /q
           CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
         run: |
