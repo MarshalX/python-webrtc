@@ -44,6 +44,7 @@ jobs:
       - name: Build wheels.
         working-directory: "C:/src"
         env:
+          CIBW_ARCHS: AMD64
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
           CIBW_SKIP: cp36-*
