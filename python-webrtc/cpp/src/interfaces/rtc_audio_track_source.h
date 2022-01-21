@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <atomic>
+
 #include <webrtc/pc/local_audio_source.h>
 
 #include "peer_connection_factory.h"

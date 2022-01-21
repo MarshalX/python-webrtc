@@ -159,6 +159,12 @@ else()
   list(APPEND GN_GEN_ARGS
       rtc_build_tools=false
   )
+
+  if ("$ENV{TARGET_ARCH}" STREQUAL "ia32")
+    list(APPEND GN_GEN_ARGS
+        target_arch=ia32
+    )
+  endif()
 endif()
 
 if (WIN32)
