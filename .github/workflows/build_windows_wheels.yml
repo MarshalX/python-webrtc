@@ -36,6 +36,7 @@ jobs:
       - name: Set up git config.
         shell: bash
         run: |
+          echo "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Enterprise\\VC\\Auxiliary\\Build\\" >> $GITHUB_PATH
           git config --global core.longpaths true
 
       - name: Move repository to disk C.
@@ -52,7 +53,7 @@ jobs:
         if: matrix.arch == 'x32'
         working-directory: "C:/src"
         env:
-          CIBW_BEFORE_BUILD: call "%vsappiddir%..\..\VC\Auxiliary\Build\vcvars32.bat" x86 && cd C:/src/third_part/depot_tool/src && git stash
+          CIBW_BEFORE_BUILD: call vcvars32.bat && cd C:/src/third_part/depot_tool/src && git stash
           CIBW_ARCHS: x86
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
