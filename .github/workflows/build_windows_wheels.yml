@@ -20,8 +20,8 @@ jobs:
     strategy:
       matrix:
         arch: [
-#            "x32",
-            "x64",
+            "x32",
+#            "x64",
         ]
 
     env:
@@ -53,6 +53,7 @@ jobs:
         if: matrix.arch == 'x32'
         working-directory: "C:/src"
         env:
+          TARGET_ARCH: ia32
           CIBW_BEFORE_BUILD: call vcvars32.bat
           CIBW_ARCHS: x86
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
