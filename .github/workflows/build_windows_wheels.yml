@@ -58,7 +58,7 @@ jobs:
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
           CIBW_SKIP: cp36-*
-          CIBW_BEFORE_TEST: cd /d C:\src\third_party\depot_tools\src && git stash
+          CIBW_BEFORE_TEST: rmdir C:\src\third_party\depot_tools
           CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
         run: |
           pip install cibuildwheel==2.3.1
@@ -72,7 +72,7 @@ jobs:
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
           CIBW_SKIP: cp36-*
-          CIBW_BEFORE_TEST: cd /d C:\src\third_party\depot_tools\src && git stash
+          CIBW_BEFORE_TEST: rmdir C:\src\third_party\depot_tools
           CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
         run: |
           pip install cibuildwheel==2.3.1
