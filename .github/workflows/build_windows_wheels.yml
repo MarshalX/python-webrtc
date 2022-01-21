@@ -53,7 +53,7 @@ jobs:
         if: matrix.arch == 'x32'
         working-directory: "C:/src"
         env:
-          CIBW_BEFORE_BUILD: call vcvars32.bat && cd C:/src/third_part/depot_tool/src && git stash
+          CIBW_BEFORE_BUILD: call vcvars32.bat && cd C:/src/third_party/depot_tool/src && git stash
           CIBW_ARCHS: x86
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
@@ -67,7 +67,7 @@ jobs:
         if: matrix.arch == 'x64'
         working-directory: "C:/src"
         env:
-          CIBW_BEFORE_BUILD: cd C:/src/third_part/depot_tool/src && git stash
+          CIBW_BEFORE_BUILD: cd C:/src/third_party/depot_tool/src && git stash
           CIBW_ARCHS: AMD64
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
