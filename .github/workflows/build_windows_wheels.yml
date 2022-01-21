@@ -17,6 +17,13 @@ jobs:
     name: Build and publish wheels for Windows
     runs-on: windows-latest
 
+    strategy:
+      matrix:
+        arch: [
+            "x32",
+            "x64",
+        ]
+
     env:
       WEBRTC_CACHE_KEY: "1"
 
@@ -39,11 +46,27 @@ jobs:
         uses: actions/cache@v2
         with:
           path: "C:/src/third_party/libwebrtc"
-          key: ${{ runner.os }}-cache-webrtc-${{ env.WEBRTC_CACHE_KEY }}
+          key: ${{ runner.os }}-${{ matrix.arch }}-cache-webrtc-${{ env.WEBRTC_CACHE_KEY }}
 
-      - name: Build wheels.
+      - name: Build wheels for x32.
+        if: matrix.arch == "x32"
         working-directory: "C:/src"
         env:
+          CIBW_BEFORE_BUILD: call vcvars32.bat && cd C:/src/third_part/depot_tool/src && git stash
+          CIBW_ARCHS: x86
+          CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
+          CIBW_BUILD: cp3*-*
+          CIBW_SKIP: cp36-*
+          CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
+        run: |
+          pip install cibuildwheel==2.3.1
+          cibuildwheel
+
+      - name: Build wheels for x64.
+        if: matrix.arch == "x64"
+        working-directory: "C:/src"
+        env:
+          CIBW_BEFORE_BUILD: cd C:/src/third_part/depot_tool/src && git stash
           CIBW_ARCHS: AMD64
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
