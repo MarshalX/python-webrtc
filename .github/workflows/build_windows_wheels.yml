@@ -49,7 +49,7 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.arch }}-cache-webrtc-${{ env.WEBRTC_CACHE_KEY }}
 
       - name: Build wheels for x32.
-        if: matrix.arch == "x32"
+        if: matrix.arch == x32
         working-directory: "C:/src"
         env:
           CIBW_BEFORE_BUILD: call vcvars32.bat && cd C:/src/third_part/depot_tool/src && git stash
@@ -63,7 +63,7 @@ jobs:
           cibuildwheel
 
       - name: Build wheels for x64.
-        if: matrix.arch == "x64"
+        if: matrix.arch == x64
         working-directory: "C:/src"
         env:
           CIBW_BEFORE_BUILD: cd C:/src/third_part/depot_tool/src && git stash
