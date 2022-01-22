@@ -23,7 +23,8 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
-    std::optional<MediaStreamTrack> GetTrack();
+//    std::optional<MediaStreamTrack> GetTrack();
+    MediaStreamTrack GetTrack();
 
 //    TODO
 //    void GetTransport();
