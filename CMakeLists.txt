@@ -21,11 +21,17 @@ get_filename_component(src_loc "${project_loc}/src" REALPATH)
 
 # depot tools
 # ref about fix on M1 macs with git commits: https://bugs.chromium.org/p/chromium/issues/detail?id=1102967
+if (APPLE)
+  set(DEPOT_GIT_TAG cb340f5b7bbdcaba0fad346b08db91538619a531)
+else()
+  set(DEPOT_GIT_TAG 2fddb95698211db1373ebe2b16091a54eac51c9c)
+endif()
+
 ExternalProject_Add(
     project_depot_tools
 
     GIT_REPOSITORY    https://chromium.googlesource.com/chromium/tools/depot_tools.git
-    GIT_TAG           cb340f5b7bbdcaba0fad346b08db91538619a531
+    GIT_TAG           ${DEPOT_GIT_TAG}
 
     PREFIX            ${third_party_loc}/depot_tools/prefix
     TMP_DIR           ${third_party_loc}/depot_tools/tmp
