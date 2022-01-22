@@ -25,7 +25,8 @@ jobs:
         uses: pypa/cibuildwheel@v2.3.1
         env:
           # TODO install deps in docker
-          CIBW_BEFORE_ALL_LINUX: yum install -y python3
+          #CIBW_BEFORE_ALL_LINUX: yum install -y python3
+          CIBW_BEFORE_BUILD: alias python=/usr/bin/python2
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
           CIBW_SKIP: cp36-*
