@@ -29,8 +29,9 @@ jobs:
           #CIBW_BEFORE_BUILD: rm -f /usr/bin/python && ln -s /usr/bin/python2 /usr/bin/python && which python
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_24
-          CIBW_BUILD: cp3*-*
-          CIBW_SKIP: cp36-*
+          CIBW_BUILD: cp310-*
+#          CIBW_BUILD: cp3*-*
+#          CIBW_SKIP: cp36-*
           CIBW_TEST_COMMAND: python3 -c "import wrtc; wrtc.ping()"
 
       - name: Upload artifacts.
