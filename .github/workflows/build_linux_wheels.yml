@@ -26,11 +26,11 @@ jobs:
         env:
           # TODO install deps in docker
           #CIBW_BEFORE_ALL_LINUX: yum install -y python3
-          CIBW_BEFORE_BUILD: which python
+          CIBW_BEFORE_BUILD: rm -f /usr/bin/python && ln -s /usr/bin/python2 /usr/bin/python
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
           CIBW_SKIP: cp36-*
-          CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
+          CIBW_TEST_COMMAND: python3 -c "import wrtc; wrtc.ping()"
 
       - name: Upload artifacts.
         uses: actions/upload-artifact@v2
