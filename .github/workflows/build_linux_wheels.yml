@@ -27,7 +27,7 @@ jobs:
           CIBW_ARCHS: x86_64
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_MANYLINUX_X86_64_IMAGE: ghcr.io/marshalx/wrtc/manylinux_2_24_x86_64:latest
-          CIBW_BUILD: cp3*-*
+          CIBW_BUILD: cp3*-manylinux_*
           CIBW_SKIP: cp36-*
           CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
 
