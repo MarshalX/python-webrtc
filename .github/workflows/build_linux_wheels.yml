@@ -24,6 +24,7 @@ jobs:
       - name: Build wheels.
         uses: pypa/cibuildwheel@v2.3.1
         env:
+          CIBW_ARCHS: x86_64
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_MANYLINUX_X86_64_IMAGE: ghcr.io/marshalx/wrtc/manylinux_2_24_x86_64:latest
           CIBW_BUILD: cp310-*
@@ -34,5 +35,5 @@ jobs:
       - name: Upload artifacts.
         uses: actions/upload-artifact@v2
         with:
-          name: "wrtc for Linux (Intel)"
+          name: "wrtc for Linux (x86_64)"
           path: ./wheelhouse/*.whl
