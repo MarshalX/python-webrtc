@@ -24,8 +24,10 @@ jobs:
       - name: Build wheels.
         uses: pypa/cibuildwheel@v2.3.1
         env:
+          MANYLINUX_INSIDE: true
           CIBW_ARCHS: x86_64
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
+          # extended manylinux image with updated GCC (7.5)
           CIBW_MANYLINUX_X86_64_IMAGE: ghcr.io/marshalx/wrtc/manylinux_2_24_x86_64:latest
           CIBW_BUILD: cp3*-manylinux_*
           CIBW_SKIP: cp36-*
