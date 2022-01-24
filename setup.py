@@ -49,8 +49,8 @@ class CMakeBuild(build_ext):
             f'-DPYTHON_EXECUTABLE={sys.executable}',
             f'-DCMAKE_BUILD_TYPE={cfg}',  # not used on MSVC, but no harm
             # TODO should be optional + passed from args
-            '-DCMAKE_C_COMPILER=/usr/local/bin/gcc',
-            '-DCMAKE_CXX_COMPILER=/usr/local/bin/g++',
+            # '-DCMAKE_C_COMPILER=/usr/local/bin/gcc',
+            # '-DCMAKE_CXX_COMPILER=/usr/local/bin/g++',
         ]
         build_args = []
         # Adding CMake arguments set as environment variable
