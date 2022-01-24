@@ -6,7 +6,7 @@ on:
       - pypi-dev
       - ci-dev
     paths:
-      - '.github/workflows/build_macos_wheels.yml'
+      - '.github/workflows/build_macos_arm_wheels.yml'
       - 'python-webrtc/cpp/**'
       - 'CMakeLists.txt'
       - 'setup.py'
