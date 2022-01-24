@@ -33,10 +33,10 @@ jobs:
       - name: Build wheels.
         uses: pypa/cibuildwheel@v2.3.1
         env:
+          TARGET_ARCH: arm64
           CIBW_ARCHS: arm64
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
-          CIBW_SKIP: cp36-*
           CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
 
       - name: Upload artifacts.
