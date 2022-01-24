@@ -11,6 +11,7 @@ on:
 jobs:
   build_manylinux:
     name: Build and publish manylinux images
+    timeout-minutes: 1024
     runs-on: ubuntu-latest
 
     strategy:
@@ -43,6 +44,7 @@ jobs:
 
       - name: manylinux_2_24_${{ matrix.arch }}.
         uses: docker/build-push-action@v2
+        timeout-minutes: 1024
         with:
           context: .
           file: build/Dockerfile
