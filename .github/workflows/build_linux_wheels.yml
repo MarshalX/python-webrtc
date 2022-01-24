@@ -24,15 +24,12 @@ jobs:
       - name: Build wheels.
         uses: pypa/cibuildwheel@v2.3.1
         env:
-          # TODO install deps in docker
-          CIBW_BEFORE_ALL_LINUX: apt-get update && apt-get install -y xz-utils libxml2 python3-dev libxcrypt1
-          #CIBW_BEFORE_BUILD: rm -f /usr/bin/python && ln -s /usr/bin/python2 /usr/bin/python && which python
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
-          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_24
+          CIBW_MANYLINUX_X86_64_IMAGE: ghcr.io/marshalx/wrtc/manylinux_2_24_x86_64:latest
           CIBW_BUILD: cp310-*
 #          CIBW_BUILD: cp3*-*
 #          CIBW_SKIP: cp36-*
-          CIBW_TEST_COMMAND: python3 -c "import wrtc; wrtc.ping()"
+          CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
 
       - name: Upload artifacts.
         uses: actions/upload-artifact@v2
