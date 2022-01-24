@@ -140,8 +140,7 @@ namespace python_webrtc {
     return tracks;
   }
 
-//  std::optional<MediaStreamTrack> MediaStream::GetTrackById(const std::string &label) {
-  MediaStreamTrack MediaStream::GetTrackById(const std::string &label) {
+  std::optional<MediaStreamTrack> MediaStream::GetTrackById(const std::string &label) {
     auto audioTrack = _impl._stream->FindAudioTrack(label);
     if (audioTrack) {
       return MediaStreamTrack(_impl._factory, audioTrack);
@@ -152,8 +151,7 @@ namespace python_webrtc {
       return MediaStreamTrack(_impl._factory, videoTrack);
     }
 
-//    return {};
-    return MediaStreamTrack(_impl._factory, videoTrack);
+    return {};
   }
 
   void MediaStream::AddTrack(MediaStreamTrack *mediaStreamTrack) {

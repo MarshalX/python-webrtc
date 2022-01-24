@@ -49,8 +49,7 @@ namespace python_webrtc {
 
     std::vector<MediaStreamTrack> GetTracks();
 
-    MediaStreamTrack GetTrackById(const std::string &);
-//    std::optional<MediaStreamTrack> GetTrackById(const std::string &);
+    std::optional<MediaStreamTrack> GetTrackById(const std::string &);
 
     void AddTrack(MediaStreamTrack *);
 

@@ -63,9 +63,9 @@ namespace python_webrtc {
         .def("createAnswer", &RTCPeerConnection::CreateAnswer)
         .def("setLocalDescription", &RTCPeerConnection::SetLocalDescription)
         .def("setRemoteDescription", &RTCPeerConnection::SetRemoteDescription)
-//        .def("addTrack",
-//             pybind11::overload_cast<MediaStreamTrack &, std::optional<std::reference_wrapper<MediaStream>>>(
-//                 &RTCPeerConnection::AddTrack))
+        .def("addTrack",
+             pybind11::overload_cast<MediaStreamTrack &, std::optional<std::reference_wrapper<MediaStream>>>(
+                 &RTCPeerConnection::AddTrack))
         .def("addTrack",
              pybind11::overload_cast<MediaStreamTrack &, const std::vector<MediaStream *> &>(
                  &RTCPeerConnection::AddTrack))
@@ -171,29 +171,29 @@ namespace python_webrtc {
     return std::make_unique<RTCRtpSender>(_factory, rtpSender);
   }
 
-//  std::unique_ptr<RTCRtpSender> RTCPeerConnection::AddTrack(
-//      MediaStreamTrack &mediaStreamTrack, std::optional<std::reference_wrapper<MediaStream>> mediaStream) {
-//    if (!_jinglePeerConnection) {
-//      // TODO raise
-//      // "Cannot addTrack; RTCPeerConnection is closed"
-//      return {};
-//    }
-//
-//    std::vector<std::string> streamIds;
-//    if (mediaStream != std::nullopt) {
-//      streamIds.emplace_back(mediaStream->get().stream()->id());
-//    }
-//
-//    auto result = _jinglePeerConnection->AddTrack(mediaStreamTrack.track(), streamIds);
-//    if (!result.ok()) {
-//      // TODO raise
-//      // result.error() // RTCError
-//      return {};
-//    }
-//
-//    auto rtpSender = result.value();
-//    return std::make_unique<RTCRtpSender>(_factory, rtpSender);
-//  }
+  std::unique_ptr<RTCRtpSender> RTCPeerConnection::AddTrack(
+      MediaStreamTrack &mediaStreamTrack, std::optional<std::reference_wrapper<MediaStream>> mediaStream) {
+    if (!_jinglePeerConnection) {
+      // TODO raise
+      // "Cannot addTrack; RTCPeerConnection is closed"
+      return {};
+    }
+
+    std::vector<std::string> streamIds;
+    if (mediaStream != std::nullopt) {
+      streamIds.emplace_back(mediaStream->get().stream()->id());
+    }
+
+    auto result = _jinglePeerConnection->AddTrack(mediaStreamTrack.track(), streamIds);
+    if (!result.ok()) {
+      // TODO raise
+      // result.error() // RTCError
+      return {};
+    }
+
+    auto rtpSender = result.value();
+    return std::make_unique<RTCRtpSender>(_factory, rtpSender);
+  }
 
   void RTCPeerConnection::Close() {
     if (_jinglePeerConnection) {

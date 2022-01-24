@@ -38,7 +38,7 @@ namespace python_webrtc {
 
     void SetRemoteDescription(std::function<void()> &, RTCSessionDescription &);
 
-//    std::unique_ptr<RTCRtpSender> AddTrack(MediaStreamTrack &, std::optional<std::reference_wrapper<MediaStream>>);
+    std::unique_ptr<RTCRtpSender> AddTrack(MediaStreamTrack &, std::optional<std::reference_wrapper<MediaStream>>);
     std::unique_ptr<RTCRtpSender> AddTrack(MediaStreamTrack &, const std::vector<MediaStream *>&);
 
     static void Init(pybind11::module &m);
