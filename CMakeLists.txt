@@ -24,8 +24,7 @@ get_filename_component(src_loc "${project_loc}/src" REALPATH)
 if (APPLE)
   set(DEPOT_GIT_TAG cb340f5b7bbdcaba0fad346b08db91538619a531)
 else()
-#  set(DEPOT_GIT_TAG 2fddb95698211db1373ebe2b16091a54eac51c9c)
-  set(DEPOT_GIT_TAG 9b5dd7ab8a98140a1b73b9dea29245605137cd09) # glibc 2.18
+  set(DEPOT_GIT_TAG 9b5dd7ab8a98140a1b73b9dea29245605137cd09) # glibc 2.18, supports python 3 < 3.8
 endif()
 
 ExternalProject_Add(
@@ -101,7 +100,6 @@ list(TRANSFORM libc++_objects PREPEND ${libwebrtc_binary_dir}/obj/buildtools/thi
 set_property(TARGET libc++ APPEND PROPERTY IMPORTED_CONFIGURATIONS DEBUG)
 set_target_properties(libc++ PROPERTIES IMPORTED_OBJECTS_DEBUG "${libc++_objects}" IMPORTED_OBJECTS "${libc++_objects}")
 
-
 # libc++abi
 add_library(libc++abi OBJECT IMPORTED)
 add_dependencies(libc++abi libwebrtc)
@@ -164,6 +162,7 @@ elseif ("$ENV{TARGET_ARCH}" STREQUAL "arm64")
   )
 else()
   list(APPEND GN_GEN_ARGS
+      use_glib=false
       rtc_build_tools=false
   )
 

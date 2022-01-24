@@ -1,0 +1,51 @@
+name: Build and publish manylinux with updated GCC
+on:
+  push:
+    branches:
+      - main
+      - pypi-dev
+      - ci-dev
+    paths:
+      - '.github/workflows/build_manylinux.yml'
+      - 'build/Dockerfile'
+jobs:
+  build_manylinux:
+    name: Build and publish manylinux images
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        arch: [
+            "x86_64",
+            "aarch64",
+        ]
+
+    steps:
+      - name: Clone.
+        uses: actions/checkout@v2
+
+      - name: Set up QEMU.
+        if: matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v1
+
+      - name: Set up Docker Buildx.
+        uses: docker/setup-buildx-action@v1
+
+      - name: Login to GitHub Container Registry.
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.CR_PAT }}
+
+      - name: Prepare registry name.
+        run: echo IMAGE_REPOSITORY=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]') >> $GITHUB_ENV
+
+      - name: manylinux_2_24_${{ matrix.arch }}.
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: build/Dockerfile
+          push: true
+          build-args: MANYLINUX_ARCH=${{ matrix.arch }}
+          tags: ghcr.io/${{ env.IMAGE_REPOSITORY }}/wrtc/manylinux_2_24_${{ matrix.arch }}:latest
