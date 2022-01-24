@@ -49,6 +49,15 @@ class CMakeBuild(build_ext):
             f'-DPYTHON_EXECUTABLE={sys.executable}',
             f'-DCMAKE_BUILD_TYPE={cfg}',  # not used on MSVC, but no harm
         ]
+
+        manylinux_inside = os.environ.get('MANYLINUX_INSIDE')
+        if manylinux_inside:
+            # using gcc 7.5 instead of default (Debian 9) 6.3
+            cmake_args.extend([
+                '-DCMAKE_C_COMPILER=/usr/local/bin/gcc',
+                '-DCMAKE_CXX_COMPILER=/usr/local/bin/g++',
+            ])
+
         build_args = []
         # Adding CMake arguments set as environment variable
         # (needed e.g. to build for ARM OSx on conda-forge)
