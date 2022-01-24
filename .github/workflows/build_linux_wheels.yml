@@ -25,6 +25,7 @@ jobs:
         uses: pypa/cibuildwheel@v2.3.1
         env:
           MANYLINUX_INSIDE: true
+          CIBW_ENVIRONMENT_PASS_LINUX: MANYLINUX_INSIDE
           CIBW_ARCHS: x86_64
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           # extended manylinux image with updated GCC (7.5)
