@@ -29,8 +29,12 @@ jobs:
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           # extended manylinux image with updated GCC (7.5)
           CIBW_MANYLINUX_X86_64_IMAGE: ghcr.io/marshalx/wrtc/manylinux_2_24_x86_64:latest
-          CIBW_BUILD: cp3*-manylinux_*
-          CIBW_SKIP: cp36-*
+          CIBW_BUILD: cp39-manylinux_* cp310-manylinux_*
+          # TODO uncomment after applied patches for cpython in manylinux
+          # there is no cp37, cp38 for now
+          # ref: https://github.com/pypa/manylinux/issues/1264
+#          CIBW_BUILD: cp3*-manylinux_*
+#          CIBW_SKIP: cp36-*
           CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
 
       - name: Upload artifacts.
