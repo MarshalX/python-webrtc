@@ -4,7 +4,6 @@ on:
     branches:
       - main
       - pypi-dev
-      - ci-dev
     paths:
       - '.github/workflows/build_linux_wheels.yml'
       - 'python-webrtc/cpp/**'
@@ -28,14 +27,11 @@ jobs:
           CIBW_ENVIRONMENT_PASS_LINUX: MANYLINUX_INSIDE
           CIBW_ARCHS: x86_64
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
-          # extended manylinux image with updated GCC (7.5)
+          # extended manylinux image with updated GCC (7.5) and patched CPython
+          # about gcc: https://github.com/pypa/manylinux/issues/1012
+          # about patch: https://github.com/pypa/manylinux/issues/1264
           CIBW_MANYLINUX_X86_64_IMAGE: ghcr.io/marshalx/wrtc/manylinux_2_24_x86_64:latest
-          CIBW_BUILD: cp39-manylinux_* cp310-manylinux_*
-          # TODO uncomment after applied patches for cpython in manylinux
-          # there is no cp37, cp38 for now
-          # ref: https://github.com/pypa/manylinux/issues/1264
-#          CIBW_BUILD: cp3*-manylinux_*
-#          CIBW_SKIP: cp36-*
+          CIBW_BUILD: cp3*-manylinux_*
           CIBW_TEST_COMMAND: python -c "import wrtc; wrtc.ping()"
 
       - name: Upload artifacts.

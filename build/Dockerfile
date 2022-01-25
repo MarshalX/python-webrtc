@@ -1,5 +1,6 @@
 ARG MANYLINUX_ARCH
-FROM quay.io/pypa/manylinux_2_24_$MANYLINUX_ARCH AS builder
+# celf pathed cpython https://github.com/MarshalX/manylinux-cpython-pathes
+FROM quay.io/pypa_patched/manylinux_2_24_$MANYLINUX_ARCH AS builder
 
 RUN apt-get update && apt-get install -y xz-utils libxml2 wget build-essential
 
