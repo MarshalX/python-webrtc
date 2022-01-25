@@ -18,7 +18,7 @@ jobs:
       matrix:
         arch: [
             "x86_64",
-#            "aarch64",
+#           "aarch64", # it's not possible to do on GHA because there is time limit (more then 6 hours under QEMU)
         ]
 
     steps:
