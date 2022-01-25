@@ -156,7 +156,7 @@ setup(
         'Natural Language :: English',
         'Intended Audience :: Developers',
     ],
-    python_requires='~=3.7',
+    python_requires='~=3.6',
     ext_modules=[CMakeExtension('wrtc')],
     cmdclass={'build_ext': CMakeBuild},
     zip_safe=False,
