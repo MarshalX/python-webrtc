@@ -1,6 +1,6 @@
 import asyncio
 
-import webrtc
+import wrtc
 
 
 VALID_SDP = '''v=0
@@ -12,94 +12,25 @@ a=msid-semantic: WMS
 '''
 
 
-class Event(asyncio.Event):
-
-    def __init__(self):
-        # TODO
-        self.loop = asyncio.events._get_running_loop()
-        super().__init__()
-
-    def set(self):
-        self.loop.call_soon_threadsafe(super().set)
-
-
-class AsyncWrapper:
-    def __init__(self, func: callable):
-        self.__event = Event()
-        self.__func = func
-
-        self.__args_for_run = []
-        self.__kwargs_for_run = {}
-
-        self.__result = None
-
-    def set(self):
-        self.__event.set()
-
-    def _on_success(self, result=None):    # TODO many results mb
-        self.__result = result
-        self.set()
-
-    def _on_fail(self, error):
-        # TODO reraise. error should be exception created from cpp side
-        pass
-
-    async def run(self, timeout=10):
-        self.__func(self._on_success, *self.__args_for_run, **self.__kwargs_for_run)  # TODO pass _on_fail
-        await asyncio.wait_for(self.__event.wait(), timeout)
-        return self.__result
-
-    def __call__(self, *args, **kwargs):
-        self.__args_for_run = args
-        self.__kwargs_for_run = kwargs
-
-        return self
-
-    def __await__(self):
-        return self.run().__await__()
-
-
-toAsync = AsyncWrapper
-
-
 def idle():
     while True:
         pass
 
 
-async def test_async(peer_connection):
-    async def _1():
-        while True:
-            sdp = await toAsync(peer_connection.createOffer)
-            print('_1', sdp)
-            await asyncio.sleep(0.1)
-
-    async def _2():
-        import random
-        while True:
-            print('_2', random.randint(0, 10**6))
-            await asyncio.sleep(0.1)
-
-    await asyncio.gather(
-        _1(),
-        _2(),
-    )
-
-
 async def main():
-    webrtc.ping()
+    wrtc.ping()
 
     # factory = webrtc.PeerConnectionFactory.getOrCreateDefault()
     # factory.gelease()
     # factory.dispose()
 
     enums = [
-        webrtc.RTCPeerConnectionState,
-        webrtc.RTCIceConnectionState,
-        webrtc.RTCIceGatheringState,
-        webrtc.RTCSdpType,
-        webrtc.MediaStreamTrackState,
-        webrtc.MediaStreamSourceState,
+        wrtc.RTCPeerConnectionState,
+        wrtc.RTCIceConnectionState,
+        wrtc.RTCIceGatheringState,
+        wrtc.RTCSdpType,
+        wrtc.MediaStreamTrackState,
+        wrtc.MediaStreamSourceState,
     ]
     for enum in enums:
         print(f'{enum!r} = {enum.__members__}')
@@ -108,7 +39,7 @@ async def main():
     # answer_sdp = webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, VALID_SDP)
     # answer = webrtc.RTCSessionDescription(answer_sdp)
 
-    pc = webrtc.RTCPeerConnection()
+    pc = wrtc.RTCPeerConnection()
 
     # local_sdp = await toAsync(pc.createOffer)
     # print('Local SDP', local_sdp)
@@ -147,9 +78,9 @@ async def main():
 
     length = int(48000 * 16 / 8 / 100 * 1)  # 960
     data = b'\0' * length
-    frame = webrtc.RTCOnDataEvent(data, length)
+    frame = wrtc.RTCOnDataEvent(data, length)
 
-    source = webrtc.RTCAudioSource()
+    source = wrtc.RTCAudioSource()
     track = source.createTrack()
     track.enabled = False
 

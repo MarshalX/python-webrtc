@@ -139,6 +139,8 @@ with open(os.path.join(base_path, 'CMakeLists.txt'), 'r', encoding='utf-8') as f
 with open(os.path.join(base_path, 'README.md'), 'r', encoding='utf-8') as f:
     readme = f.read()
 
+# TODO include pybind11 for sdist
+
 # The information here can also be placed in setup.cfg - better separation of
 # logic and declaration, and simpler if you include description/version in a file.
 setup(
@@ -157,6 +159,8 @@ setup(
         'Intended Audience :: Developers',
     ],
     python_requires='~=3.7',
+    package_dir={'': 'python-webrtc/python'},
+    packages=['webrtc'],
     ext_modules=[CMakeExtension('wrtc')],
     cmdclass={'build_ext': CMakeBuild},
     zip_safe=False,
