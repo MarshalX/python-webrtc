@@ -148,7 +148,7 @@ setup(
     version=version,
     author='Il`ya Semyonov',
     author_email='ilya@marshal.dev',
-    # license='', # TODO
+    license='BSD 3-Clause',
     url='https://github.com/MarshalX/python-webrtc',
     description='',
     long_description=readme,
@@ -157,6 +157,7 @@ setup(
         'Development Status :: 1 - Planning',
         'Natural Language :: English',
         'Intended Audience :: Developers',
+        'License :: OSI Approved :: BSD License',
     ],
     python_requires='~=3.7',
     package_dir={'': 'python-webrtc/python'},
