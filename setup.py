@@ -3,7 +3,7 @@ import re
 import subprocess
 import sys
 
-from setuptools import Extension, setup
+from setuptools import Extension, setup, find_packages
 from setuptools.command.build_ext import build_ext
 
 # Convert distutils Windows platform specifiers to CMake -A arguments
@@ -136,7 +136,7 @@ with open(os.path.join(base_path, 'CMakeLists.txt'), 'r', encoding='utf-8') as f
         major, minor, path_, tweak = version.split('.')
         version = f'{major}.{minor}.{path_}.dev{tweak}'
 
-with open(os.path.join(base_path, 'README.md'), 'r', encoding='utf-8') as f:
+with open(os.path.join(base_path, 'README.rst'), 'r', encoding='utf-8') as f:
     readme = f.read()
 
 # TODO include pybind11 for sdist
@@ -152,7 +152,7 @@ setup(
     url='https://github.com/MarshalX/python-webrtc',
     description='',
     long_description=readme,
-    long_description_content_type='text/markdown',
+    long_description_content_type='text/x-rst',
     classifiers=[
         'Development Status :: 1 - Planning',
         'Natural Language :: English',
@@ -160,7 +160,7 @@ setup(
     ],
     python_requires='~=3.7',
     package_dir={'': 'python-webrtc/python'},
-    packages=['webrtc'],
+    packages=find_packages(where='python-webrtc/python'),
     ext_modules=[CMakeExtension('wrtc')],
     cmdclass={'build_ext': CMakeBuild},
     zip_safe=False,
