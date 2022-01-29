@@ -166,9 +166,9 @@ else()
       rtc_build_tools=false
   )
 
-  if ("$ENV{TARGET_ARCH}" STREQUAL "ia32")
+  if ("$ENV{TARGET_ARCH}" STREQUAL "x86")
     list(APPEND GN_GEN_ARGS
-        target_arch=ia32
+        target_cpu=x86
     )
   endif()
 endif()
