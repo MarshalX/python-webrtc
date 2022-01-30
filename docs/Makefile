@@ -14,7 +14,7 @@ help:
 .PHONY: help Makefile
 
 gen:
-	@$(SPHINXGENERATE) -f -M -o "$(SOURCEDIR)" "$(MODULEPATH)" "$(EXCLUDEPATTERN)" $(O)
+	@$(SPHINXGENERATE) -f -e -M -o "$(SOURCEDIR)" "$(MODULEPATH)" "$(EXCLUDEPATTERN)" $(O)
 
 .PHONY: gen Makefile
 

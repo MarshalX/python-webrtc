@@ -6,13 +6,20 @@ webrtc package
    :undoc-members:
    :show-inheritance:
 
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   webrtc.functions
+   webrtc.interfaces
+   webrtc.models
+
 Submodules
 ----------
 
-webrtc.rtc\_peer\_connection module
------------------------------------
+.. toctree::
+   :maxdepth: 4
 
-.. automodule:: webrtc.rtc_peer_connection
-   :members:
-   :undoc-members:
-   :show-inheritance:
+   webrtc.base

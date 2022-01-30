@@ -23,7 +23,6 @@ import time
 import asyncio
 import threading
 
-import wrtc
 import webrtc
 
 # pip install pytgcalls[pyrogram]==3.0.0.dev21
@@ -138,9 +137,9 @@ def send_audio_data(audio_source):
                 f.close()
                 break
 
-            event_data = wrtc.RTCOnDataEvent(data, length // 4)   # 2 channels
-            event_data.channelCount = 2
-            audio_source.onData(event_data)
+            event_data = webrtc.RTCOnDataEvent(data, length // 4)   # 2 channels
+            event_data.channel_count = 2
+            audio_source.on_data(event_data)
 
             last_read_ms = start_time
 
@@ -152,13 +151,14 @@ def send_audio_data(audio_source):
 async def main(client, input_peer):
     pc = webrtc.RTCPeerConnection()
 
-    # stream = webrtc.getUserMedia()
-    # for track in stream.getTracks():
-    #     pc.addTrack(track, stream)
+    # stream = webrtc.get_user_media()
+    # for track in stream.get_tracks():
+    #     track.enabled = True
+    #     pc.add_track(track, stream)
 
-    audio_source = wrtc.RTCAudioSource()
-    track = audio_source.createTrack()
-    await pc.addTrack(track, None)
+    audio_source = webrtc.RTCAudioSource()
+    track = audio_source.create_track()
+    pc.add_track(track)
 
     local_sdp = await pc.create_offer()
     await pc.set_local_description(local_sdp)
@@ -182,10 +182,12 @@ async def main(client, input_peer):
         await asyncio.sleep(0.1)
     # await asyncio.wait_for(REMOTE_ANSWER_EVENT.wait(), 30)
 
-    answer_sdp_init = wrtc.RTCSessionDescriptionInit(wrtc.RTCSdpType.answer, remote_sdp)
-    answer_sdp = wrtc.RTCSessionDescription(answer_sdp_init)
     # TODO allow to pass RTCSessionDescriptionInit
-    await pc.setRemoteDescription(answer_sdp)
+    await pc.set_remote_description(
+        webrtc.RTCSessionDescription(
+            webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, remote_sdp)
+        )
+    )
 
     thread = threading.Thread(target=send_audio_data, args=(audio_source,))
     thread.daemon = True
