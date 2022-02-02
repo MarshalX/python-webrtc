@@ -136,13 +136,9 @@ with open(os.path.join(base_path, 'CMakeLists.txt'), 'r', encoding='utf-8') as f
         major, minor, path_, tweak = version.split('.')
         version = f'{major}.{minor}.{path_}.dev{tweak}'
 
-with open(os.path.join(base_path, 'README.rst'), 'r', encoding='utf-8') as f:
+with open(os.path.join(base_path, 'README.md'), 'r', encoding='utf-8') as f:
     readme = f.read()
 
-# TODO include pybind11 for sdist
-
-# The information here can also be placed in setup.cfg - better separation of
-# logic and declaration, and simpler if you include description/version in a file.
 setup(
     name='wrtc',    # webrtc for some reasons isn't allowed but looks like free...
     version=version,
@@ -150,14 +146,38 @@ setup(
     author_email='ilya@marshal.dev',
     license='BSD 3-Clause',
     url='https://github.com/MarshalX/python-webrtc',
-    description='',
+    description='a Python Extension that provides bindings to WebRTC M92',
     long_description=readme,
-    long_description_content_type='text/x-rst',
+    long_description_content_type='text/markdown',
     classifiers=[
         'Development Status :: 1 - Planning',
         'Natural Language :: English',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: BSD License',
+        'Operating System :: OS Independent',
+        'Operating System :: MacOS',
+        'Operating System :: Unix',
+        'Topic :: Internet',
+        'Topic :: Multimedia',
+        'Topic :: Multimedia :: Video',
+        'Topic :: Multimedia :: Video :: Capture',
+        'Topic :: Multimedia :: Sound/Audio',
+        'Topic :: Multimedia :: Sound/Audio :: Capture/Recording',
+        'Topic :: Communications',
+        'Topic :: Communications :: Internet Phone',
+        'Topic :: Communications :: Telephony',
+        "Topic :: Software Development :: Libraries",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+        'Programming Language :: C++',
+        'Programming Language :: Python',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3 :: Only',
+        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        "Programming Language :: Python :: Implementation",
+        "Programming Language :: Python :: Implementation :: CPython",
     ],
     python_requires='~=3.7',
     package_dir={'': 'python-webrtc/python'},
@@ -167,5 +187,7 @@ setup(
     zip_safe=False,
     project_urls={
         'Author': 'https://github.com/MarshalX',
+        'Tracker': 'https://github.com/MarshalX/python-webrtc/issues',
+        'Source': 'https://github.com/MarshalX/python-webrtc',
     }
 )
