@@ -27,6 +27,10 @@ else()
   set(DEPOT_GIT_TAG 9b5dd7ab8a98140a1b73b9dea29245605137cd09) # glibc 2.18, supports python 3 < 3.8
 endif()
 
+if (WIN32)
+  set(DEPOT_GIT_TAG 2fddb95698211db1373ebe2b16091a54eac51c9c)
+endif()
+
 ExternalProject_Add(
     project_depot_tools
 
