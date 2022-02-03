@@ -3,7 +3,7 @@
         <img src="https://github.com/MarshalX/python-webrtc/raw/main/.github/images/logo.png" alt="python-webrtc logo">
     </a>
     <br>
-    <b>Python Extension that provides bindings to WebRTC M92 </b>
+    <b>A Python extension that provides bindings to WebRTC M92</b>
     <br>
     <a href="https://github.com/MarshalX/python-webrtc/tree/main/examples">
         Examples
@@ -22,14 +22,13 @@
 
 > Stop making unstandard pure implementations of WebRTC and let's use the native library!
 
-This project tries to be like [W3C](https://w3c.github.io/webrtc-pc/) specification, but there is some edits out of
-specification. The changes were applied to make library more Pythonic and add useful API like programmatic audio and
+This project follows the [W3C specification](https://w3c.github.io/webrtc-pc/) with some modifications and additions to make it work better with Python applications, with useful APIs like programmatic audio and
 video.
 
 ## DISCLAIMER
 
-This project under development and doesn't redy for any serious use! In the current stage it's possible to establish
-connection and working with audio. The project has segfaults and sigbuse in large numbers ✨
+This project is still under development and isn't ready for any serious use! In the current stage it's possible to establish
+connection and work with audio with a large number of segfaults and sigbuses. ✨
 
 #### Snippet
 
@@ -147,17 +146,17 @@ pip3 install --pre wrtc --no-binary wrtc
 
 ### Documentation
 
-`wrtc`'s documentation lives at [readthedocs.io](https://wrtc.rtfd.io/).
+The documentation is live at [readthedocs.io](https://wrtc.rtfd.io/).
 
 ### Getting help
 
 You can get help in several ways:
-- Report bugs, request new features by creating [an issue](https://github.com/MarshalX/python-webrtc/issues/new).
-- Ask questions by creation [a discussion](https://github.com/MarshalX/python-webrtc/discussions/new).
+- Report bugs, request new features by [creating an issue](https://github.com/MarshalX/python-webrtc/issues/new).
+- Ask question by [starting a discussion](https://github.com/MarshalX/python-webrtc/discussions/new).
 
 ### Contributing
 
-Contributions of all sizes are welcome.
+Contributions of any sizes are welcome.
 
 ### Special thanks to
 
@@ -165,4 +164,4 @@ Contributions of all sizes are welcome.
 
 ### License
 
-The `python-webrtc` licence is [BSD 3-Clause License](LICENSE.md).
+The `python-webrtc` is publicized under the [BSD 3-Clause License](LICENSE.md).
