@@ -1,6 +1,6 @@
 <p align="center">
     <a href="https://github.com/MarshalX/python-webrtc">
-        <img src=".github/images/logo.png" alt="python-webrtc">
+        <img src="https://github.com/MarshalX/python-webrtc/raw/main/.github/images/logo.png" alt="python-webrtc">
     </a>
     <br>
     <b>Python Extension that provides bindings to WebRTC M92 </b>
@@ -135,16 +135,16 @@ _Full building instruction will be present later_
 
 ### Installing
 
-❗️ Nothing was published on PyPi for now!
+❗️ Pre-built wheels were not published on PyPi for now!
 
 Pre-built wheel:
 ``` bash
-pip3 install wrtc
+pip3 install --pre wrtc
 ```
 
 Build from sources:
 ``` bash
-pip3 install wrtc --no-binary
+pip3 install --pre wrtc --no-binary wrtc
 ```
 
 ### Documentation
