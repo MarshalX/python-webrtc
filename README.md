@@ -1,6 +1,6 @@
 <p align="center">
     <a href="https://github.com/MarshalX/python-webrtc">
-        <img src="https://github.com/MarshalX/python-webrtc/raw/main/.github/images/logo.png" alt="python-webrtc">
+        <img src="https://github.com/MarshalX/python-webrtc/raw/main/.github/images/logo.png" alt="python-webrtc logo">
     </a>
     <br>
     <b>Python Extension that provides bindings to WebRTC M92 </b>
@@ -62,7 +62,7 @@ if __name__ == '__main__':
 #### Pre-built wheels:
 
 - Python 3.7 or higher
-- Pip 21+
+- pip 21 or higher
 - And compatible platform: 
 
 <table>
@@ -76,27 +76,27 @@ if __name__ == '__main__':
     <tr>
       <th>armv7l</th>
       <th>arm64</th>
-      <th>x64</th>
-      <th>x64</th>
-      <th>M1</th>
-      <th>x64</th>
+      <th>x86_64</th>
+      <th>Intel</th>
+      <th>Apple Silicon</th>
+      <th>64bit</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <th rowspan="6">Python</th>
+      <th rowspan="4">Python</th>
       <th>3.7</th>
-        <td align="center">❌</td>
-        <td align="center">❌</td>
+        <td align="center">N/A</td>
+        <td align="center">N/A</td>
         <td align="center">✅</td>
         <td align="center">✅</td>
-        <td align="center">❌</td>
+        <td align="center">N/A</td>
         <td align="center">✅</td>
     </tr>
     <tr>
       <th>3.8</th>
-        <td align="center">❌</td>
-        <td align="center">❌</td>
+        <td align="center">N/A</td>
+        <td align="center">N/A</td>
         <td align="center">✅</td>
         <td align="center">✅</td>
         <td align="center">✅</td>
@@ -104,8 +104,8 @@ if __name__ == '__main__':
     </tr>
     <tr>
       <th>3.9</th>
-        <td align="center">❌</td>
-        <td align="center">❌</td>
+        <td align="center">N/A</td>
+        <td align="center">N/A</td>
         <td align="center">✅</td>
         <td align="center">✅</td>
         <td align="center">✅</td>
@@ -113,8 +113,8 @@ if __name__ == '__main__':
     </tr>
     <tr>
       <th>3.10</th>
-        <td align="center">❌</td>
-        <td align="center">❌</td>
+        <td align="center">N/A</td>
+        <td align="center">N/A</td>
         <td align="center">✅</td>
         <td align="center">✅</td>
         <td align="center">✅</td>
@@ -126,16 +126,14 @@ if __name__ == '__main__':
 #### Building from sources (sdist):
 
 - ~15 GB of free disk space
-- CMake 3.14+
-- GCC 7.5+
-- glibc 2.18+ 
+- CMake 3.14 or higher
+- GCC 7.5 or higher
+- glibc 2.18 or higher 
 - ARM toolchain (ARM only)
 
 _Full building instruction will be present later_
 
 ### Installing
-
-❗️ Pre-built wheels were not published on PyPi for now!
 
 Pre-built wheel:
 ``` bash
