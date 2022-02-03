@@ -1,22 +1,3 @@
-#  tgcalls - a Python binding for C++ library by Telegram
-#  pytgcalls - a library connecting the Python binding with MTProto
-#  Copyright (C) 2020-2021 Il`ya (Marshal) <https://github.com/MarshalX>
-#
-#  This file is part of tgcalls and pytgcalls.
-#
-#  tgcalls and pytgcalls is free software: you can redistribute it and/or modify
-#  it under the terms of the GNU Lesser General Public License as published
-#  by the Free Software Foundation, either version 3 of the License, or
-#  (at your option) any later version.
-#
-#  tgcalls and pytgcalls is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU Lesser General Public License for more details.
-#
-#  You should have received a copy of the GNU Lesser General Public License v3
-#  along with tgcalls. If not, see <http://www.gnu.org/licenses/>.
-
 import os
 import json
 import time
@@ -118,7 +99,7 @@ async def group_call_update_callback(update):
     remote_sdp = build_answer(json.loads(data))
 
 
-def send_audio_data(audio_source):
+def send_audio_data(audio_source, input_filename):
     def get_ms_time():
         return round(time.time() * 1000)
 
@@ -126,7 +107,7 @@ def send_audio_data(audio_source):
 
     length = int(480 * 16 / 8 * 2)  # 2 channels with 16 bits per sample in 48khz
 
-    f = open('test.raw', 'rb')
+    f = open(input_filename, 'rb')
 
     while True:
         start_time = get_ms_time()
@@ -148,13 +129,8 @@ def send_audio_data(audio_source):
             time.sleep((10 - delta_time) / 1000)
 
 
-async def main(client, input_peer):
+async def main(client, input_peer, input_filename):
     pc = webrtc.RTCPeerConnection()
-
-    # stream = webrtc.get_user_media()
-    # for track in stream.get_tracks():
-    #     track.enabled = True
-    #     pc.add_track(track, stream)
 
     audio_source = webrtc.RTCAudioSource()
     track = audio_source.create_track()
@@ -182,14 +158,13 @@ async def main(client, input_peer):
         await asyncio.sleep(0.1)
     # await asyncio.wait_for(REMOTE_ANSWER_EVENT.wait(), 30)
 
-    # TODO allow to pass RTCSessionDescriptionInit
     await pc.set_remote_description(
         webrtc.RTCSessionDescription(
             webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, remote_sdp)
         )
     )
 
-    thread = threading.Thread(target=send_audio_data, args=(audio_source,))
+    thread = threading.Thread(target=send_audio_data, args=(audio_source, input_filename))
     thread.daemon = True
     thread.start()
 
@@ -202,6 +177,7 @@ if __name__ == '__main__':
     )
     pyro_client.start()
 
-    peer = os.environ.get('PEER')
+    peer = input('Input peer:')
+    filename = input('Input filename to play:')
 
-    asyncio.get_event_loop().run_until_complete(main(pyro_client, peer))
+    asyncio.get_event_loop().run_until_complete(main(pyro_client, peer, filename))

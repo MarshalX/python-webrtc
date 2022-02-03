@@ -5,9 +5,9 @@ include(ExternalProject)
 
 project(python_webrtc
     LANGUAGES C CXX
-    DESCRIPTION "Python binding for WebRTC"
+    DESCRIPTION "a Python Extension that provides bindings to WebRTC"
     HOMEPAGE_URL "https://github.com/MarshalX/python-webrtc"
-    VERSION "0.0.0.1"
+    VERSION "0.0.0.3"
 )
 
 include(ExternalProject)

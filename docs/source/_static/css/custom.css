@@ -1,0 +1,8 @@
+.sidebar-container, .toc-drawer {
+    box-sizing: border-box;
+    width: 25em;
+}
+
+.sidebar-drawer {
+    min-width: 25em;
+}

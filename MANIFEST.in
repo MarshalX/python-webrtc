@@ -1,0 +1,14 @@
+include README.md LICENSE.md
+
+include CMakeLists.txt
+graft python-webrtc/cpp
+exclude python-webrtc/cpp/src/config.h
+graft python-webrtc/python/webrtc
+
+graft scripts
+include third_party/pybind11/LICENSE
+include third_party/pybind11/CMakeLists.txt
+graft third_party/pybind11/include
+graft third_party/pybind11/tools
+
+global-exclude *.py[cod]
