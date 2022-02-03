@@ -5,6 +5,10 @@
     <br>
     <b>Python Extension that provides bindings to WebRTC M92 </b>
     <br>
+    <a href="https://github.com/MarshalX/python-webrtc/tree/main/examples">
+        Examples
+    </a>
+    •
     <a href="https://wrtc.rtfd.io/">
         Documentation
     </a>
