@@ -164,4 +164,4 @@ Contributions of any sizes are welcome.
 
 ### License
 
-The `python-webrtc` is publicized under the [BSD 3-Clause License](LICENSE.md).
+The `python-webrtc` is published under the [BSD 3-Clause License](LICENSE.md).
