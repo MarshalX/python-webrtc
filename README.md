@@ -22,13 +22,11 @@
 
 > Stop making unstandard pure implementations of WebRTC and let's use the native library!
 
-This project follows the [W3C specification](https://w3c.github.io/webrtc-pc/) with some modifications and additions to make it work better with Python applications, with useful APIs like programmatic audio and
-video.
+This project follows the [W3C specification](https://w3c.github.io/webrtc-pc/) with some modifications and additions to make it work better with Python applications, with useful APIs like programmatic audio and video.
 
 ## DISCLAIMER
 
-This project is still under development and isn't ready for any serious use! In the current stage it's possible to establish
-connection and work with audio with a large number of segfaults and sigbuses. ✨
+This project is still under development and isn't ready for any serious use! In the current stage it's possible to establish connection and work with audio with a large number of segfaults and sigbuses. ✨
 
 #### Snippet
 
