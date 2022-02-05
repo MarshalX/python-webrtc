@@ -51,15 +51,52 @@ html_search_language = 'en'
 # These folders are copied to the documentation's HTML output
 html_static_path = ['_static']
 
+# Add favicon
+extensions += ['sphinx-favicon']
+html_static_path += ['images']
+favicons = [
+    {
+        'rel': 'icon',
+        'static-file': 'favicon.svg',
+        'type': 'image/svg+xml',
+    },
+    {
+        'rel': 'icon',
+        'sizes': '16x16',
+        'static-file': 'favicon-16x16.png',
+        'type': 'image/png',
+    },
+    {
+        'rel': 'icon',
+        'sizes': '32x32',
+        'static-file': 'favicon-32x32.png',
+        'type': 'image/png',
+    },
+    {
+        'rel': 'apple-touch-icon',
+        'sizes': '180x180',
+        'static-file': 'apple-touch-icon-180x180.png',
+        'type': 'image/png',
+    },
+]
+
+# Add OpenGraph
+extensions += ['sphinxext.opengraph']
+ogp_site_url = 'https://wrtc.readthedocs.io/'
+# Social preview of GitHub. I guess its lifetime link until reuploading, for example
+ogp_image = 'https://repository-images.githubusercontent.com/444007147/cbcbf096-57d3-4715-93b0-4dba751db76a'
+
 # These paths are either relative to html_static_path
 # or fully qualified paths (eg. https://...)
 html_css_files = [
     'css/custom.css',
 ]
 
+html_title = 'Python WebRTC'
 html_theme = 'furo'
 html_logo = 'images/logo.png'
 
 html_theme_options = {
-    "sidebar_hide_name": True,
+    'sidebar_hide_name': True,
+    'navigation_with_keys': True,
 }

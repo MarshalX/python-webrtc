@@ -1,2 +1,4 @@
 sphinx
+sphinx-favicon
+sphinxext-opengraph
 furo
