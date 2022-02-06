@@ -41,7 +41,7 @@ async def main():
     # answer_sdp = webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, VALID_SDP)
     # answer = webrtc.RTCSessionDescription(answer_sdp)
 
-    pc = wrtc.RTCPeerConnection()
+    pc = webrtc.RTCPeerConnection()
 
     # local_sdp = await toAsync(pc.createOffer)
     # print('Local SDP', local_sdp)
@@ -59,35 +59,35 @@ async def main():
     def get_dir(o):
         return [m for m in dir(o) if not m.startswith('__')]
 
-    # TODO should be asynced?
-    # stream = webrtc.getUserMedia()
-    # print(repr(stream), get_dir(stream))
+    stream = webrtc.getUserMedia()
+    print(repr(stream), get_dir(stream))
     # <webrtc.MediaStream object at 0x10623e3f0> ['active', 'addTrack', 'clone', 'getAudioTracks',
     # 'getTrackById', 'getTracks', 'getVideoTracks', 'id', 'removeTrack']
-    # for track in stream.getTracks():
-    #     print(repr(track), get_dir(track))
+    for track in stream.getTracks():
+        print(repr(track), get_dir(track))
         # <webrtc.MediaStreamTrack object at 0x10623a1f0> ['clone', 'enabled', 'id', 'kind',
         # 'muted', 'readyState', 'stop']
 
-        # sender = pc.addTrack(track, stream)
+        sender = pc.addTrack(track, stream)
+        # TODO should be raised
+        # Sender already exists for track 88db8c42-7e4e-... (INVALID_PARAMETER)
         # sender2 = pc.addTrack(track, [stream])
-        # print(sender.track)
-        # print(repr(sender), get_dir(sender))
+        print(repr(sender), get_dir(sender))
 
-        # TODO SIGSEGV
-        # issue with return value? cuz it works in RTCAudioSource
-        # track.enabled = False
+        # TODO SIGSEGV because its another instance of the track with reregistered observer. should be the same
+        print(sender.track)     # should not return new instance! because it's already created by getTracks()
+        track.enabled = False
 
-    length = int(48000 * 16 / 8 / 100 * 1)  # 960
-    data = b'\0' * length
-    frame = wrtc.RTCOnDataEvent(data, length)
+    # length = int(48000 * 16 / 8 / 100 * 1)  # 960
+    # data = b'\0' * length
+    # frame = wrtc.RTCOnDataEvent(data, length)
 
     source = wrtc.RTCAudioSource()
     track = source.createTrack()
     track.enabled = False
 
-    pc.addTrack(track, None)
-    source.onData(frame)
+    # pc.addTrack(track, None)
+    # source.onData(frame)
 
     # local_sdp = await toAsync(pc.createOffer)
     # print('Local SDP with track', local_sdp)

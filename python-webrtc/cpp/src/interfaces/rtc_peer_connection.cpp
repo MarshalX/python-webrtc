@@ -167,7 +167,7 @@ namespace python_webrtc {
       return {};
     }
 
-    auto rtpSender = result.value();
+    auto rtpSender = result.value().release();
     return std::make_unique<RTCRtpSender>(_factory, rtpSender);
   }
 
@@ -191,7 +191,7 @@ namespace python_webrtc {
       return {};
     }
 
-    auto rtpSender = result.value();
+    auto rtpSender = result.value().release();
     return std::make_unique<RTCRtpSender>(_factory, rtpSender);
   }
 

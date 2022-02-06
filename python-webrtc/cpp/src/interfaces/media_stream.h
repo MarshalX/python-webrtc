@@ -43,17 +43,17 @@ namespace python_webrtc {
 
     bool GetActive();
 
-    std::vector<MediaStreamTrack> GetAudioTracks();
+    std::vector<std::unique_ptr<MediaStreamTrack>> GetAudioTracks();
 
-    std::vector<MediaStreamTrack> GetVideoTracks();
+    std::vector<std::unique_ptr<MediaStreamTrack>> GetVideoTracks();
 
-    std::vector<MediaStreamTrack> GetTracks();
+    std::vector<std::unique_ptr<MediaStreamTrack>> GetTracks();
 
-    std::optional<MediaStreamTrack> GetTrackById(const std::string &);
+    std::optional<std::unique_ptr<MediaStreamTrack>> GetTrackById(const std::string &);
 
-    void AddTrack(MediaStreamTrack *);
+    void AddTrack(MediaStreamTrack &);
 
-    void RemoveTrack(MediaStreamTrack *);
+    void RemoveTrack(MediaStreamTrack &);
 
     std::unique_ptr<MediaStream> Clone();
 

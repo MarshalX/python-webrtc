@@ -17,13 +17,13 @@ namespace python_webrtc {
 
   class RTCRtpSender {
   public:
-    explicit RTCRtpSender(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::RtpSenderInterface>);
+    explicit RTCRtpSender(PeerConnectionFactory *, webrtc::RtpSenderInterface *);
 
     ~RTCRtpSender();
 
     static void Init(pybind11::module &m);
 
-    std::optional<MediaStreamTrack> GetTrack();
+    std::optional<std::unique_ptr<MediaStreamTrack>> GetTrack();
 
 //    TODO
 //    void GetTransport();
@@ -33,11 +33,12 @@ namespace python_webrtc {
 //
 //    void SetStreams();
 
-    rtc::scoped_refptr<webrtc::RtpSenderInterface> sender() { return _sender; }
+    // TODO used smart pointer for _sender if this method will be used
+    webrtc::RtpSenderInterface& sender() { return *_sender; }
 
   private:
     PeerConnectionFactory *_factory;
-    rtc::scoped_refptr<webrtc::RtpSenderInterface> _sender;
+    webrtc::RtpSenderInterface *_sender;
   };
 
 } // namespace python_webrtc
