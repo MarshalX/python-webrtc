@@ -8,8 +8,8 @@ namespace python_webrtc {
 
   RTCSessionDescriptionInit::RTCSessionDescriptionInit() {}
 
-  RTCSessionDescriptionInit::RTCSessionDescriptionInit(webrtc::SdpType type, std::string sdp):
-    type(type), sdp(std::move(sdp)) {}
+  RTCSessionDescriptionInit::RTCSessionDescriptionInit(webrtc::SdpType type, std::string sdp) :
+      type(type), sdp(std::move(sdp)) {}
 
   void RTCSessionDescriptionInit::Init(pybind11::module &m) {
     pybind11::class_<RTCSessionDescriptionInit>(m, "RTCSessionDescriptionInit")

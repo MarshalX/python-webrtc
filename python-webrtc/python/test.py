@@ -61,12 +61,8 @@ async def main():
 
     stream = webrtc.getUserMedia()
     print(repr(stream), get_dir(stream))
-    # <webrtc.MediaStream object at 0x10623e3f0> ['active', 'addTrack', 'clone', 'getAudioTracks',
-    # 'getTrackById', 'getTracks', 'getVideoTracks', 'id', 'removeTrack']
     for track in stream.getTracks():
         print(repr(track), get_dir(track))
-        # <webrtc.MediaStreamTrack object at 0x10623a1f0> ['clone', 'enabled', 'id', 'kind',
-        # 'muted', 'readyState', 'stop']
 
         sender = pc.addTrack(track, stream)
         # TODO should be raised
@@ -74,15 +70,14 @@ async def main():
         # sender2 = pc.addTrack(track, [stream])
         print(repr(sender), get_dir(sender))
 
-        # TODO SIGSEGV because its another instance of the track with reregistered observer. should be the same
-        print(sender.track)     # should not return new instance! because it's already created by getTracks()
+        print(sender.track)
         track.enabled = False
 
     # length = int(48000 * 16 / 8 / 100 * 1)  # 960
     # data = b'\0' * length
     # frame = wrtc.RTCOnDataEvent(data, length)
 
-    source = wrtc.RTCAudioSource()
+    source = webrtc.RTCAudioSource()
     track = source.createTrack()
     track.enabled = False
 
@@ -93,7 +88,32 @@ async def main():
     # print('Local SDP with track', local_sdp)
     # print(local_sdp.sdp)
 
-    idle()
+    stream = webrtc.get_user_media()
+    tracks1 = stream.get_tracks()
+    tracks2 = stream.get_tracks()
+    tracks3 = stream.get_audio_tracks()
+    tracks4 = stream.get_audio_tracks()
+
+    assert tracks1[0]._native_obj == tracks2[0]._native_obj
+
+    sender = pc.add_track(tracks1[0], stream)
+    print(sender.track)
+    tracks1[0].enabled = False
+
+    track = stream.get_track_by_id(tracks1[0].id)
+    print(track)
+
+    assert sender.track._native_obj == track._native_obj
+
+    t1 = track.clone()
+    t2 = track.clone()
+    assert t1._native_obj != t2._native_obj
+    s1 = stream.clone()
+    s2 = stream.clone()
+    assert s1._native_obj != s2._native_obj
+
+    # pc.close()
+    # idle()
 
 if __name__ == '__main__':
     asyncio.run(main())

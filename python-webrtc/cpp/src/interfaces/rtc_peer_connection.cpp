@@ -65,10 +65,10 @@ namespace python_webrtc {
         .def("setRemoteDescription", &RTCPeerConnection::SetRemoteDescription)
         .def("addTrack",
              pybind11::overload_cast<MediaStreamTrack &, std::optional<std::reference_wrapper<MediaStream>>>(
-                 &RTCPeerConnection::AddTrack))
+                 &RTCPeerConnection::AddTrack), pybind11::return_value_policy::reference)
         .def("addTrack",
              pybind11::overload_cast<MediaStreamTrack &, const std::vector<MediaStream *> &>(
-                 &RTCPeerConnection::AddTrack))
+                 &RTCPeerConnection::AddTrack), pybind11::return_value_policy::reference)
         .def("close", &RTCPeerConnection::Close);
   }
 
@@ -146,7 +146,7 @@ namespace python_webrtc {
     _jinglePeerConnection->SetRemoteDescription(observer, raw_description_ptr.release());
   }
 
-  std::unique_ptr<RTCRtpSender> RTCPeerConnection::AddTrack(
+  RTCRtpSender *RTCPeerConnection::AddTrack(
       MediaStreamTrack &mediaStreamTrack, const std::vector<MediaStream *> &mediaStreams) {
     if (!_jinglePeerConnection) {
       // TODO raise
@@ -167,11 +167,11 @@ namespace python_webrtc {
       return {};
     }
 
-    auto rtpSender = result.value().release();
-    return std::make_unique<RTCRtpSender>(_factory, rtpSender);
+    auto rtpSender = result.value();
+    return RTCRtpSender::holder()->GetOrCreate(_factory, rtpSender);
   }
 
-  std::unique_ptr<RTCRtpSender> RTCPeerConnection::AddTrack(
+  RTCRtpSender *RTCPeerConnection::AddTrack(
       MediaStreamTrack &mediaStreamTrack, std::optional<std::reference_wrapper<MediaStream>> mediaStream) {
     if (!_jinglePeerConnection) {
       // TODO raise
@@ -191,8 +191,8 @@ namespace python_webrtc {
       return {};
     }
 
-    auto rtpSender = result.value().release();
-    return std::make_unique<RTCRtpSender>(_factory, rtpSender);
+    auto rtpSender = result.value();
+    return RTCRtpSender::holder()->GetOrCreate(_factory, rtpSender);
   }
 
   void RTCPeerConnection::Close() {
@@ -202,8 +202,8 @@ namespace python_webrtc {
 
     if (_jinglePeerConnection->GetConfiguration().sdp_semantics == webrtc::SdpSemantics::kUnifiedPlan) {
       for (const auto &transceiver: _jinglePeerConnection->GetTransceivers()) {
-        auto track = MediaStreamTrack(_factory, transceiver->receiver()->track());
-        track.OnPeerConnectionClosed();
+        auto track = MediaStreamTrack::holder()->GetOrCreate(_factory, transceiver->receiver()->track());
+        track->OnPeerConnectionClosed();
       }
     }
 

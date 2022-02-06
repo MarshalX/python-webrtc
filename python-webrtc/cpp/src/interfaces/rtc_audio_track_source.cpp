@@ -31,11 +31,11 @@ namespace python_webrtc {
     webrtc::AudioTrackSinkInterface *sink = _sink;
     if (sink) {
       sink->OnData(
-        data.audioData,
-        data.bitsPerSample,
-        data.sampleRate,
-        data.channelCount,
-        data.numberOfFrames
+          data.audioData,
+          data.bitsPerSample,
+          data.sampleRate,
+          data.channelCount,
+          data.numberOfFrames
       );
     }
   }

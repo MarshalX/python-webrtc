@@ -31,11 +31,17 @@ namespace python_webrtc {
 
     explicit MediaStream(MediaStream *);
 
-    explicit MediaStream(std::vector<MediaStreamTrack>);
+    explicit MediaStream(std::vector<MediaStreamTrack *>);
 
     MediaStream(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::MediaStreamInterface>);
 
+    static MediaStream *Create(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::MediaStreamInterface>);
+
     void static Init(pybind11::module &m);
+
+    static InstanceHolder<
+        MediaStream *, rtc::scoped_refptr<webrtc::MediaStreamInterface>, PeerConnectionFactory *
+    > *holder();
 
     rtc::scoped_refptr<webrtc::MediaStreamInterface> stream();
 
@@ -43,19 +49,22 @@ namespace python_webrtc {
 
     bool GetActive();
 
-    std::vector<std::unique_ptr<MediaStreamTrack>> GetAudioTracks();
+    // stl containers will be returned to python as a copy
+    std::vector<MediaStreamTrack *> GetAudioTracks();
 
-    std::vector<std::unique_ptr<MediaStreamTrack>> GetVideoTracks();
+    std::vector<MediaStreamTrack *> GetVideoTracks();
 
-    std::vector<std::unique_ptr<MediaStreamTrack>> GetTracks();
+    std::vector<MediaStreamTrack *> GetTracks();
 
-    std::optional<std::unique_ptr<MediaStreamTrack>> GetTrackById(const std::string &);
+    // it will be copied to python too
+    std::optional<MediaStreamTrack *> GetTrackById(const std::string &);
 
     void AddTrack(MediaStreamTrack &);
 
     void RemoveTrack(MediaStreamTrack &);
 
-    std::unique_ptr<MediaStream> Clone();
+    // must be returned to python as reference
+    MediaStream *Clone();
 
   private:
     class Impl {
@@ -75,7 +84,7 @@ namespace python_webrtc {
 
       explicit Impl(PeerConnectionFactory *factory = nullptr);
 
-      Impl(std::vector<MediaStreamTrack> &&tracks, PeerConnectionFactory *factory = nullptr);
+      Impl(std::vector<MediaStreamTrack *> &&tracks, PeerConnectionFactory *factory = nullptr);
 
       Impl(rtc::scoped_refptr<webrtc::MediaStreamInterface> stream, PeerConnectionFactory *factory = nullptr);
 

@@ -10,6 +10,7 @@
 #include <pybind11/pybind11.h>
 
 #include "peer_connection_factory.h"
+#include "../utils/instance_holder.h"
 
 namespace python_webrtc {
 
@@ -17,9 +18,16 @@ namespace python_webrtc {
   public:
     explicit MediaStreamTrack(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::MediaStreamTrackInterface>);
 
+    static MediaStreamTrack *Create(
+        PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track);
+
     ~MediaStreamTrack() override;
 
     void static Init(pybind11::module &m);
+
+    static InstanceHolder<
+        MediaStreamTrack *, rtc::scoped_refptr<webrtc::MediaStreamTrackInterface>, PeerConnectionFactory *
+    > *holder();
 
     void Stop();
 
@@ -40,7 +48,8 @@ namespace python_webrtc {
 
     bool GetMuted();
 
-    std::unique_ptr<MediaStreamTrack> Clone();
+    // should be returned to python as reference! because we holding it in our holder
+    MediaStreamTrack *Clone();
 
     bool active() { return !_ended && _track->state() == webrtc::MediaStreamTrackInterface::TrackState::kLive; }
 

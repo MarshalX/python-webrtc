@@ -11,17 +11,17 @@ namespace python_webrtc {
         _stream(_factory->factory()->CreateLocalMediaStream(rtc::CreateRandomUuid())),
         _shouldReleaseFactory(!factory) {}
 
-  MediaStream::Impl::Impl(std::vector<MediaStreamTrack> &&tracks, PeerConnectionFactory *factory)
+  MediaStream::Impl::Impl(std::vector<MediaStreamTrack *> &&tracks, PeerConnectionFactory *factory)
       : _factory(
-      factory ? factory : tracks.empty() ? PeerConnectionFactory::GetOrCreateDefault() : tracks[0].factory()),
+      factory ? factory : tracks.empty() ? PeerConnectionFactory::GetOrCreateDefault() : tracks[0]->factory()),
         _stream(_factory->factory()->CreateLocalMediaStream(rtc::CreateRandomUuid())),
         _shouldReleaseFactory(!factory && tracks.empty()) {
     for (auto &track: tracks) {
-      if (track.track()->kind() == track.track()->kAudioKind) {
-        auto audioTrack = static_cast<webrtc::AudioTrackInterface *>(track.track().get());
+      if (track->track()->kind() == track->track()->kAudioKind) {
+        auto audioTrack = dynamic_cast<webrtc::AudioTrackInterface *>(track->track().get());
         _stream->AddTrack(audioTrack);
       } else {
-        auto videoTrack = static_cast<webrtc::VideoTrackInterface *>(track.track().get());
+        auto videoTrack = dynamic_cast<webrtc::VideoTrackInterface *>(track->track().get());
         _stream->AddTrack(videoTrack);
       }
     }
@@ -63,16 +63,16 @@ namespace python_webrtc {
   MediaStream::MediaStream(MediaStream *existedStream) {
     // Local MediaStream, existed MediaStream
     auto factory = existedStream->_impl._factory;
-    auto tracks = std::vector<MediaStreamTrack>();
+    auto tracks = std::vector<MediaStreamTrack *>();
 
     for (auto const &track: existedStream->tracks()) {
-      tracks.emplace_back(factory, track);
+      tracks.push_back(MediaStreamTrack::holder()->GetOrCreate(factory, track));
     }
 
     _impl = MediaStream::Impl(std::move(tracks), factory);
   }
 
-  MediaStream::MediaStream(std::vector<MediaStreamTrack> tracks) {
+  MediaStream::MediaStream(std::vector<MediaStreamTrack *> tracks) {
     // Local MediaStream, Array of MediaStreamTrack
     _impl = MediaStream::Impl(std::move(tracks));
   }
@@ -92,7 +92,7 @@ namespace python_webrtc {
         .def("getTrackById", &MediaStream::GetTrackById)
         .def("addTrack", &MediaStream::AddTrack)
         .def("removeTrack", &MediaStream::RemoveTrack)
-        .def("clone", &MediaStream::Clone);
+        .def("clone", &MediaStream::Clone, pybind11::return_value_policy::reference);
   }
 
   std::string MediaStream::GetId() {
@@ -103,57 +103,52 @@ namespace python_webrtc {
     auto active = false;
 
     for (auto const &track: tracks()) {
-      auto mediaStreamTrack = MediaStreamTrack(_impl._factory, track);
-      active = active || mediaStreamTrack.active();
+      auto mediaStreamTrack = MediaStreamTrack::holder()->GetOrCreate(_impl._factory, track);
+      active = active || mediaStreamTrack->active();
     }
 
     return active;
   }
 
-  std::vector<std::unique_ptr<MediaStreamTrack>> MediaStream::GetAudioTracks() {
-    auto tracks = std::vector<std::unique_ptr<MediaStreamTrack>>();
+  std::vector<MediaStreamTrack *> MediaStream::GetAudioTracks() {
+    auto tracks = std::vector<MediaStreamTrack *>();
 
     for (auto const &track: _impl._stream->GetAudioTracks()) {
-      // TODO all tracks should be created once! getOrCreate, shared ptr?
-      tracks.emplace_back(new MediaStreamTrack(_impl._factory, track));
+      tracks.push_back(MediaStreamTrack::holder()->GetOrCreate(_impl._factory, track));
     }
 
     return tracks;
   }
 
-  std::vector<std::unique_ptr<MediaStreamTrack>> MediaStream::GetVideoTracks() {
-    auto tracks = std::vector<std::unique_ptr<MediaStreamTrack>>();
+  std::vector<MediaStreamTrack *> MediaStream::GetVideoTracks() {
+    auto tracks = std::vector<MediaStreamTrack *>();
 
     for (auto const &track: _impl._stream->GetVideoTracks()) {
-      // TODO all tracks should be created once! getOrCreate, shared ptr?
-      tracks.emplace_back(new MediaStreamTrack(_impl._factory, track));
+      tracks.push_back(MediaStreamTrack::holder()->GetOrCreate(_impl._factory, track));
     }
 
     return tracks;
   }
 
-  std::vector<std::unique_ptr<MediaStreamTrack>> MediaStream::GetTracks() {
-    auto tracks = std::vector<std::unique_ptr<MediaStreamTrack>>();
+  std::vector<MediaStreamTrack *> MediaStream::GetTracks() {
+    auto tracks = std::vector<MediaStreamTrack *>();
 
-    for (auto track: this->tracks()) {
-      // TODO all tracks should be created once! getOrCreate, shared ptr?
-      tracks.emplace_back(new MediaStreamTrack(_impl._factory, std::move(track)));
+    for (auto const &track: this->tracks()) {
+      tracks.push_back(MediaStreamTrack::holder()->GetOrCreate(_impl._factory, track));
     }
 
     return tracks;
   }
 
-  std::optional<std::unique_ptr<MediaStreamTrack>> MediaStream::GetTrackById(const std::string &label) {
+  std::optional<MediaStreamTrack *> MediaStream::GetTrackById(const std::string &label) {
     auto audioTrack = _impl._stream->FindAudioTrack(label);
     if (audioTrack) {
-      // TODO all tracks should be created once! getOrCreate, shared ptr?
-      return std::make_unique<MediaStreamTrack>(_impl._factory, audioTrack);
+      return MediaStreamTrack::holder()->GetOrCreate(_impl._factory, audioTrack);
     }
 
     auto videoTrack = _impl._stream->FindVideoTrack(label);
     if (videoTrack) {
-      // TODO all tracks should be created once! getOrCreate, shared ptr?
-      return std::make_unique<MediaStreamTrack>(_impl._factory, videoTrack);
+      return MediaStreamTrack::holder()->GetOrCreate(_impl._factory, videoTrack);
     }
 
     return {};
@@ -164,9 +159,9 @@ namespace python_webrtc {
     auto track = mediaStreamTrack.track();
 
     if (track->kind() == track->kAudioKind) {
-      stream->AddTrack(static_cast<webrtc::AudioTrackInterface *>(track.get()));
+      stream->AddTrack(dynamic_cast<webrtc::AudioTrackInterface *>(track.get()));
     } else {
-      stream->AddTrack(static_cast<webrtc::VideoTrackInterface *>(track.get()));
+      stream->AddTrack(dynamic_cast<webrtc::VideoTrackInterface *>(track.get()));
     }
   }
 
@@ -175,30 +170,45 @@ namespace python_webrtc {
     auto track = mediaStreamTrack.track();
 
     if (track->kind() == track->kAudioKind) {
-      stream->RemoveTrack(static_cast<webrtc::AudioTrackInterface *>(track.get()));
+      stream->RemoveTrack(dynamic_cast<webrtc::AudioTrackInterface *>(track.get()));
     } else {
-      stream->RemoveTrack(static_cast<webrtc::VideoTrackInterface *>(track.get()));
+      stream->RemoveTrack(dynamic_cast<webrtc::VideoTrackInterface *>(track.get()));
     }
   }
 
-  std::unique_ptr<MediaStream> MediaStream::Clone() {
+  MediaStream *MediaStream::Clone() {
     auto clonedStream = _impl._factory->factory()->CreateLocalMediaStream(rtc::CreateRandomUuid());
 
     for (auto const &track: this->tracks()) {
       if (track->kind() == track->kAudioKind) {
-        auto audioTrack = static_cast<webrtc::AudioTrackInterface *>(track.get());
+        auto audioTrack = dynamic_cast<webrtc::AudioTrackInterface *>(track.get());
         auto source = audioTrack->GetSource();
         auto clonedTrack = _impl._factory->factory()->CreateAudioTrack(rtc::CreateRandomUuid(), source);
         clonedStream->AddTrack(clonedTrack);
       } else {
-        auto videoTrack = static_cast<webrtc::VideoTrackInterface *>(track.get());
+        auto videoTrack = dynamic_cast<webrtc::VideoTrackInterface *>(track.get());
         auto source = videoTrack->GetSource();
         auto clonedTrack = _impl._factory->factory()->CreateVideoTrack(rtc::CreateRandomUuid(), source);
         clonedStream->AddTrack(clonedTrack);
       }
     }
 
-    return std::make_unique<MediaStream>(_impl._factory, clonedStream);
+    return MediaStream::holder()->GetOrCreate(_impl._factory, clonedStream);
+  }
+
+  InstanceHolder<MediaStream *, rtc::scoped_refptr<webrtc::MediaStreamInterface>, PeerConnectionFactory *> *
+  MediaStream::holder() {
+    // call holder().Release(this) in a destructor?
+    static auto holder = new InstanceHolder<
+        MediaStream *, rtc::scoped_refptr<webrtc::MediaStreamInterface>, PeerConnectionFactory *
+    >(MediaStream::Create);
+    return holder;
+  }
+
+  MediaStream *
+  MediaStream::Create(PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::MediaStreamInterface> stream) {
+    // who caring about freeing memory?
+    return new MediaStream(factory, std::move(stream));
   }
 
 } // namespace python_webrtc

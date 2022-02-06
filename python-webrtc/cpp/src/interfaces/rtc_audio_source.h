@@ -19,7 +19,7 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
-    std::unique_ptr<MediaStreamTrack> CreateTrack();
+    MediaStreamTrack *CreateTrack();
 
     void OnData(RTCOnDataEvent &);
 

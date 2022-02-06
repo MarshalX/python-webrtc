@@ -15,10 +15,12 @@ namespace python_webrtc {
   public:
     // TODO sdp should be optional (empty string by default) and not None
     RTCSessionDescriptionInit();
+
     RTCSessionDescriptionInit(webrtc::SdpType type, std::string sdp);
 
     static void Init(pybind11::module &m);
-    static RTCSessionDescriptionInit Wrap(webrtc::SessionDescriptionInterface*);
+
+    static RTCSessionDescriptionInit Wrap(webrtc::SessionDescriptionInterface *);
 
     webrtc::SdpType type;
     std::string sdp;

@@ -28,12 +28,12 @@ namespace python_webrtc {
 
   void RTCSessionDescription::Init(pybind11::module &m) {
     pybind11::class_<RTCSessionDescription>(m, "RTCSessionDescription")
-        .def(pybind11::init<const RTCSessionDescriptionInit&>())
+        .def(pybind11::init<const RTCSessionDescriptionInit &>())
         .def_property_readonly("type", &RTCSessionDescription::getType)
         .def_property_readonly("sdp", &RTCSessionDescription::getSdp);
   }
 
-  RTCSessionDescription::operator webrtc::SessionDescriptionInterface*() {
+  RTCSessionDescription::operator webrtc::SessionDescriptionInterface *() {
     // TODO update mb when will be necessary
     return _description.get();
   }

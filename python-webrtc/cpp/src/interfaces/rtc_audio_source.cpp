@@ -15,19 +15,19 @@ namespace python_webrtc {
   void RTCAudioSource::Init(pybind11::module &m) {
     pybind11::class_<RTCAudioSource>(m, "RTCAudioSource")
         .def(pybind11::init<>())
-        .def("createTrack", &RTCAudioSource::CreateTrack)
+        .def("createTrack", &RTCAudioSource::CreateTrack, pybind11::return_value_policy::reference)
         .def("onData", &RTCAudioSource::OnData);
   }
 
-  std::unique_ptr<MediaStreamTrack> RTCAudioSource::CreateTrack() {
+  MediaStreamTrack *RTCAudioSource::CreateTrack() {
     // TODO(mroberts): Again, we have some implicit factory we are threading around. How to handle?
     auto factory = PeerConnectionFactory::GetOrCreateDefault();
     auto track = factory->factory()->CreateAudioTrack(rtc::CreateRandomUuid(), _source.get());
-    return std::make_unique<MediaStreamTrack>(factory, track);
+    return MediaStreamTrack::holder()->GetOrCreate(factory, track);
   }
 
   void RTCAudioSource::OnData(RTCOnDataEvent &data) {
-     _source->PushData(data);
+    _source->PushData(data);
   }
 
 } // namespace python_webrtc

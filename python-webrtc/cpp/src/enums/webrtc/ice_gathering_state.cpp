@@ -9,7 +9,7 @@
 namespace python_webrtc {
 
   void IceGatheringState::Init(pybind11::module &m) {
-    pybind11::enum_<webrtc::PeerConnectionInterface::IceGatheringState>(m,"RTCIceGatheringState")
+    pybind11::enum_<webrtc::PeerConnectionInterface::IceGatheringState>(m, "RTCIceGatheringState")
         .value("new", webrtc::PeerConnectionInterface::IceGatheringState::kIceGatheringNew)
         .value("gathering", webrtc::PeerConnectionInterface::IceGatheringState::kIceGatheringGathering)
         .value("complete", webrtc::PeerConnectionInterface::IceGatheringState::kIceGatheringComplete)

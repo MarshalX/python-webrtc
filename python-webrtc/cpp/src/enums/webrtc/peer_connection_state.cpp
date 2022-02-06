@@ -11,7 +11,7 @@ namespace python_webrtc {
   void PeerConnectionState::Init(pybind11::module &m) {
     // TODO review public name cuz mb shouldn't be as separated enum. accessible only by
     // connectionState = RTCPeerConnection.connectionState;
-    pybind11::enum_<webrtc::PeerConnectionInterface::PeerConnectionState>(m,"RTCPeerConnectionState")
+    pybind11::enum_<webrtc::PeerConnectionInterface::PeerConnectionState>(m, "RTCPeerConnectionState")
         .value("new", webrtc::PeerConnectionInterface::PeerConnectionState::kNew)
         .value("connecting", webrtc::PeerConnectionInterface::PeerConnectionState::kConnecting)
         .value("connected", webrtc::PeerConnectionInterface::PeerConnectionState::kConnected)

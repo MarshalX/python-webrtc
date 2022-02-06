@@ -9,7 +9,7 @@
 namespace python_webrtc {
 
   void IceConnectionState::Init(pybind11::module &m) {
-    pybind11::enum_<webrtc::PeerConnectionInterface::IceConnectionState>(m,"RTCIceConnectionState")
+    pybind11::enum_<webrtc::PeerConnectionInterface::IceConnectionState>(m, "RTCIceConnectionState")
         .value("new", webrtc::PeerConnectionInterface::IceConnectionState::kIceConnectionNew)
         .value("checking", webrtc::PeerConnectionInterface::IceConnectionState::kIceConnectionChecking)
         .value("connected", webrtc::PeerConnectionInterface::IceConnectionState::kIceConnectionConnected)

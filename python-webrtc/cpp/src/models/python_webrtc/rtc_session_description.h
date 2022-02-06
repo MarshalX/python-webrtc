@@ -11,14 +11,16 @@ namespace python_webrtc {
   class RTCSessionDescription {
   public:
     // TODO rtcSessionDescriptionInit should be optional
-    explicit RTCSessionDescription(const RTCSessionDescriptionInit& rtcSessionDescriptionInit);
+    explicit RTCSessionDescription(const RTCSessionDescriptionInit &rtcSessionDescriptionInit);
 
     static void Init(pybind11::module &m);
-    static RTCSessionDescription Wrap(webrtc::SessionDescriptionInterface*);
 
-    explicit operator webrtc::SessionDescriptionInterface*();
+    static RTCSessionDescription Wrap(webrtc::SessionDescriptionInterface *);
+
+    explicit operator webrtc::SessionDescriptionInterface *();
 
     webrtc::SdpType getType();
+
     std::string getSdp();
 
     // TODO .toJSON() method?

@@ -12,7 +12,7 @@ namespace python_webrtc {
 
   class SetSessionDescriptionObserver : public webrtc::SetSessionDescriptionObserver {
   public:
-    explicit SetSessionDescriptionObserver(std::function<void()> &on_success): _on_success(on_success) {}
+    explicit SetSessionDescriptionObserver(std::function<void()> &on_success) : _on_success(on_success) {}
 
     void OnSuccess() override;
 

@@ -6,11 +6,13 @@
 
 namespace python_webrtc {
 
-  RTCRtpSender::RTCRtpSender(PeerConnectionFactory *factory, webrtc::RtpSenderInterface *sender)
-      : _factory(factory), _sender(sender) {}
+  RTCRtpSender::RTCRtpSender(PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::RtpSenderInterface> sender)
+      : _factory(factory), _sender(std::move(sender)) {}
 
   RTCRtpSender::~RTCRtpSender() {
     _factory = nullptr;
+
+    holder()->Release(this);
   }
 
   void RTCRtpSender::Init(pybind11::module &m) {
@@ -18,15 +20,28 @@ namespace python_webrtc {
         .def_property_readonly("track", &RTCRtpSender::GetTrack);
   }
 
-  std::optional<std::unique_ptr<MediaStreamTrack>> RTCRtpSender::GetTrack() {
+  std::optional<MediaStreamTrack *> RTCRtpSender::GetTrack() {
     auto track = _sender->track();
     if (track) {
-      // TODO should be getOrCreate? because we can get the same track from stream.getTracks(), for example
-      // shared ptr?
-      return std::make_unique<MediaStreamTrack>(_factory, track);
+      return MediaStreamTrack::holder()->GetOrCreate(_factory, track);
     }
 
     return {};
+  }
+
+  InstanceHolder<RTCRtpSender *, rtc::scoped_refptr<webrtc::RtpSenderInterface>, PeerConnectionFactory *> *
+  RTCRtpSender::holder() {
+    static auto holder = new InstanceHolder<
+        RTCRtpSender *, rtc::scoped_refptr<webrtc::RtpSenderInterface>, PeerConnectionFactory *
+    >(RTCRtpSender::Create);
+    return holder;
+  }
+
+  RTCRtpSender *RTCRtpSender::Create(
+      PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::RtpSenderInterface> sender
+  ) {
+    // who caring about freeing memory?
+    return new RTCRtpSender(factory, std::move(sender));
   }
 
 }

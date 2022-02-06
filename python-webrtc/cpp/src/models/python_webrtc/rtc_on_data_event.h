@@ -16,7 +16,7 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
-    uint8_t* audioData;
+    uint8_t *audioData;
     uint16_t numberOfFrames;
     uint16_t sampleRate = 48000;
     uint8_t bitsPerSample = 16;

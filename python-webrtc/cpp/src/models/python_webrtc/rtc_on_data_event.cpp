@@ -7,7 +7,7 @@
 namespace python_webrtc {
 
   RTCOnDataEvent::RTCOnDataEvent(std::string &data, uint16_t length) {
-    audioData = reinterpret_cast<uint8_t*>(data.data());
+    audioData = reinterpret_cast<uint8_t *>(data.data());
     numberOfFrames = length;
   }
 
