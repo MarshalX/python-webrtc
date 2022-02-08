@@ -193,7 +193,8 @@ async def main(client, input_peer):
     thread.daemon = True
     thread.start()
 
-    await pyrogram.idle()
+    await asyncio.sleep(10)
+    # await pyrogram.idle()
 
 
 if __name__ == '__main__':

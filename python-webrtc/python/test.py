@@ -112,6 +112,10 @@ async def main():
     s2 = stream.clone()
     assert s1._native_obj != s2._native_obj
 
+    local_sdp = await pc.create_offer()
+    print(local_sdp.sdp)
+    await pc.set_local_description(local_sdp)
+
     # pc.close()
     # idle()
 

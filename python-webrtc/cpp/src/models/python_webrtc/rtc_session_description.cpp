@@ -10,7 +10,7 @@ namespace python_webrtc {
     webrtc::SdpParseError error;
     auto description = webrtc::CreateSessionDescription(init.type, init.sdp, &error);
     if (!description) {
-      // TODO
+      // TODO throw exception with error
     }
 
     _description = std::move(description);
@@ -34,8 +34,7 @@ namespace python_webrtc {
   }
 
   RTCSessionDescription::operator webrtc::SessionDescriptionInterface *() {
-    // TODO update mb when will be necessary
-    return _description.get();
+    return webrtc::CreateSessionDescription(this->getType(), this->getSdp()).release();
   }
 
   RTCSessionDescription RTCSessionDescription::Wrap(webrtc::SessionDescriptionInterface *description) {
