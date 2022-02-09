@@ -39,10 +39,10 @@ jobs:
       with:
         languages: ${{ matrix.language }}
 
-    - if: matrix.language == 'cpp' && false
+    - if: matrix.language == 'cpp'
       name: Build
-      # TODO install deps mb
       run: |
+        sudo apt install -y python3.9-dev
         python setup.py build
 
     - name: Perform CodeQL Analysis
