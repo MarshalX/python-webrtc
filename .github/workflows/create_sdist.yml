@@ -5,7 +5,7 @@ on:
       - main
       - pypi-dev
     paths:
-      - '.github/workflows/publish_sdist.yml'
+      - '.github/workflows/create_sdist.yml'
       - 'python-webrtc/cpp/**'
       - 'CMakeLists.txt'
       - 'setup.py'
