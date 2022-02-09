@@ -32,8 +32,10 @@ jobs:
       with:
         languages: ${{ matrix.language }}
 
-    - name: Autobuild
-      uses: github/codeql-action/autobuild@v1
+    - if: matrix.language == 'cpp'
+      name: Build
+      run: |
+        python3 setup.py build
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v1

@@ -1,4 +1,5 @@
 name: Build and publish Linux wheels
+
 on:
   push:
     branches:
@@ -8,6 +9,7 @@ on:
       - 'python-webrtc/cpp/**'
       - 'CMakeLists.txt'
       - 'setup.py'
+
 jobs:
   build_wheels_for_linux:
     name: Build and publish wheels for Linux

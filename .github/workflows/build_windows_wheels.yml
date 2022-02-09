@@ -1,4 +1,5 @@
 name: Build and publish Windows wheels
+
 on:
   push:
     branches:
@@ -8,6 +9,7 @@ on:
       - 'python-webrtc/cpp/**'
       - 'CMakeLists.txt'
       - 'setup.py'
+
 jobs:
   # Disk C is used to bypass limitation of default disk space
   # ref: https://github.com/actions/virtual-environments/issues/1341
