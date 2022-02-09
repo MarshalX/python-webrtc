@@ -2,7 +2,6 @@ name: Build and publish Linux wheels
 on:
   push:
     branches:
-      - main
       - pypi-dev
     paths:
       - '.github/workflows/build_linux_wheels.yml'

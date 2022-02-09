@@ -2,7 +2,6 @@ name: Build and publish Windows wheels
 on:
   push:
     branches:
-      - main
       - pypi-dev
     paths:
       - '.github/workflows/build_windows_wheels.yml'
