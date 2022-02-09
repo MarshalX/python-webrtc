@@ -1,4 +1,4 @@
-include README.md LICENSE.md
+include README.md LICENSE.md THIRD_PARTY_LICENSES.md
 
 include CMakeLists.txt
 graft python-webrtc/cpp
