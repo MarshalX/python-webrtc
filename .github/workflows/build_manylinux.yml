@@ -1,4 +1,5 @@
 name: Build and publish manylinux with updated GCC
+
 on:
   push:
     branches:
@@ -6,6 +7,7 @@ on:
     paths:
       - '.github/workflows/build_manylinux.yml'
       - 'build/Dockerfile'
+
 jobs:
   build_manylinux:
     name: Build and publish manylinux images
