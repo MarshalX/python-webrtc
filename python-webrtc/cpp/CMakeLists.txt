@@ -2,6 +2,10 @@ configure_file("${src_loc}/config.h.in" "${src_loc}/config.h")
 
 file(GLOB_RECURSE MODULE_SRC ${src_loc}/*.cpp ${src_loc}/*.h)
 
+if ("$ENV{NO_LTO}" STREQUAL "true")
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+endif()
+
 pybind11_add_module(${MODULE} ${MODULE_SRC})
 
 set_property(TARGET ${MODULE} PROPERTY CXX_STANDARD 17)
