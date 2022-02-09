@@ -61,6 +61,11 @@ jobs:
           name: wrtc for macOS (${{ matrix.arch }})
           path: ./wheelhouse/*.whl
 
+      - uses: actions/setup-python@v2
+        if: github.ref == 'refs/heads/pypi-dev' && github.repository == 'MarshalX/python-webrtc'
+        with:
+          python-version: 3.7
+
       - name: Publish a Python distribution to PyPI.
         if: github.ref == 'refs/heads/pypi-dev' && github.repository == 'MarshalX/python-webrtc'
         env:
