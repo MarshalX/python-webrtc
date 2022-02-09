@@ -28,7 +28,7 @@ jobs:
         submodules: recursive
 
     - name: Setup Python
-      uses: actions/setup-python@v1
+      uses: actions/setup-python@v2
       with:
         python-version: 3.9
 
@@ -36,13 +36,12 @@ jobs:
       uses: github/codeql-action/init@v1
       with:
         languages: ${{ matrix.language }}
-        config-file: ./.github/codeql/codeql_config.yaml
+        config-file: ./.github/codeql/codeql_config.yml
 
     - if: matrix.language == 'cpp'
       name: Build
       run: |
         sudo apt install -y python3.9-dev
-        export NO_LTO=true
         python setup.py build
 
     - name: Perform CodeQL Analysis

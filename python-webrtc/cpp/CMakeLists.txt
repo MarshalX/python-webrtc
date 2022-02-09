@@ -2,7 +2,7 @@ configure_file("${src_loc}/config.h.in" "${src_loc}/config.h")
 
 file(GLOB_RECURSE MODULE_SRC ${src_loc}/*.cpp ${src_loc}/*.h)
 
-if ("$ENV{NO_LTO}" STREQUAL "true")
+if(UNIX AND NOT APPLE)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 endif()
 
