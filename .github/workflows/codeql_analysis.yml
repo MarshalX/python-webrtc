@@ -29,15 +29,21 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Setup Python
+      uses: actions/setup-python@v1
+      with:
+        python-version: 3.9
+
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v1
       with:
         languages: ${{ matrix.language }}
 
-    - if: matrix.language == 'cpp'
+    - if: matrix.language == 'cpp' && false
       name: Build
+      # TODO install deps mb
       run: |
-        python3 setup.py build
+        python setup.py build
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v1
