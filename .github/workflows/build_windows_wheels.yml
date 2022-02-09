@@ -85,3 +85,11 @@ jobs:
         with:
           name: "wrtc wheels for Windows"
           path: "C:/src/wheelhouse/*.whl"
+
+      - name: Publish a Python distribution to PyPI.
+        if: github.ref == 'refs/heads/pypi-dev' && github.repository == 'MarshalX/python-webrtc'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          packages_dir: "C:/src/wheelhouse/"

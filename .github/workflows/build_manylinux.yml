@@ -3,8 +3,6 @@ on:
   push:
     branches:
       - main
-      - pypi-dev
-      - ci-dev
     paths:
       - '.github/workflows/build_manylinux.yml'
       - 'build/Dockerfile'
@@ -18,7 +16,7 @@ jobs:
       matrix:
         arch: [
             "x86_64",
-#           "aarch64", # it's not possible to do on GHA because there is time limit (more then 6 hours under QEMU)
+#           "aarch64", # it's not possible to do on GHA because there is time limit (more than 6 hours under QEMU)
         ]
 
     steps:
