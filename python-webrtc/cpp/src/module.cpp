@@ -8,6 +8,7 @@
 #include <pybind11/pybind11.h>
 
 #include "config.h"
+#include "exceptions.h"
 #include "enums/enums.h"
 #include "models/models.h"
 #include "interfaces/interfaces.h"
@@ -33,6 +34,7 @@ PYBIND11_MODULE(wrtc, m) {
 
   m.def("ping", &ping);
 
+  python_webrtc::Exceptions::Init(m);
   python_webrtc::Enums::Init(m);
   python_webrtc::Models::Init(m);
   python_webrtc::Interfaces::Init(m);

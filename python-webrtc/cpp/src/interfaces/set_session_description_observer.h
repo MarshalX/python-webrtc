@@ -15,15 +15,18 @@ namespace python_webrtc {
 
   class SetSessionDescriptionObserver : public webrtc::SetSessionDescriptionObserver {
   public:
-    explicit SetSessionDescriptionObserver(std::function<void()> &on_success) : _on_success(on_success) {}
+    SetSessionDescriptionObserver(
+        std::function<void()> &onSuccess,
+        std::function<void(CallbackPythonWebRTCException)> &onFailure) :
+        _onSuccess(onSuccess), _onFailure(onFailure) {}
 
     void OnSuccess() override;
 
     void OnFailure(webrtc::RTCError) override;
 
   private:
-    std::function<void()> _on_success = nullptr;
-    std::function<void(std::string)> _on_error = nullptr;
+    std::function<void()> _onSuccess = nullptr;
+    std::function<void(CallbackPythonWebRTCException)> _onFailure = nullptr;
   };
 
 } // namespace python_webrtc

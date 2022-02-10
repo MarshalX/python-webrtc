@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Optional, Union, List
 import wrtc
 
 from webrtc import WebRTCObject
-from webrtc.utils.callback_to_async import to_async
+from webrtc.utils.callbacks_to_async import to_async
 
 if TYPE_CHECKING:
     import webrtc
