@@ -15,6 +15,9 @@ jobs:
     name: Build and publish wheels for Linux
     runs-on: ubuntu-latest
 
+    env:
+      TRIGGER_WORKFLOW_KEY: "1"
+
     steps:
       - name: Clone.
         uses: actions/checkout@v2
