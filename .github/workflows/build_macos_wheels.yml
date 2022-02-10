@@ -41,6 +41,8 @@ jobs:
         if: matrix.arch == 'Intel'
         uses: pypa/cibuildwheel@v2.3.1
         env:
+          DEPOT_TOOLS_UPDATE: 0
+          DEPOT_TOOLS_METRICS: 0
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
           CIBW_SKIP: cp36-*
@@ -52,6 +54,7 @@ jobs:
         env:
           TARGET_ARCH: arm64
           DEPOT_TOOLS_UPDATE: 0
+          DEPOT_TOOLS_METRICS: 0
           CIBW_ARCHS: arm64
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
