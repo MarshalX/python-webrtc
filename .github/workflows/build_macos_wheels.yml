@@ -23,7 +23,7 @@ jobs:
         ]
 
     env:
-      WEBRTC_CACHE_KEY: "1"
+      WEBRTC_CACHE_KEY: "2"
 
     steps:
       - name: Clone.
