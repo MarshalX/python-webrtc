@@ -53,6 +53,7 @@ jobs:
         if: matrix.arch == 'x32'
         working-directory: "C:/src"
         env:
+          DEPOT_TOOLS_UPDATE: 0
           TARGET_ARCH: ia32
           CIBW_BEFORE_BUILD: call vcvars32.bat
           CIBW_ARCHS: x86
@@ -70,6 +71,7 @@ jobs:
         if: matrix.arch == 'x64'
         working-directory: "C:/src"
         env:
+          DEPOT_TOOLS_UPDATE: 0
           CIBW_ARCHS: AMD64
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*

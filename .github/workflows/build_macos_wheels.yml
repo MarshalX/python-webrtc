@@ -51,6 +51,7 @@ jobs:
         uses: pypa/cibuildwheel@v2.3.1
         env:
           TARGET_ARCH: arm64
+          DEPOT_TOOLS_UPDATE: 0
           CIBW_ARCHS: arm64
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           CIBW_BUILD: cp3*-*
