@@ -9,7 +9,6 @@ import asyncio
 
 
 class _Event(asyncio.Event):
-
     def __init__(self):
         # TODO
         self.loop = asyncio.events._get_running_loop()
@@ -32,7 +31,7 @@ class _AsyncWrapper:
     def set(self):
         self.__event.set()
 
-    def _on_success(self, result=None):    # TODO many results mb
+    def _on_success(self, result=None):  # TODO many results mb
         self.__result = result
         self.set()
 

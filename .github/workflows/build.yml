@@ -1,0 +1,29 @@
+name: Build
+
+on:
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '0 8 * * 1'
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository.
+      uses: actions/checkout@v2
+      with:
+        submodules: recursive
+
+    - name: Setup Python.
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.9
+
+    - name: Build.
+      run: |
+        sudo apt install -y python3.9-dev
+        python setup.py build

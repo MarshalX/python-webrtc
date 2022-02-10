@@ -17,6 +17,7 @@ class RTCOnDataEvent(WebRTCObject):
     Note:
         :obj:`webrtc.RTCOnDataEvent` should represent 10 ms of audio samples.
     """
+
     _class = wrtc.RTCOnDataEvent
 
     def __init__(self, audio_data: AnyStr, number_of_frames: int):

@@ -19,30 +19,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'cpp', 'python' ]
+        language: [
+            # 'cpp',
+            'python'
+        ]
 
     steps:
-    - name: Checkout repository
+    - name: Checkout repository.
       uses: actions/checkout@v2
       with:
         submodules: recursive
 
-    - name: Setup Python
+    - name: Initialize CodeQL.
+      uses: github/codeql-action/init@v1
+      with:
+        languages: ${{ matrix.language }}
+        setup-python-dependencies: false
+        config-file: ./.github/codeql/codeql_config.yml
+
+    - name: Setup Python.
+      if: matrix.language == 'cpp'
       uses: actions/setup-python@v2
       with:
         python-version: 3.9
 
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v1
-      with:
-        languages: ${{ matrix.language }}
-        config-file: ./.github/codeql/codeql_config.yml
-
-    - if: matrix.language == 'cpp'
-      name: Build
+    - name: Build.
+      if: matrix.language == 'cpp'
       run: |
         sudo apt install -y python3.9-dev
         python setup.py build
 
-    - name: Perform CodeQL Analysis
+    # it takes too long for cpp
+    - name: Perform CodeQL Analysis.
       uses: github/codeql-action/analyze@v1

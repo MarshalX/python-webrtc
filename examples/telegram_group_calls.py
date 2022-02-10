@@ -20,7 +20,7 @@ def parse_sdp(sdp):
     def lookup(prefix):
         for line in lines:
             if line.startswith(prefix):
-                return line[len(prefix):]
+                return line[len(prefix) :]
 
     info = {
         'fingerprint': lookup('a=fingerprint:').split(' ')[1],
@@ -38,17 +38,11 @@ def parse_sdp(sdp):
 
 def get_params_from_parsed_sdp(info):
     return {
-        'fingerprints': [
-            {
-                'fingerprint': info['fingerprint'],
-                'hash': info['hash'],
-                'setup': 'active'
-            }
-        ],
+        'fingerprints': [{'fingerprint': info['fingerprint'], 'hash': info['hash'], 'setup': 'active'}],
         'pwd': info['pwd'],
         'ssrc': info['source'],
         'ssrc-groups': [],
-        'ufrag': info['ufrag']
+        'ufrag': info['ufrag'],
     }
 
 
@@ -56,9 +50,11 @@ def build_answer(sdp):
     def add_candidates():
         candidates_sdp = []
         for cand in sdp['transport']['candidates']:
-            candidates_sdp.append(f"a=candidate:{cand['foundation']} {cand['component']} {cand['protocol']} "
-                                  f"{cand['priority']} {cand['ip']} {cand['port']} typ {cand['type']} "
-                                  f"generation {cand['generation']}")
+            candidates_sdp.append(
+                f"a=candidate:{cand['foundation']} {cand['component']} {cand['protocol']} "
+                f"{cand['priority']} {cand['ip']} {cand['port']} typ {cand['type']} "
+                f"generation {cand['generation']}"
+            )
 
         return '\n'.join(candidates_sdp)
 
@@ -114,11 +110,11 @@ def send_audio_data(audio_source, input_filename):
 
         if last_read_ms == 0 or start_time - last_read_ms >= 10:
             data = f.read(length)
-            if not data:   # eof
+            if not data:  # eof
                 f.close()
                 break
 
-            event_data = webrtc.RTCOnDataEvent(data, length // 4)   # 2 channels
+            event_data = webrtc.RTCOnDataEvent(data, length // 4)  # 2 channels
             event_data.channel_count = 2
             audio_source.on_data(event_data)
 
@@ -140,9 +136,7 @@ async def main(client, input_peer, input_filename):
     await pc.set_local_description(local_sdp)
 
     app = PyrogramBridge(client)
-    app.register_group_call_native_callback(
-        group_call_participants_update_callback, group_call_update_callback
-    )
+    app.register_group_call_native_callback(group_call_participants_update_callback, group_call_update_callback)
     await app.get_and_set_group_call(input_peer)
     await app.resolve_and_set_join_as(None)
 
@@ -159,9 +153,7 @@ async def main(client, input_peer, input_filename):
     # await asyncio.wait_for(REMOTE_ANSWER_EVENT.wait(), 30)
 
     await pc.set_remote_description(
-        webrtc.RTCSessionDescription(
-            webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, remote_sdp)
-        )
+        webrtc.RTCSessionDescription(webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, remote_sdp))
     )
 
     thread = threading.Thread(target=send_audio_data, args=(audio_source, input_filename))

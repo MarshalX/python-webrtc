@@ -36,21 +36,17 @@ __all__ = [
     'RTCSdpType',
     'MediaStreamTrackState',
     'MediaStreamSourceState',
-
     # base
     'WebRTCObject',
-
     # interfaces
     'RTCPeerConnection',
     'MediaStreamTrack',
     'MediaStream',
     'RTCRtpSender',
     'RTCAudioSource',
-
     # functions
     'getUserMedia',
     'get_user_media',
-
     # models
     'RTCSessionDescriptionInit',
     'RTCSessionDescription',
