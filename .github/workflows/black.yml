@@ -19,4 +19,4 @@ jobs:
       - name: Check code style.
         run: |
           pip install black
-          black --check python-webrtc
+          black --config=black.toml --check python-webrtc
