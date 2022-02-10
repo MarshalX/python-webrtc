@@ -15,17 +15,19 @@ namespace python_webrtc {
 
   class CreateSessionDescriptionObserver : public webrtc::CreateSessionDescriptionObserver {
   public:
-    explicit CreateSessionDescriptionObserver(RTCPeerConnection *peer_connection,
-                                              std::function<void(RTCSessionDescription)> &on_success);
+    CreateSessionDescriptionObserver(RTCPeerConnection *peerConnection,
+                                     std::function<void(RTCSessionDescription)> &onSuccess,
+                                     std::function<void(CallbackPythonWebRTCException)> &onFailure) :
+        _peerConnection(peerConnection), _onSuccess(onSuccess), _onFailure(onFailure) {}
 
     void OnSuccess(webrtc::SessionDescriptionInterface *) override;
 
     void OnFailure(webrtc::RTCError) override;
 
   private:
-    RTCPeerConnection *_peer_connection;
-    std::function<void(RTCSessionDescription)> _on_success = nullptr;
-    std::function<void(std::string)> _on_error = nullptr;
+    RTCPeerConnection *_peerConnection;
+    std::function<void(RTCSessionDescription)> _onSuccess = nullptr;
+    std::function<void(CallbackPythonWebRTCException)> _onFailure = nullptr;
   };
 
 } // namespace python_webrtc

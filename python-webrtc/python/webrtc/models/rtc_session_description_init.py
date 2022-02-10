@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 class RTCSessionDescriptionInit(WebRTCObject):
     """An object providing the default values for the session description."""
+
     _class = wrtc.RTCSessionDescriptionInit
 
     def __init__(self, type: 'webrtc.RTCSdpType', sdp=''):

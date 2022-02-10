@@ -13,6 +13,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/functional.h>
 
+#include "../exceptions.h"
 #include "../models/python_webrtc/rtc_session_description.h"
 
 #include "media_stream_track.h"
@@ -33,13 +34,17 @@ namespace python_webrtc {
 
     ~RTCPeerConnection() override;
 
-    void CreateOffer(std::function<void(RTCSessionDescription)> &);
+    void CreateOffer(
+        std::function<void(RTCSessionDescription)> &, std::function<void(CallbackPythonWebRTCException)> &);
 
-    void CreateAnswer(std::function<void(RTCSessionDescription)> &);
+    void CreateAnswer(
+        std::function<void(RTCSessionDescription)> &, std::function<void(CallbackPythonWebRTCException)> &);
 
-    void SetLocalDescription(std::function<void()> &, RTCSessionDescription &);
+    void SetLocalDescription(
+        std::function<void()> &, std::function<void(CallbackPythonWebRTCException)> &, RTCSessionDescription &);
 
-    void SetRemoteDescription(std::function<void()> &, RTCSessionDescription &);
+    void SetRemoteDescription(
+        std::function<void()> &, std::function<void(CallbackPythonWebRTCException)> &, RTCSessionDescription &);
 
     RTCRtpSender *AddTrack(MediaStreamTrack &, std::optional<std::reference_wrapper<MediaStream>>);
 

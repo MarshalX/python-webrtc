@@ -2,10 +2,7 @@ name: CodeQL
 
 on:
   push:
-    branches: [ main ]
   pull_request:
-    # The branches below must be a subset of the branches above
-    branches: [ main ]
   schedule:
     - cron: '0 8 * * 1'
 
@@ -19,31 +16,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'cpp', 'python' ]
+        language: [
+            # 'cpp',
+            'python'
+        ]
 
     steps:
-    - name: Checkout repository
+    - name: Checkout repository.
       uses: actions/checkout@v2
       with:
         submodules: recursive
 
-    - name: Setup Python
-      uses: actions/setup-python@v1
-      with:
-        python-version: 3.9
-
-    - name: Initialize CodeQL
+    - name: Initialize CodeQL.
       uses: github/codeql-action/init@v1
       with:
         languages: ${{ matrix.language }}
-        config-file: ./.github/codeql/codeql_config.yaml
+        setup-python-dependencies: false
+        config-file: ./.github/codeql/codeql_config.yml
 
-    - if: matrix.language == 'cpp'
-      name: Build
+    - name: Setup Python.
+      if: matrix.language == 'cpp'
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.9
+
+    - name: Build.
+      if: matrix.language == 'cpp'
       run: |
         sudo apt install -y python3.9-dev
-        export NO_LTO=true
         python setup.py build
 
-    - name: Perform CodeQL Analysis
+    # it takes too long for cpp
+    - name: Perform CodeQL Analysis.
       uses: github/codeql-action/analyze@v1

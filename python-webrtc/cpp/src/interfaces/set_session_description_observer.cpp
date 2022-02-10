@@ -10,11 +10,11 @@
 namespace python_webrtc {
 
   void SetSessionDescriptionObserver::OnSuccess() {
-    _on_success();
+    _onSuccess();
   }
 
-  void SetSessionDescriptionObserver::OnFailure(webrtc::RTCError) {
-//      TODO call onFail
+  void SetSessionDescriptionObserver::OnFailure(webrtc::RTCError error) {
+    _onFailure(wrapRTCErrorForCallback(error));
   }
 
 } // namespace python_webrtc

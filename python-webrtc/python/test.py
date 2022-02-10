@@ -113,11 +113,29 @@ async def main():
     assert s1._native_obj != s2._native_obj
 
     local_sdp = await pc.create_offer()
-    print(local_sdp.sdp)
+    # print(local_sdp.sdp)
+    # pc.close()
     await pc.set_local_description(local_sdp)
 
-    # pc.close()
+    pc.close()
+    pc.close()
+
+    try:
+        # invalid sdp
+        webrtc.RTCSessionDescription(webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, 'sdp'))
+
+        # invalid pc state
+        pc.close()
+
+        # sender already created
+        pc.add_track(tracks1[0], stream)
+    # except webrtc.PythonWebRTCExceptionBase as e:
+    # except webrtc.PythonWebRTCException as e:
+    except webrtc.RTCException as e:
+        # except webrtc.SdpParseException as e:
+        print('exception', str(e))
     # idle()
+
 
 if __name__ == '__main__':
     asyncio.run(main())

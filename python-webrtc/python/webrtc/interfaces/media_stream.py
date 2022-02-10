@@ -19,6 +19,7 @@ class MediaStream(WebRTCObject):
     """The MediaStream interface represents a stream of media content. A stream consists of several tracks,
     such as video or audio tracks. Each track is specified as an instance of :obj:`webrtc.MediaStreamTrack`.
     """
+
     _class = wrtc.MediaStream
 
     @property
@@ -41,15 +42,15 @@ class MediaStream(WebRTCObject):
 
     def get_video_tracks(self) -> List['webrtc.MediaStreamTrack']:
         """Returns a :obj:`list` of the :obj:`webrtc.MediaStreamTrack` objects stored in the :obj:`webrtc.MediaStream`
-         object that have their kind attribute set to "video". The order is not defined,
-         and may not only vary from one machine to another, but also from one call to another.
+        object that have their kind attribute set to "video". The order is not defined,
+        and may not only vary from one machine to another, but also from one call to another.
         """
         return MediaStreamTrack._wrap_many(self._native_obj.getVideoTracks())
 
     def get_tracks(self) -> List['webrtc.MediaStreamTrack']:
         """Returns a :obj:`list` of all :obj:`webrtc.MediaStreamTrack` objects stored in the :obj:`webrtc.MediaStream`
-         object, regardless of the value of the kind attribute. The order is not defined,
-         and may not only vary from one machine to another, but also from one call to another.
+        object, regardless of the value of the kind attribute. The order is not defined,
+        and may not only vary from one machine to another, but also from one call to another.
         """
         return MediaStreamTrack._wrap_many(self._native_obj.getTracks())
 

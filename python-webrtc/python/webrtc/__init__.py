@@ -21,6 +21,13 @@ from .models.rtc_session_description_init import RTCSessionDescriptionInit
 from .models.rtc_session_description import RTCSessionDescription
 from .models.rtc_on_data_event import RTCOnDataEvent
 
+# exception
+PythonWebRTCExceptionBase = wrtc.PythonWebRTCExceptionBase
+PythonWebRTCException = wrtc.PythonWebRTCException
+RTCException = wrtc.RTCException
+SdpParseException = wrtc.SdpParseException
+
+# enums
 RTCPeerConnectionState = wrtc.RTCPeerConnectionState
 RTCIceConnectionState = wrtc.RTCIceConnectionState
 RTCIceGatheringState = wrtc.RTCIceGatheringState
@@ -29,6 +36,11 @@ MediaStreamTrackState = wrtc.MediaStreamTrackState
 MediaStreamSourceState = wrtc.MediaStreamSourceState
 
 __all__ = [
+    # exceptions
+    'PythonWebRTCExceptionBase',
+    'PythonWebRTCException',
+    'RTCException',
+    'SdpParseException',
     # enums
     'RTCPeerConnectionState',
     'RTCIceConnectionState',
@@ -36,21 +48,17 @@ __all__ = [
     'RTCSdpType',
     'MediaStreamTrackState',
     'MediaStreamSourceState',
-
     # base
     'WebRTCObject',
-
     # interfaces
     'RTCPeerConnection',
     'MediaStreamTrack',
     'MediaStream',
     'RTCRtpSender',
     'RTCAudioSource',
-
     # functions
     'getUserMedia',
     'get_user_media',
-
     # models
     'RTCSessionDescriptionInit',
     'RTCSessionDescription',

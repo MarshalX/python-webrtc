@@ -7,13 +7,15 @@
 
 #include "rtc_session_description.h"
 
+#include "../../exceptions.h"
+
 namespace python_webrtc {
 
   RTCSessionDescription::RTCSessionDescription(const RTCSessionDescriptionInit &init) {
     webrtc::SdpParseError error;
     auto description = webrtc::CreateSessionDescription(init.type, init.sdp, &error);
     if (!description) {
-      // TODO throw exception with error
+      throw wrapSdpParseError(error);
     }
 
     _description = std::move(description);

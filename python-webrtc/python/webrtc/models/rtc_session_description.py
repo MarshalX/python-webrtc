@@ -36,6 +36,7 @@ class RTCSessionDescription(WebRTCObject):
         Though some browsers might still support it, it may have already been removed from the relevant web standards,
         may be in the process of being dropped, or may only be kept for compatibility purposes.
     """
+
     _class = wrtc.RTCSessionDescription
 
     def __init__(self, rtc_session_description_init: 'webrtc.RTCSessionDescriptionInit'):

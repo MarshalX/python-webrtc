@@ -17,6 +17,7 @@ class MediaStreamTrack(WebRTCObject):
     """The MediaStreamTrack interface represents a single media track within a stream;
     typically, these are audio or video tracks, but other track types may exist as well.
     """
+
     _class = wrtc.RTCPeerConnection
 
     @property
@@ -38,7 +39,7 @@ class MediaStreamTrack(WebRTCObject):
     @property
     def kind(self) -> str:
         """:obj:`str`: "audio" if the track is an audio track and to "video", if it is a video track.
-         It doesn't change if the track is deassociated from its source."""
+        It doesn't change if the track is deassociated from its source."""
         return self._native_obj.kind
 
     @property

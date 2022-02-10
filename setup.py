@@ -146,7 +146,7 @@ setup(
     author_email='ilya@marshal.dev',
     license='BSD 3-Clause',
     url='https://github.com/MarshalX/python-webrtc',
-    description='a Python Extension that provides bindings to WebRTC M92',
+    description='a Python extension that provides bindings to WebRTC M92',
     long_description=readme,
     long_description_content_type='text/markdown',
     classifiers=[

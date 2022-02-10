@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Optional, Union, List
 import wrtc
 
 from webrtc import WebRTCObject
-from webrtc.utils.callback_to_async import to_async
+from webrtc.utils.callbacks_to_async import to_async
 
 if TYPE_CHECKING:
     import webrtc
@@ -18,9 +18,10 @@ if TYPE_CHECKING:
 
 class RTCPeerConnection(WebRTCObject):
     """The RTCPeerConnection interface represents a WebRTC connection between the local computer and a remote peer.
-        It provides methods to connect to a remote peer, maintain and monitor the connection, and close the connection
-        once it's no longer needed.
+    It provides methods to connect to a remote peer, maintain and monitor the connection, and close the connection
+    once it's no longer needed.
     """
+
     _class = wrtc.RTCPeerConnection
 
     async def create_offer(self):
@@ -31,6 +32,7 @@ class RTCPeerConnection(WebRTCObject):
         the configuration of an existing connection.
         """
         from webrtc import RTCSessionDescription
+
         return RTCSessionDescription._wrap(await to_async(self._native_obj.createOffer))
 
     async def create_answer(self):
@@ -39,6 +41,7 @@ class RTCPeerConnection(WebRTCObject):
         session, codecs and options supported by the machine, and any ICE candidates already gathered.
         """
         from webrtc import RTCSessionDescription
+
         return RTCSessionDescription._wrap(await to_async(self._native_obj.createAnswer))
 
     # TODO arg should be RTCSessionDescriptionInit
@@ -72,9 +75,9 @@ class RTCPeerConnection(WebRTCObject):
         return await to_async(self._native_obj.setRemoteDescription)(sdp._native_obj)
 
     def add_track(
-            self,
-            track: 'webrtc.MediaStreamTrack',
-            stream: Optional[Union['webrtc.MediaStream', List['webrtc.MediaStream']]] = None
+        self,
+        track: 'webrtc.MediaStreamTrack',
+        stream: Optional[Union['webrtc.MediaStream', List['webrtc.MediaStream']]] = None,
     ) -> 'webrtc.RTCRtpSender':
         """Adds a new :obj:`webrtc.MediaStreamTrack` to the set of tracks which will be transmitted to the other peer.
 
@@ -97,6 +100,7 @@ class RTCPeerConnection(WebRTCObject):
             sender = self._native_obj.addTrack(track._native_obj, stream._native_obj)
 
         from webrtc import RTCRtpSender
+
         return RTCRtpSender._wrap(sender)
 
     def close(self):

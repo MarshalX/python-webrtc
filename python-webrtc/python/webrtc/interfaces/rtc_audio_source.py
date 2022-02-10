@@ -17,6 +17,7 @@ class RTCAudioSource(WebRTCObject):
     """The :obj:`webrtc.MediaStreamTrack` interface represents a single media track within a stream;
     typically, these are audio or video tracks, but other track types may exist as well.
     """
+
     _class = wrtc.RTCAudioSource
 
     def create_track(self) -> 'webrtc.MediaStreamTrack':

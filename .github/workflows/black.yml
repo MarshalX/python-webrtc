@@ -1,0 +1,22 @@
+name: Black
+
+on: [push, pull_request]
+
+jobs:
+  black:
+    name: Black
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository.
+        uses: actions/checkout@v2
+
+      - name: Setup Python.
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+
+      - name: Check code style.
+        run: |
+          pip install black
+          black --check python-webrtc

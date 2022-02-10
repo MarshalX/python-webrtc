@@ -3,12 +3,17 @@ import wrtc
 import typing
 
 __all__ = [
+    "CallbackPythonWebRTCException",
     "MediaStream",
     "MediaStreamSourceState",
     "MediaStreamTrack",
     "MediaStreamTrackState",
     "PeerConnectionFactory",
+    "PythonWebRTCException",
+    "PythonWebRTCExceptionBase",
     "RTCAudioSource",
+    "RTCCallbackException",
+    "RTCException",
     "RTCIceConnectionState",
     "RTCIceGatheringState",
     "RTCOnDataEvent",
@@ -18,6 +23,7 @@ __all__ = [
     "RTCSdpType",
     "RTCSessionDescription",
     "RTCSessionDescriptionInit",
+    "SdpParseException",
     "answer",
     "checking",
     "closed",
@@ -42,6 +48,9 @@ __all__ = [
 ]
 
 
+class CallbackPythonWebRTCException():
+    def what(self) -> str: ...
+    pass
 class MediaStream():
     def addTrack(self, arg0: MediaStreamTrack) -> None: ...
     def clone(self) -> MediaStream: ...
@@ -170,10 +179,19 @@ class PeerConnectionFactory():
     @staticmethod
     def release() -> None: ...
     pass
+class PythonWebRTCExceptionBase(Exception, BaseException):
+    pass
+class PythonWebRTCException(PythonWebRTCExceptionBase, Exception, BaseException):
+    pass
 class RTCAudioSource():
     def __init__(self) -> None: ...
     def createTrack(self) -> MediaStreamTrack: ...
     def onData(self, arg0: RTCOnDataEvent) -> None: ...
+    pass
+class RTCCallbackException():
+    def what(self) -> str: ...
+    pass
+class RTCException(PythonWebRTCExceptionBase, Exception, BaseException):
     pass
 class RTCIceConnectionState():
     """
@@ -306,10 +324,10 @@ class RTCPeerConnection():
     @staticmethod
     def addTrack(*args, **kwargs) -> typing.Any: ...
     def close(self) -> None: ...
-    def createAnswer(self, arg0: typing.Callable[[RTCSessionDescription], None]) -> None: ...
-    def createOffer(self, arg0: typing.Callable[[RTCSessionDescription], None]) -> None: ...
-    def setLocalDescription(self, arg0: typing.Callable[[], None], arg1: RTCSessionDescription) -> None: ...
-    def setRemoteDescription(self, arg0: typing.Callable[[], None], arg1: RTCSessionDescription) -> None: ...
+    def createAnswer(self, arg0: typing.Callable[[RTCSessionDescription], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None]) -> None: ...
+    def createOffer(self, arg0: typing.Callable[[RTCSessionDescription], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None]) -> None: ...
+    def setLocalDescription(self, arg0: typing.Callable[[], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None], arg2: RTCSessionDescription) -> None: ...
+    def setRemoteDescription(self, arg0: typing.Callable[[], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None], arg2: RTCSessionDescription) -> None: ...
     pass
 class RTCPeerConnectionState():
     """
@@ -429,6 +447,8 @@ class RTCSessionDescriptionInit():
     @type.setter
     def type(self, arg0: RTCSdpType) -> None:
         pass
+    pass
+class SdpParseException(PythonWebRTCExceptionBase, Exception, BaseException):
     pass
 def getUserMedia() -> MediaStream:
     pass

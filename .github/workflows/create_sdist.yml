@@ -3,7 +3,6 @@ name: Create and publish Source Distribution
 on:
   push:
     branches:
-      - main
       - pypi-dev
     paths:
       - '.github/workflows/create_sdist.yml'
@@ -23,7 +22,7 @@ jobs:
           submodules: recursive
 
       - name: Setup Python.
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.7
 
