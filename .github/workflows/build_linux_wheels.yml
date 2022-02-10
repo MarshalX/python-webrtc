@@ -26,7 +26,8 @@ jobs:
         env:
           MANYLINUX_INSIDE: true
           DEPOT_TOOLS_UPDATE: 0
-          CIBW_ENVIRONMENT_PASS_LINUX: MANYLINUX_INSIDE DEPOT_TOOLS_UPDATE
+          DEPOT_TOOLS_METRICS: 0
+          CIBW_ENVIRONMENT_PASS_LINUX: MANYLINUX_INSIDE DEPOT_TOOLS_UPDATE DEPOT_TOOLS_METRICS
           CIBW_ARCHS: x86_64
           CIBW_PROJECT_REQUIRES_PYTHON: ">=3.7"
           # extended manylinux image with updated GCC (7.5) and patched CPython
