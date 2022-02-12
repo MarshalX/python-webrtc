@@ -26,7 +26,7 @@ This project follows the [W3C specification](https://w3c.github.io/webrtc-pc/) w
 
 ## DISCLAIMER
 
-This project is still under development and isn't ready for any serious use! In the current stage it's possible to establish connection and work with audio with a large number of segfaults and sigbuses. ✨
+This project is still under development and isn't ready for any serious use. In the current stage, it's possible to establish connection and work with audio, but many interfaces and methods not implemented yet.
 
 #### Snippet
 
