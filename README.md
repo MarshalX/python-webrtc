@@ -20,7 +20,7 @@
 
 ## Python WebRTC
 
-> Stop making unstandard pure implementations of WebRTC and let's use the native library!
+> Let's use the native WebRTC with strict compatibility and fully implemented stuff!
 
 This project follows the [W3C specification](https://w3c.github.io/webrtc-pc/) with some modifications and additions to make it work better with Python applications, with useful APIs like programmatic audio and video.
 
