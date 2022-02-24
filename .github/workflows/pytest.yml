@@ -1,0 +1,35 @@
+name: Build and run tests
+
+on:
+  push:
+    branches:
+      - ci-pytest
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository.
+      uses: actions/checkout@v2
+      with:
+        submodules: recursive
+
+    - name: Setup Python.
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.9
+
+    - name: Build and install package.
+      run: |
+        sudo apt install -y python3.9-dev
+        python setup.py install
+
+    - name: Install dev dependencies.
+      run: pip install -r requirements-dev.txt
+
+    - name: Test with pytest.
+      run: pytest -vv
