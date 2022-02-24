@@ -1,5 +1,5 @@
 ARG MANYLINUX_ARCH
-# celf pathed cpython https://github.com/MarshalX/manylinux-cpython-pathes
+# self pathed cpython https://github.com/MarshalX/manylinux-cpython-pathes
 FROM quay.io/pypa_patched/manylinux_2_24_$MANYLINUX_ARCH AS builder
 
 RUN apt-get update && apt-get install -y xz-utils libxml2 wget build-essential
@@ -11,4 +11,5 @@ WORKDIR gcc-7.5.0
 RUN ./contrib/download_prerequisites && \
     ./configure --disable-multilib && \
     make -j $(nproc) && \
-    make install
+    make install && \
+    make clean
