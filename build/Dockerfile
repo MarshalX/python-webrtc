@@ -11,5 +11,7 @@ WORKDIR gcc-7.5.0
 RUN ./contrib/download_prerequisites && \
     ./configure --disable-multilib && \
     make -j $(nproc) && \
-    make install && \
-    make clean
+    make install
+
+WORKDIR /opt
+RUN rm -rf gcc-7.5.0 && rm gcc-7.5.0.tar.gz
