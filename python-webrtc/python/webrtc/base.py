@@ -35,3 +35,9 @@ class WebRTCObject(object, metaclass=ABCMeta):
 
     def __repr__(self):
         return f'<webrtc.{self.__class__.__name__} object at {hex(id(self))}'
+
+    def __eq__(self, other):
+        if isinstance(other, WebRTCObject):
+            return id(self._native_obj) == id(other._native_obj)
+
+        return super().__eq__(other)
