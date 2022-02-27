@@ -34,14 +34,6 @@ namespace python_webrtc {
 
     std::optional<MediaStreamTrack *> GetTrack();
 
-//    TODO
-//    void GetTransport();
-//    void GetRtcpTransport();
-
-//    void ReplaceTrack();
-//
-//    void SetStreams();
-
     rtc::scoped_refptr<webrtc::RtpSenderInterface> sender() { return _sender; }
 
   private:

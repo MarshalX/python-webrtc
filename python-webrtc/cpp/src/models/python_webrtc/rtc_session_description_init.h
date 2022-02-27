@@ -17,6 +17,7 @@ namespace python_webrtc {
   class RTCSessionDescriptionInit {
   public:
     // TODO sdp should be optional (empty string by default) and not None
+    // https://github.com/MarshalX/python-webrtc/issues/173
     RTCSessionDescriptionInit();
 
     RTCSessionDescriptionInit(webrtc::SdpType type, std::string sdp);
