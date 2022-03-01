@@ -14,6 +14,7 @@ from .interfaces.media_stream_track import MediaStreamTrack
 from .interfaces.media_stream import MediaStream
 from .interfaces.rtc_rtp_sender import RTCRtpSender
 from .interfaces.rtc_audio_source import RTCAudioSource
+from .interfaces.rtc_rtp_transceiver import RTCRtpTransceiver
 
 from .functions.get_user_media import getUserMedia, get_user_media
 
@@ -34,6 +35,7 @@ RTCIceGatheringState = wrtc.RTCIceGatheringState
 RTCSdpType = wrtc.RTCSdpType
 MediaStreamTrackState = wrtc.MediaStreamTrackState
 MediaStreamSourceState = wrtc.MediaStreamSourceState
+TransceiverDirection = wrtc.TransceiverDirection
 
 __all__ = [
     # exceptions
@@ -48,6 +50,7 @@ __all__ = [
     'RTCSdpType',
     'MediaStreamTrackState',
     'MediaStreamSourceState',
+    'TransceiverDirection',
     # base
     'WebRTCObject',
     # interfaces
@@ -56,6 +59,7 @@ __all__ = [
     'MediaStream',
     'RTCRtpSender',
     'RTCAudioSource',
+    'RTCRtpTransceiver',
     # functions
     'getUserMedia',
     'get_user_media',

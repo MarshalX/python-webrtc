@@ -24,7 +24,8 @@ class RTCPeerConnection(WebRTCObject):
 
     _class = wrtc.RTCPeerConnection
 
-    async def create_offer(self):
+    async def create_offer(self) -> 'webrtc.RTCSessionDescription':
+        # TODO return type. Should be RTCSessionDescriptionInit instead
         """Initiates the creation of an SDP offer for the purpose of starting a new WebRTC connection to a remote peer.
         The SDP offer includes information about any MediaStreamTrack objects already attached to the WebRTC session,
         codec, and options supported by the machine, as well as any candidates already gathered by the ICE agent, for
@@ -35,7 +36,8 @@ class RTCPeerConnection(WebRTCObject):
 
         return RTCSessionDescription._wrap(await to_async(self._native_obj.createOffer))
 
-    async def create_answer(self):
+    async def create_answer(self) -> 'webrtc.RTCSessionDescription':
+        # TODO return type. Should be RTCSessionDescriptionInit instead
         """Initiates the creation an SDP answer to an offer received from a remote peer during the offer/answer
         negotiation of a WebRTC connection. The answer contains information about any media already attached to the
         session, codecs and options supported by the machine, and any ICE candidates already gathered.
@@ -89,7 +91,7 @@ class RTCPeerConnection(WebRTCObject):
 
         Returns:
             :obj:`webrtc.RTCRtpSender`: The :obj:`webrtc.RTCRtpSender` object which will be used to
-                transmit the media data.
+            transmit the media data.
         """
         if not stream:
             sender = self._native_obj.addTrack(track._native_obj, None)
@@ -102,6 +104,37 @@ class RTCPeerConnection(WebRTCObject):
         from webrtc import RTCRtpSender
 
         return RTCRtpSender._wrap(sender)
+
+    def get_transceivers(self) -> List['webrtc.RTCRtpTransceiver']:
+        """Returns a :obj:`list` of the :obj:`webrtc.RTCRtpTransceiver` objects being used to send and
+        receive data on the connection.
+
+        Returns:
+            :obj:`list` of :obj:`webrtc.RTCRtpTransceiver`: An array of the :obj:`webrtc.RTCRtpTransceiver` objects
+            representing the transceivers handling sending and receiving all media
+            on the :obj:`webrtc.RTCPeerConnection`. The list is in the order in which the transceivers were
+            added to the connection.
+        """
+        from webrtc import RTCRtpTransceiver
+
+        return RTCRtpTransceiver._wrap_many(self._native_obj.getTransceivers())
+
+    def get_senders(self) -> List['webrtc.RTCRtpSender']:
+        """Returns an array of :obj:`webrtc.RTCRtpSender` objects, each of which represents the RTP sender responsible
+        for transmitting one track's data. A sender object provides methods and properties for examining
+        and controlling the encoding and transmission of the track's data.
+
+        Note:
+            The order of the returned :obj:`webrtc.RTCRtpSenders` is not defined by the specification, and may change
+            from one call to :attr:`get_senders` to the next.
+
+        Returns:
+            :obj:`list` of :obj:`webrtc.RTCRtpSender`: An array of :obj:`webrtc.RTCRtpSender` objects, one for each
+            track on the connection. The array is empty if there are no RTP senders on the connection.
+        """
+        from webrtc import RTCRtpSender
+
+        return RTCRtpSender._wrap_many(self._native_obj.getSenders())
 
     def close(self):
         """Closes the current peer connection."""
@@ -117,3 +150,7 @@ class RTCPeerConnection(WebRTCObject):
     setRemoteDescription = set_remote_description
     #: Alias for :attr:`add_track`
     addTrack = add_track
+    #: Alias for :attr:`get_transceivers`
+    getTransceivers = get_transceivers
+    #: Alias for :attr:`get_senders`
+    getSenders = get_senders

@@ -20,10 +20,12 @@ __all__ = [
     "RTCPeerConnection",
     "RTCPeerConnectionState",
     "RTCRtpSender",
+    "RTCRtpTransceiver",
     "RTCSdpType",
     "RTCSessionDescription",
     "RTCSessionDescriptionInit",
     "SdpParseException",
+    "TransceiverDirection",
     "answer",
     "checking",
     "closed",
@@ -36,6 +38,7 @@ __all__ = [
     "failed",
     "gathering",
     "getUserMedia",
+    "inactive",
     "initializing",
     "live",
     "max",
@@ -44,7 +47,11 @@ __all__ = [
     "offer",
     "ping",
     "pranswer",
-    "rollback"
+    "recvonly",
+    "rollback",
+    "sendonly",
+    "sendrecv",
+    "stopped"
 ]
 
 
@@ -326,6 +333,7 @@ class RTCPeerConnection():
     def close(self) -> None: ...
     def createAnswer(self, arg0: typing.Callable[[RTCSessionDescription], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None]) -> None: ...
     def createOffer(self, arg0: typing.Callable[[RTCSessionDescription], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None]) -> None: ...
+    def getTransceivers(self) -> typing.List[python_webrtc::RTCRtpTransceiver]: ...
     def setLocalDescription(self, arg0: typing.Callable[[], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None], arg2: RTCSessionDescription) -> None: ...
     def setRemoteDescription(self, arg0: typing.Callable[[], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None], arg2: RTCSessionDescription) -> None: ...
     pass
@@ -377,6 +385,37 @@ class RTCRtpSender():
     def track(self) -> typing.Optional[MediaStreamTrack]:
         """
         :type: typing.Optional[MediaStreamTrack]
+        """
+    pass
+class RTCRtpTransceiver():
+    def stop(self) -> None: ...
+    @property
+    def currentDirection(self) -> typing.Optional[TransceiverDirection]:
+        """
+        :type: typing.Optional[TransceiverDirection]
+        """
+    @property
+    def direction(self) -> TransceiverDirection:
+        """
+        :type: TransceiverDirection
+        """
+    @direction.setter
+    def direction(self, arg1: TransceiverDirection) -> None:
+        pass
+    @property
+    def mid(self) -> typing.Optional[str]:
+        """
+        :type: typing.Optional[str]
+        """
+    @property
+    def sender(self) -> RTCRtpSender:
+        """
+        :type: RTCRtpSender
+        """
+    @property
+    def stopped(self) -> bool:
+        """
+        :type: bool
         """
     pass
 class RTCSdpType():
@@ -450,6 +489,46 @@ class RTCSessionDescriptionInit():
     pass
 class SdpParseException(PythonWebRTCExceptionBase, Exception, BaseException):
     pass
+class TransceiverDirection():
+    """
+    Members:
+
+      sendrecv
+
+      sendonly
+
+      recvonly
+
+      inactive
+
+      stopped
+    """
+    def __eq__(self, other: object) -> bool: ...
+    def __getstate__(self) -> int: ...
+    def __hash__(self) -> int: ...
+    def __index__(self) -> int: ...
+    def __init__(self, value: int) -> None: ...
+    def __int__(self) -> int: ...
+    def __ne__(self, other: object) -> bool: ...
+    def __repr__(self) -> str: ...
+    def __setstate__(self, state: int) -> None: ...
+    @property
+    def name(self) -> str:
+        """
+        :type: str
+        """
+    @property
+    def value(self) -> int:
+        """
+        :type: int
+        """
+    __members__: dict # value = {'sendrecv': <TransceiverDirection.sendrecv: 0>, 'sendonly': <TransceiverDirection.sendonly: 1>, 'recvonly': <TransceiverDirection.recvonly: 2>, 'inactive': <TransceiverDirection.inactive: 3>, 'stopped': <TransceiverDirection.stopped: 4>}
+    inactive: wrtc.TransceiverDirection # value = <TransceiverDirection.inactive: 3>
+    recvonly: wrtc.TransceiverDirection # value = <TransceiverDirection.recvonly: 2>
+    sendonly: wrtc.TransceiverDirection # value = <TransceiverDirection.sendonly: 1>
+    sendrecv: wrtc.TransceiverDirection # value = <TransceiverDirection.sendrecv: 0>
+    stopped: wrtc.TransceiverDirection # value = <TransceiverDirection.stopped: 4>
+    pass
 def getUserMedia() -> MediaStream:
     pass
 def ping() -> None:
@@ -465,6 +544,7 @@ disconnected: wrtc.RTCIceConnectionState # value = <RTCIceConnectionState.discon
 ended: wrtc.MediaStreamSourceState # value = <MediaStreamSourceState.ended: 2>
 failed: wrtc.RTCIceConnectionState # value = <RTCIceConnectionState.failed: 4>
 gathering: wrtc.RTCIceGatheringState # value = <RTCIceGatheringState.gathering: 1>
+inactive: wrtc.TransceiverDirection # value = <TransceiverDirection.inactive: 3>
 initializing: wrtc.MediaStreamSourceState # value = <MediaStreamSourceState.initializing: 0>
 live: wrtc.MediaStreamSourceState # value = <MediaStreamSourceState.live: 1>
 max: wrtc.RTCIceConnectionState # value = <RTCIceConnectionState.max: 7>
@@ -472,4 +552,8 @@ muted: wrtc.MediaStreamSourceState # value = <MediaStreamSourceState.muted: 3>
 new: wrtc.RTCIceGatheringState # value = <RTCIceGatheringState.new: 0>
 offer: wrtc.RTCSdpType # value = <RTCSdpType.offer: 0>
 pranswer: wrtc.RTCSdpType # value = <RTCSdpType.pranswer: 1>
+recvonly: wrtc.TransceiverDirection # value = <TransceiverDirection.recvonly: 2>
 rollback: wrtc.RTCSdpType # value = <RTCSdpType.rollback: 3>
+sendonly: wrtc.TransceiverDirection # value = <TransceiverDirection.sendonly: 1>
+sendrecv: wrtc.TransceiverDirection # value = <TransceiverDirection.sendrecv: 0>
+stopped: wrtc.TransceiverDirection # value = <TransceiverDirection.stopped: 4>

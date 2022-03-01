@@ -21,6 +21,7 @@ namespace python_webrtc {
 
 //    TODO get from python
     auto configuration = webrtc::PeerConnectionInterface::RTCConfiguration();
+    configuration.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
 
     auto portAllocator = std::unique_ptr<cricket::PortAllocator>(new cricket::BasicPortAllocator(
         _factory->getNetworkManager(),
@@ -71,6 +72,8 @@ namespace python_webrtc {
         .def("addTrack",
              pybind11::overload_cast<MediaStreamTrack &, const std::vector<MediaStream *> &>(
                  &RTCPeerConnection::AddTrack), pybind11::return_value_policy::reference)
+        .def("getTransceivers", &RTCPeerConnection::GetTransceivers)
+        .def("getSenders", &RTCPeerConnection::GetSenders)
         .def("close", &RTCPeerConnection::Close);
   }
 
@@ -198,6 +201,31 @@ namespace python_webrtc {
 
     auto rtpSender = result.value();
     return RTCRtpSender::holder()->GetOrCreate(_factory, rtpSender);
+  }
+
+  std::vector<RTCRtpTransceiver *> RTCPeerConnection::GetTransceivers() {
+    std::vector<RTCRtpTransceiver *> transceivers;
+
+    auto isUnified = _jinglePeerConnection->GetConfiguration().sdp_semantics == webrtc::SdpSemantics::kUnifiedPlan;
+    if (_jinglePeerConnection && isUnified) {
+      for (const auto &transceiver: _jinglePeerConnection->GetTransceivers()) {
+        transceivers.emplace_back(RTCRtpTransceiver::holder()->GetOrCreate(_factory, transceiver));
+      }
+    }
+
+    return transceivers;
+  }
+
+  std::vector<RTCRtpSender *> RTCPeerConnection::GetSenders() {
+    std::vector<RTCRtpSender *> senders;
+
+    if (_jinglePeerConnection) {
+      for (const auto &sender: _jinglePeerConnection->GetSenders()) {
+        senders.emplace_back(RTCRtpSender::holder()->GetOrCreate(_factory, sender));
+      }
+    }
+
+    return senders;
   }
 
   void RTCPeerConnection::Close() {

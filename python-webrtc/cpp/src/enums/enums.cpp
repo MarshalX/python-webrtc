@@ -13,6 +13,7 @@
 #include "webrtc/sdp_type.h"
 #include "webrtc/track_state.h"
 #include "webrtc/source_state.h"
+#include "webrtc/rtp_transceiver_direction.h"
 
 namespace python_webrtc {
 
@@ -28,6 +29,9 @@ namespace python_webrtc {
     TrackState::Init(m);
     SourceState::Init(m);
 
+    RTPTransceiverDirection::Init(m);
+
     // python_webrtc
   }
-}
+
+} // namespace python_webrtc

@@ -19,6 +19,7 @@
 #include "media_stream_track.h"
 #include "media_stream.h"
 #include "rtc_rtp_sender.h"
+#include "rtc_rtp_transceiver.h"
 
 namespace webrtc {
   struct PeerConnectionDependencies;
@@ -31,6 +32,8 @@ namespace python_webrtc {
   class RTCPeerConnection : public webrtc::PeerConnectionObserver {
   public:
     explicit RTCPeerConnection();
+
+    static void Init(pybind11::module &m);
 
     ~RTCPeerConnection() override;
 
@@ -50,7 +53,9 @@ namespace python_webrtc {
 
     RTCRtpSender *AddTrack(MediaStreamTrack &, const std::vector<MediaStream *> &);
 
-    static void Init(pybind11::module &m);
+    std::vector<RTCRtpTransceiver*> GetTransceivers();
+
+    std::vector<RTCRtpSender*> GetSenders();
 
     void SaveLastSdp(const RTCSessionDescriptionInit &lastSdp);
 

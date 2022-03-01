@@ -44,13 +44,12 @@ def test_sender_and_transceivers(pc, audio_stream):
 
     assert track == sender.track
 
-    return
     # when we ready in cpp
     transceivers = pc.get_transceivers()
     assert len(transceivers) == 1
 
     transceiver, *_ = transceivers
-    assert transceiver.sender == server
+    assert transceiver.sender == sender
 
     assert [sender] == pc.get_senders()
 
