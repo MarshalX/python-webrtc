@@ -33,7 +33,7 @@ async def main():
         wrtc.RTCSdpType,
         wrtc.MediaStreamTrackState,
         wrtc.MediaStreamSourceState,
-        wrtc.TransceiverDirection
+        wrtc.TransceiverDirection,
     ]
     for enum in enums:
         print(f'{enum!r} = {enum.__members__}')

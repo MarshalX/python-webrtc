@@ -17,3 +17,6 @@ stub:
 
 doc:
 	cd docs && make gen && make html
+
+black:
+	black --config black.toml tests python-webrtc
