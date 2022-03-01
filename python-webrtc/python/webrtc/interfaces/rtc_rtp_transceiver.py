@@ -64,7 +64,7 @@ class RTCRtpTransceiver(WebRTCObject):
     def current_direction(self) -> Optional['webrtc.TransceiverDirection']:
         """A member of :obj:`webrtc.TransceiverDirection` enum, indicating
         the current directionality of the transceiver."""
-        return self._native_obj.current_direction
+        return self._native_obj.currentDirection
 
     def stop(self) -> None:
         """Permanently stops the transceiver by stopping both the associated :obj:`webrtc.RTCRtpSender`

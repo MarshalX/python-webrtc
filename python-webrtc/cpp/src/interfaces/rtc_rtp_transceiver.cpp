@@ -49,6 +49,8 @@ namespace python_webrtc {
     if (_transceiver->mid()) {
       return _transceiver->mid().value();
     }
+
+    return {};
   }
 
   RTCRtpSender *RTCRtpTransceiver::GetSender() {
@@ -79,6 +81,8 @@ namespace python_webrtc {
     if (_transceiver->current_direction()) {
       return _transceiver->current_direction().value();
     }
+
+    return {};
   }
 
   void RTCRtpTransceiver::Stop() {
