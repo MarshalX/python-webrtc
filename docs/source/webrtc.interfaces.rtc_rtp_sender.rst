@@ -1,5 +1,5 @@
-webrtc.interfaces.rtc\_rtp\_sender module
-=========================================
+webrtc.interfaces.rtc\_rtp\_sender
+==================================
 
 .. automodule:: webrtc.interfaces.rtc_rtp_sender
    :members:

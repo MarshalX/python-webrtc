@@ -13,7 +13,10 @@ from .interfaces.rtc_peer_connection import RTCPeerConnection
 from .interfaces.media_stream_track import MediaStreamTrack
 from .interfaces.media_stream import MediaStream
 from .interfaces.rtc_rtp_sender import RTCRtpSender
+from .interfaces.rtc_rtp_receiver import RTCRtpReceiver
+from .interfaces.rtc_rtp_transceiver import RTCRtpTransceiver
 from .interfaces.rtc_audio_source import RTCAudioSource
+from .interfaces.rtc_ice_transport import RTCIceTransport
 
 from .functions.get_user_media import getUserMedia, get_user_media
 
@@ -34,6 +37,11 @@ RTCIceGatheringState = wrtc.RTCIceGatheringState
 RTCSdpType = wrtc.RTCSdpType
 MediaStreamTrackState = wrtc.MediaStreamTrackState
 MediaStreamSourceState = wrtc.MediaStreamSourceState
+TransceiverDirection = wrtc.TransceiverDirection
+RTCIceComponent = wrtc.RTCIceComponent
+RTCIceRole = wrtc.RTCIceRole
+RTCIceTransportState = wrtc.RTCIceTransportState
+CricketIceGatheringState = wrtc.CricketIceGatheringState
 
 __all__ = [
     # exceptions
@@ -48,6 +56,11 @@ __all__ = [
     'RTCSdpType',
     'MediaStreamTrackState',
     'MediaStreamSourceState',
+    'TransceiverDirection',
+    'RTCIceComponent',
+    'RTCIceRole',
+    'RTCIceTransportState',
+    'CricketIceGatheringState',
     # base
     'WebRTCObject',
     # interfaces
@@ -55,6 +68,9 @@ __all__ = [
     'MediaStreamTrack',
     'MediaStream',
     'RTCRtpSender',
+    'RTCRtpReceiver',
+    'RTCRtpTransceiver',
+    'RTCIceTransport',
     'RTCAudioSource',
     # functions
     'getUserMedia',

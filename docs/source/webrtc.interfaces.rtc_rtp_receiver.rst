@@ -1,7 +1,7 @@
-webrtc.interfaces.rtc\_audio\_source
+webrtc.interfaces.rtc\_rtp\_receiver
 ====================================
 
-.. automodule:: webrtc.interfaces.rtc_audio_source
+.. automodule:: webrtc.interfaces.rtc_rtp_receiver
    :members:
    :undoc-members:
    :show-inheritance:

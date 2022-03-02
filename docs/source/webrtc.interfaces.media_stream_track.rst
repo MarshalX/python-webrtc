@@ -1,5 +1,5 @@
-webrtc.interfaces.media\_stream\_track module
-=============================================
+webrtc.interfaces.media\_stream\_track
+======================================
 
 .. automodule:: webrtc.interfaces.media_stream_track
    :members:

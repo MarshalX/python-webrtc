@@ -13,6 +13,11 @@
 #include "webrtc/sdp_type.h"
 #include "webrtc/track_state.h"
 #include "webrtc/source_state.h"
+#include "webrtc/rtp_transceiver_direction.h"
+#include "webrtc/cricket_ice_gathering_state.h"
+#include "webrtc/rtc_ice_role.h"
+#include "webrtc/rtc_ice_transport_state.h"
+#include "python_webrtc/rtc_ice_component.h"
 
 namespace python_webrtc {
 
@@ -28,6 +33,15 @@ namespace python_webrtc {
     TrackState::Init(m);
     SourceState::Init(m);
 
+    RTPTransceiverDirection::Init(m);
+
+    CricketIceGatheringState::Init(m);
+    RTCIceRole::Init(m);
+    RTCIceTransportState::Init(m);
+
     // python_webrtc
+
+    RTCIceComponent_::Init(m);
   }
-}
+
+} // namespace python_webrtc

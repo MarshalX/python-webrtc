@@ -1,7 +1,7 @@
-webrtc.interfaces.rtc\_peer\_connection
+webrtc.interfaces.rtc\_rtp\_transceiver
 =======================================
 
-.. automodule:: webrtc.interfaces.rtc_peer_connection
+.. automodule:: webrtc.interfaces.rtc_rtp_transceiver
    :members:
    :undoc-members:
    :show-inheritance:

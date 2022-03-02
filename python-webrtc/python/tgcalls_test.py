@@ -81,11 +81,11 @@ def build_answer(sdp):
 o=- {time.time()} 2 IN IP4 0.0.0.0
 s=-
 t=0 0   
-a=group:BUNDLE audio
+a=group:BUNDLE 0
 a=ice-lite
 m=audio 1 RTP/SAVPF 111 126
 c=IN IP4 0.0.0.0
-a=mid:audio
+a=mid:0
 a=ice-ufrag:{sdp['transport']['ufrag']}
 a=ice-pwd:{sdp['transport']['pwd']}
 a=fingerprint:sha-256 {sdp['transport']['fingerprints'][0]['fingerprint']}
@@ -185,8 +185,8 @@ async def main(client, input_peer):
     thread.daemon = True
     thread.start()
 
-    await asyncio.sleep(10)
-    # await pyrogram.idle()
+    # await asyncio.sleep(10)
+    await pyrogram.idle()
 
 
 if __name__ == '__main__':

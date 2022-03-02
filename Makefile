@@ -11,3 +11,12 @@ export PYTHONPATH=${PATH_TO_PY_MODULES}
 
 test:
 	@${RUN_TESTS} ${TESTS_DIR} ${RUN_TESTS_OPTS} $(O)
+
+stub:
+	python -m "pybind11_stubgen" wrtc --non-stop
+
+doc:
+	cd docs && make gen && make html
+
+black:
+	black --config black.toml tests python-webrtc

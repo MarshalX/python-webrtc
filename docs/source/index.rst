@@ -3,4 +3,4 @@ Python WebRTC Documentation
 
 .. toctree::
 
-   modules
+   webrtc
