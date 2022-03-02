@@ -16,5 +16,6 @@ Submodules
    webrtc.interfaces.media_stream_track
    webrtc.interfaces.rtc_audio_source
    webrtc.interfaces.rtc_peer_connection
+   webrtc.interfaces.rtc_rtp_receiver
    webrtc.interfaces.rtc_rtp_sender
    webrtc.interfaces.rtc_rtp_transceiver

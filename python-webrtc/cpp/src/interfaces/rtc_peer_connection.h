@@ -57,6 +57,8 @@ namespace python_webrtc {
 
     std::vector<RTCRtpSender*> GetSenders();
 
+    std::vector<RTCRtpReceiver*> GetReceivers();
+
     void SaveLastSdp(const RTCSessionDescriptionInit &lastSdp);
 
     void Close();

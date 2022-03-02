@@ -23,7 +23,7 @@ namespace python_webrtc {
     pybind11::class_<RTCRtpTransceiver>(m, "RTCRtpTransceiver")
         .def_property_readonly("mid", &RTCRtpTransceiver::GetMid)
         .def_property_readonly("sender", &RTCRtpTransceiver::GetSender, pybind11::return_value_policy::reference)
-//        .def_property_readonly("receiver", &RTCRtpTransceiver::GetReceiver, pybind11::return_value_policy::reference)
+        .def_property_readonly("receiver", &RTCRtpTransceiver::GetReceiver, pybind11::return_value_policy::reference)
         .def_property_readonly("stopped", &RTCRtpTransceiver::GetStopped)
         .def_property("direction", &RTCRtpTransceiver::GetDirection, &RTCRtpTransceiver::SetDirection)
         .def_property_readonly("currentDirection", &RTCRtpTransceiver::GetCurrentDirection)
@@ -57,9 +57,9 @@ namespace python_webrtc {
     return RTCRtpSender::holder()->GetOrCreate(_factory, _transceiver->sender());
   }
 
-//  RTCRtpReceiver *RTCRtpTransceiver::GetReceiver() {
-//    return RTCRtpReceiver::holder()->GetOrCreate(_factory, _transceiver->receiver());
-//  }
+  RTCRtpReceiver *RTCRtpTransceiver::GetReceiver() {
+    return RTCRtpReceiver::holder()->GetOrCreate(_factory, _transceiver->receiver());
+  }
 
   bool RTCRtpTransceiver::GetStopped() {
     // TODO Deprecated: This feature is no longer recommended.

@@ -74,6 +74,7 @@ namespace python_webrtc {
                  &RTCPeerConnection::AddTrack), pybind11::return_value_policy::reference)
         .def("getTransceivers", &RTCPeerConnection::GetTransceivers)
         .def("getSenders", &RTCPeerConnection::GetSenders)
+        .def("getReceivers", &RTCPeerConnection::GetReceivers)
         .def("close", &RTCPeerConnection::Close);
   }
 
@@ -226,6 +227,18 @@ namespace python_webrtc {
     }
 
     return senders;
+  }
+
+  std::vector<RTCRtpReceiver *> RTCPeerConnection::GetReceivers() {
+    std::vector<RTCRtpReceiver*> receivers;
+
+    if (_jinglePeerConnection) {
+      for (const auto& receiver : _jinglePeerConnection->GetReceivers()) {
+        receivers.emplace_back(RTCRtpReceiver::holder()->GetOrCreate(_factory, receiver));
+      }
+    }
+
+    return receivers;
   }
 
   void RTCPeerConnection::Close() {

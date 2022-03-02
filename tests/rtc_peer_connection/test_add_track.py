@@ -25,6 +25,8 @@ def test_sender_creation(pc, audio_stream):
 
     assert isinstance(sender, webrtc.RTCRtpSender)
 
+    assert sender.track == track
+
 
 def test_adding_of_the_same_track(pc, audio_stream):
     track, *_ = audio_stream.get_audio_tracks()
@@ -44,7 +46,6 @@ def test_sender_and_transceivers(pc, audio_stream):
 
     assert track == sender.track
 
-    # when we ready in cpp
     transceivers = pc.get_transceivers()
     assert len(transceivers) == 1
 
@@ -53,4 +54,7 @@ def test_sender_and_transceivers(pc, audio_stream):
 
     assert [sender] == pc.get_senders()
 
-    # assert kind and list of receivers
+    receiver = transceiver.receiver
+    assert receiver.track.kind == 'audio'
+
+    assert [receiver] == pc.get_receivers()

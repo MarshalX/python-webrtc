@@ -28,8 +28,16 @@ class RTCRtpTransceiver(WebRTCObject):
         return self._native_obj.mid
 
     @property
+    def receiver(self) -> 'webrtc.RTCRtpReceiver':
+        """A :obj:`webrtc.RTCRtpReceiver` object which is responsible for receiving and decoding incoming media data
+        whose media ID is the same as the current value of :attr:`mid`."""
+        from webrtc import RTCRtpReceiver
+
+        return RTCRtpReceiver._wrap(self._native_obj.receiver)
+
+    @property
     def sender(self) -> 'webrtc.RTCRtpSender':
-        """An :obj:`webrtc.RTCRtpSender` object used to encode and send media whose media ID matches
+        """A :obj:`webrtc.RTCRtpSender` object used to encode and send media whose media ID matches
         the current value of :attr:`mid`."""
         from webrtc import RTCRtpSender
 
@@ -43,7 +51,6 @@ class RTCRtpTransceiver(WebRTCObject):
 
         Warning:
             Deprecated: This feature is no longer recommended.
-
         """
         return self._native_obj.stopped
 

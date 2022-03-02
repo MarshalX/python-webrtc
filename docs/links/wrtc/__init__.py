@@ -19,6 +19,7 @@ __all__ = [
     "RTCOnDataEvent",
     "RTCPeerConnection",
     "RTCPeerConnectionState",
+    "RTCRtpReceiver",
     "RTCRtpSender",
     "RTCRtpTransceiver",
     "RTCSdpType",
@@ -333,6 +334,7 @@ class RTCPeerConnection():
     def close(self) -> None: ...
     def createAnswer(self, arg0: typing.Callable[[RTCSessionDescription], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None]) -> None: ...
     def createOffer(self, arg0: typing.Callable[[RTCSessionDescription], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None]) -> None: ...
+    def getSenders(self) -> typing.List[python_webrtc::RTCRtpSender]: ...
     def getTransceivers(self) -> typing.List[python_webrtc::RTCRtpTransceiver]: ...
     def setLocalDescription(self, arg0: typing.Callable[[], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None], arg2: RTCSessionDescription) -> None: ...
     def setRemoteDescription(self, arg0: typing.Callable[[], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None], arg2: RTCSessionDescription) -> None: ...
@@ -380,6 +382,13 @@ class RTCPeerConnectionState():
     failed: wrtc.RTCPeerConnectionState # value = <RTCPeerConnectionState.failed: 4>
     new: wrtc.RTCPeerConnectionState # value = <RTCPeerConnectionState.new: 0>
     pass
+class RTCRtpReceiver():
+    @property
+    def track(self) -> MediaStreamTrack:
+        """
+        :type: MediaStreamTrack
+        """
+    pass
 class RTCRtpSender():
     @property
     def track(self) -> typing.Optional[MediaStreamTrack]:
@@ -406,6 +415,11 @@ class RTCRtpTransceiver():
     def mid(self) -> typing.Optional[str]:
         """
         :type: typing.Optional[str]
+        """
+    @property
+    def receiver(self) -> RTCRtpReceiver:
+        """
+        :type: RTCRtpReceiver
         """
     @property
     def sender(self) -> RTCRtpSender:

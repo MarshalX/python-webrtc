@@ -12,8 +12,9 @@
 #include "media_stream_track.h"
 #include "media_stream.h"
 #include "rtc_rtp_sender.h"
-#include "rtc_audio_source.h"
+#include "rtc_rtp_receiver.h"
 #include "rtc_rtp_transceiver.h"
+#include "rtc_audio_source.h"
 
 namespace python_webrtc {
 
@@ -23,7 +24,8 @@ namespace python_webrtc {
     MediaStreamTrack::Init(m);
     MediaStream::Init(m);
     RTCRtpSender::Init(m);
-    RTCAudioSource::Init(m);
+    RTCRtpReceiver::Init(m);
     RTCRtpTransceiver::Init(m);
+    RTCAudioSource::Init(m);
   }
 }

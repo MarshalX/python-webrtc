@@ -136,6 +136,23 @@ class RTCPeerConnection(WebRTCObject):
 
         return RTCRtpSender._wrap_many(self._native_obj.getSenders())
 
+    def get_receivers(self) -> List['webrtc.RTCRtpReceiver']:
+        """Returns an array of :obj:`webrtc.RTCRtpReceiver` objects, each of which represents one RTP receiver. Each RTP
+        receiver manages the reception and decoding of data for a :obj:`webrtc.MediaStreamTrack`
+        on an :obj:`webrtc.RTCPeerConnection`.
+
+        Note:
+            The order of the returned :obj:`webrtc.RTCRtpReceiver` is not defined by the specification, and may change
+            from one call to :attr:`get_receivers` to the next.
+
+        Returns:
+            :obj:`list` of :obj:`webrtc.RTCRtpReceiver`: An array of :obj:`webrtc.RTCRtpReceiver` objects, one for each
+             track on the connection. The array is empty if there are no RTP receivers on the connection.
+        """
+        from webrtc import RTCRtpReceiver
+
+        return RTCRtpReceiver._wrap_many(self._native_obj.getReceivers())
+
     def close(self):
         """Closes the current peer connection."""
         return self._native_obj.close()
@@ -154,3 +171,5 @@ class RTCPeerConnection(WebRTCObject):
     getTransceivers = get_transceivers
     #: Alias for :attr:`get_senders`
     getSenders = get_senders
+    #: Alias for :attr:`get_receivers`
+    getReceivers = get_receivers

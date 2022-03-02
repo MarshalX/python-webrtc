@@ -13,8 +13,9 @@ from .interfaces.rtc_peer_connection import RTCPeerConnection
 from .interfaces.media_stream_track import MediaStreamTrack
 from .interfaces.media_stream import MediaStream
 from .interfaces.rtc_rtp_sender import RTCRtpSender
-from .interfaces.rtc_audio_source import RTCAudioSource
+from .interfaces.rtc_rtp_receiver import RTCRtpReceiver
 from .interfaces.rtc_rtp_transceiver import RTCRtpTransceiver
+from .interfaces.rtc_audio_source import RTCAudioSource
 
 from .functions.get_user_media import getUserMedia, get_user_media
 
@@ -58,8 +59,9 @@ __all__ = [
     'MediaStreamTrack',
     'MediaStream',
     'RTCRtpSender',
-    'RTCAudioSource',
+    'RTCRtpReceiver',
     'RTCRtpTransceiver',
+    'RTCAudioSource',
     # functions
     'getUserMedia',
     'get_user_media',

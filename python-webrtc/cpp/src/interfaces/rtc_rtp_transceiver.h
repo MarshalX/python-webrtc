@@ -16,6 +16,7 @@
 
 #include "peer_connection_factory.h"
 #include "rtc_rtp_sender.h"
+#include "rtc_rtp_receiver.h"
 
 namespace python_webrtc {
 
@@ -37,7 +38,7 @@ namespace python_webrtc {
 
     RTCRtpSender *GetSender();
 
-//    RTCRtpReceiver *GetReceiver();
+    RTCRtpReceiver *GetReceiver();
 
     bool GetStopped();
 
