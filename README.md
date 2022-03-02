@@ -28,6 +28,8 @@ This project follows the [W3C specification](https://w3c.github.io/webrtc-pc/) w
 
 This project is still under development and isn't ready for any serious use. In the current stage, it's possible to establish connection and work with audio, but many interfaces and methods not implemented yet.
 
+You can easily check status of methods and interfaces availability [here](https://github.com/users/MarshalX/projects/1/views/1).
+
 #### Snippet
 
 ```python
@@ -150,7 +152,7 @@ The documentation is live at [readthedocs.io](https://wrtc.rtfd.io/).
 
 You can get help in several ways:
 - Report bugs, request new features by [creating an issue](https://github.com/MarshalX/python-webrtc/issues/new).
-- Ask question by [starting a discussion](https://github.com/MarshalX/python-webrtc/discussions/new).
+- Ask questions by [starting a discussion](https://github.com/MarshalX/python-webrtc/discussions/new).
 
 ### Contributing
 
