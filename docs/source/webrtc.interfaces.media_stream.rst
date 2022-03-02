@@ -1,5 +1,5 @@
-webrtc.interfaces.media\_stream module
-======================================
+webrtc.interfaces.media\_stream
+===============================
 
 .. automodule:: webrtc.interfaces.media_stream
    :members:

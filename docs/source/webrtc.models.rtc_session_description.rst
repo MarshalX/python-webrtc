@@ -1,5 +1,5 @@
-webrtc.models.rtc\_session\_description module
-==============================================
+webrtc.models.rtc\_session\_description
+=======================================
 
 .. automodule:: webrtc.models.rtc_session_description
    :members:
