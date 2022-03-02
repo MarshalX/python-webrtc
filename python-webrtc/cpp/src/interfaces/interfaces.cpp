@@ -15,6 +15,7 @@
 #include "rtc_rtp_receiver.h"
 #include "rtc_rtp_transceiver.h"
 #include "rtc_audio_source.h"
+#include "rtc_ice_transport.h"
 
 namespace python_webrtc {
 
@@ -26,6 +27,7 @@ namespace python_webrtc {
     RTCRtpSender::Init(m);
     RTCRtpReceiver::Init(m);
     RTCRtpTransceiver::Init(m);
+    RTCIceTransport::Init(m);
     RTCAudioSource::Init(m);
   }
 }
