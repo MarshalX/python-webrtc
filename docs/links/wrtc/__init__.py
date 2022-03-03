@@ -5,6 +5,7 @@ import typing
 __all__ = [
     "CallbackPythonWebRTCException",
     "CricketIceGatheringState",
+    "DtlsTransportState",
     "MediaStream",
     "MediaStreamSourceState",
     "MediaStreamTrack",
@@ -14,6 +15,7 @@ __all__ = [
     "PythonWebRTCExceptionBase",
     "RTCAudioSource",
     "RTCCallbackException",
+    "RTCDtlsTransport",
     "RTCException",
     "RTCIceComponent",
     "RTCIceConnectionState",
@@ -102,6 +104,46 @@ class CricketIceGatheringState():
     complete: wrtc.CricketIceGatheringState # value = <CricketIceGatheringState.complete: 2>
     gathering: wrtc.CricketIceGatheringState # value = <CricketIceGatheringState.gathering: 1>
     new: wrtc.CricketIceGatheringState # value = <CricketIceGatheringState.new: 0>
+    pass
+class DtlsTransportState():
+    """
+    Members:
+
+      new
+
+      connecting
+
+      connected
+
+      closed
+
+      failed
+    """
+    def __eq__(self, other: object) -> bool: ...
+    def __getstate__(self) -> int: ...
+    def __hash__(self) -> int: ...
+    def __index__(self) -> int: ...
+    def __init__(self, value: int) -> None: ...
+    def __int__(self) -> int: ...
+    def __ne__(self, other: object) -> bool: ...
+    def __repr__(self) -> str: ...
+    def __setstate__(self, state: int) -> None: ...
+    @property
+    def name(self) -> str:
+        """
+        :type: str
+        """
+    @property
+    def value(self) -> int:
+        """
+        :type: int
+        """
+    __members__: dict # value = {'new': <DtlsTransportState.new: 0>, 'connecting': <DtlsTransportState.connecting: 1>, 'connected': <DtlsTransportState.connected: 2>, 'closed': <DtlsTransportState.closed: 3>, 'failed': <DtlsTransportState.failed: 4>}
+    closed: wrtc.DtlsTransportState # value = <DtlsTransportState.closed: 3>
+    connected: wrtc.DtlsTransportState # value = <DtlsTransportState.connected: 2>
+    connecting: wrtc.DtlsTransportState # value = <DtlsTransportState.connecting: 1>
+    failed: wrtc.DtlsTransportState # value = <DtlsTransportState.failed: 4>
+    new: wrtc.DtlsTransportState # value = <DtlsTransportState.new: 0>
     pass
 class MediaStream():
     def addTrack(self, arg0: MediaStreamTrack) -> None: ...
@@ -242,6 +284,18 @@ class RTCAudioSource():
     pass
 class RTCCallbackException():
     def what(self) -> str: ...
+    pass
+class RTCDtlsTransport():
+    @property
+    def iceTransport(self) -> RTCIceTransport:
+        """
+        :type: RTCIceTransport
+        """
+    @property
+    def state(self) -> DtlsTransportState:
+        """
+        :type: DtlsTransportState
+        """
     pass
 class RTCException(PythonWebRTCExceptionBase, Exception, BaseException):
     pass
@@ -506,14 +560,16 @@ class RTCOnDataEvent():
     pass
 class RTCPeerConnection():
     def __init__(self) -> None: ...
-    @staticmethod
-    def addTrack(*args, **kwargs) -> typing.Any: ...
+    @typing.overload
+    def addTrack(self, arg0: MediaStreamTrack, arg1: typing.List[MediaStream]) -> RTCRtpSender: ...
+    @typing.overload
+    def addTrack(self, arg0: MediaStreamTrack, arg1: typing.Optional[MediaStream]) -> RTCRtpSender: ...
     def close(self) -> None: ...
     def createAnswer(self, arg0: typing.Callable[[RTCSessionDescription], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None]) -> None: ...
     def createOffer(self, arg0: typing.Callable[[RTCSessionDescription], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None]) -> None: ...
-    def getReceivers(self) -> typing.List[python_webrtc::RTCRtpReceiver]: ...
-    def getSenders(self) -> typing.List[python_webrtc::RTCRtpSender]: ...
-    def getTransceivers(self) -> typing.List[python_webrtc::RTCRtpTransceiver]: ...
+    def getReceivers(self) -> typing.List[RTCRtpReceiver]: ...
+    def getSenders(self) -> typing.List[RTCRtpSender]: ...
+    def getTransceivers(self) -> typing.List[RTCRtpTransceiver]: ...
     def setLocalDescription(self, arg0: typing.Callable[[], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None], arg2: RTCSessionDescription) -> None: ...
     def setRemoteDescription(self, arg0: typing.Callable[[], None], arg1: typing.Callable[[CallbackPythonWebRTCException], None], arg2: RTCSessionDescription) -> None: ...
     pass
@@ -566,12 +622,22 @@ class RTCRtpReceiver():
         """
         :type: MediaStreamTrack
         """
+    @property
+    def transport(self) -> typing.Optional[RTCDtlsTransport]:
+        """
+        :type: typing.Optional[RTCDtlsTransport]
+        """
     pass
 class RTCRtpSender():
     @property
     def track(self) -> typing.Optional[MediaStreamTrack]:
         """
         :type: typing.Optional[MediaStreamTrack]
+        """
+    @property
+    def transport(self) -> typing.Optional[RTCDtlsTransport]:
+        """
+        :type: typing.Optional[RTCDtlsTransport]
         """
     pass
 class RTCRtpTransceiver():
@@ -729,23 +795,23 @@ RTCP: wrtc.RTCIceComponent # value = <RTCIceComponent.RTCP: 1>
 RTP: wrtc.RTCIceComponent # value = <RTCIceComponent.RTP: 0>
 answer: wrtc.RTCSdpType # value = <RTCSdpType.answer: 2>
 checking: wrtc.RTCIceTransportState # value = <RTCIceTransportState.checking: 1>
-closed: wrtc.RTCIceTransportState # value = <RTCIceTransportState.closed: 6>
+closed: wrtc.DtlsTransportState # value = <DtlsTransportState.closed: 3>
 complete: wrtc.CricketIceGatheringState # value = <CricketIceGatheringState.complete: 2>
 completed: wrtc.RTCIceTransportState # value = <RTCIceTransportState.completed: 3>
-connected: wrtc.RTCIceTransportState # value = <RTCIceTransportState.connected: 2>
-connecting: wrtc.RTCPeerConnectionState # value = <RTCPeerConnectionState.connecting: 1>
+connected: wrtc.DtlsTransportState # value = <DtlsTransportState.connected: 2>
+connecting: wrtc.DtlsTransportState # value = <DtlsTransportState.connecting: 1>
 controlled: wrtc.RTCIceRole # value = <RTCIceRole.controlled: 1>
 controlling: wrtc.RTCIceRole # value = <RTCIceRole.controlling: 0>
 disconnected: wrtc.RTCIceTransportState # value = <RTCIceTransportState.disconnected: 5>
 ended: wrtc.MediaStreamSourceState # value = <MediaStreamSourceState.ended: 2>
-failed: wrtc.RTCIceTransportState # value = <RTCIceTransportState.failed: 4>
+failed: wrtc.DtlsTransportState # value = <DtlsTransportState.failed: 4>
 gathering: wrtc.CricketIceGatheringState # value = <CricketIceGatheringState.gathering: 1>
 inactive: wrtc.TransceiverDirection # value = <TransceiverDirection.inactive: 3>
 initializing: wrtc.MediaStreamSourceState # value = <MediaStreamSourceState.initializing: 0>
 live: wrtc.MediaStreamSourceState # value = <MediaStreamSourceState.live: 1>
 max: wrtc.RTCIceConnectionState # value = <RTCIceConnectionState.max: 7>
 muted: wrtc.MediaStreamSourceState # value = <MediaStreamSourceState.muted: 3>
-new: wrtc.RTCIceTransportState # value = <RTCIceTransportState.new: 0>
+new: wrtc.DtlsTransportState # value = <DtlsTransportState.new: 0>
 offer: wrtc.RTCSdpType # value = <RTCSdpType.offer: 0>
 pranswer: wrtc.RTCSdpType # value = <RTCSdpType.pranswer: 1>
 recvonly: wrtc.TransceiverDirection # value = <TransceiverDirection.recvonly: 2>

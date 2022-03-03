@@ -17,6 +17,7 @@
 #include "webrtc/cricket_ice_gathering_state.h"
 #include "webrtc/rtc_ice_role.h"
 #include "webrtc/rtc_ice_transport_state.h"
+#include "webrtc/dtls_transport_state.h"
 #include "python_webrtc/rtc_ice_component.h"
 
 namespace python_webrtc {
@@ -38,6 +39,7 @@ namespace python_webrtc {
     CricketIceGatheringState::Init(m);
     RTCIceRole::Init(m);
     RTCIceTransportState::Init(m);
+    DtlsTransportState::Init(m);
 
     // python_webrtc
 

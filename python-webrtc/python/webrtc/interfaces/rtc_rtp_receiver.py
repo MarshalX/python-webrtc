@@ -5,9 +5,9 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
-from webrtc import wrtc, WebRTCObject, MediaStreamTrack
+from webrtc import wrtc, WebRTCObject
 
 if TYPE_CHECKING:
     import webrtc
@@ -23,6 +23,18 @@ class RTCRtpReceiver(WebRTCObject):
     def track(self) -> 'webrtc.MediaStreamTrack':
         """:obj:`webrtc.MediaStreamTrack`: The :obj:`webrtc.MediaStreamTrack` associated with the current
         :obj:`webrtc.RTCRtpReceiver` instance."""
-        track = self._native_obj.track
+        from webrtc import MediaStreamTrack
 
-        return MediaStreamTrack._wrap(track)
+        return MediaStreamTrack._wrap(self._native_obj.track)
+
+    @property
+    def transport(self) -> Optional['webrtc.RTCDtlsTransport']:
+        """:obj:`webrtc.RTCDtlsTransport`: An object representing the underlying transport being used by the
+        receiver to exchange packets with the remote peer, or null if the receiver isn't yet connected to transport."""
+        from webrtc import RTCDtlsTransport
+
+        transport = self._native_obj.transport
+        if transport:
+            return RTCDtlsTransport._wrap(transport)
+
+        return None

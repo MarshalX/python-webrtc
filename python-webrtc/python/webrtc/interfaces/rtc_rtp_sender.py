@@ -7,7 +7,7 @@
 
 from typing import TYPE_CHECKING, Optional
 
-from webrtc import wrtc, WebRTCObject, MediaStreamTrack
+from webrtc import wrtc, WebRTCObject
 
 if TYPE_CHECKING:
     import webrtc
@@ -25,8 +25,22 @@ class RTCRtpSender(WebRTCObject):
         """:obj:`webrtc.MediaStreamTrack`, optional: The :obj:`webrtc.MediaStreamTrack` which is being handled by
         the :obj:`webrtc.RTCRtpSender`. If track is :obj:`None`, the :obj:`webrtc.RTCRtpSender`
         doesn't transmit anything."""
+        from webrtc import MediaStreamTrack
+
         track = self._native_obj.track
         if track:
             return MediaStreamTrack._wrap(track)
+
+        return None
+
+    @property
+    def transport(self) -> Optional['webrtc.RTCDtlsTransport']:
+        """:obj:`webrtc.RTCDtlsTransport`: An object representing the underlying transport being used by the sender
+        to exchange packets with the remote peer, or null if the sender isn't yet connected to transport."""
+        from webrtc import RTCDtlsTransport
+
+        transport = self._native_obj.transport
+        if transport:
+            return RTCDtlsTransport._wrap(transport)
 
         return None

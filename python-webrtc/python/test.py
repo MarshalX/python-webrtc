@@ -38,6 +38,7 @@ async def main():
         wrtc.RTCIceRole,
         wrtc.RTCIceTransportState,
         wrtc.CricketIceGatheringState,
+        wrtc.DtlsTransportState,
     ]
     for enum in enums:
         print(f'{enum!r} = {enum.__members__}')
@@ -48,11 +49,15 @@ async def main():
     print(repr(stream), get_dir(stream))
     for track in stream.getTracks():
         print(repr(track), get_dir(track))
-        pc.add_track(track, stream)
+        sender = pc.add_track(track, stream)
 
+    local_sdp = await pc.create_offer()
+    await pc.set_local_description(local_sdp)
+
+    transport = sender.transport
     transceivers = pc.get_transceivers()
 
-    idle()
+    # idle()
 
 
 if __name__ == '__main__':
