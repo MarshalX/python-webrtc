@@ -20,7 +20,8 @@ namespace python_webrtc {
 
   void RTCRtpReceiver::Init(pybind11::module &m) {
     pybind11::class_<RTCRtpReceiver>(m, "RTCRtpReceiver")
-        .def_property_readonly("track", &RTCRtpReceiver::GetTrack, pybind11::return_value_policy::reference);
+        .def_property_readonly("track", &RTCRtpReceiver::GetTrack, pybind11::return_value_policy::reference)
+        .def_property_readonly("transport", &RTCRtpReceiver::GetTransport);
   }
 
   InstanceHolder<RTCRtpReceiver *, rtc::scoped_refptr<webrtc::RtpReceiverInterface>, PeerConnectionFactory *> *
@@ -41,4 +42,13 @@ namespace python_webrtc {
     return MediaStreamTrack::holder()->GetOrCreate(_factory, _receiver->track());
   }
 
-}
+  std::optional<RTCDtlsTransport *> RTCRtpReceiver::GetTransport() {
+    auto transport = _receiver->dtls_transport();
+    if (transport) {
+      return RTCDtlsTransport::holder()->GetOrCreate(_factory, transport);
+    }
+
+    return {};
+  }
+
+} // namespace python_webrtc

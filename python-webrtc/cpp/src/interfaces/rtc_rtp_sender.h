@@ -10,11 +10,9 @@
 #include <webrtc/api/rtp_sender_interface.h>
 #include <webrtc/api/scoped_refptr.h>
 
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
-
 #include "peer_connection_factory.h"
 #include "media_stream_track.h"
+#include "rtc_dtls_transport.h"
 
 namespace python_webrtc {
 
@@ -33,6 +31,8 @@ namespace python_webrtc {
     > *holder();
 
     std::optional<MediaStreamTrack *> GetTrack();
+
+    std::optional<RTCDtlsTransport *> GetTransport();
 
     rtc::scoped_refptr<webrtc::RtpSenderInterface> sender() { return _sender; }
 

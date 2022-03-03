@@ -53,11 +53,17 @@ namespace python_webrtc {
 
     RTCRtpSender *AddTrack(MediaStreamTrack &, const std::vector<MediaStream *> &);
 
-    std::vector<RTCRtpTransceiver*> GetTransceivers();
+    RTCRtpTransceiver *AddTransceiver(
+        cricket::MediaType, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &);
 
-    std::vector<RTCRtpSender*> GetSenders();
+    RTCRtpTransceiver *AddTransceiver(
+        MediaStreamTrack &, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &);
 
-    std::vector<RTCRtpReceiver*> GetReceivers();
+    std::vector<RTCRtpTransceiver *> GetTransceivers();
+
+    std::vector<RTCRtpSender *> GetSenders();
+
+    std::vector<RTCRtpReceiver *> GetReceivers();
 
     void SaveLastSdp(const RTCSessionDescriptionInit &lastSdp);
 

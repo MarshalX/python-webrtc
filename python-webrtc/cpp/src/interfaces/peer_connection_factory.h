@@ -14,6 +14,7 @@
 #include <webrtc/modules/audio_device/include/audio_device.h>
 
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 namespace rtc {
 

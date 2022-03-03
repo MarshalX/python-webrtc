@@ -9,6 +9,7 @@
 
 #include "peer_connection_factory.h"
 #include "media_stream_track.h"
+#include "rtc_dtls_transport.h"
 
 namespace python_webrtc {
 
@@ -27,6 +28,8 @@ namespace python_webrtc {
     > *holder();
 
     MediaStreamTrack *GetTrack();
+
+    std::optional<RTCDtlsTransport *> GetTransport();
 
   private:
     PeerConnectionFactory *_factory;

@@ -10,6 +10,9 @@
 #include "python_webrtc/rtc_session_description.h"
 #include "python_webrtc/rtc_on_data_event.h"
 
+#include "webrtc/rtp_transceiver_init.h"
+#include "webrtc/rtp_encoding_parameters.h"
+
 namespace python_webrtc {
 
   void Models::Init(pybind11::module &m) {
@@ -20,5 +23,8 @@ namespace python_webrtc {
     RTCOnDataEvent::Init(m);
 
     // webrtc
+
+    bindRtpTransceiverInit(m);
+    bindRtpEncodingParameters(m);
   }
 }

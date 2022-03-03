@@ -8,13 +8,12 @@
 #pragma once
 
 #include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
 
 namespace python_webrtc {
 
-  class Models {
+  class DtlsTransportState {
   public:
     static void Init(pybind11::module &m);
   };
 
-}
+} // namespace python_webrtc
