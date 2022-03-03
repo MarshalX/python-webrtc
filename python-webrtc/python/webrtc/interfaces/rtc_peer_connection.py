@@ -105,6 +105,38 @@ class RTCPeerConnection(WebRTCObject):
 
         return RTCRtpSender._wrap(sender)
 
+    def add_transceiver(
+            self,
+            track_or_kind: Union['webrtc.MediaStreamTrack', 'webrtc.MediaType'],
+            init: Optional['webrtc.RtpTransceiverInit'] = None,
+    ) -> 'webrtc.RTCRtpTransceiver':
+        """Creates a new :obj:`webrtc.RTCRtpTransceiver` and adds it to the set of transceivers associated with the
+        connection. Each transceiver represents a bidirectional stream, with both an :obj:`webrtc.RTCRtpSender` and
+        an :obj:`webrtc.RTCRtpReceiver` associated with it.
+
+        Args:
+            track_or_kind (:obj:`webrtc.MediaStreamTrack`): A :obj:`webrtc.MediaStreamTrack` to associate with the
+                transceiver, or a member of :obj:`webrtc.MediaType` which is used as the kind of the receiver's track,
+                and by extension of the :obj:`webrtc.RTCRtpReceiver` itself.
+            init (:obj:`webrtc.RtpTransceiverInit`, optional): An object for specifying any options when creating
+                the new transceiver.
+
+        Returns:
+            :obj:`webrtc.RTCRtpSender`: The :obj:`webrtc.RTCRtpSender` object which will be used to
+            transmit the media data.
+         """
+        from webrtc import MediaType, RTCRtpTransceiver
+
+        if init:
+            init = init._native_obj
+
+        if isinstance(track_or_kind, MediaType):
+            transceiver = self._native_obj.addTransceiver(track_or_kind, init)
+        else:   # its wrapped track
+            transceiver = self._native_obj.addTransceiver(track_or_kind._native_obj, init)
+
+        return RTCRtpTransceiver._wrap(transceiver)
+
     def get_transceivers(self) -> List['webrtc.RTCRtpTransceiver']:
         """Returns a :obj:`list` of the :obj:`webrtc.RTCRtpTransceiver` objects being used to send and
         receive data on the connection.
@@ -167,6 +199,8 @@ class RTCPeerConnection(WebRTCObject):
     setRemoteDescription = set_remote_description
     #: Alias for :attr:`add_track`
     addTrack = add_track
+    #: Alias for :attr:`add_transceiver`
+    addTransceiver = add_transceiver
     #: Alias for :attr:`get_transceivers`
     getTransceivers = get_transceivers
     #: Alias for :attr:`get_senders`

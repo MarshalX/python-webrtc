@@ -45,7 +45,7 @@ namespace python_webrtc {
 
     std::string GetId();
 
-    std::string GetKind();
+    cricket::MediaType GetKind();
 
     webrtc::MediaStreamTrackInterface::TrackState GetReadyState();
 

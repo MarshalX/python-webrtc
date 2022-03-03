@@ -24,6 +24,8 @@ from .functions.get_user_media import getUserMedia, get_user_media
 from .models.rtc_session_description_init import RTCSessionDescriptionInit
 from .models.rtc_session_description import RTCSessionDescription
 from .models.rtc_on_data_event import RTCOnDataEvent
+from .models.rtp_encoding_parameters import RtpEncodingParameters
+from .models.rtp_transceiver_init import RtpTransceiverInit
 
 # exception
 PythonWebRTCExceptionBase = wrtc.PythonWebRTCExceptionBase
@@ -44,6 +46,7 @@ RTCIceRole = wrtc.RTCIceRole
 RTCIceTransportState = wrtc.RTCIceTransportState
 CricketIceGatheringState = wrtc.CricketIceGatheringState
 DtlsTransportState = wrtc.DtlsTransportState
+MediaType = wrtc.MediaType
 
 __all__ = [
     # exceptions
@@ -64,6 +67,7 @@ __all__ = [
     'RTCIceTransportState',
     'CricketIceGatheringState',
     'DtlsTransportState',
+    'MediaType',
     # base
     'WebRTCObject',
     # interfaces
@@ -83,4 +87,6 @@ __all__ = [
     'RTCSessionDescriptionInit',
     'RTCSessionDescription',
     'RTCOnDataEvent',
+    'RtpEncodingParameters',
+    'RtpTransceiverInit',
 ]

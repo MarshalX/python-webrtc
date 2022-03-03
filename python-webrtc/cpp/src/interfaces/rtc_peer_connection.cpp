@@ -72,6 +72,12 @@ namespace python_webrtc {
         .def("addTrack",
              pybind11::overload_cast<MediaStreamTrack &, const std::vector<MediaStream *> &>(
                  &RTCPeerConnection::AddTrack), pybind11::return_value_policy::reference)
+        .def("addTransceiver",
+             pybind11::overload_cast<cricket::MediaType, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &>(
+                 &RTCPeerConnection::AddTransceiver), pybind11::return_value_policy::reference)
+        .def("addTransceiver",
+             pybind11::overload_cast<MediaStreamTrack &, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &>(
+                 &RTCPeerConnection::AddTransceiver), pybind11::return_value_policy::reference)
         .def("getTransceivers", &RTCPeerConnection::GetTransceivers)
         .def("getSenders", &RTCPeerConnection::GetSenders)
         .def("getReceivers", &RTCPeerConnection::GetReceivers)
@@ -204,6 +210,44 @@ namespace python_webrtc {
     return RTCRtpSender::holder()->GetOrCreate(_factory, rtpSender);
   }
 
+  RTCRtpTransceiver *RTCPeerConnection::AddTransceiver(
+      cricket::MediaType kind, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &init
+  ) {
+    if (!_jinglePeerConnection) {
+      throw PythonWebRTCException("Cannot add transceiver; RTCPeerConnection is closed");
+    } else if (_jinglePeerConnection->GetConfiguration().sdp_semantics != webrtc::SdpSemantics::kUnifiedPlan) {
+      throw PythonWebRTCException("AddTransceiver is only available with Unified Plan SdpSemanticsAbort");
+    }
+
+    auto result = init ?
+                  _jinglePeerConnection->AddTransceiver(kind, init->get()) :
+                  _jinglePeerConnection->AddTransceiver(kind);
+    if (!result.ok()) {
+      throw wrapRTCError(result.error());
+    }
+
+    return RTCRtpTransceiver::holder()->GetOrCreate(_factory, result.value());
+  }
+
+  RTCRtpTransceiver *RTCPeerConnection::AddTransceiver(
+      MediaStreamTrack &track, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &init
+  ) {
+    if (!_jinglePeerConnection) {
+      throw PythonWebRTCException("Cannot add transceiver; RTCPeerConnection is closed");
+    } else if (_jinglePeerConnection->GetConfiguration().sdp_semantics != webrtc::SdpSemantics::kUnifiedPlan) {
+      throw PythonWebRTCException("AddTransceiver is only available with Unified Plan SdpSemanticsAbort");
+    }
+
+    auto result = init ?
+                  _jinglePeerConnection->AddTransceiver(track.track(), init->get()) :
+                  _jinglePeerConnection->AddTransceiver(track.track());
+    if (!result.ok()) {
+      throw wrapRTCError(result.error());
+    }
+
+    return RTCRtpTransceiver::holder()->GetOrCreate(_factory, result.value());
+  }
+
   std::vector<RTCRtpTransceiver *> RTCPeerConnection::GetTransceivers() {
     std::vector<RTCRtpTransceiver *> transceivers;
 
@@ -230,10 +274,10 @@ namespace python_webrtc {
   }
 
   std::vector<RTCRtpReceiver *> RTCPeerConnection::GetReceivers() {
-    std::vector<RTCRtpReceiver*> receivers;
+    std::vector<RTCRtpReceiver *> receivers;
 
     if (_jinglePeerConnection) {
-      for (const auto& receiver : _jinglePeerConnection->GetReceivers()) {
+      for (const auto &receiver: _jinglePeerConnection->GetReceivers()) {
         receivers.emplace_back(RTCRtpReceiver::holder()->GetOrCreate(_factory, receiver));
       }
     }

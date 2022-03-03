@@ -55,6 +55,6 @@ def test_sender_and_transceivers(pc, audio_stream):
     assert [sender] == pc.get_senders()
 
     receiver = transceiver.receiver
-    assert receiver.track.kind == 'audio'
+    assert receiver.track.kind == webrtc.MediaType.audio
 
     assert [receiver] == pc.get_receivers()
