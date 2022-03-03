@@ -7,13 +7,17 @@
 
 #pragma once
 
+#ifndef ABSL_USES_STD_OPTIONAL
+
 #include <pybind11/cast.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "absl/types/optional.h"
+#include <absl/types/optional.h>
 
 namespace pybind11::detail {
-  template<typename T> struct type_caster<absl::optional < T>>: public optional_caster <absl::optional<T>> {};
+  template<typename T> struct type_caster<absl::optional<T>>: public optional_caster<absl::optional<T>> {};
   template<> struct type_caster<absl::nullopt_t> : public void_caster<absl::nullopt_t> {};
 } // namespace pybind11::detail
+
+#endif // ABSL_USES_STD_OPTIONAL
