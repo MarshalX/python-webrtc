@@ -106,9 +106,9 @@ class RTCPeerConnection(WebRTCObject):
         return RTCRtpSender._wrap(sender)
 
     def add_transceiver(
-            self,
-            track_or_kind: Union['webrtc.MediaStreamTrack', 'webrtc.MediaType'],
-            init: Optional['webrtc.RtpTransceiverInit'] = None,
+        self,
+        track_or_kind: Union['webrtc.MediaStreamTrack', 'webrtc.MediaType'],
+        init: Optional['webrtc.RtpTransceiverInit'] = None,
     ) -> 'webrtc.RTCRtpTransceiver':
         """Creates a new :obj:`webrtc.RTCRtpTransceiver` and adds it to the set of transceivers associated with the
         connection. Each transceiver represents a bidirectional stream, with both an :obj:`webrtc.RTCRtpSender` and
@@ -124,7 +124,7 @@ class RTCPeerConnection(WebRTCObject):
         Returns:
             :obj:`webrtc.RTCRtpSender`: The :obj:`webrtc.RTCRtpSender` object which will be used to
             transmit the media data.
-         """
+        """
         from webrtc import MediaType, RTCRtpTransceiver
 
         if init:
@@ -132,7 +132,7 @@ class RTCPeerConnection(WebRTCObject):
 
         if isinstance(track_or_kind, MediaType):
             transceiver = self._native_obj.addTransceiver(track_or_kind, init)
-        else:   # its wrapped track
+        else:  # its wrapped track
             transceiver = self._native_obj.addTransceiver(track_or_kind._native_obj, init)
 
         return RTCRtpTransceiver._wrap(transceiver)

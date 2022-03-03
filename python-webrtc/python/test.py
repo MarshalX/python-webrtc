@@ -59,15 +59,10 @@ async def main():
     # transceivers = pc.get_transceivers()
 
     params = webrtc.RtpEncodingParameters(
-        max_bitrate=1234,
-        max_framerate=20,
-        rid="lolkek",
-        scale_resolution_down_by=2.0
+        max_bitrate=1234, max_framerate=20, rid="lolkek", scale_resolution_down_by=2.0
     )
     init = webrtc.RtpTransceiverInit(
-        direction=webrtc.TransceiverDirection.recvonly,
-        send_encodings=[params],
-        streams=[stream]
+        direction=webrtc.TransceiverDirection.recvonly, send_encodings=[params], streams=[stream]
     )
 
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)

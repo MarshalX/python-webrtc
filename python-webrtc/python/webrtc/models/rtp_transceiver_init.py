@@ -20,10 +20,10 @@ class RtpTransceiverInit(WebRTCObject):
     _class = wrtc.RtpTransceiverInit
 
     def __init__(
-            self,
-            direction: Optional['webrtc.RtpTransceiverDirection'] = None,
-            send_encodings: Optional[List['webrtc.RtpEncodingParameters']] = None,
-            streams: Optional[List['webrtc.MediaStream']] = None,
+        self,
+        direction: Optional['webrtc.RtpTransceiverDirection'] = None,
+        send_encodings: Optional[List['webrtc.RtpEncodingParameters']] = None,
+        streams: Optional[List['webrtc.MediaStream']] = None,
     ):
         super().__init__()
 

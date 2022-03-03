@@ -16,12 +16,12 @@ class RtpEncodingParameters(WebRTCObject):
     _class = wrtc.RtpEncodingParameters
 
     def __init__(
-            self,
-            active: Optional[bool] = True,
-            max_bitrate: Optional[int] = None,
-            max_framerate: Optional[float] = None,
-            rid: Optional[str] = None,
-            scale_resolution_down_by: Optional[float] = None
+        self,
+        active: Optional[bool] = True,
+        max_bitrate: Optional[int] = None,
+        max_framerate: Optional[float] = None,
+        rid: Optional[str] = None,
+        scale_resolution_down_by: Optional[float] = None,
     ):
         # TODO so hacky ;d need to be able to wrap already created native objects
         if isinstance(active, self._class):
