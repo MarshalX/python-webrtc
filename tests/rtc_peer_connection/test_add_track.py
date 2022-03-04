@@ -9,6 +9,8 @@ import pytest
 
 import webrtc
 
+from tests.helpers import exchange_offer_answer
+
 
 def test_1(pc, audio_stream):
     """addTrack when pc is closed should throw PythonWebRTCException with invalid state"""
@@ -116,12 +118,7 @@ async def test_8(caller, callee, audio_stream):
     track, *_ = audio_stream.get_tracks()
     transceiver = caller.add_transceiver(track)
 
-    offer = await caller.create_offer()
-    await caller.set_local_description(offer)
-    await callee.set_remote_description(offer)
-    answer = await callee.create_answer()
-    await callee.set_local_description(answer)
-    await caller.set_remote_description(answer)
+    await exchange_offer_answer(caller, callee)
 
     assert transceiver.current_direction == webrtc.TransceiverDirection.sendonly
 
@@ -160,12 +157,7 @@ async def test_10(caller, callee, audio_stream, audio_stream2):
     track, *_ = audio_stream.get_tracks()
     transceiver = caller.add_transceiver(track)
 
-    offer = await caller.create_offer()
-    await caller.set_local_description(offer)
-    await callee.set_remote_description(offer)
-    answer = await callee.create_answer()
-    await callee.set_local_description(answer)
-    await caller.set_remote_description(answer)
+    await exchange_offer_answer(caller, callee)
 
     assert transceiver.current_direction == webrtc.TransceiverDirection.sendonly
 
@@ -177,12 +169,7 @@ async def test_10(caller, callee, audio_stream, audio_stream2):
 
     caller.add_track(second_track)
 
-    offer = await caller.create_offer()
-    await caller.set_local_description(offer)
-    await callee.set_remote_description(offer)
-    answer = await callee.create_answer()
-    await callee.set_local_description(answer)
-    await caller.set_remote_description(answer)
+    await exchange_offer_answer(caller, callee)
 
     first_transceiver, second_transceiver, *_ = caller.get_transceivers()
     assert first_transceiver.receiver.transport == second_transceiver.receiver.transport
