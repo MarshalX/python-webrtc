@@ -13,7 +13,7 @@ test:
 	@${RUN_TESTS} ${TESTS_DIR} ${RUN_TESTS_OPTS} $(O)
 
 stub:
-	python -m "pybind11_stubgen" wrtc
+	python -m "pybind11_stubgen" wrtc --no-setup-py --root-module-suffix=""
 
 doc:
 	cd docs && make gen && make html
