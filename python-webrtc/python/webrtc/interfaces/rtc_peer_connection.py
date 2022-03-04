@@ -125,15 +125,15 @@ class RTCPeerConnection(WebRTCObject):
             :obj:`webrtc.RTCRtpSender`: The :obj:`webrtc.RTCRtpSender` object which will be used to
             transmit the media data.
         """
-        from webrtc import MediaType, RTCRtpTransceiver
+        from webrtc import MediaStreamTrack, RTCRtpTransceiver
 
         if init:
             init = init._native_obj
 
-        if isinstance(track_or_kind, MediaType):
-            transceiver = self._native_obj.addTransceiver(track_or_kind, init)
-        else:  # its wrapped track
+        if isinstance(track_or_kind, MediaStreamTrack):
             transceiver = self._native_obj.addTransceiver(track_or_kind._native_obj, init)
+        else:  # its media kind
+            transceiver = self._native_obj.addTransceiver(track_or_kind, init)
 
         return RTCRtpTransceiver._wrap(transceiver)
 
