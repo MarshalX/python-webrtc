@@ -103,8 +103,8 @@ namespace python_webrtc {
 
 //     TODO bind RTCOfferOptions (voice_activity_detection, iceRestart, offerToReceiveAudio, offerToReceiveVideo)
     auto options = webrtc::PeerConnectionInterface::RTCOfferAnswerOptions();
-    options.offer_to_receive_audio = 1;
-    options.offer_to_receive_video = 0;
+//    options.offer_to_receive_audio = 1;
+//    options.offer_to_receive_video = 0;
 
     _jinglePeerConnection->CreateOffer(observer, options);
   }
