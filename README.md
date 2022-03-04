@@ -161,6 +161,7 @@ Contributions of any sizes are welcome.
 ### Special thanks to
 
 - [Authors](https://github.com/node-webrtc/node-webrtc/blob/develop/AUTHORS) of [node-webrtc](https://github.com/node-webrtc/node-webrtc).
+- Authors of [web-platform-tests](https://github.com/web-platform-tests/wpt).
 
 ### License
 
