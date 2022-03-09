@@ -23,7 +23,9 @@ class RTCDtlsTransport(WebRTCObject):
     @property
     def ice_transport(self) -> 'webrtc.RTCIceTransport':
         """:obj:`webrtc.RTCIceTransport`: Returns a reference to the underlying :obj:`webrtc.RTCIceTransport` object."""
-        return self._native_obj.iceTransport
+        from webrtc import RTCIceTransport
+
+        return RTCIceTransport._wrap(self._native_obj.iceTransport)
 
     @property
     def state(self) -> 'webrtc.DtlsTransportState':
