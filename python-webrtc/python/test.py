@@ -39,6 +39,7 @@ async def main():
         wrtc.RTCIceTransportState,
         wrtc.CricketIceGatheringState,
         wrtc.DtlsTransportState,
+        wrtc.SctpTransportState,
         wrtc.MediaType,
     ]
     for enum in enums:

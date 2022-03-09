@@ -31,12 +31,14 @@ __all__ = [
     "RTCRtpReceiver",
     "RTCRtpSender",
     "RTCRtpTransceiver",
+    "RTCSctpTransport",
     "RTCSdpType",
     "RTCSessionDescription",
     "RTCSessionDescriptionInit",
     "RTP",
     "RtpEncodingParameters",
     "RtpTransceiverInit",
+    "SctpTransportState",
     "SdpParseException",
     "TransceiverDirection",
     "answer",
@@ -724,6 +726,28 @@ class RTCRtpTransceiver():
         :type: bool
         """
     pass
+class RTCSctpTransport():
+    @property
+    def maxChannels(self) -> typing.Optional[int]:
+        """
+        :type: typing.Optional[int]
+        """
+    @property
+    def maxMessageSize(self) -> typing.Optional[float]:
+        """
+        :type: typing.Optional[float]
+        """
+    @property
+    def state(self) -> SctpTransportState:
+        """
+        :type: SctpTransportState
+        """
+    @property
+    def transport(self) -> RTCDtlsTransport:
+        """
+        :type: RTCDtlsTransport
+        """
+    pass
 class RTCSdpType():
     """
     Members:
@@ -871,6 +895,43 @@ class RtpTransceiverInit():
     def streamIds(self, arg0: typing.List[str]) -> None:
         pass
     pass
+class SctpTransportState():
+    """
+    Members:
+
+      new
+
+      connecting
+
+      connected
+
+      closed
+    """
+    def __eq__(self, other: object) -> bool: ...
+    def __getstate__(self) -> int: ...
+    def __hash__(self) -> int: ...
+    def __index__(self) -> int: ...
+    def __init__(self, value: int) -> None: ...
+    def __int__(self) -> int: ...
+    def __ne__(self, other: object) -> bool: ...
+    def __repr__(self) -> str: ...
+    def __setstate__(self, state: int) -> None: ...
+    @property
+    def name(self) -> str:
+        """
+        :type: str
+        """
+    @property
+    def value(self) -> int:
+        """
+        :type: int
+        """
+    __members__: dict # value = {'new': <SctpTransportState.new: 0>, 'connecting': <SctpTransportState.connecting: 1>, 'connected': <SctpTransportState.connected: 2>, 'closed': <SctpTransportState.closed: 3>}
+    closed: wrtc.SctpTransportState # value = <SctpTransportState.closed: 3>
+    connected: wrtc.SctpTransportState # value = <SctpTransportState.connected: 2>
+    connecting: wrtc.SctpTransportState # value = <SctpTransportState.connecting: 1>
+    new: wrtc.SctpTransportState # value = <SctpTransportState.new: 0>
+    pass
 class SdpParseException(PythonWebRTCExceptionBase, Exception, BaseException):
     pass
 class TransceiverDirection():
@@ -922,11 +983,11 @@ RTP: wrtc.RTCIceComponent # value = <RTCIceComponent.RTP: 0>
 answer: wrtc.RTCSdpType # value = <RTCSdpType.answer: 2>
 audio: wrtc.MediaType # value = <MediaType.audio: 0>
 checking: wrtc.RTCIceTransportState # value = <RTCIceTransportState.checking: 1>
-closed: wrtc.DtlsTransportState # value = <DtlsTransportState.closed: 3>
+closed: wrtc.SctpTransportState # value = <SctpTransportState.closed: 3>
 complete: wrtc.CricketIceGatheringState # value = <CricketIceGatheringState.complete: 2>
 completed: wrtc.RTCIceTransportState # value = <RTCIceTransportState.completed: 3>
-connected: wrtc.DtlsTransportState # value = <DtlsTransportState.connected: 2>
-connecting: wrtc.DtlsTransportState # value = <DtlsTransportState.connecting: 1>
+connected: wrtc.SctpTransportState # value = <SctpTransportState.connected: 2>
+connecting: wrtc.SctpTransportState # value = <SctpTransportState.connecting: 1>
 controlled: wrtc.RTCIceRole # value = <RTCIceRole.controlled: 1>
 controlling: wrtc.RTCIceRole # value = <RTCIceRole.controlling: 0>
 data: wrtc.MediaType # value = <MediaType.data: 2>
@@ -939,7 +1000,7 @@ initializing: wrtc.MediaStreamSourceState # value = <MediaStreamSourceState.init
 live: wrtc.MediaStreamSourceState # value = <MediaStreamSourceState.live: 1>
 max: wrtc.RTCIceConnectionState # value = <RTCIceConnectionState.max: 7>
 muted: wrtc.MediaStreamSourceState # value = <MediaStreamSourceState.muted: 3>
-new: wrtc.DtlsTransportState # value = <DtlsTransportState.new: 0>
+new: wrtc.SctpTransportState # value = <SctpTransportState.new: 0>
 offer: wrtc.RTCSdpType # value = <RTCSdpType.offer: 0>
 pranswer: wrtc.RTCSdpType # value = <RTCSdpType.pranswer: 1>
 recvonly: wrtc.TransceiverDirection # value = <TransceiverDirection.recvonly: 2>

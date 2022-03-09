@@ -12,6 +12,7 @@
 #include "media_stream.h"
 #include "rtc_ice_transport.h"
 #include "rtc_dtls_transport.h"
+#include "rtc_sctp_transport.h"
 #include "rtc_rtp_sender.h"
 #include "rtc_rtp_receiver.h"
 #include "rtc_rtp_transceiver.h"
@@ -26,6 +27,7 @@ namespace python_webrtc {
     MediaStream::Init(m);
     RTCIceTransport::Init(m);
     RTCDtlsTransport::Init(m);
+    RTCSctpTransport::Init(m);
     RTCRtpSender::Init(m);
     RTCRtpReceiver::Init(m);
     RTCRtpTransceiver::Init(m);

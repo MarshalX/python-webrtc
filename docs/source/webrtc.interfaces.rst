@@ -21,3 +21,4 @@ Submodules
    webrtc.interfaces.rtc_rtp_receiver
    webrtc.interfaces.rtc_rtp_sender
    webrtc.interfaces.rtc_rtp_transceiver
+   webrtc.interfaces.rtc_sctp_transport
