@@ -185,9 +185,34 @@ class RTCPeerConnection(WebRTCObject):
 
         return RTCRtpReceiver._wrap_many(self._native_obj.getReceivers())
 
+    def remove_track(self, sender: 'webrtc.RTCRtpSender') -> None:
+        """Tells the local end of the connection to stop sending media from the specified track, without
+        actually removing the corresponding :obj:`webrtc.RTCRtpSender` from the list of senders as reported
+        by :attr:`get_senders``. If the track is already stopped, or is not in the connection's senders list,
+        this method has no effect."""
+        return self._native_obj.removeTrack(sender._native_obj)
+
+    def restart_ice(self) -> None:
+        """Allows to easily request that ICE candidate gathering be redone on both ends of the connection.
+        This simplifies the process by allowing the same method to be used by either the caller or the receiver
+        to trigger an ICE restart."""
+        return self._native_obj.restartIce()
+
     def close(self):
         """Closes the current peer connection."""
         return self._native_obj.close()
+
+    @property
+    def sctp(self) -> Optional['webrtc.RTCSctpTransport']:
+        """:obj:`webrtc.RTCSctpTransport`, optional: An object describing the SCTP transport layer over which SCTP
+        data is being sent and received. If SCTP hasn't been negotiated, this value is :obj:`None`"""
+        from webrtc import RTCSctpTransport
+
+        sctp = self._native_obj.sctp
+        if sctp:
+            return RTCSctpTransport._wrap(sctp)
+
+        return None
 
     #: Alias for :attr:`create_offer`
     createOffer = create_offer
@@ -207,3 +232,7 @@ class RTCPeerConnection(WebRTCObject):
     getSenders = get_senders
     #: Alias for :attr:`get_receivers`
     getReceivers = get_receivers
+    #: Alias for :attr:`remove_track`
+    removeTrack = remove_track
+    #: Alias for :attr:`restart_ice`
+    restartIce = restart_ice

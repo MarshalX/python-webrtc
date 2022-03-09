@@ -81,6 +81,9 @@ namespace python_webrtc {
         .def("getTransceivers", &RTCPeerConnection::GetTransceivers)
         .def("getSenders", &RTCPeerConnection::GetSenders)
         .def("getReceivers", &RTCPeerConnection::GetReceivers)
+        .def_property_readonly("sctp", &RTCPeerConnection::GetSctp)
+        .def("restartIce", &RTCPeerConnection::RestartIce)
+        .def("removeTrack", &RTCPeerConnection::RemoveTrack)
         .def("close", &RTCPeerConnection::Close);
   }
 
@@ -283,6 +286,35 @@ namespace python_webrtc {
     }
 
     return receivers;
+  }
+
+  std::optional<RTCSctpTransport *> RTCPeerConnection::GetSctp() {
+    if (_jinglePeerConnection && _jinglePeerConnection->GetSctpTransport()) {
+      return RTCSctpTransport::holder()->GetOrCreate(_factory, _jinglePeerConnection->GetSctpTransport());
+    }
+
+    return {};
+  }
+
+  void RTCPeerConnection::RestartIce() {
+    if (_jinglePeerConnection) {
+      _jinglePeerConnection->RestartIce();
+    }
+  }
+
+  void RTCPeerConnection::RemoveTrack(RTCRtpSender &sender) {
+    if (!_jinglePeerConnection) {
+      throw PythonWebRTCException("Cannot remove track; RTCPeerConnection is closed");
+    }
+
+    auto senders = _jinglePeerConnection->GetSenders();
+    if (std::find(senders.begin(), senders.end(), sender.sender()) == senders.end()) {
+      throw PythonWebRTCException("Cannot remove track because sender not found in senders of PeerConnection");
+    }
+
+    if (!_jinglePeerConnection->RemoveTrack(sender.sender())) {
+      throw PythonWebRTCException("Cannot remove track");
+    }
   }
 
   void RTCPeerConnection::Close() {

@@ -20,6 +20,7 @@
 #include "media_stream.h"
 #include "rtc_rtp_sender.h"
 #include "rtc_rtp_transceiver.h"
+#include "rtc_sctp_transport.h"
 
 namespace webrtc {
   struct PeerConnectionDependencies;
@@ -64,6 +65,12 @@ namespace python_webrtc {
     std::vector<RTCRtpSender *> GetSenders();
 
     std::vector<RTCRtpReceiver *> GetReceivers();
+
+    std::optional<RTCSctpTransport *> GetSctp();
+
+    void RestartIce();
+
+    void RemoveTrack(RTCRtpSender &);
 
     void SaveLastSdp(const RTCSessionDescriptionInit &lastSdp);
 
