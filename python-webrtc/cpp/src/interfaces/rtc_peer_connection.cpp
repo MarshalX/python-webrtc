@@ -84,7 +84,12 @@ namespace python_webrtc {
         .def_property_readonly("sctp", &RTCPeerConnection::GetSctp)
         .def("restartIce", &RTCPeerConnection::RestartIce)
         .def("removeTrack", &RTCPeerConnection::RemoveTrack)
-        .def("close", &RTCPeerConnection::Close);
+        .def("close", &RTCPeerConnection::Close)
+        .def_property_readonly("connectionState", &RTCPeerConnection::GetConnectionState);
+        // TODO bind enums
+//        .def_property_readonly("signalingState", &RTCPeerConnection::GetSignalingState)
+//        .def_property_readonly("iceConnectionState", &RTCPeerConnection::GetIceConnectionState)
+//        .def_property_readonly("iceGatheringState", &RTCPeerConnection::GetIceGatheringState);
   }
 
   void RTCPeerConnection::SaveLastSdp(const RTCSessionDescriptionInit &lastSdp) {
@@ -336,6 +341,38 @@ namespace python_webrtc {
         PeerConnectionFactory::Release();
       }
       _factory = nullptr;
+    }
+  }
+
+  webrtc::PeerConnectionInterface::PeerConnectionState RTCPeerConnection::GetConnectionState() {
+    if (_jinglePeerConnection) {
+      return _jinglePeerConnection->peer_connection_state();
+    } else {
+      return webrtc::PeerConnectionInterface::PeerConnectionState::kClosed;
+    }
+  }
+
+  webrtc::PeerConnectionInterface::SignalingState RTCPeerConnection::GetSignalingState() {
+    if (_jinglePeerConnection) {
+      return _jinglePeerConnection->signaling_state();
+    } else {
+      return webrtc::PeerConnectionInterface::SignalingState::kClosed;
+    }
+  }
+
+  webrtc::PeerConnectionInterface::IceConnectionState RTCPeerConnection::GetIceConnectionState() {
+    if (_jinglePeerConnection) {
+      return _jinglePeerConnection->standardized_ice_connection_state();
+    } else {
+      return webrtc::PeerConnectionInterface::IceConnectionState::kIceConnectionClosed;
+    }
+  }
+
+  webrtc::PeerConnectionInterface::IceGatheringState RTCPeerConnection::GetIceGatheringState() {
+    if (_jinglePeerConnection) {
+      return _jinglePeerConnection->ice_gathering_state();
+    } else {
+      return webrtc::PeerConnectionInterface::IceGatheringState::kIceGatheringComplete;
     }
   }
 

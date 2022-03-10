@@ -76,6 +76,14 @@ namespace python_webrtc {
 
     void Close();
 
+    webrtc::PeerConnectionInterface::PeerConnectionState GetConnectionState();
+
+    webrtc::PeerConnectionInterface::SignalingState GetSignalingState();
+
+    webrtc::PeerConnectionInterface::IceConnectionState GetIceConnectionState();
+
+    webrtc::PeerConnectionInterface::IceGatheringState GetIceGatheringState();
+
     // PeerConnectionObserver implementation.
     void OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState new_state) override;
 
