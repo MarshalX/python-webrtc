@@ -12,35 +12,43 @@ jobs:
   build_and_test:
     strategy:
       matrix:
-        os: [ ubuntu-20.04, macos-11, windows-2019 ]
+        os: [ ubuntu-20.04, macos-12, windows-2019 ]
 
     runs-on: ${{matrix.os}}
     continue-on-error: true
 
-    defaults:
-      run:
-        shell: bash
-
     steps:
-    - name: Checkout repository.
-      uses: actions/checkout@v2
-      with:
-        submodules: recursive
+      - name: Checkout repository.
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
 
-    - name: Setup Python.
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.9
+      - name: Move repository to disk C.
+        if: matrix.os == 'windows-2019'
+        run: xcopy . C:\src\ /E/H
 
-    - name: Install Python Dev.
-      if: matrix.os == 'ubuntu-20.04'
-      run: sudo apt install -y python3.9-dev
+      - name: Setup Python.
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
 
-    - name: Build and install package.
-      run: python setup.py install
+      - name: Build and install package.
+        if: matrix.os == 'ubuntu-20.04'
+        run: |
+          python setup.py install
+          sudo apt install -y python3.9-dev
 
-    - name: Install dev dependencies.
-      run: pip install -r requirements-dev.txt
+      - name: Build and install package.
+        if: matrix.os == 'macos-12'
+        run: python setup.py install
 
-    - name: Run tests.
-      run: pytest tests -vv
+      - name: Build and install package.
+        if: matrix.os == 'windows-2019'
+        working-directory: "C:/src"
+        run: python setup.py install
+
+      - name: Install dev dependencies.
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests.
+        run: pytest tests -vv
