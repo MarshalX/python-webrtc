@@ -37,9 +37,9 @@ class MediaStreamTrack(WebRTCObject):
         return self._native_obj.id
 
     @property
-    def kind(self) -> str:
-        """:obj:`str`: "audio" if the track is an audio track and to "video", if it is a video track.
-        It doesn't change if the track is deassociated from its source."""
+    def kind(self) -> 'webrtc.MediaType':
+        """:obj:`webrtc.MediaType`: Indicating type of media. Audio or video. It doesn't change if the track is
+        deassociated from its source."""
         return self._native_obj.kind
 
     @property

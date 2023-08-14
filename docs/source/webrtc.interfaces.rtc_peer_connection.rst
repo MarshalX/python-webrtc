@@ -1,5 +1,5 @@
-webrtc.interfaces.rtc\_peer\_connection module
-==============================================
+webrtc.interfaces.rtc\_peer\_connection
+=======================================
 
 .. automodule:: webrtc.interfaces.rtc_peer_connection
    :members:

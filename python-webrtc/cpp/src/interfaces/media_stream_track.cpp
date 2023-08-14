@@ -72,8 +72,14 @@ namespace python_webrtc {
     return _track->id();
   }
 
-  std::string MediaStreamTrack::GetKind() {
-    return _track->kind();
+  cricket::MediaType MediaStreamTrack::GetKind() {
+    if (_track->kind() == webrtc::MediaStreamTrackInterface::kAudioKind) {
+      return cricket::MediaType::MEDIA_TYPE_AUDIO;
+    } else if (_track->kind() == webrtc::MediaStreamTrackInterface::kVideoKind) {
+      return cricket::MediaType::MEDIA_TYPE_VIDEO;
+    }
+
+    return cricket::MediaType::MEDIA_TYPE_UNSUPPORTED;
   }
 
   webrtc::MediaStreamTrackInterface::TrackState MediaStreamTrack::GetReadyState() {

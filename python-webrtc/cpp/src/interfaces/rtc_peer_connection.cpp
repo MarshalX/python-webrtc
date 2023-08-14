@@ -21,6 +21,7 @@ namespace python_webrtc {
 
 //    TODO get from python
     auto configuration = webrtc::PeerConnectionInterface::RTCConfiguration();
+    configuration.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
 
     auto portAllocator = std::unique_ptr<cricket::PortAllocator>(new cricket::BasicPortAllocator(
         _factory->getNetworkManager(),
@@ -71,7 +72,24 @@ namespace python_webrtc {
         .def("addTrack",
              pybind11::overload_cast<MediaStreamTrack &, const std::vector<MediaStream *> &>(
                  &RTCPeerConnection::AddTrack), pybind11::return_value_policy::reference)
-        .def("close", &RTCPeerConnection::Close);
+        .def("addTransceiver",
+             pybind11::overload_cast<cricket::MediaType, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &>(
+                 &RTCPeerConnection::AddTransceiver), pybind11::return_value_policy::reference)
+        .def("addTransceiver",
+             pybind11::overload_cast<MediaStreamTrack &, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &>(
+                 &RTCPeerConnection::AddTransceiver), pybind11::return_value_policy::reference)
+        .def("getTransceivers", &RTCPeerConnection::GetTransceivers)
+        .def("getSenders", &RTCPeerConnection::GetSenders)
+        .def("getReceivers", &RTCPeerConnection::GetReceivers)
+        .def_property_readonly("sctp", &RTCPeerConnection::GetSctp)
+        .def("restartIce", &RTCPeerConnection::RestartIce)
+        .def("removeTrack", &RTCPeerConnection::RemoveTrack)
+        .def("close", &RTCPeerConnection::Close)
+        .def_property_readonly("connectionState", &RTCPeerConnection::GetConnectionState);
+        // TODO bind enums
+//        .def_property_readonly("signalingState", &RTCPeerConnection::GetSignalingState)
+//        .def_property_readonly("iceConnectionState", &RTCPeerConnection::GetIceConnectionState)
+//        .def_property_readonly("iceGatheringState", &RTCPeerConnection::GetIceGatheringState);
   }
 
   void RTCPeerConnection::SaveLastSdp(const RTCSessionDescriptionInit &lastSdp) {
@@ -93,8 +111,8 @@ namespace python_webrtc {
 
 //     TODO bind RTCOfferOptions (voice_activity_detection, iceRestart, offerToReceiveAudio, offerToReceiveVideo)
     auto options = webrtc::PeerConnectionInterface::RTCOfferAnswerOptions();
-    options.offer_to_receive_audio = 1;
-    options.offer_to_receive_video = 0;
+//    options.offer_to_receive_audio = 1;
+//    options.offer_to_receive_video = 0;
 
     _jinglePeerConnection->CreateOffer(observer, options);
   }
@@ -200,6 +218,110 @@ namespace python_webrtc {
     return RTCRtpSender::holder()->GetOrCreate(_factory, rtpSender);
   }
 
+  RTCRtpTransceiver *RTCPeerConnection::AddTransceiver(
+      cricket::MediaType kind, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &init
+  ) {
+    if (!_jinglePeerConnection) {
+      throw PythonWebRTCException("Cannot add transceiver; RTCPeerConnection is closed");
+    } else if (_jinglePeerConnection->GetConfiguration().sdp_semantics != webrtc::SdpSemantics::kUnifiedPlan) {
+      throw PythonWebRTCException("AddTransceiver is only available with Unified Plan SdpSemanticsAbort");
+    }
+
+    auto result = init ?
+                  _jinglePeerConnection->AddTransceiver(kind, init->get()) :
+                  _jinglePeerConnection->AddTransceiver(kind);
+    if (!result.ok()) {
+      throw wrapRTCError(result.error());
+    }
+
+    return RTCRtpTransceiver::holder()->GetOrCreate(_factory, result.value());
+  }
+
+  RTCRtpTransceiver *RTCPeerConnection::AddTransceiver(
+      MediaStreamTrack &track, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &init
+  ) {
+    if (!_jinglePeerConnection) {
+      throw PythonWebRTCException("Cannot add transceiver; RTCPeerConnection is closed");
+    } else if (_jinglePeerConnection->GetConfiguration().sdp_semantics != webrtc::SdpSemantics::kUnifiedPlan) {
+      throw PythonWebRTCException("AddTransceiver is only available with Unified Plan SdpSemanticsAbort");
+    }
+
+    auto result = init ?
+                  _jinglePeerConnection->AddTransceiver(track.track(), init->get()) :
+                  _jinglePeerConnection->AddTransceiver(track.track());
+    if (!result.ok()) {
+      throw wrapRTCError(result.error());
+    }
+
+    return RTCRtpTransceiver::holder()->GetOrCreate(_factory, result.value());
+  }
+
+  std::vector<RTCRtpTransceiver *> RTCPeerConnection::GetTransceivers() {
+    std::vector<RTCRtpTransceiver *> transceivers;
+
+    auto isUnified = _jinglePeerConnection->GetConfiguration().sdp_semantics == webrtc::SdpSemantics::kUnifiedPlan;
+    if (_jinglePeerConnection && isUnified) {
+      for (const auto &transceiver: _jinglePeerConnection->GetTransceivers()) {
+        transceivers.emplace_back(RTCRtpTransceiver::holder()->GetOrCreate(_factory, transceiver));
+      }
+    }
+
+    return transceivers;
+  }
+
+  std::vector<RTCRtpSender *> RTCPeerConnection::GetSenders() {
+    std::vector<RTCRtpSender *> senders;
+
+    if (_jinglePeerConnection) {
+      for (const auto &sender: _jinglePeerConnection->GetSenders()) {
+        senders.emplace_back(RTCRtpSender::holder()->GetOrCreate(_factory, sender));
+      }
+    }
+
+    return senders;
+  }
+
+  std::vector<RTCRtpReceiver *> RTCPeerConnection::GetReceivers() {
+    std::vector<RTCRtpReceiver *> receivers;
+
+    if (_jinglePeerConnection) {
+      for (const auto &receiver: _jinglePeerConnection->GetReceivers()) {
+        receivers.emplace_back(RTCRtpReceiver::holder()->GetOrCreate(_factory, receiver));
+      }
+    }
+
+    return receivers;
+  }
+
+  std::optional<RTCSctpTransport *> RTCPeerConnection::GetSctp() {
+    if (_jinglePeerConnection && _jinglePeerConnection->GetSctpTransport()) {
+      return RTCSctpTransport::holder()->GetOrCreate(_factory, _jinglePeerConnection->GetSctpTransport());
+    }
+
+    return {};
+  }
+
+  void RTCPeerConnection::RestartIce() {
+    if (_jinglePeerConnection) {
+      _jinglePeerConnection->RestartIce();
+    }
+  }
+
+  void RTCPeerConnection::RemoveTrack(RTCRtpSender &sender) {
+    if (!_jinglePeerConnection) {
+      throw PythonWebRTCException("Cannot remove track; RTCPeerConnection is closed");
+    }
+
+    auto senders = _jinglePeerConnection->GetSenders();
+    if (std::find(senders.begin(), senders.end(), sender.sender()) == senders.end()) {
+      throw PythonWebRTCException("Cannot remove track because sender not found in senders of PeerConnection");
+    }
+
+    if (!_jinglePeerConnection->RemoveTrack(sender.sender())) {
+      throw PythonWebRTCException("Cannot remove track");
+    }
+  }
+
   void RTCPeerConnection::Close() {
     if (_jinglePeerConnection) {
       _jinglePeerConnection->Close();
@@ -219,6 +341,38 @@ namespace python_webrtc {
         PeerConnectionFactory::Release();
       }
       _factory = nullptr;
+    }
+  }
+
+  webrtc::PeerConnectionInterface::PeerConnectionState RTCPeerConnection::GetConnectionState() {
+    if (_jinglePeerConnection) {
+      return _jinglePeerConnection->peer_connection_state();
+    } else {
+      return webrtc::PeerConnectionInterface::PeerConnectionState::kClosed;
+    }
+  }
+
+  webrtc::PeerConnectionInterface::SignalingState RTCPeerConnection::GetSignalingState() {
+    if (_jinglePeerConnection) {
+      return _jinglePeerConnection->signaling_state();
+    } else {
+      return webrtc::PeerConnectionInterface::SignalingState::kClosed;
+    }
+  }
+
+  webrtc::PeerConnectionInterface::IceConnectionState RTCPeerConnection::GetIceConnectionState() {
+    if (_jinglePeerConnection) {
+      return _jinglePeerConnection->standardized_ice_connection_state();
+    } else {
+      return webrtc::PeerConnectionInterface::IceConnectionState::kIceConnectionClosed;
+    }
+  }
+
+  webrtc::PeerConnectionInterface::IceGatheringState RTCPeerConnection::GetIceGatheringState() {
+    if (_jinglePeerConnection) {
+      return _jinglePeerConnection->ice_gathering_state();
+    } else {
+      return webrtc::PeerConnectionInterface::IceGatheringState::kIceGatheringComplete;
     }
   }
 

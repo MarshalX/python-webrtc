@@ -10,11 +10,11 @@
 namespace python_webrtc {
 
   static MediaStream *GetUserMedia() {
-    // TODO GetUserMediaImpl should be asynced method ?
     auto factory = PeerConnectionFactory::GetOrCreateDefault();
     auto stream = factory->factory()->CreateLocalMediaStream(rtc::CreateRandomUuid());
 
-    // TODO get from bound MediaStreamConstraints
+    // TODO (MarshalX) get from bound MediaStreamConstraints
+    // https://github.com/MarshalX/python-webrtc/issues/169
     auto audio = true;
     auto video = false;
 
@@ -26,7 +26,8 @@ namespace python_webrtc {
     }
 
     if (video) {
-//      TODO create RTCVideoTrackSource
+//      TODO (MarshalX) create RTCVideoTrackSource
+//      https://github.com/MarshalX/python-webrtc/issues/170
 //      auto source = ... RTCVideoTrackSource()
 //      auto track = factory->factory()->CreateVideoTrack(rtc::CreateRandomUuid(), source);
 //      stream->AddTrack(track);

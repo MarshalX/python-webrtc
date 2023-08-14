@@ -2,7 +2,6 @@
 line-length = 120
 skip-string-normalization=true
 target-version = ['py37']
-include = '\.pyi?$'
 exclude = '''
 (
   /(
@@ -17,5 +16,6 @@ exclude = '''
     | build
     | dist
   )/
+  | .+\.pyi$
 )
 '''

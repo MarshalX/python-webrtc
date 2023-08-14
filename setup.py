@@ -53,10 +53,12 @@ class CMakeBuild(build_ext):
         manylinux_inside = os.environ.get('MANYLINUX_INSIDE')
         if manylinux_inside:
             # using gcc 7.5 instead of default (Debian 9) 6.3
-            cmake_args.extend([
-                '-DCMAKE_C_COMPILER=/usr/local/bin/gcc',
-                '-DCMAKE_CXX_COMPILER=/usr/local/bin/g++',
-            ])
+            cmake_args.extend(
+                [
+                    '-DCMAKE_C_COMPILER=/usr/local/bin/gcc',
+                    '-DCMAKE_CXX_COMPILER=/usr/local/bin/g++',
+                ]
+            )
 
         build_args = []
         # Adding CMake arguments set as environment variable
@@ -97,9 +99,7 @@ class CMakeBuild(build_ext):
 
             # Multi-config generators have a different way to specify configs
             if not single_config:
-                cmake_args += [
-                    f'-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{cfg.upper()}={extdir}'
-                ]
+                cmake_args += [f'-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{cfg.upper()}={extdir}']
                 build_args += ['--config', cfg]
 
         if sys.platform.startswith('darwin'):
@@ -120,12 +120,8 @@ class CMakeBuild(build_ext):
         if not os.path.exists(self.build_temp):
             os.makedirs(self.build_temp)
 
-        subprocess.check_call(
-            ['cmake', ext.sourcedir] + cmake_args, cwd=self.build_temp
-        )
-        subprocess.check_call(
-            ['cmake', '--build', '.'] + build_args, cwd=self.build_temp
-        )
+        subprocess.check_call(['cmake', ext.sourcedir] + cmake_args, cwd=self.build_temp)
+        subprocess.check_call(['cmake', '--build', '.'] + build_args, cwd=self.build_temp)
 
 
 with open(os.path.join(base_path, 'CMakeLists.txt'), 'r', encoding='utf-8') as f:
@@ -140,7 +136,7 @@ with open(os.path.join(base_path, 'README.md'), 'r', encoding='utf-8') as f:
     readme = f.read()
 
 setup(
-    name='wrtc',    # webrtc for some reasons isn't allowed but looks like free...
+    name='wrtc',  # webrtc for some reasons isn't allowed but looks like free...
     version=version,
     author='Il`ya Semyonov',
     author_email='ilya@marshal.dev',
@@ -183,11 +179,12 @@ setup(
     package_dir={'': 'python-webrtc/python'},
     packages=find_packages(where='python-webrtc/python'),
     ext_modules=[CMakeExtension('wrtc')],
+    # TODO add stub
     cmdclass={'build_ext': CMakeBuild},
     zip_safe=False,
     project_urls={
         'Author': 'https://github.com/MarshalX',
         'Tracker': 'https://github.com/MarshalX/python-webrtc/issues',
         'Source': 'https://github.com/MarshalX/python-webrtc',
-    }
+    },
 )

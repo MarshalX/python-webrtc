@@ -10,12 +10,6 @@ import pytest
 import webrtc
 
 
-# alias for rtc_peer_connection
-@pytest.fixture
-def pc(rtc_peer_connection):
-    return rtc_peer_connection
-
-
 @pytest.fixture
 def rtc_peer_connection(request):
     pc = webrtc.RTCPeerConnection()
@@ -26,6 +20,10 @@ def rtc_peer_connection(request):
     request.addfinalizer(close_pc)
 
     return pc
+
+
+# aliases
+pc = caller = callee = rtc_peer_connection
 
 
 def get_stream(constraints, request):
@@ -44,6 +42,10 @@ def get_stream(constraints, request):
 @pytest.fixture
 def audio_stream(request):
     return get_stream(None, request)
+
+
+# alias
+audio_stream2 = audio_stream
 
 
 @pytest.fixture

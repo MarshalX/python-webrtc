@@ -7,7 +7,7 @@ project(python_webrtc
     LANGUAGES C CXX
     DESCRIPTION "a Python extension that provides bindings to WebRTC"
     HOMEPAGE_URL "https://github.com/MarshalX/python-webrtc"
-    VERSION "0.0.0.6"
+    VERSION "0.0.0.9"
 )
 
 include(ExternalProject)
@@ -169,12 +169,6 @@ else()
       use_glib=false
       rtc_build_tools=false
   )
-
-  if ("$ENV{TARGET_ARCH}" STREQUAL "ia32")
-    list(APPEND GN_GEN_ARGS
-        target_arch=ia32
-    )
-  endif()
 endif()
 
 if (WIN32)

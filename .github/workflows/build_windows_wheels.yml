@@ -15,7 +15,7 @@ jobs:
   # ref: https://github.com/actions/virtual-environments/issues/1341
   build_wheels_for_windows:
     name: Build and publish wheels for Windows
-    runs-on: windows-latest
+    runs-on: windows-2019
 
     strategy:
       matrix:

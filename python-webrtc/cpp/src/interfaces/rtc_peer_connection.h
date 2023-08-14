@@ -19,6 +19,8 @@
 #include "media_stream_track.h"
 #include "media_stream.h"
 #include "rtc_rtp_sender.h"
+#include "rtc_rtp_transceiver.h"
+#include "rtc_sctp_transport.h"
 
 namespace webrtc {
   struct PeerConnectionDependencies;
@@ -31,6 +33,8 @@ namespace python_webrtc {
   class RTCPeerConnection : public webrtc::PeerConnectionObserver {
   public:
     explicit RTCPeerConnection();
+
+    static void Init(pybind11::module &m);
 
     ~RTCPeerConnection() override;
 
@@ -50,11 +54,35 @@ namespace python_webrtc {
 
     RTCRtpSender *AddTrack(MediaStreamTrack &, const std::vector<MediaStream *> &);
 
-    static void Init(pybind11::module &m);
+    RTCRtpTransceiver *AddTransceiver(
+        cricket::MediaType, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &);
+
+    RTCRtpTransceiver *AddTransceiver(
+        MediaStreamTrack &, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &);
+
+    std::vector<RTCRtpTransceiver *> GetTransceivers();
+
+    std::vector<RTCRtpSender *> GetSenders();
+
+    std::vector<RTCRtpReceiver *> GetReceivers();
+
+    std::optional<RTCSctpTransport *> GetSctp();
+
+    void RestartIce();
+
+    void RemoveTrack(RTCRtpSender &);
 
     void SaveLastSdp(const RTCSessionDescriptionInit &lastSdp);
 
     void Close();
+
+    webrtc::PeerConnectionInterface::PeerConnectionState GetConnectionState();
+
+    webrtc::PeerConnectionInterface::SignalingState GetSignalingState();
+
+    webrtc::PeerConnectionInterface::IceConnectionState GetIceConnectionState();
+
+    webrtc::PeerConnectionInterface::IceGatheringState GetIceGatheringState();
 
     // PeerConnectionObserver implementation.
     void OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState new_state) override;

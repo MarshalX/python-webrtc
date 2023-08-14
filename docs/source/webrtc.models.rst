@@ -15,3 +15,5 @@ Submodules
    webrtc.models.rtc_on_data_event
    webrtc.models.rtc_session_description
    webrtc.models.rtc_session_description_init
+   webrtc.models.rtp_encoding_parameters
+   webrtc.models.rtp_transceiver_init

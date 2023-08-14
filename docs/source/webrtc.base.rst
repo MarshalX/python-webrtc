@@ -1,5 +1,5 @@
-webrtc.base module
-==================
+webrtc.base
+===========
 
 .. automodule:: webrtc.base
    :members:
