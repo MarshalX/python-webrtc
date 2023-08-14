@@ -13,7 +13,7 @@ on:
 jobs:
   build_wheels_for_macos:
     name: Build and publish wheels for macOS
-    runs-on: macos-latest
+    runs-on: macos-12
 
     strategy:
       matrix:
