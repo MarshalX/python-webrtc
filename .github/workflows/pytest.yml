@@ -10,7 +10,16 @@ on:
 
 jobs:
   build_and_test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ ubuntu-20.04, macos-11, windows-2019 ]
+
+    runs-on: ${{matrix.os}}
+    continue-on-error: true
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
     - name: Checkout repository.
@@ -23,13 +32,15 @@ jobs:
       with:
         python-version: 3.9
 
+    - name: Install Python Dev.
+      if: matrix.os == 'ubuntu-20.04'
+      run: sudo apt install -y python3.9-dev
+
     - name: Build and install package.
-      run: |
-        sudo apt install -y python3.9-dev
-        python setup.py install
+      run: python setup.py install
 
     - name: Install dev dependencies.
       run: pip install -r requirements-dev.txt
 
-    - name: Test with pytest.
+    - name: Run tests.
       run: pytest tests -vv
