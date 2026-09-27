@@ -6,24 +6,42 @@
 //
 
 #include "peer_connection_factory.h"
+#include "../utils/gil.h"
 
+#include <api/audio/create_audio_device_module.h>
 #include <api/create_peerconnection_factory.h>
-#include <api/task_queue/default_task_queue_factory.h>
+#include <api/environment/environment_factory.h>
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
-#include <api/video_codecs/builtin_video_encoder_factory.h>
-#include <api/video_codecs/builtin_video_decoder_factory.h>
-#include <p2p/base/basic_packet_socket_factory.h>
+#include <api/video_codecs/video_decoder_factory_template.h>
+#include <api/video_codecs/video_decoder_factory_template_dav1d_adapter.h>
+#include <api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h>
+#include <api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template.h>
+#include <api/video_codecs/video_encoder_factory_template_libaom_av1_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h>
 #include <rtc_base/ssl_adapter.h>
 
 namespace python_webrtc {
+
+  // Royalty-free codecs only (the prebuilts have no H.264).
+  using VideoEncoderFactory = webrtc::VideoEncoderFactoryTemplate<
+      webrtc::LibvpxVp8EncoderTemplateAdapter,
+      webrtc::LibvpxVp9EncoderTemplateAdapter,
+      webrtc::LibaomAv1EncoderTemplateAdapter>;
+
+  using VideoDecoderFactory = webrtc::VideoDecoderFactoryTemplate<
+      webrtc::LibvpxVp8DecoderTemplateAdapter,
+      webrtc::LibvpxVp9DecoderTemplateAdapter,
+      webrtc::Dav1dDecoderTemplateAdapter>;
 
   PeerConnectionFactory *PeerConnectionFactory::_default = nullptr;
   std::mutex PeerConnectionFactory::_mutex{};
   int PeerConnectionFactory::_references = 0;
 
   PeerConnectionFactory::PeerConnectionFactory() {
-    _workerThread = rtc::Thread::CreateWithSocketServer();
+    _workerThread = webrtc::Thread::CreateWithSocketServer();
     assert(_workerThread);
 
     bool result = _workerThread->SetName("PeerConnectionFactory:workerThread", nullptr);
@@ -32,7 +50,7 @@ namespace python_webrtc {
     result = _workerThread->Start();
     assert(result);
 
-    _signalingThread = rtc::Thread::Create();
+    _signalingThread = webrtc::Thread::Create();
     assert(_signalingThread);
 
     result = _signalingThread->SetName("PeerConnectionFactory:signalingThread", nullptr);
@@ -41,22 +59,20 @@ namespace python_webrtc {
     result = _signalingThread->Start();
     assert(result);
 
-    _workerThread->Invoke<void>(RTC_FROM_HERE, [this]() {
-      auto taskQuery = webrtc::CreateDefaultTaskQueueFactory();
-      _audioDeviceModule = webrtc::AudioDeviceModule::Create(
-          webrtc::AudioDeviceModule::AudioLayer::kDummyAudio,
-          taskQuery.release());
+    _workerThread->BlockingCall([this]() {
+      _audioDeviceModule = webrtc::CreateAudioDeviceModule(
+          webrtc::CreateEnvironment(), webrtc::AudioDeviceModule::AudioLayer::kDummyAudio);
     });
 
     _factory = webrtc::CreatePeerConnectionFactory(
         _workerThread.get(),
         _workerThread.get(),
         _signalingThread.get(),
-        _audioDeviceModule.get(),
+        _audioDeviceModule,
         webrtc::CreateBuiltinAudioEncoderFactory(),
         webrtc::CreateBuiltinAudioDecoderFactory(),
-        webrtc::CreateBuiltinVideoEncoderFactory(),
-        webrtc::CreateBuiltinVideoDecoderFactory(),
+        std::make_unique<VideoEncoderFactory>(),
+        std::make_unique<VideoDecoderFactory>(),
         nullptr,
         nullptr);
     assert(_factory);
@@ -64,18 +80,12 @@ namespace python_webrtc {
     webrtc::PeerConnectionFactoryInterface::Options options;
     options.network_ignore_mask = 0;
     _factory->SetOptions(options);
-
-    _networkManager = std::unique_ptr<rtc::NetworkManager>(new rtc::BasicNetworkManager());
-    assert(_networkManager != nullptr);
-
-    _socketFactory = std::unique_ptr<rtc::PacketSocketFactory>(new rtc::BasicPacketSocketFactory(_workerThread.get()));
-    assert(_socketFactory != nullptr);
   }
 
   PeerConnectionFactory::~PeerConnectionFactory() {
     _factory = nullptr;
 
-    _workerThread->Invoke<void>(RTC_FROM_HERE, [this]() {
+    _workerThread->BlockingCall([this]() {
       this->_audioDeviceModule = nullptr;
     });
 
@@ -84,9 +94,6 @@ namespace python_webrtc {
 
     _workerThread = nullptr;
     _signalingThread = nullptr;
-
-    _networkManager = nullptr;
-    _socketFactory = nullptr;
   }
 
   PeerConnectionFactory *PeerConnectionFactory::GetOrCreateDefault() {
@@ -113,21 +120,21 @@ namespace python_webrtc {
   }
 
   void PeerConnectionFactory::Dispose() {
-    rtc::CleanupSSL();
+    webrtc::CleanupSSL();
   }
 
   void PeerConnectionFactory::Init(pybind11::module &m) {
     bool result;
     (void) result;
 
-    result = rtc::InitializeSSL();
+    result = webrtc::InitializeSSL();
     assert(result);
 
     pybind11::class_<PeerConnectionFactory>(m, "PeerConnectionFactory")
-        .def(pybind11::init<>())
-        .def("getOrCreateDefault", &PeerConnectionFactory::GetOrCreateDefault)
-        .def("release", &PeerConnectionFactory::Release)
-        .def("dispose", &PeerConnectionFactory::Dispose);
+        .def(pybind11::init<>(), nogil())
+        .def("getOrCreateDefault", &PeerConnectionFactory::GetOrCreateDefault, nogil())
+        .def("release", &PeerConnectionFactory::Release, nogil())
+        .def("dispose", &PeerConnectionFactory::Dispose, nogil());
   }
 
 } // namespace python_webrtc

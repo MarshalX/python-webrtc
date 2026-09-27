@@ -1,9 +1,7 @@
 import asyncio
 
 import webrtc
-
 import wrtc
-
 
 VALID_SDP = '''v=0
 o=- 6373938523134045336 2 IN IP4 127.0.0.1

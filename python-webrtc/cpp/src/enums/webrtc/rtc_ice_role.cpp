@@ -12,10 +12,10 @@
 namespace python_webrtc {
 
   void RTCIceRole::Init(pybind11::module &m) {
-    pybind11::enum_<cricket::IceRole>(m, "RTCIceRole")
-        .value("controlling", cricket::IceRole::ICEROLE_CONTROLLING)
-        .value("controlled", cricket::IceRole::ICEROLE_CONTROLLED)
-        .value("unknown", cricket::IceRole::ICEROLE_UNKNOWN) // not standard? should not be occurred?
+    pybind11::enum_<webrtc::IceRole>(m, "RTCIceRole")
+        .value("controlling", webrtc::IceRole::ICEROLE_CONTROLLING)
+        .value("controlled", webrtc::IceRole::ICEROLE_CONTROLLED)
+        .value("unknown", webrtc::IceRole::ICEROLE_UNKNOWN) // not standard? should not be occurred?
         .export_values();
   }
 

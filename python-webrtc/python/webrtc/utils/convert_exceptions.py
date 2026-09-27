@@ -11,8 +11,8 @@ __CALLBACK_EXCEPTION_TO_EXCEPTION = None
 def __init_callback_exception_to_exception_dict():
     global __CALLBACK_EXCEPTION_TO_EXCEPTION
 
-    import wrtc
     import webrtc
+    import wrtc
 
     __CALLBACK_EXCEPTION_TO_EXCEPTION = {
         wrtc.CallbackPythonWebRTCException: webrtc.PythonWebRTCException,

@@ -6,19 +6,20 @@
 //
 
 #include "rtc_dtls_transport.h"
+#include "../utils/gil.h"
 
 namespace python_webrtc {
 
-  static std::vector<rtc::Buffer> copyCertificates(const webrtc::DtlsTransportInformation& information) {
+  static std::vector<webrtc::Buffer> copyCertificates(const webrtc::DtlsTransportInformation& information) {
     auto certificates = information.remote_ssl_certificates();
     if (certificates) {
       auto size = certificates->GetSize();
 
-      auto derCertificates = std::vector<rtc::Buffer>();
+      auto derCertificates = std::vector<webrtc::Buffer>();
       derCertificates.reserve(size);
 
       for (unsigned long i = 0; i < size; ++i) {
-        auto buffer = rtc::Buffer(1);
+        auto buffer = webrtc::Buffer(1);
         certificates->Get(i).ToDER(&buffer);
         derCertificates.emplace_back(std::move(buffer));
       }
@@ -30,12 +31,12 @@ namespace python_webrtc {
   }
 
   RTCDtlsTransport::RTCDtlsTransport(
-      PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::DtlsTransportInterface> transport
+      PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::DtlsTransportInterface> transport
   ) {
     _factory = factory;
     _transport = std::move(transport);
 
-    _factory->_workerThread->Invoke<void>(RTC_FROM_HERE, [this]() {
+    _factory->_workerThread->BlockingCall([this]() {
       _transport->RegisterObserver(this);
 
       auto information = _transport->Information();
@@ -55,20 +56,20 @@ namespace python_webrtc {
 
   void RTCDtlsTransport::Init(pybind11::module &m) {
     pybind11::class_<RTCDtlsTransport>(m, "RTCDtlsTransport")
-        .def_property_readonly("iceTransport", &RTCDtlsTransport::GetIceTransport)
-        .def_property_readonly("state", &RTCDtlsTransport::GetState);
+        .def_property_readonly("iceTransport", nogil_fn(&RTCDtlsTransport::GetIceTransport))
+        .def_property_readonly("state", nogil_fn(&RTCDtlsTransport::GetState));
   }
 
-  InstanceHolder<RTCDtlsTransport *, rtc::scoped_refptr<webrtc::DtlsTransportInterface>, PeerConnectionFactory *> *
+  InstanceHolder<RTCDtlsTransport *, webrtc::scoped_refptr<webrtc::DtlsTransportInterface>, PeerConnectionFactory *> *
   RTCDtlsTransport::holder() {
     static auto holder = new InstanceHolder<
-        RTCDtlsTransport *, rtc::scoped_refptr<webrtc::DtlsTransportInterface>, PeerConnectionFactory *
+        RTCDtlsTransport *, webrtc::scoped_refptr<webrtc::DtlsTransportInterface>, PeerConnectionFactory *
     >(RTCDtlsTransport::Create);
     return holder;
   }
 
   RTCDtlsTransport *RTCDtlsTransport::Create(
-      PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::DtlsTransportInterface> transport
+      PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::DtlsTransportInterface> transport
   ) {
     // who caring about freeing memory?
     return new RTCDtlsTransport(factory, std::move(transport));

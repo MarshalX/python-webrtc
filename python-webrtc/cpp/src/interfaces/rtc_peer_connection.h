@@ -7,8 +7,11 @@
 
 #pragma once
 
-#include <webrtc/api/peer_connection_interface.h>
-#include <webrtc/api/scoped_refptr.h>
+#include <atomic>
+#include <mutex>
+
+#include <api/peer_connection_interface.h>
+#include <api/scoped_refptr.h>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/functional.h>
@@ -55,7 +58,7 @@ namespace python_webrtc {
     RTCRtpSender *AddTrack(MediaStreamTrack &, const std::vector<MediaStream *> &);
 
     RTCRtpTransceiver *AddTransceiver(
-        cricket::MediaType, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &);
+        webrtc::MediaType, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &);
 
     RTCRtpTransceiver *AddTransceiver(
         MediaStreamTrack &, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &);
@@ -84,6 +87,10 @@ namespace python_webrtc {
 
     webrtc::PeerConnectionInterface::IceGatheringState GetIceGatheringState();
 
+    std::optional<RTCSessionDescription> GetLocalDescription();
+
+    std::optional<RTCSessionDescription> GetRemoteDescription();
+
     // PeerConnectionObserver implementation.
     void OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState new_state) override;
 
@@ -93,30 +100,37 @@ namespace python_webrtc {
 
     void OnIceCandidate(const webrtc::IceCandidateInterface *candidate) override;
 
-    void OnIceCandidateError(const std::string &host_candidate, const std::string &url, int error_code,
+    void OnIceCandidateError(const std::string &address, int port, const std::string &url, int error_code,
                              const std::string &error_text) override;
 
     void OnRenegotiationNeeded() override;
 
-    void OnDataChannel(rtc::scoped_refptr<webrtc::DataChannelInterface> data_channel) override;
+    void OnDataChannel(webrtc::scoped_refptr<webrtc::DataChannelInterface> data_channel) override;
 
-    void OnAddStream(rtc::scoped_refptr<webrtc::MediaStreamInterface> stream) override;
+    void OnAddStream(webrtc::scoped_refptr<webrtc::MediaStreamInterface> stream) override;
 
-    void OnRemoveStream(rtc::scoped_refptr<webrtc::MediaStreamInterface> stream) override;
+    void OnRemoveStream(webrtc::scoped_refptr<webrtc::MediaStreamInterface> stream) override;
 
-    void OnAddTrack(rtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver,
-                    const std::vector<rtc::scoped_refptr<webrtc::MediaStreamInterface>> &streams) override;
+    void OnAddTrack(webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver,
+                    const std::vector<webrtc::scoped_refptr<webrtc::MediaStreamInterface>> &streams) override;
 
-    void OnTrack(rtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) override;
+    void OnTrack(webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) override;
 
   private:
+    std::optional<RTCSessionDescription> GetDescription(bool local);
+
+    // Python threads may call close() concurrently with other methods (the GIL is released)
+    webrtc::scoped_refptr<webrtc::PeerConnectionInterface> connection();
+
+    std::mutex _connectionMutex;
+
 //    someStructWith2FieldMinAndMax _port_range;
-    rtc::scoped_refptr<webrtc::PeerConnectionInterface> _jinglePeerConnection;
+    webrtc::scoped_refptr<webrtc::PeerConnectionInterface> _jinglePeerConnection;
 
     RTCSessionDescriptionInit _lastSdp;
 
     PeerConnectionFactory *_factory;
-    bool _shouldReleaseFactory;
+    std::atomic<bool> _shouldReleaseFactory;
   };
 
 }

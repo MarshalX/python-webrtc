@@ -9,7 +9,7 @@
 
 #include <optional>
 
-#include <webrtc/api/scoped_refptr.h>
+#include <api/scoped_refptr.h>
 #include <api/rtp_transceiver_interface.h>
 
 #include <pybind11/pybind11.h>
@@ -22,16 +22,16 @@ namespace python_webrtc {
 
   class RTCRtpTransceiver {
   public:
-    RTCRtpTransceiver(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::RtpTransceiverInterface>);
+    RTCRtpTransceiver(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>);
 
-    static RTCRtpTransceiver *Create(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::RtpTransceiverInterface>);
+    static RTCRtpTransceiver *Create(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>);
 
     ~RTCRtpTransceiver();
 
     static void Init(pybind11::module &m);
 
     static InstanceHolder<
-        RTCRtpTransceiver *, rtc::scoped_refptr<webrtc::RtpTransceiverInterface>, PeerConnectionFactory *
+        RTCRtpTransceiver *, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>, PeerConnectionFactory *
     > *holder();
 
     std::optional<std::string> GetMid();
@@ -55,7 +55,7 @@ namespace python_webrtc {
 
   private:
     PeerConnectionFactory *_factory;
-    rtc::scoped_refptr<webrtc::RtpTransceiverInterface> _transceiver;
+    webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> _transceiver;
   };
 
 } // namespace python_webrtc

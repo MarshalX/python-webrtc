@@ -8,7 +8,6 @@
 import pytest
 
 import webrtc
-
 from tests.helpers import generate_answer
 
 

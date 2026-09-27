@@ -19,17 +19,17 @@ namespace python_webrtc {
 
   class MediaStreamTrack : public webrtc::ObserverInterface {
   public:
-    explicit MediaStreamTrack(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::MediaStreamTrackInterface>);
+    explicit MediaStreamTrack(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>);
 
     static MediaStreamTrack *Create(
-        PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track);
+        PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track);
 
     ~MediaStreamTrack() override;
 
     void static Init(pybind11::module &m);
 
     static InstanceHolder<
-        MediaStreamTrack *, rtc::scoped_refptr<webrtc::MediaStreamTrackInterface>, PeerConnectionFactory *
+        MediaStreamTrack *, webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>, PeerConnectionFactory *
     > *holder();
 
     void Stop();
@@ -45,7 +45,7 @@ namespace python_webrtc {
 
     std::string GetId();
 
-    cricket::MediaType GetKind();
+    webrtc::MediaType GetKind();
 
     webrtc::MediaStreamTrackInterface::TrackState GetReadyState();
 
@@ -58,17 +58,17 @@ namespace python_webrtc {
 
     PeerConnectionFactory *factory() { return _factory; }
 
-    rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track() { return _track; }
+    webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track() { return _track; }
 
-    explicit operator rtc::scoped_refptr<webrtc::AudioTrackInterface>();
+    explicit operator webrtc::scoped_refptr<webrtc::AudioTrackInterface>();
 
-    explicit operator rtc::scoped_refptr<webrtc::VideoTrackInterface>();
+    explicit operator webrtc::scoped_refptr<webrtc::VideoTrackInterface>();
 
   private:
     bool _ended = false;
     bool _enabled;
     PeerConnectionFactory *_factory;
-    rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> _track;
+    webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> _track;
   };
 
 } // namespace python_webrtc

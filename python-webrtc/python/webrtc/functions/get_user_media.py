@@ -8,7 +8,6 @@
 from typing import TYPE_CHECKING
 
 import wrtc
-
 from webrtc import MediaStream
 
 if TYPE_CHECKING:

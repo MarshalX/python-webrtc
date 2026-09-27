@@ -1,20 +1,38 @@
 .idea/
+.vscode/
+.DS_Store
 
-third_party/libwebrtc
-third_party/depot_tools
-
+# build artifacts
+build/
 dist/
-cmake-build-debug/
+wheelhouse/
+cmake-build-*/
+*.so
+*.pyd
 
+# python
+.venv/
 __pycache__/
 *.egg-info/
-
-config.h
-
-*.so
+.pytest_cache/
+.ruff_cache/
 
 *.env
-
 *.log
 
 docs/build
+
+# local reference checkouts and experiments
+/node-webrtc/
+/wpt/
+/docs_html/
+/Dockerfile*
+/docker-compose.yaml
+/py.typed
+
+# scratch files of manual testing
+python-webrtc/python/*.session
+python-webrtc/python/*.session-journal
+python-webrtc/python/*.raw
+python-webrtc/python/snippet_test.py
+python-webrtc/python/test_ub.py

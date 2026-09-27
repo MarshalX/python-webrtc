@@ -3,7 +3,7 @@
         <img src="https://github.com/MarshalX/python-webrtc/raw/main/.github/images/logo.png" alt="python-webrtc logo">
     </a>
     <br>
-    <b>A Python extension that provides bindings to WebRTC M92</b>
+    <b>A Python extension that provides bindings to WebRTC M152</b>
     <br>
     <a href="https://github.com/MarshalX/python-webrtc/tree/main/examples">
         Examples
@@ -58,91 +58,67 @@ if __name__ == '__main__':
 
 ### Requirements
 
-#### Pre-built wheels:
+#### Pre-built wheels
 
-- Python 3.7 or higher
-- pip 21 or higher
-- And compatible platform: 
+Python 3.9 – 3.14 (CPython) on:
 
-<table>
-  <thead>
-    <tr>
-      <td colspan="2" rowspan="2"></td>
-      <th colspan="3">Linux</th>
-      <th colspan="2">macOS</th>
-      <th>Windows</th>
-    </tr>
-    <tr>
-      <th>armv7l</th>
-      <th>arm64</th>
-      <th>x86_64</th>
-      <th>Intel</th>
-      <th>Apple Silicon</th>
-      <th>64bit</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <th rowspan="4">Python</th>
-      <th>3.7</th>
-        <td align="center">N/A</td>
-        <td align="center">N/A</td>
-        <td align="center">✅</td>
-        <td align="center">✅</td>
-        <td align="center">N/A</td>
-        <td align="center">✅</td>
-    </tr>
-    <tr>
-      <th>3.8</th>
-        <td align="center">N/A</td>
-        <td align="center">N/A</td>
-        <td align="center">✅</td>
-        <td align="center">✅</td>
-        <td align="center">✅</td>
-        <td align="center">✅</td>
-    </tr>
-    <tr>
-      <th>3.9</th>
-        <td align="center">N/A</td>
-        <td align="center">N/A</td>
-        <td align="center">✅</td>
-        <td align="center">✅</td>
-        <td align="center">✅</td>
-        <td align="center">✅</td>
-    </tr>
-    <tr>
-      <th>3.10</th>
-        <td align="center">N/A</td>
-        <td align="center">N/A</td>
-        <td align="center">✅</td>
-        <td align="center">✅</td>
-        <td align="center">✅</td>
-        <td align="center">✅</td>
-    </tr>
-  </tbody>
-</table>
+| Linux                          | macOS                          | Windows |
+|--------------------------------|--------------------------------|---------|
+| x86_64 (glibc 2.27+, manylinux) | 13+, Intel and Apple Silicon | x64     |
 
-#### Building from sources (sdist):
+#### Building from sources (sdist)
 
-- ~15 GB of free disk space
-- CMake 3.14 or higher
-- GCC 7.5 or higher
-- glibc 2.18 or higher 
-- ARM toolchain (ARM only)
+- CMake 3.26 or higher
+- A C++20 compiler: Clang on Linux (libwebrtc there is built against Chromium's libc++), Apple Clang on macOS, MSVC on Windows
+- ~150 MB of free disk space
 
-_Full building instruction will be present later_
+Nothing else has to be installed or configured manually: a prebuilt static libwebrtc for the target platform
+(from [libwebrtc-bin](https://github.com/crow-misia/libwebrtc-bin)) is downloaded once, verified and unpacked
+into a shared cache (`~/.cache/python-webrtc`, `%LOCALAPPDATA%\python-webrtc` on Windows or `$WRTC_CACHE_DIR`).
+Only the headers in use are extracted and debug info is stripped, so it takes ~60 MB per platform.
+Pass `-Ccmake.define.LIBWEBRTC_ROOT=/path/to/libwebrtc` to use your own libwebrtc build instead.
 
 ### Installing
 
 Pre-built wheel:
 ``` bash
-pip3 install --pre wrtc
+pip install --pre wrtc
 ```
 
 Build from sources:
 ``` bash
-pip3 install --pre wrtc --no-binary wrtc
+pip install --pre wrtc --no-binary wrtc
 ```
+
+### Development
+
+Requires [uv](https://docs.astral.sh/uv/).
+
+``` bash
+make dev     # editable install into .venv, C++ is rebuilt on import when changed
+make test    # run the test suite
+make lint    # ruff
+make stub    # regenerate type stubs of the native module
+make wheels  # build wheels for the current platform the same way CI does
+```
+
+#### Releasing
+
+1. Bump `version` in `pyproject.toml` and run `uv lock`.
+2. Push a `v<version>` tag. CI builds the sdist and wheels for every platform and publishes them to PyPI.
+
+Publishing uses [trusted publishing](https://docs.pypi.org/trusted-publishers/): the PyPI project needs a
+trusted publisher for this repository's `ci.yml` workflow, and the repository a `pypi` environment. No tokens needed.
+
+#### Updating WebRTC
+
+The libwebrtc version and archive hashes are pinned in `cmake/libwebrtc.cmake`:
+
+1. Set `LIBWEBRTC_VERSION` to a [libwebrtc-bin release](https://github.com/crow-misia/libwebrtc-bin/releases)
+   and update the `LIBWEBRTC_SHA256_*` values (the release page lists a SHA256 digest per asset).
+2. Refresh the Linux libc++ pins as described in [`cmake/libcxx/README.md`](cmake/libcxx/README.md).
+3. Build and run the tests. On Linux, check whether `cmake/libwebrtc_linux_fixups.cpp` is still needed:
+   remove it and see whether the module imports (it is linked with `-z now`, so missing symbols fail on import).
 
 ### Documentation
 

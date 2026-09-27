@@ -7,8 +7,8 @@
 
 #pragma once
 
-#include <webrtc/api/rtp_sender_interface.h>
-#include <webrtc/api/scoped_refptr.h>
+#include <api/rtp_sender_interface.h>
+#include <api/scoped_refptr.h>
 
 #include "peer_connection_factory.h"
 #include "media_stream_track.h"
@@ -18,27 +18,27 @@ namespace python_webrtc {
 
   class RTCRtpSender {
   public:
-    explicit RTCRtpSender(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::RtpSenderInterface>);
+    explicit RTCRtpSender(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::RtpSenderInterface>);
 
-    static RTCRtpSender *Create(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::RtpSenderInterface>);
+    static RTCRtpSender *Create(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::RtpSenderInterface>);
 
     ~RTCRtpSender();
 
     static void Init(pybind11::module &m);
 
     static InstanceHolder<
-        RTCRtpSender *, rtc::scoped_refptr<webrtc::RtpSenderInterface>, PeerConnectionFactory *
+        RTCRtpSender *, webrtc::scoped_refptr<webrtc::RtpSenderInterface>, PeerConnectionFactory *
     > *holder();
 
     std::optional<MediaStreamTrack *> GetTrack();
 
     std::optional<RTCDtlsTransport *> GetTransport();
 
-    rtc::scoped_refptr<webrtc::RtpSenderInterface> sender() { return _sender; }
+    webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender() { return _sender; }
 
   private:
     PeerConnectionFactory *_factory;
-    rtc::scoped_refptr<webrtc::RtpSenderInterface> _sender;
+    webrtc::scoped_refptr<webrtc::RtpSenderInterface> _sender;
   };
 
 } // namespace python_webrtc

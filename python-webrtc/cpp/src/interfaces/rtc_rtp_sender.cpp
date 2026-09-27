@@ -6,10 +6,11 @@
 //
 
 #include "rtc_rtp_sender.h"
+#include "../utils/gil.h"
 
 namespace python_webrtc {
 
-  RTCRtpSender::RTCRtpSender(PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::RtpSenderInterface> sender)
+  RTCRtpSender::RTCRtpSender(PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender)
       : _factory(factory), _sender(std::move(sender)) {}
 
   RTCRtpSender::~RTCRtpSender() {
@@ -20,20 +21,20 @@ namespace python_webrtc {
 
   void RTCRtpSender::Init(pybind11::module &m) {
     pybind11::class_<RTCRtpSender>(m, "RTCRtpSender")
-        .def_property_readonly("track", &RTCRtpSender::GetTrack)
-        .def_property_readonly("transport", &RTCRtpSender::GetTransport);
+        .def_property_readonly("track", nogil_fn(&RTCRtpSender::GetTrack))
+        .def_property_readonly("transport", nogil_fn(&RTCRtpSender::GetTransport));
   }
 
-  InstanceHolder<RTCRtpSender *, rtc::scoped_refptr<webrtc::RtpSenderInterface>, PeerConnectionFactory *> *
+  InstanceHolder<RTCRtpSender *, webrtc::scoped_refptr<webrtc::RtpSenderInterface>, PeerConnectionFactory *> *
   RTCRtpSender::holder() {
     static auto holder = new InstanceHolder<
-        RTCRtpSender *, rtc::scoped_refptr<webrtc::RtpSenderInterface>, PeerConnectionFactory *
+        RTCRtpSender *, webrtc::scoped_refptr<webrtc::RtpSenderInterface>, PeerConnectionFactory *
     >(RTCRtpSender::Create);
     return holder;
   }
 
   RTCRtpSender *RTCRtpSender::Create(
-      PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::RtpSenderInterface> sender
+      PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender
   ) {
     // who caring about freeing memory?
     return new RTCRtpSender(factory, std::move(sender));

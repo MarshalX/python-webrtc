@@ -9,14 +9,15 @@
 
 #include <atomic>
 
-#include <webrtc/pc/local_audio_source.h>
+#include <api/media_stream_interface.h>
+#include <api/notifier.h>
 
 #include "peer_connection_factory.h"
 #include "../models/python_webrtc/rtc_on_data_event.h"
 
 namespace python_webrtc {
 
-  class RTCAudioTrackSource : public webrtc::LocalAudioSource {
+  class RTCAudioTrackSource : public webrtc::Notifier<webrtc::AudioSourceInterface> {
   public:
     RTCAudioTrackSource() = default;
 

@@ -7,9 +7,9 @@
 
 #pragma once
 
-#include <webrtc/api/media_stream_interface.h>
-#include <webrtc/api/scoped_refptr.h>
-#include <webrtc/pc/local_audio_source.h>
+#include <api/media_stream_interface.h>
+#include <api/scoped_refptr.h>
+#include <pc/local_audio_source.h>
 
 #include "rtc_audio_track_source.h"
 #include "media_stream_track.h"
@@ -27,7 +27,7 @@ namespace python_webrtc {
     void OnData(RTCOnDataEvent &);
 
   private:
-    rtc::scoped_refptr<RTCAudioTrackSource> _source;
+    webrtc::scoped_refptr<RTCAudioTrackSource> _source;
   };
 
 } // namespace python_webrtc

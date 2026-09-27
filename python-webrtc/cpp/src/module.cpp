@@ -25,7 +25,7 @@ static void ping() {
 PYBIND11_MODULE(wrtc, m) {
   if (!copyrightShowed) {
     auto ver = std::string(PROJECT_VER);
-    auto dev = std::count(ver.begin(), ver.end(), '.') == 3 ? " DEV" : "";
+    auto dev = ver.find("dev") != std::string::npos ? " DEV" : "";
     py::print("Python WebRTC v" + ver + dev + ", Copyright (C) 2022 Il`ya (Marshal) <https://github.com/MarshalX>");
     py::print("Licensed under the terms of the BSD 3-Clause License\n\n");
 

@@ -32,12 +32,12 @@ namespace python_webrtc {
 
   RTCException wrapRTCError(const webrtc::RTCError &error) {
     std::string msg;
-    return RTCException(msg + "[" + ToString(error.type()) + "] " + error.message());
+    return RTCException(msg + "[" + std::string(ToString(error.type())) + "] " + std::string(error.message()));
   }
 
   RTCCallbackException wrapRTCErrorForCallback(const webrtc::RTCError &error) {
     std::string msg;
-    return RTCCallbackException(msg + "[" + ToString(error.type()) + "] " + error.message());
+    return RTCCallbackException(msg + "[" + std::string(ToString(error.type())) + "] " + std::string(error.message()));
   }
 
   SdpParseException wrapSdpParseError(const webrtc::SdpParseError &error) {

@@ -6,19 +6,22 @@
 //
 
 #include "rtc_ice_transport.h"
+#include "../utils/gil.h"
 
 namespace python_webrtc {
 
   RTCIceTransport::RTCIceTransport(
-      PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::IceTransportInterface> transport) {
+      PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::IceTransportInterface> transport) {
     _factory = factory;
     _transport = std::move(transport);
 
-    _factory->_workerThread->Invoke<void>(RTC_FROM_HERE, [this]() {
+    _factory->_workerThread->BlockingCall([this]() {
       auto internal = _transport->internal();
       if (internal) {
-        internal->SignalIceTransportStateChanged.connect(this, &RTCIceTransport::OnStateChanged);
-        internal->SignalGatheringState.connect(this, &RTCIceTransport::OnGatheringStateChanged);
+        internal->SubscribeIceTransportStateChanged(
+            this, [this](webrtc::IceTransportInternal *transport) { OnStateChanged(transport); });
+        internal->AddGatheringStateCallback(
+            this, [this](webrtc::IceTransportInternal *transport) { OnGatheringStateChanged(transport); });
       }
       TakeSnapshot();
       if (_state == webrtc::IceTransportState::kClosed) {
@@ -34,22 +37,22 @@ namespace python_webrtc {
 
   void RTCIceTransport::Init(pybind11::module &m) {
     pybind11::class_<RTCIceTransport>(m, "RTCIceTransport")
-        .def_property_readonly("component", &RTCIceTransport::GetComponent)
-        .def_property_readonly("gatheringState ", &RTCIceTransport::GetGatheringState)
-        .def_property_readonly("role", &RTCIceTransport::GetRole)
-        .def_property_readonly("state", &RTCIceTransport::GetState);
+        .def_property_readonly("component", nogil_fn(&RTCIceTransport::GetComponent))
+        .def_property_readonly("gatheringState", nogil_fn(&RTCIceTransport::GetGatheringState))
+        .def_property_readonly("role", nogil_fn(&RTCIceTransport::GetRole))
+        .def_property_readonly("state", nogil_fn(&RTCIceTransport::GetState));
   }
 
-  InstanceHolder<RTCIceTransport *, rtc::scoped_refptr<webrtc::IceTransportInterface>, PeerConnectionFactory *> *
+  InstanceHolder<RTCIceTransport *, webrtc::scoped_refptr<webrtc::IceTransportInterface>, PeerConnectionFactory *> *
   RTCIceTransport::holder() {
     static auto holder = new InstanceHolder<
-        RTCIceTransport *, rtc::scoped_refptr<webrtc::IceTransportInterface>, PeerConnectionFactory *
+        RTCIceTransport *, webrtc::scoped_refptr<webrtc::IceTransportInterface>, PeerConnectionFactory *
     >(RTCIceTransport::Create);
     return holder;
   }
 
   RTCIceTransport *RTCIceTransport::Create(
-      PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::IceTransportInterface> transport
+      PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::IceTransportInterface> transport
   ) {
     // who caring about freeing memory?
     return new RTCIceTransport(factory, std::move(transport));
@@ -70,14 +73,14 @@ namespace python_webrtc {
       _gathering_state = internal->gathering_state();
     } else {
       _state = webrtc::IceTransportState::kClosed;
-      _gathering_state = cricket::IceGatheringState::kIceGatheringComplete;
+      _gathering_state = webrtc::IceGatheringState::kIceGatheringComplete;
     }
   }
 
   void RTCIceTransport::OnRTCDtlsTransportStopped() {
     std::lock_guard<std::mutex> lock(_mutex);
     _state = webrtc::IceTransportState::kClosed;
-    _gathering_state = cricket::IceGatheringState::kIceGatheringComplete;
+    _gathering_state = webrtc::IceGatheringState::kIceGatheringComplete;
     Stop();
   }
 
@@ -85,7 +88,7 @@ namespace python_webrtc {
 
   }
 
-  void RTCIceTransport::OnStateChanged(cricket::IceTransportInternal *) {
+  void RTCIceTransport::OnStateChanged(webrtc::IceTransportInternal *) {
     TakeSnapshot();
 
     // TODO call callback
@@ -95,7 +98,7 @@ namespace python_webrtc {
     }
   }
 
-  void RTCIceTransport::OnGatheringStateChanged(cricket::IceTransportInternal *) {
+  void RTCIceTransport::OnGatheringStateChanged(webrtc::IceTransportInternal *) {
     TakeSnapshot();
 
     // TODO call callback
@@ -110,12 +113,12 @@ namespace python_webrtc {
     }
   }
 
-  cricket::IceGatheringState RTCIceTransport::GetGatheringState() {
+  webrtc::IceGatheringState RTCIceTransport::GetGatheringState() {
     std::lock_guard<std::mutex> lock(_mutex);
     return _gathering_state;
   }
 
-  cricket::IceRole RTCIceTransport::GetRole() {
+  webrtc::IceRole RTCIceTransport::GetRole() {
     std::lock_guard<std::mutex> lock(_mutex);
     return _role;
   }

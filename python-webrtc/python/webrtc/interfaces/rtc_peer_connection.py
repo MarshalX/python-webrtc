@@ -5,10 +5,9 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING, Optional, Union, List
+from typing import TYPE_CHECKING, List, Optional, Union
 
 import wrtc
-
 from webrtc import WebRTCObject
 from webrtc.utils.callbacks_to_async import to_async
 
@@ -214,6 +213,56 @@ class RTCPeerConnection(WebRTCObject):
 
         return None
 
+    @property
+    def local_description(self) -> Optional['webrtc.RTCSessionDescription']:
+        """:obj:`webrtc.RTCSessionDescription`, optional: The local end of the connection, including ICE candidates
+        gathered so far. :obj:`None` if the local description hasn't been set yet."""
+        from webrtc import RTCSessionDescription
+
+        description = self._native_obj.localDescription
+        return RTCSessionDescription._wrap(description) if description is not None else None
+
+    @property
+    def remote_description(self) -> Optional['webrtc.RTCSessionDescription']:
+        """:obj:`webrtc.RTCSessionDescription`, optional: The remote end of the connection.
+        :obj:`None` if the remote description hasn't been set yet."""
+        from webrtc import RTCSessionDescription
+
+        description = self._native_obj.remoteDescription
+        return RTCSessionDescription._wrap(description) if description is not None else None
+
+    @property
+    def connection_state(self) -> 'webrtc.RTCPeerConnectionState':
+        """:obj:`webrtc.RTCPeerConnectionState`: The current state of the connection."""
+        return self._native_obj.connectionState
+
+    @property
+    def signaling_state(self) -> 'webrtc.RTCSignalingState':
+        """:obj:`webrtc.RTCSignalingState`: The state of the signaling process."""
+        return self._native_obj.signalingState
+
+    @property
+    def ice_connection_state(self) -> 'webrtc.RTCIceConnectionState':
+        """:obj:`webrtc.RTCIceConnectionState`: The state of the ICE agent."""
+        return self._native_obj.iceConnectionState
+
+    @property
+    def ice_gathering_state(self) -> 'webrtc.RTCIceGatheringState':
+        """:obj:`webrtc.RTCIceGatheringState`: The ICE candidate gathering state."""
+        return self._native_obj.iceGatheringState
+
+    #: Alias for :attr:`local_description`
+    localDescription = local_description
+    #: Alias for :attr:`remote_description`
+    remoteDescription = remote_description
+    #: Alias for :attr:`connection_state`
+    connectionState = connection_state
+    #: Alias for :attr:`signaling_state`
+    signalingState = signaling_state
+    #: Alias for :attr:`ice_connection_state`
+    iceConnectionState = ice_connection_state
+    #: Alias for :attr:`ice_gathering_state`
+    iceGatheringState = ice_gathering_state
     #: Alias for :attr:`create_offer`
     createOffer = create_offer
     #: Alias for :attr:`create_answer`

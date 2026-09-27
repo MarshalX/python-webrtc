@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include <webrtc/api/scoped_refptr.h>
+#include <api/scoped_refptr.h>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -36,17 +36,17 @@ namespace python_webrtc {
 
     explicit MediaStream(std::vector<MediaStreamTrack *>);
 
-    MediaStream(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::MediaStreamInterface>);
+    MediaStream(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::MediaStreamInterface>);
 
-    static MediaStream *Create(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::MediaStreamInterface>);
+    static MediaStream *Create(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::MediaStreamInterface>);
 
     void static Init(pybind11::module &m);
 
     static InstanceHolder<
-        MediaStream *, rtc::scoped_refptr<webrtc::MediaStreamInterface>, PeerConnectionFactory *
+        MediaStream *, webrtc::scoped_refptr<webrtc::MediaStreamInterface>, PeerConnectionFactory *
     > *holder();
 
-    rtc::scoped_refptr<webrtc::MediaStreamInterface> stream();
+    webrtc::scoped_refptr<webrtc::MediaStreamInterface> stream();
 
     std::string GetId();
 
@@ -89,7 +89,7 @@ namespace python_webrtc {
 
       Impl(std::vector<MediaStreamTrack *> &&tracks, PeerConnectionFactory *factory = nullptr);
 
-      Impl(rtc::scoped_refptr<webrtc::MediaStreamInterface> stream, PeerConnectionFactory *factory = nullptr);
+      Impl(webrtc::scoped_refptr<webrtc::MediaStreamInterface> stream, PeerConnectionFactory *factory = nullptr);
 
 //      TODO
 //      Impl(const RTCMediaStreamInit& init, PeerConnectionFactory* factory = nullptr);
@@ -97,11 +97,11 @@ namespace python_webrtc {
       ~Impl();
 
       PeerConnectionFactory *_factory;
-      rtc::scoped_refptr<webrtc::MediaStreamInterface> _stream;
+      webrtc::scoped_refptr<webrtc::MediaStreamInterface> _stream;
       bool _shouldReleaseFactory;
     };
 
-    std::vector<rtc::scoped_refptr<webrtc::MediaStreamTrackInterface>> tracks();
+    std::vector<webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>> tracks();
 
     Impl _impl;
   };

@@ -8,7 +8,6 @@
 import pytest
 
 import webrtc
-
 from tests.helpers import exchange_offer_answer
 
 
@@ -103,7 +102,7 @@ async def test_7(caller, callee):
 
     await exchange_offer_answer(caller, callee)
     caller.get_transceivers()[0].stop()
-    await exchange_offer_answer(callee, caller)    # switched args
+    await exchange_offer_answer(callee, caller)  # switched args
 
     await caller.set_local_description(await caller.create_offer())
 

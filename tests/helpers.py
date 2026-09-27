@@ -34,4 +34,3 @@ async def generate_answer(offer):
     pc.close()
 
     return answer
-

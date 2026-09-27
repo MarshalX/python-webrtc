@@ -1,15 +1,14 @@
-import os
-import json
-import time
 import asyncio
+import json
+import os
 import threading
-
-import webrtc
+import time
 
 # pip install pytgcalls[pyrogram]==3.0.0.dev21
 import pyrogram
 from pytgcalls.mtproto.pyrogram_bridge import PyrogramBridge
 
+import webrtc
 
 remote_sdp = None
 
@@ -61,7 +60,7 @@ def build_answer(sdp):
     return f"""v=0
 o=- {time.time()} 2 IN IP4 0.0.0.0
 s=-
-t=0 0   
+t=0 0
 a=group:BUNDLE 0
 a=ice-lite
 m=audio 1 RTP/SAVPF 111 126

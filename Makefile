@@ -1,22 +1,32 @@
-# TODO (MarshalX) make it more pretty
-PATH_TO_WRTC_SO = ../../build/lib.macosx-12.1-arm64-3.10/wrtc.cpython-310-darwin.so
-PATH_TO_PY_MODULES = ./python-webrtc/python
+.PHONY: dev test lint format stub wheels doc clean
 
-RUN_TESTS = pytest
-RUN_TESTS_OPTS ?= -vv -W ignore:::wrtc -W ignore:::pkg_resources
-TESTS_DIR = tests
-
-export PATH_TO_LIB=${PATH_TO_WRTC_SO}
-export PYTHONPATH=${PATH_TO_PY_MODULES}
+# editable install; the extension is rebuilt automatically on import after C++ changes
+dev:
+	uv sync --group dev --no-install-project
+	uv pip install --no-build-isolation -e . \
+		-Ceditable.rebuild=true -Cbuild-dir=build/editable
 
 test:
-	@${RUN_TESTS} ${TESTS_DIR} ${RUN_TESTS_OPTS} $(O)
+	uv run --no-sync pytest tests $(O)
+
+lint:
+	uvx ruff check
+	uvx ruff format --check
+
+format:
+	uvx ruff check --fix
+	uvx ruff format
 
 stub:
-	python -m "pybind11_stubgen" wrtc --no-setup-py --root-module-suffix=""
+	uv run --no-sync pybind11-stubgen wrtc -o build/stubs
+	cp build/stubs/wrtc.pyi stubs/wrtc/__init__.pyi
+
+# wheels for the current platform, exactly as CI builds them
+wheels:
+	uvx cibuildwheel==4.2.1 --output-dir wheelhouse
 
 doc:
 	cd docs && make gen && make html
 
-black:
-	black --config black.toml tests python-webrtc
+clean:
+	rm -rf build dist wheelhouse

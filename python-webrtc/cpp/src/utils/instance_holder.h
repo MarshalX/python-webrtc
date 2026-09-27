@@ -8,6 +8,7 @@
 #pragma once
 
 #include <map>
+#include <mutex>
 
 namespace python_webrtc {
 
@@ -28,12 +29,15 @@ namespace python_webrtc {
   private:
     T (*WrapConstructor)(V..., U);
 
+    // wrappers may create nested wrappers (sctp -> dtls -> ice) while holding the lock
+    std::recursive_mutex _mutex;
     std::map<U, T> _uToTstore;
     std::map<T, U> _tToUstore;
   };
 
   template<typename T, typename U, typename... V>
   T InstanceHolder<T, U, V...>::GetOrCreate(V... args, U key) {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     if (_uToTstore.find(key) != _uToTstore.end()) {
       return _uToTstore.at(key);
     }
@@ -47,6 +51,7 @@ namespace python_webrtc {
 
   template<typename T, typename U, typename... V>
   void InstanceHolder<T, U, V...>::Release(T value) {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     auto key = _tToUstore.at(value);
     _tToUstore.erase(value);
     _uToTstore.erase(key);

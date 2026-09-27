@@ -5,10 +5,9 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING, Optional, List
+from typing import TYPE_CHECKING, List, Optional
 
-from webrtc import wrtc, WebRTCObject
-
+from webrtc import WebRTCObject, wrtc
 
 if TYPE_CHECKING:
     import webrtc

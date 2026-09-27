@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include <pybind11/pybind11.h>
 
@@ -15,11 +16,11 @@ namespace python_webrtc {
 
   class RTCOnDataEvent {
   public:
-    RTCOnDataEvent(std::string &, uint16_t);
+    RTCOnDataEvent(std::string, uint16_t);
 
     static void Init(pybind11::module &m);
 
-    uint8_t *audioData;
+    std::string audioData;  // raw PCM samples, owned
     uint16_t numberOfFrames;
     uint16_t sampleRate = 48000;
     uint8_t bitsPerSample = 16;
