@@ -6,6 +6,9 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '0 17 * * 5'  # Fridays, catches breakage from runner images, dependencies and downloads
+      timezone: Europe/Warsaw
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -49,6 +52,7 @@ jobs:
       - name: Locate sdist
         shell: bash
         run: echo "SDIST=$(ls *.tar.gz)" >> "$GITHUB_ENV"
+      - uses: astral-sh/setup-uv@v7
       - uses: pypa/cibuildwheel@v4.2.1
         with:
           package-dir: ${{ env.SDIST }}
