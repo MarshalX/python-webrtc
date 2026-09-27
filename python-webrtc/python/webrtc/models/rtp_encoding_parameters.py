@@ -7,7 +7,7 @@
 
 from typing import Optional
 
-from webrtc import wrtc, WebRTCObject
+from webrtc import WebRTCObject, wrtc
 
 
 class RtpEncodingParameters(WebRTCObject):

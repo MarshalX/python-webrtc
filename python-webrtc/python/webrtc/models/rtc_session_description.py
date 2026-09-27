@@ -7,7 +7,7 @@
 
 from typing import TYPE_CHECKING
 
-from webrtc import wrtc, WebRTCObject, RTCSessionDescriptionInit
+from webrtc import RTCSessionDescriptionInit, WebRTCObject, wrtc
 
 if TYPE_CHECKING:
     import webrtc

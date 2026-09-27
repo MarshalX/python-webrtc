@@ -7,11 +7,13 @@
 
 #include "../interfaces/media_stream.h"
 
+#include <rtc_base/crypto_random.h>
+
 namespace python_webrtc {
 
   static MediaStream *GetUserMedia() {
     auto factory = PeerConnectionFactory::GetOrCreateDefault();
-    auto stream = factory->factory()->CreateLocalMediaStream(rtc::CreateRandomUuid());
+    auto stream = factory->factory()->CreateLocalMediaStream(webrtc::CreateRandomUuid());
 
     // TODO (MarshalX) get from bound MediaStreamConstraints
     // https://github.com/MarshalX/python-webrtc/issues/169
@@ -19,9 +21,9 @@ namespace python_webrtc {
     auto video = false;
 
     if (audio) {
-      cricket::AudioOptions options;
+      webrtc::AudioOptions options;
       auto source = factory->factory()->CreateAudioSource(options);
-      auto track = factory->factory()->CreateAudioTrack(rtc::CreateRandomUuid(), source);
+      auto track = factory->factory()->CreateAudioTrack(webrtc::CreateRandomUuid(), source.get());
       stream->AddTrack(track);
     }
 
@@ -29,7 +31,7 @@ namespace python_webrtc {
 //      TODO (MarshalX) create RTCVideoTrackSource
 //      https://github.com/MarshalX/python-webrtc/issues/170
 //      auto source = ... RTCVideoTrackSource()
-//      auto track = factory->factory()->CreateVideoTrack(rtc::CreateRandomUuid(), source);
+//      auto track = factory->factory()->CreateVideoTrack(webrtc::CreateRandomUuid(), source);
 //      stream->AddTrack(track);
     }
 

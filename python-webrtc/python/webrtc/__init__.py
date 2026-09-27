@@ -9,6 +9,7 @@ import wrtc
 
 from .base import WebRTCObject
 
+# the order matters: modules import each other through the package namespace
 from .interfaces.rtc_peer_connection import RTCPeerConnection
 from .interfaces.media_stream_track import MediaStreamTrack
 from .interfaces.media_stream import MediaStream
@@ -36,6 +37,7 @@ SdpParseException = wrtc.SdpParseException
 
 # enums
 RTCPeerConnectionState = wrtc.RTCPeerConnectionState
+RTCSignalingState = wrtc.RTCSignalingState
 RTCIceConnectionState = wrtc.RTCIceConnectionState
 RTCIceGatheringState = wrtc.RTCIceGatheringState
 RTCSdpType = wrtc.RTCSdpType
@@ -58,6 +60,7 @@ __all__ = [
     'SdpParseException',
     # enums
     'RTCPeerConnectionState',
+    'RTCSignalingState',
     'RTCIceConnectionState',
     'RTCIceGatheringState',
     'RTCSdpType',

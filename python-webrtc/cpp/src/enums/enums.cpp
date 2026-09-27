@@ -8,6 +8,7 @@
 #include "enums.h"
 
 #include "webrtc/peer_connection_state.h"
+#include "webrtc/signaling_state.h"
 #include "webrtc/ice_connection_state.h"
 #include "webrtc/ice_gathering_state.h"
 #include "webrtc/sdp_type.h"
@@ -28,6 +29,7 @@ namespace python_webrtc {
     // webrtc
 
     PeerConnectionState::Init(m);
+    SignalingState::Init(m);
     IceConnectionState::Init(m);
     IceGatheringState::Init(m);
 

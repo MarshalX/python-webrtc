@@ -15,16 +15,16 @@ namespace python_webrtc {
 
   class RTCRtpReceiver {
   public:
-    explicit RTCRtpReceiver(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::RtpReceiverInterface>);
+    explicit RTCRtpReceiver(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>);
 
-    static RTCRtpReceiver *Create(PeerConnectionFactory *, rtc::scoped_refptr<webrtc::RtpReceiverInterface>);
+    static RTCRtpReceiver *Create(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>);
 
     ~RTCRtpReceiver();
 
     static void Init(pybind11::module &m);
 
     static InstanceHolder<
-        RTCRtpReceiver *, rtc::scoped_refptr<webrtc::RtpReceiverInterface>, PeerConnectionFactory *
+        RTCRtpReceiver *, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>, PeerConnectionFactory *
     > *holder();
 
     MediaStreamTrack *GetTrack();
@@ -33,7 +33,7 @@ namespace python_webrtc {
 
   private:
     PeerConnectionFactory *_factory;
-    rtc::scoped_refptr<webrtc::RtpReceiverInterface> _receiver;
+    webrtc::scoped_refptr<webrtc::RtpReceiverInterface> _receiver;
   };
 
 } // namespace python_webrtc

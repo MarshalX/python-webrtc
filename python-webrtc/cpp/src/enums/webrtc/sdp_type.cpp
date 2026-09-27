@@ -7,7 +7,7 @@
 
 #include "sdp_type.h"
 
-#include <webrtc/api/jsep.h>
+#include <api/jsep.h>
 
 namespace python_webrtc {
 

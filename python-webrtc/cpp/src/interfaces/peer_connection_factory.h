@@ -9,22 +9,13 @@
 
 #include <mutex>
 
-#include <webrtc/api/peer_connection_interface.h>
-#include <webrtc/api/scoped_refptr.h>
-#include <webrtc/modules/audio_device/include/audio_device.h>
+#include <api/peer_connection_interface.h>
+#include <api/scoped_refptr.h>
+#include <rtc_base/thread.h>
+#include <modules/audio_device/include/audio_device.h>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-
-namespace rtc {
-
-  class NetworkManager;
-
-  class PacketSocketFactory;
-
-  class Thread;
-
-}  // namespace rtc
 
 namespace webrtc {
 
@@ -44,29 +35,22 @@ namespace python_webrtc {
 
     static void Release();
 
-    rtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory() { return _factory; }
-
-    rtc::NetworkManager *getNetworkManager() { return _networkManager.get(); }
-
-    rtc::PacketSocketFactory *getSocketFactory() { return _socketFactory.get(); }
+    webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory() { return _factory; }
 
     static void Init(pybind11::module &m);
 
     static void Dispose();
 
-    std::unique_ptr<rtc::Thread> _signalingThread;
-    std::unique_ptr<rtc::Thread> _workerThread;
+    std::unique_ptr<webrtc::Thread> _signalingThread;
+    std::unique_ptr<webrtc::Thread> _workerThread;
 
   private:
     static PeerConnectionFactory *_default;
     static std::mutex _mutex;
     static int _references;
 
-    rtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> _factory;
-    rtc::scoped_refptr<webrtc::AudioDeviceModule> _audioDeviceModule;
-
-    std::unique_ptr<rtc::NetworkManager> _networkManager;
-    std::unique_ptr<rtc::PacketSocketFactory> _socketFactory;
+    webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> _factory;
+    webrtc::scoped_refptr<webrtc::AudioDeviceModule> _audioDeviceModule;
   };
 
 } // namespace python_webrtc

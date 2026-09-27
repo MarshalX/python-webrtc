@@ -12,10 +12,10 @@
 namespace python_webrtc {
 
   void CricketIceGatheringState::Init(pybind11::module &m) {
-    pybind11::enum_<cricket::IceGatheringState>(m, "CricketIceGatheringState")
-        .value("new", cricket::IceGatheringState::kIceGatheringNew)
-        .value("gathering", cricket::IceGatheringState::kIceGatheringGathering)
-        .value("complete", cricket::IceGatheringState::kIceGatheringComplete)
+    pybind11::enum_<webrtc::IceGatheringState>(m, "CricketIceGatheringState")
+        .value("new", webrtc::IceGatheringState::kIceGatheringNew)
+        .value("gathering", webrtc::IceGatheringState::kIceGatheringGathering)
+        .value("complete", webrtc::IceGatheringState::kIceGatheringComplete)
         .export_values();
   }
 

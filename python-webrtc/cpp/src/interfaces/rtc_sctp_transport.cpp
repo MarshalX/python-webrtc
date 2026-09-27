@@ -6,16 +6,17 @@
 //
 
 #include "rtc_sctp_transport.h"
+#include "../utils/gil.h"
 
 namespace python_webrtc {
 
   RTCSctpTransport::RTCSctpTransport(
-      python_webrtc::PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::SctpTransportInterface> transport
+      python_webrtc::PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::SctpTransportInterface> transport
   ) {
     _factory = factory;
     _transport = std::move(transport);
 
-    _factory->_workerThread->Invoke<void>(RTC_FROM_HERE, [this]() {
+    _factory->_workerThread->BlockingCall([this]() {
       _dtls_transport = _transport->dtls_transport();
       _transport->RegisterObserver(this);
     });
@@ -32,22 +33,22 @@ namespace python_webrtc {
 
   void RTCSctpTransport::Init(pybind11::module &m) {
     pybind11::class_<RTCSctpTransport>(m, "RTCSctpTransport")
-        .def_property_readonly("transport", &RTCSctpTransport::GetTransport, pybind11::return_value_policy::reference)
-        .def_property_readonly("state", &RTCSctpTransport::GetState)
-        .def_property_readonly("maxMessageSize", &RTCSctpTransport::GetMaxMessageSize)
-        .def_property_readonly("maxChannels", &RTCSctpTransport::GetMaxChannels);
+        .def_property_readonly("transport", nogil_fn(&RTCSctpTransport::GetTransport), pybind11::return_value_policy::reference)
+        .def_property_readonly("state", nogil_fn(&RTCSctpTransport::GetState))
+        .def_property_readonly("maxMessageSize", nogil_fn(&RTCSctpTransport::GetMaxMessageSize))
+        .def_property_readonly("maxChannels", nogil_fn(&RTCSctpTransport::GetMaxChannels));
   }
 
-  InstanceHolder<RTCSctpTransport *, rtc::scoped_refptr<webrtc::SctpTransportInterface>, PeerConnectionFactory *> *
+  InstanceHolder<RTCSctpTransport *, webrtc::scoped_refptr<webrtc::SctpTransportInterface>, PeerConnectionFactory *> *
   RTCSctpTransport::holder() {
     static auto holder = new InstanceHolder<
-        RTCSctpTransport *, rtc::scoped_refptr<webrtc::SctpTransportInterface>, PeerConnectionFactory *
+        RTCSctpTransport *, webrtc::scoped_refptr<webrtc::SctpTransportInterface>, PeerConnectionFactory *
     >(RTCSctpTransport::Create);
     return holder;
   }
 
   RTCSctpTransport *RTCSctpTransport::Create(
-      PeerConnectionFactory *factory, rtc::scoped_refptr<webrtc::SctpTransportInterface> transport
+      PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::SctpTransportInterface> transport
   ) {
     // who caring about freeing memory?
     return new RTCSctpTransport(factory, std::move(transport));
@@ -66,7 +67,7 @@ namespace python_webrtc {
   }
 
   RTCDtlsTransport *RTCSctpTransport::GetTransport() {
-    return RTCDtlsTransport::holder()->GetOrCreate(_factory, _dtls_transport.get());
+    return RTCDtlsTransport::holder()->GetOrCreate(_factory, _dtls_transport);
   }
 
   webrtc::SctpTransportState RTCSctpTransport::GetState() {

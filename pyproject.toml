@@ -1,0 +1,118 @@
+[build-system]
+requires = ["scikit-build-core>=0.11", "pybind11>=3.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "wrtc"  # "webrtc" isn't allowed on PyPI
+version = "0.0.0.dev10"
+description = "a Python extension that provides bindings to WebRTC M152"
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE.md", "THIRD_PARTY_LICENSES.md"]
+authors = [{ name = "Ilya (Marshal)", email = "ilya@marshal.dev" }]
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Natural Language :: English",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Internet",
+    "Topic :: Multimedia",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Multimedia :: Video :: Capture",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Sound/Audio :: Capture/Recording",
+    "Topic :: Communications",
+    "Topic :: Communications :: Internet Phone",
+    "Topic :: Communications :: Telephony",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: C++",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/MarshalX/python-webrtc"
+Documentation = "https://wrtc.rtfd.io/"
+Source = "https://github.com/MarshalX/python-webrtc"
+Tracker = "https://github.com/MarshalX/python-webrtc/issues"
+Author = "https://github.com/MarshalX"
+
+[dependency-groups]
+test = ["pytest>=8", "pytest-asyncio>=0.24"]
+dev = [
+    { include-group = "test" },
+    "scikit-build-core>=0.11",
+    "pybind11>=3.0",
+    "ruff>=0.13",
+    "pybind11-stubgen>=2.5",
+]
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+cmake.version = ">=3.26"
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["python-webrtc/python/webrtc"]
+sdist.exclude = [
+    ".github", ".idea", "docs", "docs_html", "examples", "node-webrtc", "wpt",
+    "Dockerfile*", "docker-compose.yaml", "/py.typed",
+    "python-webrtc/python/*.py", "python-webrtc/python/*.session*", "python-webrtc/python/*.raw",
+]
+
+[tool.cibuildwheel]
+build = "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
+skip = "*-musllinux_*"
+build-frontend = "build[uv]"
+test-groups = ["test"]
+test-command = "pytest {project}/tests"
+
+[tool.cibuildwheel.linux]
+archs = ["x86_64"]
+manylinux-x86_64-image = "manylinux_2_28"
+# libwebrtc for Linux is compiled against Chromium's libc++, which needs Clang
+before-all = "dnf install -y clang lld"
+environment = { CC = "clang", CXX = "clang++", WRTC_CACHE_DIR = "/tmp/wrtc-cache" }
+
+[tool.cibuildwheel.macos]
+archs = ["native"]
+environment = { MACOSX_DEPLOYMENT_TARGET = "13.0" }
+
+[tool.cibuildwheel.windows]
+archs = ["AMD64"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+include = ["python-webrtc/python/webrtc/**/*.py", "tests/**/*.py", "examples/**/*.py", "cmake/**/*.py"]
+extend-exclude = ["*.pyi"]
+
+[tool.ruff.format]
+quote-style = "preserve"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["UP006", "UP007", "UP035", "UP045", "B024"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["I001", "E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["webrtc", "wrtc", "tests"]

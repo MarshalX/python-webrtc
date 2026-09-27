@@ -5,12 +5,11 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
+from abc import ABCMeta
 from typing import List
 
-from abc import ABCMeta
 
-
-class WebRTCObject(object, metaclass=ABCMeta):
+class WebRTCObject(metaclass=ABCMeta):
     _class = None
 
     def __init__(self, native_obj=None):

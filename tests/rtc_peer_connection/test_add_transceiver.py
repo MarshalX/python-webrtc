@@ -32,9 +32,9 @@ def _create_and_test_transceiver(pc, kind):
     assert transceiver.direction == webrtc.TransceiverDirection.sendrecv
     assert transceiver.current_direction is None
 
-    assert [
-        transceiver
-    ] == pc.get_transceivers(), 'Expect added transceiver to be the only element in connection\'s list of transceivers'
+    assert [transceiver] == pc.get_transceivers(), (
+        'Expect added transceiver to be the only element in connection\'s list of transceivers'
+    )
 
     sender = transceiver.sender
 
@@ -53,9 +53,9 @@ def _create_and_test_transceiver(pc, kind):
     assert track.kind == kind
     assert track.ready_state == webrtc.MediaStreamTrackState.live
 
-    assert [
-        receiver
-    ] == pc.get_receivers(), 'Expect added receiver to be the only element in connection\'s list of receivers'
+    assert [receiver] == pc.get_receivers(), (
+        'Expect added receiver to be the only element in connection\'s list of receivers'
+    )
 
 
 def test_2(pc):
@@ -97,24 +97,24 @@ def test_6(pc, audio_stream):
 
     receiver_track = receiver.track
 
-    assert isinstance(
-        receiver_track, webrtc.MediaStreamTrack
-    ), 'Expect receiver.track to be instance of MediaStreamTrack'
-    assert (
-        receiver_track.kind == webrtc.MediaType.audio
-    ), 'receiver.track should have the same kind as added track\'s kind'
+    assert isinstance(receiver_track, webrtc.MediaStreamTrack), (
+        'Expect receiver.track to be instance of MediaStreamTrack'
+    )
+    assert receiver_track.kind == webrtc.MediaType.audio, (
+        'receiver.track should have the same kind as added track\'s kind'
+    )
 
     assert receiver_track.ready_state == webrtc.MediaStreamTrackState.live
 
-    assert [
-        transceiver
-    ] == pc.get_transceivers(), 'Expect added transceiver to be the only element in connection\'s list of transceivers'
+    assert [transceiver] == pc.get_transceivers(), (
+        'Expect added transceiver to be the only element in connection\'s list of transceivers'
+    )
 
     assert [sender] == pc.get_senders(), 'Expect added sender to be the only element in connection\'s list of senders'
 
-    assert [
-        receiver
-    ] == pc.get_receivers(), 'Expect added receiver to be the only element in connection\'s list of receivers'
+    assert [receiver] == pc.get_receivers(), (
+        'Expect added receiver to be the only element in connection\'s list of receivers'
+    )
 
 
 def test_7(pc, audio_stream):

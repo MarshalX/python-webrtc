@@ -17,18 +17,16 @@
 #  You should have received a copy of the GNU Lesser General Public License v3
 #  along with tgcalls. If not, see <http://www.gnu.org/licenses/>.
 
-import os
-import json
-import time
 import asyncio
+import json
+import os
 import threading
-
-import webrtc
+import time
 
 # pip install pytgcalls[pyrogram]==3.0.0.dev21
 import pyrogram
+import webrtc
 from pytgcalls.mtproto.pyrogram_bridge import PyrogramBridge
-
 
 remote_sdp = None
 

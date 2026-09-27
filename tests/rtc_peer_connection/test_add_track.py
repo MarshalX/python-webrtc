@@ -8,7 +8,6 @@
 import pytest
 
 import webrtc
-
 from tests.helpers import exchange_offer_answer
 
 

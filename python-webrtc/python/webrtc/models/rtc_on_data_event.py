@@ -7,7 +7,7 @@
 
 from typing import AnyStr
 
-from webrtc import wrtc, WebRTCObject
+from webrtc import WebRTCObject, wrtc
 
 
 # TODO rename to RTCAudioData

@@ -6,12 +6,13 @@
 //
 
 #include "rtc_rtp_transceiver.h"
+#include "../utils/gil.h"
 #include "../exceptions.h"
 
 namespace python_webrtc {
 
   RTCRtpTransceiver::RTCRtpTransceiver(PeerConnectionFactory *factory,
-                                       rtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) : _factory(
+                                       webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) : _factory(
       factory), _transceiver(std::move(transceiver)) {}
 
   RTCRtpTransceiver::~RTCRtpTransceiver() {
@@ -21,26 +22,26 @@ namespace python_webrtc {
 
   void RTCRtpTransceiver::Init(pybind11::module &m) {
     pybind11::class_<RTCRtpTransceiver>(m, "RTCRtpTransceiver")
-        .def_property_readonly("mid", &RTCRtpTransceiver::GetMid)
-        .def_property_readonly("sender", &RTCRtpTransceiver::GetSender, pybind11::return_value_policy::reference)
-        .def_property_readonly("receiver", &RTCRtpTransceiver::GetReceiver, pybind11::return_value_policy::reference)
-        .def_property_readonly("stopped", &RTCRtpTransceiver::GetStopped)
-        .def_property("direction", &RTCRtpTransceiver::GetDirection, &RTCRtpTransceiver::SetDirection)
-        .def_property_readonly("currentDirection", &RTCRtpTransceiver::GetCurrentDirection)
+        .def_property_readonly("mid", nogil_fn(&RTCRtpTransceiver::GetMid))
+        .def_property_readonly("sender", nogil_fn(&RTCRtpTransceiver::GetSender), pybind11::return_value_policy::reference)
+        .def_property_readonly("receiver", nogil_fn(&RTCRtpTransceiver::GetReceiver), pybind11::return_value_policy::reference)
+        .def_property_readonly("stopped", nogil_fn(&RTCRtpTransceiver::GetStopped))
+        .def_property("direction", nogil_fn(&RTCRtpTransceiver::GetDirection), nogil_fn(&RTCRtpTransceiver::SetDirection))
+        .def_property_readonly("currentDirection", nogil_fn(&RTCRtpTransceiver::GetCurrentDirection))
             // set codec pref
-        .def("stop", &RTCRtpTransceiver::Stop);
+        .def("stop", &RTCRtpTransceiver::Stop, nogil());
   }
 
-  InstanceHolder<RTCRtpTransceiver *, rtc::scoped_refptr<webrtc::RtpTransceiverInterface>, PeerConnectionFactory *> *
+  InstanceHolder<RTCRtpTransceiver *, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>, PeerConnectionFactory *> *
   RTCRtpTransceiver::holder() {
     static auto holder = new InstanceHolder<
-        RTCRtpTransceiver *, rtc::scoped_refptr<webrtc::RtpTransceiverInterface>, PeerConnectionFactory *
+        RTCRtpTransceiver *, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>, PeerConnectionFactory *
     >(RTCRtpTransceiver::Create);
     return holder;
   }
 
   RTCRtpTransceiver *RTCRtpTransceiver::Create(PeerConnectionFactory *factory,
-                                               rtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) {
+                                               webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) {
     // who caring about freeing memory?
     return new RTCRtpTransceiver(factory, std::move(transceiver));
   }

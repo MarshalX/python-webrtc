@@ -7,7 +7,7 @@
 
 from typing import TYPE_CHECKING
 
-from webrtc import wrtc, WebRTCObject, MediaStreamTrack
+from webrtc import MediaStreamTrack, WebRTCObject, wrtc
 
 if TYPE_CHECKING:
     import webrtc

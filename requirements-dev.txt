@@ -1,3 +1,0 @@
-black
-pytest-asyncio
-pybind11-stubgen

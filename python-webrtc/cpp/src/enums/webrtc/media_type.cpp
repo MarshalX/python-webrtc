@@ -12,11 +12,11 @@
 namespace python_webrtc {
 
   void MediaType::Init(pybind11::module &m) {
-    pybind11::enum_<cricket::MediaType>(m, "MediaType")
-        .value("audio", cricket::MediaType::MEDIA_TYPE_AUDIO)
-        .value("video", cricket::MediaType::MEDIA_TYPE_VIDEO)
-        .value("data", cricket::MediaType::MEDIA_TYPE_DATA)
-        .value("unsupported", cricket::MediaType::MEDIA_TYPE_UNSUPPORTED)
+    pybind11::enum_<webrtc::MediaType>(m, "MediaType")
+        .value("audio", webrtc::MediaType::AUDIO)
+        .value("video", webrtc::MediaType::VIDEO)
+        .value("data", webrtc::MediaType::DATA)
+        .value("unsupported", webrtc::MediaType::UNSUPPORTED)
         .export_values();
   }
 } // namespace python_webrtc
