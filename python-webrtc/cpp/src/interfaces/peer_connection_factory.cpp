@@ -13,11 +13,28 @@
 #include <api/environment/environment_factory.h>
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
-#include <api/video_codecs/builtin_video_encoder_factory.h>
-#include <api/video_codecs/builtin_video_decoder_factory.h>
+#include <api/video_codecs/video_decoder_factory_template.h>
+#include <api/video_codecs/video_decoder_factory_template_dav1d_adapter.h>
+#include <api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h>
+#include <api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template.h>
+#include <api/video_codecs/video_encoder_factory_template_libaom_av1_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h>
 #include <rtc_base/ssl_adapter.h>
 
 namespace python_webrtc {
+
+  // Royalty-free codecs only (the prebuilts have no H.264).
+  using VideoEncoderFactory = webrtc::VideoEncoderFactoryTemplate<
+      webrtc::LibvpxVp8EncoderTemplateAdapter,
+      webrtc::LibvpxVp9EncoderTemplateAdapter,
+      webrtc::LibaomAv1EncoderTemplateAdapter>;
+
+  using VideoDecoderFactory = webrtc::VideoDecoderFactoryTemplate<
+      webrtc::LibvpxVp8DecoderTemplateAdapter,
+      webrtc::LibvpxVp9DecoderTemplateAdapter,
+      webrtc::Dav1dDecoderTemplateAdapter>;
 
   PeerConnectionFactory *PeerConnectionFactory::_default = nullptr;
   std::mutex PeerConnectionFactory::_mutex{};
@@ -54,8 +71,8 @@ namespace python_webrtc {
         _audioDeviceModule,
         webrtc::CreateBuiltinAudioEncoderFactory(),
         webrtc::CreateBuiltinAudioDecoderFactory(),
-        webrtc::CreateBuiltinVideoEncoderFactory(),
-        webrtc::CreateBuiltinVideoDecoderFactory(),
+        std::make_unique<VideoEncoderFactory>(),
+        std::make_unique<VideoDecoderFactory>(),
         nullptr,
         nullptr);
     assert(_factory);
