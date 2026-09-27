@@ -5,6 +5,8 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
+import asyncio
+
 import webrtc
 
 
@@ -34,3 +36,11 @@ async def generate_answer(offer):
     pc.close()
 
     return answer
+
+
+async def wait_for_ice_gathering_complete(pc, timeout=10):
+    async def _wait():
+        while pc.ice_gathering_state != webrtc.RTCIceGatheringState.complete:
+            await asyncio.sleep(0.05)
+
+    await asyncio.wait_for(_wait(), timeout)

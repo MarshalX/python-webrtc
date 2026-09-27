@@ -145,39 +145,54 @@ def test_7(pc, audio_stream):
     assert sender2 in senders
 
 
-def test_8(pc):
+@pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
+def test_8(pc, kind):
     """add_transceiver with rid containing invalid non-alphanumeric characters should throw RTCException"""
     encodings = [webrtc.RtpEncodingParameters(rid="@Invalid!")]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
 
     # will be changed to TypeError after reworking binding to rtc error?
     with pytest.raises(webrtc.RTCException):
-        pc.add_transceiver(webrtc.MediaType.audio, init)
+        pc.add_transceiver(kind, init)
 
 
-def test_9(pc):
+@pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
+def test_9(pc, kind):
     """add_transceiver with rid longer than 16 characters should throw RTCException"""
     encodings = [webrtc.RtpEncodingParameters(rid="a" * 17)]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
 
     # will be changed to TypeError after reworking binding to rtc error?
     with pytest.raises(webrtc.RTCException):
-        pc.add_transceiver(webrtc.MediaType.audio, init)
+        pc.add_transceiver(kind, init)
 
 
-def test_10(pc):
+@pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
+def test_10(pc, kind):
     """add_transceiver with valid rid value should succeed"""
     encodings = [webrtc.RtpEncodingParameters(rid="foo")]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
-    pc.add_transceiver(webrtc.MediaType.audio, init)
+    pc.add_transceiver(kind, init)
 
 
 def test_11(pc):
     """add_transceiver with valid sendEncodings should succeed"""
-    encodings = [
-        webrtc.RtpEncodingParameters(
-            active=False, max_bitrate=1337, max_framerate=30, rid="foo", scale_resolution_down_by=2.0
-        )
-    ]
+    # dtx and ptime from the original test are not supported by RtpEncodingParameters yet
+    encodings = [webrtc.RtpEncodingParameters(active=False, max_bitrate=8, max_framerate=25, rid="foo")]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
-    pc.add_transceiver(webrtc.MediaType.audio, init)
+    pc.add_transceiver(webrtc.MediaType.video, init)
+
+
+def test_12(pc):
+    """add_transceiver with direction sendonly should have result transceiver.direction be the same"""
+    init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
+    transceiver = pc.add_transceiver(webrtc.MediaType.audio, init)
+
+    assert transceiver.direction == webrtc.TransceiverDirection.sendonly
+
+
+def test_13(pc):
+    """add_transceiver with multiple rid values should succeed"""
+    encodings = [webrtc.RtpEncodingParameters(rid="a"), webrtc.RtpEncodingParameters(rid="b")]
+    init = webrtc.RtpTransceiverInit(send_encodings=encodings)
+    pc.add_transceiver(webrtc.MediaType.video, init)
