@@ -39,12 +39,17 @@ jobs:
 
   wheels:
     needs: sdist
-    name: wheels (${{ matrix.os }})
+    name: wheels (${{ matrix.os }}, ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-15-intel, macos-15, windows-latest]
+        # PRs: oldest and newest only
+        python: ${{ fromJSON(github.event_name == 'pull_request' && '["cp39","cp314"]' || '["cp39","cp310","cp311","cp312","cp313","cp314"]') }}
+    env:
+      WRTC_CACHE_DIR: ${{ github.workspace }}/.wrtc-cache
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -52,19 +57,34 @@ jobs:
       - name: Locate sdist
         shell: bash
         run: echo "SDIST=$(ls *.tar.gz)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        if: runner.os != 'Windows'
+        with:
+          path: .ci-src
+          sparse-checkout: cmake
+      # not on Windows: the unstripped lib restores slower than it unpacks
+      - uses: actions/cache@v6
+        if: runner.os != 'Windows'
+        with:
+          path: .wrtc-cache
+          key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.ci-src/cmake/libwebrtc.cmake', '.ci-src/cmake/libcxx/*.sha256') }}
       - uses: astral-sh/setup-uv@v7
       - uses: pypa/cibuildwheel@v4.2.1
+        env:
+          CIBW_BUILD: ${{ matrix.python }}-*
+          CIBW_CONTAINER_ENGINE: "docker; create_args: --volume=${{ github.workspace }}/.wrtc-cache:/tmp/wrtc-cache"
         with:
           package-dir: ${{ env.SDIST }}
       - uses: actions/upload-artifact@v7
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels-${{ matrix.os }}-${{ matrix.python }}
           path: wheelhouse/*.whl
 
   sanitizers:
     name: sanitizers (ASan + UBSan)
     runs-on: ubuntu-latest
     container: quay.io/pypa/manylinux_2_28_x86_64
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - run: .github/scripts/sanitizers.sh
