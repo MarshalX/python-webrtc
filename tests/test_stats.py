@@ -64,6 +64,9 @@ async def test_remote_track_mute_and_stream_events(caller, callee):
     assert len(remote_stream.get_tracks()) == 2
     removed = wait_for_event(remote_stream, 'removetrack')
     remote_video = [e.track for e in events if e.track.kind == webrtc.MediaType.video][0]
+    if remote_video.muted:
+        # the first video packet may take longer than the connection
+        await wait_for_event(remote_video, 'unmute')
     muted = wait_for_event(remote_video, 'mute')
 
     # the video isn't sent anymore

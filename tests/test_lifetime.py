@@ -361,6 +361,7 @@ async def test_connections_dropped_while_emitting_events():
 def test_process_exits_after_connecting():
     """Wrappers destroyed at exit unregister from libwebrtc threads, which may be wrapping objects meanwhile:
     this used to deadlock on the lock of the wrappers"""
+    import os
     import subprocess
     import sys
     import textwrap
@@ -383,7 +384,9 @@ def test_process_exits_after_connecting():
         asyncio.run(main())
         '''
     )
-    result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=60)
+    # from the root of the project, which has the tests package (pytest may run from elsewhere, like cibuildwheel)
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=60, cwd=root)
     assert 'connected' in result.stdout, result.stderr[-2000:]
     assert result.returncode == 0, result.stderr[-2000:]
 

@@ -130,9 +130,8 @@ async def test_description_errors_and_models(pc):
     with pytest.raises(webrtc.InvalidModificationError):
         await pc.set_local_description({'type': 'offer', 'sdp': offer.sdp.replace('a=mid:0', 'a=mid:1')})
     await pc.set_local_description(offer)
-    assert pc.pending_local_description is pc.pending_local_description or (
-        pc.pending_local_description == pc.local_description
-    )
+    # not compared by identity: gathered candidates change the description (and its object) between reads
+    assert pc.pending_local_description.type == pc.local_description.type == offer.type
     assert pc.current_local_description is None
 
 
