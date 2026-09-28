@@ -14,8 +14,8 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD="${WRTC_SANITIZERS_BUILD_DIR:-/tmp/wrtc-sanitizers}"
 PYTHON="${PYTHON:-/opt/python/cp313-cp313/bin/python}"
 
-# libwebrtc for Linux is compiled against Chromium's libc++, which needs Clang
-dnf install -y -q clang lld compiler-rt
+# libwebrtc for Linux is compiled against Chromium's libc++, which needs Clang; llvm provides the symbolizer
+dnf install -y -q clang lld compiler-rt llvm
 
 "$PYTHON" -m venv "$BUILD/venv"
 # shellcheck disable=SC1091
@@ -37,6 +37,8 @@ export PYTHONMALLOC=malloc
 # Leaks of the wrappers are covered by tests/test_lifetime.py.
 export ASAN_OPTIONS="detect_leaks=0:halt_on_error=1:abort_on_error=0:strict_init_order=1:detect_stack_use_after_return=0"
 export UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
+ASAN_SYMBOLIZER_PATH="$(command -v llvm-symbolizer)"
+export ASAN_SYMBOLIZER_PATH
 export PYTHONPATH="$BUILD/python-webrtc/cpp:$SRC/python-webrtc/python:$SRC"
 export PYTHONDONTWRITEBYTECODE=1
 
