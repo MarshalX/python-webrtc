@@ -19,23 +19,21 @@ namespace python_webrtc {
 
   class RTCDtlsTransport : public webrtc::DtlsTransportObserverInterface {
   public:
-    explicit RTCDtlsTransport(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::DtlsTransportInterface>);
-
-    static RTCDtlsTransport *Create(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::DtlsTransportInterface>);
+    explicit RTCDtlsTransport(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::DtlsTransportInterface>);
 
     ~RTCDtlsTransport() override;
 
     static void Init(pybind11::module &m);
 
-    static InstanceHolder<
-        RTCDtlsTransport *, webrtc::scoped_refptr<webrtc::DtlsTransportInterface>, PeerConnectionFactory *
-    > *holder();
+    static InstanceHolder<RTCDtlsTransport, webrtc::DtlsTransportInterface> &holder();
+
+    webrtc::scoped_refptr<webrtc::DtlsTransportInterface> transport() { return _transport; }
 
     void OnStateChange(webrtc::DtlsTransportInformation) override;
 
     void OnError(webrtc::RTCError) override;
 
-    RTCIceTransport *GetIceTransport();
+    std::shared_ptr<RTCIceTransport> GetIceTransport();
 
     webrtc::DtlsTransportState GetState();
 
@@ -43,12 +41,17 @@ namespace python_webrtc {
     void Stop();
 
   private:
+    std::shared_ptr<PeerConnectionFactory> _factory;
+    webrtc::scoped_refptr<webrtc::DtlsTransportInterface> _transport;
+    // a dtls transport runs over the same ice transport for its whole life
+    std::shared_ptr<RTCIceTransport> _iceTransport;
+
+    // accessed on the network thread only
+    bool _observing = false;
+
     std::mutex _mutex;
     webrtc::DtlsTransportState _state;
     std::vector<webrtc::Buffer> _certificates;
-
-    PeerConnectionFactory *_factory;
-    webrtc::scoped_refptr<webrtc::DtlsTransportInterface> _transport;
   };
 
 } // namespace python_webrtc

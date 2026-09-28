@@ -12,44 +12,56 @@
 
 namespace python_webrtc {
 
-  MediaStreamTrack::MediaStreamTrack(PeerConnectionFactory *factory,
-                                     webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track) {
-    _factory = factory;
-
-    _track = std::move(track);
-    _track->RegisterObserver(this);
-
-//    TODO mb remove
-    _enabled = false;
+  MediaStreamTrack::MediaStreamTrack(std::shared_ptr<PeerConnectionFactory> factory,
+                                     webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track)
+      : _factory(std::move(factory)), _track(std::move(track)) {
+    _factory->_signalingThread->BlockingCall([this]() {
+      _track->RegisterObserver(this);
+      _observing = true;
+    });
   }
 
   MediaStreamTrack::~MediaStreamTrack() {
-    _track = nullptr;
-    _factory = nullptr;
+    gil_release_if_held release;
 
-    holder()->Release(this);
+    // after this the track can't notify us anymore: it notifies on the same thread
+    _factory->_signalingThread->BlockingCall([this]() {
+      if (_observing) {
+        _track->UnregisterObserver(this);
+        _observing = false;
+      }
+    });
+
+    _track = nullptr;
   }
 
   void MediaStreamTrack::Init(pybind11::module &m) {
-    pybind11::class_<MediaStreamTrack>(m, "MediaStreamTrack")
+    pybind11::class_<MediaStreamTrack, std::shared_ptr<MediaStreamTrack>>(m, "MediaStreamTrack")
         .def_property("enabled", nogil_fn(&MediaStreamTrack::GetEnabled), nogil_fn(&MediaStreamTrack::SetEnabled))
         .def_property_readonly("id", nogil_fn(&MediaStreamTrack::GetId))
         .def_property_readonly("kind", nogil_fn(&MediaStreamTrack::GetKind))
         .def_property_readonly("readyState", nogil_fn(&MediaStreamTrack::GetReadyState))
         .def_property_readonly("muted", nogil_fn(&MediaStreamTrack::GetMuted))
-        .def("clone", &MediaStreamTrack::Clone, pybind11::return_value_policy::reference, nogil())
+        .def("clone", &MediaStreamTrack::Clone, nogil())
         .def("stop", &MediaStreamTrack::Stop, nogil());
   }
 
   void MediaStreamTrack::Stop() {
-    _track->UnregisterObserver(this);
-    _ended = true;
+    _factory->_signalingThread->BlockingCall([this]() { StopOnSignalingThread(); });
+  }
+
+  void MediaStreamTrack::StopOnSignalingThread() {
+    if (_observing) {
+      _track->UnregisterObserver(this);
+      _observing = false;
+    }
     _enabled = _track->enabled();
+    _ended = true;
   }
 
   void MediaStreamTrack::OnChanged() {
     if (_track->state() == webrtc::MediaStreamTrackInterface::TrackState::kEnded) {
-      Stop();
+      StopOnSignalingThread();
     }
   }
 
@@ -58,7 +70,7 @@ namespace python_webrtc {
   }
 
   bool MediaStreamTrack::GetEnabled() {
-    return _ended ? _enabled : _track->enabled();
+    return _ended ? _enabled.load() : _track->enabled();
   }
 
   void MediaStreamTrack::SetEnabled(bool enabled) {
@@ -94,7 +106,7 @@ namespace python_webrtc {
     return false;
   }
 
-  MediaStreamTrack *MediaStreamTrack::Clone() {
+  std::shared_ptr<MediaStreamTrack> MediaStreamTrack::Clone() {
     auto label = webrtc::CreateRandomUuid();
     webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> clonedTrack = nullptr;
 
@@ -106,7 +118,7 @@ namespace python_webrtc {
       clonedTrack = _factory->factory()->CreateVideoTrack(webrtc::scoped_refptr<webrtc::VideoTrackSourceInterface>(videoTrack->GetSource()), label);
     }
 
-    auto clonedMediaStreamTrack = holder()->GetOrCreate(_factory, clonedTrack);
+    auto clonedMediaStreamTrack = holder().GetOrCreate(_factory, clonedTrack);
     if (_ended) {
       clonedMediaStreamTrack->Stop();
     }
@@ -121,18 +133,10 @@ namespace python_webrtc {
     return webrtc::scoped_refptr<webrtc::VideoTrackInterface>(dynamic_cast<webrtc::VideoTrackInterface *>(_track.get()));
   }
 
-  InstanceHolder<MediaStreamTrack *, webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>, PeerConnectionFactory *> *
-  MediaStreamTrack::holder() {
-    static auto holder = new python_webrtc::InstanceHolder<
-        MediaStreamTrack *, webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>, PeerConnectionFactory *
-    >(MediaStreamTrack::Create);
-    return holder;
-  }
-
-  MediaStreamTrack *MediaStreamTrack::Create(PeerConnectionFactory *factory,
-                                             webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track) {
-    // who caring about freeing memory?
-    return new MediaStreamTrack(factory, std::move(track));
+  InstanceHolder<MediaStreamTrack, webrtc::MediaStreamTrackInterface> &MediaStreamTrack::holder() {
+    // never destroyed: wrappers may outlive static destructors
+    static auto holder = new InstanceHolder<MediaStreamTrack, webrtc::MediaStreamTrackInterface>();
+    return *holder;
   }
 
 } // namespace python_webrtc

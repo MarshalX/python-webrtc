@@ -23,6 +23,8 @@
 #include <api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h>
 #include <rtc_base/ssl_adapter.h>
 
+#include <thread>
+
 namespace python_webrtc {
 
   // Royalty-free codecs only (the prebuilts have no H.264).
@@ -36,11 +38,13 @@ namespace python_webrtc {
       webrtc::LibvpxVp9DecoderTemplateAdapter,
       webrtc::Dav1dDecoderTemplateAdapter>;
 
-  PeerConnectionFactory *PeerConnectionFactory::_default = nullptr;
+  std::weak_ptr<PeerConnectionFactory> PeerConnectionFactory::_default{};
   std::mutex PeerConnectionFactory::_mutex{};
-  int PeerConnectionFactory::_references = 0;
+  std::atomic<int> PeerConnectionFactory::_alive{0};
 
   PeerConnectionFactory::PeerConnectionFactory() {
+    _alive++;
+
     _workerThread = webrtc::Thread::CreateWithSocketServer();
     assert(_workerThread);
 
@@ -83,6 +87,9 @@ namespace python_webrtc {
   }
 
   PeerConnectionFactory::~PeerConnectionFactory() {
+    // stopping the threads waits for their tasks, which may be waiting for the GIL
+    gil_release_if_held release;
+
     _factory = nullptr;
 
     _workerThread->BlockingCall([this]() {
@@ -94,29 +101,32 @@ namespace python_webrtc {
 
     _workerThread = nullptr;
     _signalingThread = nullptr;
+
+    _alive--;
   }
 
-  PeerConnectionFactory *PeerConnectionFactory::GetOrCreateDefault() {
-    _mutex.lock();
-    _references++;
-    if (_references == 1) {
-      assert(_default == nullptr);
-      auto factory = new PeerConnectionFactory();
+  std::shared_ptr<PeerConnectionFactory> PeerConnectionFactory::Create() {
+    return {new PeerConnectionFactory(), &PeerConnectionFactory::Destroy};
+  }
+
+  std::shared_ptr<PeerConnectionFactory> PeerConnectionFactory::GetOrCreateDefault() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    auto factory = _default.lock();
+    if (!factory) {
+      factory = Create();
       _default = factory;
     }
-    _mutex.unlock();
-    return _default;
+    return factory;
   }
 
-  void PeerConnectionFactory::Release() {
-    _mutex.lock();
-    _references--;
-    assert(_references >= 0);
-    if (!_references) {
-      assert(_default != nullptr);
-      _default = nullptr;
+  void PeerConnectionFactory::Destroy(PeerConnectionFactory *factory) {
+    // the last owner may be released by a task on one of the factory threads, which can't stop itself
+    if (factory->_workerThread->IsCurrent() || factory->_signalingThread->IsCurrent()) {
+      std::thread([factory]() { delete factory; }).detach();
+      return;
     }
-    _mutex.unlock();
+
+    delete factory;
   }
 
   void PeerConnectionFactory::Dispose() {
@@ -130,11 +140,12 @@ namespace python_webrtc {
     result = webrtc::InitializeSSL();
     assert(result);
 
-    pybind11::class_<PeerConnectionFactory>(m, "PeerConnectionFactory")
-        .def(pybind11::init<>(), nogil())
-        .def("getOrCreateDefault", &PeerConnectionFactory::GetOrCreateDefault, nogil())
-        .def("release", &PeerConnectionFactory::Release, nogil())
-        .def("dispose", &PeerConnectionFactory::Dispose, nogil());
+    pybind11::class_<PeerConnectionFactory, std::shared_ptr<PeerConnectionFactory>>(m, "PeerConnectionFactory")
+        .def(pybind11::init(&PeerConnectionFactory::Create), nogil())
+        .def_static("getOrCreateDefault", &PeerConnectionFactory::GetOrCreateDefault, nogil())
+        .def_static("dispose", &PeerConnectionFactory::Dispose, nogil());
+
+    m.def("_alive_factories", []() { return _alive.load(); });
   }
 
 } // namespace python_webrtc

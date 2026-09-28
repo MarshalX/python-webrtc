@@ -11,20 +11,18 @@
 
 namespace python_webrtc {
 
-  RTCRtpTransceiver::RTCRtpTransceiver(PeerConnectionFactory *factory,
-                                       webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) : _factory(
-      factory), _transceiver(std::move(transceiver)) {}
-
-  RTCRtpTransceiver::~RTCRtpTransceiver() {
-    _factory == nullptr;
-    holder()->Release(this);
+  RTCRtpTransceiver::RTCRtpTransceiver(std::shared_ptr<PeerConnectionFactory> factory,
+                                       webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver)
+      : _factory(std::move(factory)), _transceiver(std::move(transceiver)) {
+    _sender = RTCRtpSender::holder().GetOrCreate(_factory, _transceiver->sender());
+    _receiver = RTCRtpReceiver::holder().GetOrCreate(_factory, _transceiver->receiver());
   }
 
   void RTCRtpTransceiver::Init(pybind11::module &m) {
-    pybind11::class_<RTCRtpTransceiver>(m, "RTCRtpTransceiver")
+    pybind11::class_<RTCRtpTransceiver, std::shared_ptr<RTCRtpTransceiver>>(m, "RTCRtpTransceiver")
         .def_property_readonly("mid", nogil_fn(&RTCRtpTransceiver::GetMid))
-        .def_property_readonly("sender", nogil_fn(&RTCRtpTransceiver::GetSender), pybind11::return_value_policy::reference)
-        .def_property_readonly("receiver", nogil_fn(&RTCRtpTransceiver::GetReceiver), pybind11::return_value_policy::reference)
+        .def_property_readonly("sender", nogil_fn(&RTCRtpTransceiver::GetSender))
+        .def_property_readonly("receiver", nogil_fn(&RTCRtpTransceiver::GetReceiver))
         .def_property_readonly("stopped", nogil_fn(&RTCRtpTransceiver::GetStopped))
         .def_property("direction", nogil_fn(&RTCRtpTransceiver::GetDirection), nogil_fn(&RTCRtpTransceiver::SetDirection))
         .def_property_readonly("currentDirection", nogil_fn(&RTCRtpTransceiver::GetCurrentDirection))
@@ -32,18 +30,10 @@ namespace python_webrtc {
         .def("stop", &RTCRtpTransceiver::Stop, nogil());
   }
 
-  InstanceHolder<RTCRtpTransceiver *, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>, PeerConnectionFactory *> *
-  RTCRtpTransceiver::holder() {
-    static auto holder = new InstanceHolder<
-        RTCRtpTransceiver *, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>, PeerConnectionFactory *
-    >(RTCRtpTransceiver::Create);
-    return holder;
-  }
-
-  RTCRtpTransceiver *RTCRtpTransceiver::Create(PeerConnectionFactory *factory,
-                                               webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) {
-    // who caring about freeing memory?
-    return new RTCRtpTransceiver(factory, std::move(transceiver));
+  InstanceHolder<RTCRtpTransceiver, webrtc::RtpTransceiverInterface> &RTCRtpTransceiver::holder() {
+    // never destroyed: wrappers may outlive static destructors
+    static auto holder = new InstanceHolder<RTCRtpTransceiver, webrtc::RtpTransceiverInterface>();
+    return *holder;
   }
 
   std::optional<std::string> RTCRtpTransceiver::GetMid() {
@@ -54,12 +44,12 @@ namespace python_webrtc {
     return {};
   }
 
-  RTCRtpSender *RTCRtpTransceiver::GetSender() {
-    return RTCRtpSender::holder()->GetOrCreate(_factory, _transceiver->sender());
+  std::shared_ptr<RTCRtpSender> RTCRtpTransceiver::GetSender() {
+    return _sender;
   }
 
-  RTCRtpReceiver *RTCRtpTransceiver::GetReceiver() {
-    return RTCRtpReceiver::holder()->GetOrCreate(_factory, _transceiver->receiver());
+  std::shared_ptr<RTCRtpReceiver> RTCRtpTransceiver::GetReceiver() {
+    return _receiver;
   }
 
   bool RTCRtpTransceiver::GetStopped() {

@@ -22,11 +22,13 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
-    MediaStreamTrack *CreateTrack();
+    std::shared_ptr<MediaStreamTrack> CreateTrack();
 
     void OnData(RTCOnDataEvent &);
 
   private:
+    // TODO(mroberts): Again, we have some implicit factory we are threading around. How to handle?
+    std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<RTCAudioTrackSource> _source;
   };
 

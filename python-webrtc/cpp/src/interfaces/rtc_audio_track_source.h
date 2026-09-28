@@ -21,8 +21,6 @@ namespace python_webrtc {
   public:
     RTCAudioTrackSource() = default;
 
-    ~RTCAudioTrackSource() override;
-
     SourceState state() const override;
 
     bool remote() const override;
@@ -34,8 +32,6 @@ namespace python_webrtc {
     void RemoveSink(webrtc::AudioTrackSinkInterface *) override;
 
   private:
-    PeerConnectionFactory *_factory = PeerConnectionFactory::GetOrCreateDefault();
-
     std::atomic<webrtc::AudioTrackSinkInterface *> _sink = {nullptr};
   };
 

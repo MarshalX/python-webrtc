@@ -7,6 +7,9 @@
 
 #pragma once
 
+#include <atomic>
+#include <memory>
+
 #include <api/media_stream_interface.h>
 #include <api/scoped_refptr.h>
 
@@ -19,18 +22,14 @@ namespace python_webrtc {
 
   class MediaStreamTrack : public webrtc::ObserverInterface {
   public:
-    explicit MediaStreamTrack(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>);
-
-    static MediaStreamTrack *Create(
-        PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track);
+    explicit MediaStreamTrack(
+        std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>);
 
     ~MediaStreamTrack() override;
 
     void static Init(pybind11::module &m);
 
-    static InstanceHolder<
-        MediaStreamTrack *, webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>, PeerConnectionFactory *
-    > *holder();
+    static InstanceHolder<MediaStreamTrack, webrtc::MediaStreamTrackInterface> &holder();
 
     void Stop();
 
@@ -51,12 +50,11 @@ namespace python_webrtc {
 
     bool GetMuted();
 
-    // should be returned to python as reference! because we holding it in our holder
-    MediaStreamTrack *Clone();
+    std::shared_ptr<MediaStreamTrack> Clone();
 
     bool active() { return !_ended && _track->state() == webrtc::MediaStreamTrackInterface::TrackState::kLive; }
 
-    PeerConnectionFactory *factory() { return _factory; }
+    const std::shared_ptr<PeerConnectionFactory> &factory() { return _factory; }
 
     webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track() { return _track; }
 
@@ -65,10 +63,17 @@ namespace python_webrtc {
     explicit operator webrtc::scoped_refptr<webrtc::VideoTrackInterface>();
 
   private:
-    bool _ended = false;
-    bool _enabled;
-    PeerConnectionFactory *_factory;
+    // must be called on the signaling thread, where the track notifies its observers
+    void StopOnSignalingThread();
+
+    std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> _track;
+
+    // accessed on the signaling thread only
+    bool _observing = false;
+
+    std::atomic<bool> _ended = false;
+    std::atomic<bool> _enabled = false;
   };
 
 } // namespace python_webrtc

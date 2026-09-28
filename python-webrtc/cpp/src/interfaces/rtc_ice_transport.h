@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <memory>
 #include <mutex>
 
 #include <api/ice_transport_interface.h>
@@ -20,17 +21,13 @@ namespace python_webrtc {
 
   class RTCIceTransport {
   public:
-    explicit RTCIceTransport(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::IceTransportInterface>);
-
-    static RTCIceTransport *Create(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::IceTransportInterface>);
+    explicit RTCIceTransport(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::IceTransportInterface>);
 
     ~RTCIceTransport();
 
     static void Init(pybind11::module &m);
 
-    static InstanceHolder<
-        RTCIceTransport *, webrtc::scoped_refptr<webrtc::IceTransportInterface>, PeerConnectionFactory *
-    > *holder();
+    static InstanceHolder<RTCIceTransport, webrtc::IceTransportInterface> &holder();
 
     void OnRTCDtlsTransportStopped();
 
@@ -52,8 +49,14 @@ namespace python_webrtc {
 
     void TakeSnapshot();
 
+    std::shared_ptr<PeerConnectionFactory> _factory;
+
+    // Accessed on the network thread only. State change callbacks can't be unsubscribed from,
+    // so they check this flag and become no-ops once the wrapper is gone.
+    std::shared_ptr<bool> _alive = std::make_shared<bool>(true);
+    webrtc::IceTransportInternal *_subscribed = nullptr;
+
     RTCIceComponent _component = RTCIceComponent::kRtp;
-    PeerConnectionFactory *_factory;
     webrtc::IceGatheringState _gathering_state = webrtc::IceGatheringState::kIceGatheringNew;
     std::mutex _mutex{};
     webrtc::IceRole _role = webrtc::IceRole::ICEROLE_UNKNOWN;

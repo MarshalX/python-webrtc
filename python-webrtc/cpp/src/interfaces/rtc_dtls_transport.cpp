@@ -31,13 +31,13 @@ namespace python_webrtc {
   }
 
   RTCDtlsTransport::RTCDtlsTransport(
-      PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::DtlsTransportInterface> transport
-  ) {
-    _factory = factory;
-    _transport = std::move(transport);
+      std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::DtlsTransportInterface> transport
+  ) : _factory(std::move(factory)), _transport(std::move(transport)) {
+    _iceTransport = RTCIceTransport::holder().GetOrCreate(_factory, _transport->ice_transport());
 
     _factory->_workerThread->BlockingCall([this]() {
       _transport->RegisterObserver(this);
+      _observing = true;
 
       auto information = _transport->Information();
       _state = information.state();
@@ -50,29 +50,32 @@ namespace python_webrtc {
   }
 
   RTCDtlsTransport::~RTCDtlsTransport() {
-    _factory = nullptr;
-    holder()->Release(this);
+    gil_release_if_held release;
+
+    // the transport has a single observer slot, a newer wrapper of it may have taken it over already
+    auto replaced = holder().HasLive(_transport.get());
+    // callbacks run on the network thread, so after this none of them can be running or start again
+    _factory->_workerThread->BlockingCall([this, replaced]() {
+      if (_observing && !replaced) {
+        _transport->UnregisterObserver();
+      }
+      _observing = false;
+    });
+
+    _iceTransport = nullptr;
+    _transport = nullptr;
   }
 
   void RTCDtlsTransport::Init(pybind11::module &m) {
-    pybind11::class_<RTCDtlsTransport>(m, "RTCDtlsTransport")
+    pybind11::class_<RTCDtlsTransport, std::shared_ptr<RTCDtlsTransport>>(m, "RTCDtlsTransport")
         .def_property_readonly("iceTransport", nogil_fn(&RTCDtlsTransport::GetIceTransport))
         .def_property_readonly("state", nogil_fn(&RTCDtlsTransport::GetState));
   }
 
-  InstanceHolder<RTCDtlsTransport *, webrtc::scoped_refptr<webrtc::DtlsTransportInterface>, PeerConnectionFactory *> *
-  RTCDtlsTransport::holder() {
-    static auto holder = new InstanceHolder<
-        RTCDtlsTransport *, webrtc::scoped_refptr<webrtc::DtlsTransportInterface>, PeerConnectionFactory *
-    >(RTCDtlsTransport::Create);
-    return holder;
-  }
-
-  RTCDtlsTransport *RTCDtlsTransport::Create(
-      PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::DtlsTransportInterface> transport
-  ) {
-    // who caring about freeing memory?
-    return new RTCDtlsTransport(factory, std::move(transport));
+  InstanceHolder<RTCDtlsTransport, webrtc::DtlsTransportInterface> &RTCDtlsTransport::holder() {
+    // never destroyed: wrappers may outlive static destructors
+    static auto holder = new InstanceHolder<RTCDtlsTransport, webrtc::DtlsTransportInterface>();
+    return *holder;
   }
 
   void RTCDtlsTransport::OnStateChange(webrtc::DtlsTransportInformation information) {
@@ -94,13 +97,15 @@ namespace python_webrtc {
   }
 
   void RTCDtlsTransport::Stop() {
-    _transport->UnregisterObserver();
-    auto ice_transport = RTCIceTransport::holder()->GetOrCreate(_factory, _transport->ice_transport());
-    ice_transport->OnRTCDtlsTransportStopped();
+    if (_observing) {
+      _transport->UnregisterObserver();
+      _observing = false;
+    }
+    _iceTransport->OnRTCDtlsTransportStopped();
   }
 
-  RTCIceTransport *RTCDtlsTransport::GetIceTransport() {
-    return RTCIceTransport::holder()->GetOrCreate(_factory, _transport->ice_transport());
+  std::shared_ptr<RTCIceTransport> RTCDtlsTransport::GetIceTransport() {
+    return _iceTransport;
   }
 
   webrtc::DtlsTransportState RTCDtlsTransport::GetState() {

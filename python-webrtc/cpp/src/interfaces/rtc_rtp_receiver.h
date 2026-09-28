@@ -7,6 +7,12 @@
 
 #pragma once
 
+#include <memory>
+#include <mutex>
+
+#include <api/rtp_receiver_interface.h>
+#include <api/scoped_refptr.h>
+
 #include "peer_connection_factory.h"
 #include "media_stream_track.h"
 #include "rtc_dtls_transport.h"
@@ -15,25 +21,24 @@ namespace python_webrtc {
 
   class RTCRtpReceiver {
   public:
-    explicit RTCRtpReceiver(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>);
-
-    static RTCRtpReceiver *Create(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>);
-
-    ~RTCRtpReceiver();
+    explicit RTCRtpReceiver(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>);
 
     static void Init(pybind11::module &m);
 
-    static InstanceHolder<
-        RTCRtpReceiver *, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>, PeerConnectionFactory *
-    > *holder();
+    static InstanceHolder<RTCRtpReceiver, webrtc::RtpReceiverInterface> &holder();
 
-    MediaStreamTrack *GetTrack();
+    std::shared_ptr<MediaStreamTrack> GetTrack();
 
-    std::optional<RTCDtlsTransport *> GetTransport();
+    std::optional<std::shared_ptr<RTCDtlsTransport>> GetTransport();
 
   private:
-    PeerConnectionFactory *_factory;
+    std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::RtpReceiverInterface> _receiver;
+
+    // the receiver owns wrappers of its track and current transport
+    std::mutex _mutex;
+    std::shared_ptr<MediaStreamTrack> _track;
+    std::shared_ptr<RTCDtlsTransport> _transport;
   };
 
 } // namespace python_webrtc

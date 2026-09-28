@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <optional>
 #include <utility>
 
 #include <pybind11/pybind11.h>
@@ -18,11 +19,24 @@ namespace python_webrtc {
   using nogil = pybind11::call_guard<pybind11::gil_scoped_release>;
 
   // Property getters/setters can't take a call guard directly, wrap them into a function instead.
-  // Keeps the default policy of properties: pybind11 applies it only to getters it wraps itself,
-  // and returned pointers are owned by the C++ side, never by Python.
+  // Wrappers are returned as std::shared_ptr, so Python shares ownership of them with the C++ side.
   template<typename F>
   pybind11::cpp_function nogil_fn(F &&f) {
-    return pybind11::cpp_function(std::forward<F>(f), pybind11::return_value_policy::reference_internal, nogil());
+    return pybind11::cpp_function(std::forward<F>(f), nogil());
   }
+
+  // Destructors of wrappers block on libwebrtc threads (to unregister observers, to stop threads),
+  // which may be waiting for the GIL. They can run on any thread, with or without the GIL held.
+  class gil_release_if_held {
+  public:
+    gil_release_if_held() {
+      if (Py_IsInitialized() && PyGILState_Check()) {
+        _release.emplace();
+      }
+    }
+
+  private:
+    std::optional<pybind11::gil_scoped_release> _release;
+  };
 
 } // namespace python_webrtc

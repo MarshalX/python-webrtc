@@ -10,51 +10,51 @@
 
 namespace python_webrtc {
 
-  RTCRtpSender::RTCRtpSender(PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender)
-      : _factory(factory), _sender(std::move(sender)) {}
-
-  RTCRtpSender::~RTCRtpSender() {
-    _factory = nullptr;
-
-    holder()->Release(this);
-  }
+  RTCRtpSender::RTCRtpSender(
+      std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender)
+      : _factory(std::move(factory)), _sender(std::move(sender)) {}
 
   void RTCRtpSender::Init(pybind11::module &m) {
-    pybind11::class_<RTCRtpSender>(m, "RTCRtpSender")
+    pybind11::class_<RTCRtpSender, std::shared_ptr<RTCRtpSender>>(m, "RTCRtpSender")
         .def_property_readonly("track", nogil_fn(&RTCRtpSender::GetTrack))
         .def_property_readonly("transport", nogil_fn(&RTCRtpSender::GetTransport));
   }
 
-  InstanceHolder<RTCRtpSender *, webrtc::scoped_refptr<webrtc::RtpSenderInterface>, PeerConnectionFactory *> *
-  RTCRtpSender::holder() {
-    static auto holder = new InstanceHolder<
-        RTCRtpSender *, webrtc::scoped_refptr<webrtc::RtpSenderInterface>, PeerConnectionFactory *
-    >(RTCRtpSender::Create);
-    return holder;
+  InstanceHolder<RTCRtpSender, webrtc::RtpSenderInterface> &RTCRtpSender::holder() {
+    // never destroyed: wrappers may outlive static destructors
+    static auto holder = new InstanceHolder<RTCRtpSender, webrtc::RtpSenderInterface>();
+    return *holder;
   }
 
-  RTCRtpSender *RTCRtpSender::Create(
-      PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender
-  ) {
-    // who caring about freeing memory?
-    return new RTCRtpSender(factory, std::move(sender));
-  }
-
-  std::optional<MediaStreamTrack *> RTCRtpSender::GetTrack() {
+  std::optional<std::shared_ptr<MediaStreamTrack>> RTCRtpSender::GetTrack() {
     auto track = _sender->track();
-    if (track) {
-      return MediaStreamTrack::holder()->GetOrCreate(_factory, track);
+
+    std::shared_ptr<MediaStreamTrack> previous;
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (!_track || _track->track() != track) {
+      previous = std::move(_track);
+      _track = MediaStreamTrack::holder().GetOrCreate(_factory, track);
     }
 
+    if (_track) {
+      return _track;
+    }
     return {};
   }
 
-  std::optional<RTCDtlsTransport *> RTCRtpSender::GetTransport() {
+  std::optional<std::shared_ptr<RTCDtlsTransport>> RTCRtpSender::GetTransport() {
     auto transport = _sender->dtls_transport();
-    if (transport) {
-      return RTCDtlsTransport::holder()->GetOrCreate(_factory, transport);
+
+    std::shared_ptr<RTCDtlsTransport> previous;
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (!_transport || _transport->transport() != transport) {
+      previous = std::move(_transport);
+      _transport = RTCDtlsTransport::holder().GetOrCreate(_factory, transport);
     }
 
+    if (_transport) {
+      return _transport;
+    }
     return {};
   }
 
