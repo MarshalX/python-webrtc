@@ -28,6 +28,9 @@ if(WRTC_SANITIZE)
   target_link_options(${MODULE} PRIVATE -fsanitize=${WRTC_SANITIZE} -fno-sanitize=vptr)
   if(WRTC_SANITIZE MATCHES "address")
     target_link_options(${MODULE} PRIVATE -shared-libasan)
+    # The libc++ inside libwebrtc isn't instrumented (no _LIBCPP_INSTRUMENTED_WITH_ASAN): containers it touches
+    # aren't annotated, so annotating them in our code alone reports false container-overflows.
+    target_compile_definitions(${MODULE} PRIVATE __SANITIZER_DISABLE_CONTAINER_OVERFLOW__)
   endif()
 endif()
 
