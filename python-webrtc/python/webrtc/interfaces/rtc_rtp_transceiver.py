@@ -5,9 +5,9 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, List, Optional
 
-from webrtc import WebRTCObject, wrtc
+from webrtc import InvalidModificationError, RTCRtpCodec, RTCRtpHeaderExtensionCapability, WebRTCObject, wrtc
 
 if TYPE_CHECKING:
     import webrtc
@@ -78,12 +78,95 @@ class RTCRtpTransceiver(WebRTCObject):
         and :obj:`webrtc.RTCRtpReceiver`.
 
         Note:
-            The :attr:`stopped` property was provided to return :obj:`True` if the connection is stopped.
-            That property has been deprecated and will be removed at some point. Instead, check the value
-            of :attr:`currentDirection`. If it's :obj:`webrtc.TransceiverDirection.stopped`, the transceiver
-            has been stopped.
+            To check whether the transceiver is stopped, compare :attr:`currentDirection` with
+            :obj:`webrtc.TransceiverDirection.stopped` rather than reading the deprecated :attr:`stopped`.
         """
         self._native_obj.stop()
 
+    @property
+    def kind(self) -> 'webrtc.MediaType':
+        """:obj:`webrtc.MediaType`: The kind of media the transceiver sends and receives, audio or video."""
+        return self._native_obj.kind
+
+    def set_codec_preferences(self, codecs: List['webrtc.RTCRtpCodec']) -> None:
+        """Sets the codecs to negotiate, in order of preference, from the next negotiation.
+
+        Args:
+            codecs (:obj:`list` of :obj:`webrtc.RTCRtpCodec`): Codecs from the capabilities of
+                :meth:`webrtc.RTCRtpSender.get_capabilities` or :meth:`webrtc.RTCRtpReceiver.get_capabilities`
+                for the kind of the transceiver. An empty list restores the default preferences.
+
+        Raises:
+            :obj:`webrtc.InvalidModificationError`: If a codec isn't supported, or only resiliency codecs
+                (like RTX or FEC) are given.
+        """
+        kind = self.kind
+        natives = []
+        for source in (wrtc.RTCRtpReceiver.getCapabilities(kind), wrtc.RTCRtpSender.getCapabilities(kind)):
+            natives.extend(source.codecs if source is not None else [])
+
+        preferences = []
+        for codec in codecs:
+            native = next((n for n in natives if RTCRtpCodec._from_native(n)._matches(codec)), None)
+            if native is None:
+                raise InvalidModificationError(f'{codec.mime_type} is not a {kind} codec that can be negotiated')
+            preferences.append(native)
+        self._native_obj.setCodecPreferences(preferences)
+
+    def get_header_extensions_to_negotiate(self) -> List['webrtc.RTCRtpHeaderExtensionCapability']:
+        """Returns the header extensions offered or accepted in the next negotiation.
+
+        Returns:
+            :obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionCapability`: The extensions, with the direction they're
+            negotiated in, :attr:`webrtc.TransceiverDirection.stopped` for the ones that aren't.
+        """
+        return [
+            RTCRtpHeaderExtensionCapability._from_native(e) for e in self._native_obj.getHeaderExtensionsToNegotiate()
+        ]
+
+    def set_header_extensions_to_negotiate(self, extensions: List['webrtc.RTCRtpHeaderExtensionCapability']) -> None:
+        """Changes the directions the header extensions are negotiated in, from the next negotiation.
+
+        Args:
+            extensions (:obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionCapability`): The list
+                :meth:`get_header_extensions_to_negotiate` returns, with directions changed.
+
+        Raises:
+            :obj:`ValueError`: If an extension has an empty URI.
+            :obj:`webrtc.InvalidModificationError`: If the extensions or their order differ, or a mandatory
+                extension is stopped.
+        """
+        current = {e.uri: e for e in self._native_obj.getHeaderExtensionsToNegotiate()}
+        natives = []
+        for extension in extensions:
+            if not extension.uri:
+                raise ValueError('the URI of a header extension must not be empty')
+            native = wrtc.RtpHeaderExtensionCapability()
+            native.uri = extension.uri
+            if extension.uri in current:
+                native.preferredId = current[extension.uri].preferredId
+            native.direction = extension.direction
+            natives.append(native)
+        self._native_obj.setHeaderExtensionsToNegotiate(natives)
+
+    def get_negotiated_header_extensions(self) -> List['webrtc.RTCRtpHeaderExtensionCapability']:
+        """Returns the header extensions negotiated last, and their directions.
+
+        Returns:
+            :obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionCapability`: Every extension that can be negotiated,
+            :attr:`webrtc.TransceiverDirection.stopped` for the ones that weren't.
+        """
+        return [
+            RTCRtpHeaderExtensionCapability._from_native(e) for e in self._native_obj.getNegotiatedHeaderExtensions()
+        ]
+
     #: Alias for :attr:`current_direction`
     currentDirection = current_direction
+    #: Alias for :attr:`set_codec_preferences`
+    setCodecPreferences = set_codec_preferences
+    #: Alias for :attr:`get_header_extensions_to_negotiate`
+    getHeaderExtensionsToNegotiate = get_header_extensions_to_negotiate
+    #: Alias for :attr:`set_header_extensions_to_negotiate`
+    setHeaderExtensionsToNegotiate = set_header_extensions_to_negotiate
+    #: Alias for :attr:`get_negotiated_header_extensions`
+    getNegotiatedHeaderExtensions = get_negotiated_header_extensions

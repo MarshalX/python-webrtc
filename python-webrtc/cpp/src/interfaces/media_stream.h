@@ -9,7 +9,11 @@
 
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <set>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <api/scoped_refptr.h>
 
@@ -18,6 +22,8 @@
 
 #include "peer_connection_factory.h"
 #include "media_stream_track.h"
+#include "../utils/alive_guard.h"
+#include "../utils/listeners.h"
 
 namespace webrtc {
 
@@ -29,11 +35,20 @@ namespace webrtc {
 
 namespace python_webrtc {
 
-  class MediaStream {
+  // Emits addtrack and removetrack when libwebrtc changes the tracks of a remote stream
+  class MediaStream : public webrtc::ObserverInterface, public Listeners {
   public:
     MediaStream(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::MediaStreamInterface>);
 
-    void static Init(pybind11::module &m);
+    ~MediaStream() override;
+
+    // ObserverInterface, on the signaling thread
+    void OnChanged() override;
+
+    static void Init(pybind11::module &m);
+
+    // A new stream of these tracks (new MediaStream() in a browser)
+    static std::shared_ptr<MediaStream> Create(const std::vector<std::shared_ptr<MediaStreamTrack>> &tracks);
 
     static InstanceHolder<MediaStream, webrtc::MediaStreamInterface> &holder();
 
@@ -70,6 +85,11 @@ namespace python_webrtc {
 
     std::mutex _tracksMutex;
     std::unordered_map<webrtc::MediaStreamTrackInterface *, std::shared_ptr<MediaStreamTrack>> _tracks;
+    // the tracks the stream had when last notified, or as Python changed them, guarded by _tracksMutex
+    std::set<webrtc::MediaStreamTrackInterface *> _known;
+
+    // see AliveGuard
+    AliveGuard _alive;
   };
 
 } // namespace python_webrtc

@@ -16,7 +16,6 @@ def test_1(pc):
     assert hasattr(pc, 'add_transceiver')
 
     with pytest.raises(TypeError):
-        # invalid kind
         pc.add_transceiver('invalid')
 
 
@@ -79,7 +78,6 @@ def test_4(pc):
 def test_5(pc):
     """add_transceiver with invalid direction should throw TypeError"""
     with pytest.raises(TypeError):
-        # invalid direction
         init = webrtc.RtpTransceiverInit(direction='invalid')
         pc.add_transceiver(webrtc.MediaType.audio, init)
 
@@ -147,23 +145,21 @@ def test_7(pc, audio_stream):
 
 @pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
 def test_8(pc, kind):
-    """add_transceiver with rid containing invalid non-alphanumeric characters should throw RTCException"""
+    """add_transceiver with rid containing invalid non-alphanumeric characters should throw ValueError"""
     encodings = [webrtc.RtpEncodingParameters(rid="@Invalid!")]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
 
-    # will be changed to TypeError after reworking binding to rtc error?
-    with pytest.raises(webrtc.RTCException):
+    with pytest.raises(ValueError):
         pc.add_transceiver(kind, init)
 
 
 @pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
 def test_9(pc, kind):
-    """add_transceiver with rid longer than 16 characters should throw RTCException"""
+    """add_transceiver with rid longer than 16 characters should throw ValueError"""
     encodings = [webrtc.RtpEncodingParameters(rid="a" * 17)]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
 
-    # will be changed to TypeError after reworking binding to rtc error?
-    with pytest.raises(webrtc.RTCException):
+    with pytest.raises(ValueError):
         pc.add_transceiver(kind, init)
 
 
@@ -177,7 +173,7 @@ def test_10(pc, kind):
 
 def test_11(pc):
     """add_transceiver with valid sendEncodings should succeed"""
-    # dtx and ptime from the original test are not supported by RtpEncodingParameters yet
+    # dtx and ptime from the original test aren't supported by RtpEncodingParameters
     encodings = [webrtc.RtpEncodingParameters(active=False, max_bitrate=8, max_framerate=25, rid="foo")]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
     pc.add_transceiver(webrtc.MediaType.video, init)

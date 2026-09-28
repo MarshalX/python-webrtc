@@ -5,34 +5,29 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#include "../interfaces/media_stream.h"
+#include "get_user_media.h"
 
 #include <rtc_base/crypto_random.h>
 
+#include "../interfaces/rtc_video_source.h"
+#include "../interfaces/rtc_audio_track_source.h"
+
 namespace python_webrtc {
 
-  static std::shared_ptr<MediaStream> GetUserMedia() {
+  std::shared_ptr<MediaStream> GetUserMedia(bool audio, bool video, int width, int height, double frameRate) {
     auto factory = PeerConnectionFactory::GetOrCreateDefault();
     auto stream = factory->factory()->CreateLocalMediaStream(webrtc::CreateRandomUuid());
 
-    // TODO (MarshalX) get from bound MediaStreamConstraints
-    // https://github.com/MarshalX/python-webrtc/issues/169
-    auto audio = true;
-    auto video = false;
-
     if (audio) {
-      webrtc::AudioOptions options;
-      auto source = factory->factory()->CreateAudioSource(options);
+      // a synthetic microphone, as the audio device of the factory is a dummy one
+      auto source = webrtc::make_ref_counted<RTCAudioTrackSource>();
+      source->StartMicrophone();
       auto track = factory->factory()->CreateAudioTrack(webrtc::CreateRandomUuid(), source.get());
       stream->AddTrack(track);
     }
 
     if (video) {
-//      TODO (MarshalX) create RTCVideoTrackSource
-//      https://github.com/MarshalX/python-webrtc/issues/170
-//      auto source = ... RTCVideoTrackSource()
-//      auto track = factory->factory()->CreateVideoTrack(webrtc::CreateRandomUuid(), source);
-//      stream->AddTrack(track);
+      stream->AddTrack(RTCVideoSource::CreateCameraTrack(factory, width, height, frameRate));
     }
 
     return MediaStream::holder().GetOrCreate(factory, stream);

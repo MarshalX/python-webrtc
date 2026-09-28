@@ -5,21 +5,39 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, Union
 
-import wrtc
-from webrtc import MediaStreamTrack, WebRTCObject
+from webrtc import MediaStreamTrack, MediaStreamTrackEvent, WebRTCObject, wrtc
+from webrtc.utils.events import EventTarget
 
 if TYPE_CHECKING:
     import webrtc
 
 
-class MediaStream(WebRTCObject):
+class MediaStream(WebRTCObject, EventTarget):
     """The MediaStream interface represents a stream of media content. A stream consists of several tracks,
     such as video or audio tracks. Each track is specified as an instance of :obj:`webrtc.MediaStreamTrack`.
+
+    Events (see :meth:`on`):
+        ``addtrack`` and ``removetrack`` (:obj:`webrtc.MediaStreamTrackEvent`): The remote peer added a track to
+        a remote stream, or removed one. Changes made with :meth:`add_track` and :meth:`remove_track` fire none.
+
+    Args:
+        tracks (:obj:`list` of :obj:`webrtc.MediaStreamTrack`, optional): The tracks of the new stream,
+            or a stream whose tracks the new stream shares.
     """
 
     _class = wrtc.MediaStream
+    _events = ('addtrack', 'removetrack')
+
+    def __init__(self, tracks: Optional[Union[List['webrtc.MediaStreamTrack'], 'webrtc.MediaStream']] = None):
+        if isinstance(tracks, MediaStream):
+            tracks = tracks.get_tracks()
+        super().__init__(self._class.create([track._native_obj for track in tracks or []]))
+
+    def _create_event(self, name: str, *args):
+        (track,) = args
+        return MediaStreamTrackEvent(name, MediaStreamTrack._wrap(track), target=self)
 
     @property
     def id(self) -> str:
@@ -29,7 +47,7 @@ class MediaStream(WebRTCObject):
 
     @property
     def active(self) -> bool:
-        """:obj:`bool`: A value that returns `true` if the :obj:`webrtc.MediaStream` is active, or `false` otherwise."""
+        """:obj:`bool`: Whether the :obj:`webrtc.MediaStream` is active: whether a track of it isn't ended."""
         return self._native_obj.active
 
     def get_audio_tracks(self) -> List['webrtc.MediaStreamTrack']:
@@ -55,10 +73,10 @@ class MediaStream(WebRTCObject):
 
     def get_track_by_id(self, track_id: str) -> Optional['webrtc.MediaStreamTrack']:
         """Returns the track whose ID corresponds to the one given in parameters, :obj:`track_id`.
-        If no parameter is given, or if no track with that ID does exist, it returns :obj:`None`.
+        If no track with that ID does exist, it returns :obj:`None`.
         If several tracks have the same ID, it returns the first one.
         """
-        return MediaStreamTrack._wrap(self._native_obj.getTrackById(track_id))
+        return MediaStreamTrack._wrap_optional(self._native_obj.getTrackById(track_id))
 
     def add_track(self, track: 'webrtc.MediaStreamTrack'):
         """Stores a copy of the :obj:`webrtc.MediaStreamTrack` given as argument. If the track has already been added

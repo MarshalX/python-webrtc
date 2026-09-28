@@ -7,15 +7,21 @@
 
 """Ownership and lifetime of the native wrappers: no leaks, no use-after-free, stable identity and state."""
 
+import asyncio
 import gc
+import os
+import subprocess
+import sys
+import textwrap
 import threading
 import time
+import weakref
 
 import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import exchange_offer_answer
+from tests.helpers import QUIET_PERIOD, connect, exchange_offer_answer, wait_for_event
 
 
 def collect():
@@ -60,16 +66,17 @@ pytestmark = pytest.mark.usefixtures('isolated')
 
 
 def test_peer_connection_cycles_do_not_leak_factories():
+    """Closed and collected connections release their factory"""
     baseline = alive_factories()
 
     for _ in range(30):
         peer_connection_cycle()
 
-    # previously every connection leaked its factory
     assert alive_factories() == baseline
 
 
 def test_factories_return_to_baseline_when_everything_is_gone():
+    """Everything shares one factory, which is gone with the last object using it"""
     baseline = alive_factories()
 
     pc = webrtc.RTCPeerConnection()
@@ -90,6 +97,7 @@ def test_factories_return_to_baseline_when_everything_is_gone():
 
 
 def test_everything_alive_shares_one_factory():
+    """New connections use the factory of the media alive"""
     stream = webrtc.get_user_media()
     source = webrtc.RTCAudioSource()
     source_track = source.create_track()
@@ -105,6 +113,7 @@ def test_everything_alive_shares_one_factory():
 
 
 def test_closed_connection_keeps_its_factory_shared():
+    """A closed connection and its tracks keep their factory, which new connections reuse"""
     pc = webrtc.RTCPeerConnection()
     receiver_track = pc.add_transceiver(webrtc.MediaType.audio).receiver.track
     pc.close()
@@ -146,6 +155,7 @@ def test_destroyed_track_wrapper_is_not_notified():
 
 
 def test_track_state_survives_gc():
+    """The state of a track is kept by its native object, not by its wrapper"""
     stream = webrtc.get_user_media()
     track = stream.get_tracks()[0]
     track.enabled = False
@@ -159,6 +169,7 @@ def test_track_state_survives_gc():
 
 
 def test_track_state_survives_gc_of_all_python_references():
+    """The state of a remote track survives when no wrapper of it is left"""
     pc = webrtc.RTCPeerConnection()
     pc.add_transceiver(webrtc.MediaType.audio)
     pc.get_transceivers()[0].receiver.track.stop()
@@ -169,6 +180,7 @@ def test_track_state_survives_gc_of_all_python_references():
 
 
 def test_transceiver_identity():
+    """The same transceiver, sender, receiver and track are wrapped by the same native wrappers"""
     pc = webrtc.RTCPeerConnection()
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
     collect()
@@ -182,6 +194,7 @@ def test_transceiver_identity():
 
 
 def test_sender_identity(audio_stream):
+    """A sender and its track are the same objects after a collection"""
     pc = webrtc.RTCPeerConnection()
     track = audio_stream.get_tracks()[0]
     sender = pc.add_track(track)
@@ -193,6 +206,7 @@ def test_sender_identity(audio_stream):
 
 
 def test_drop_and_refetch_before_negotiation():
+    """Wrappers dropped and fetched again, many times, stay valid"""
     pc = webrtc.RTCPeerConnection()
     pc.add_transceiver(webrtc.MediaType.audio)
     pc.add_transceiver(webrtc.MediaType.video)
@@ -213,6 +227,7 @@ def test_drop_and_refetch_before_negotiation():
 
 @pytest.mark.asyncio
 async def test_drop_and_refetch_transports(caller, callee, audio_stream):
+    """Transports dropped and fetched again, many times, stay valid and shared"""
     caller.add_track(audio_stream.get_tracks()[0])
     await exchange_offer_answer(caller, callee)
 
@@ -236,6 +251,7 @@ async def test_drop_and_refetch_transports(caller, callee, audio_stream):
 
 @pytest.mark.asyncio
 async def test_transports_outlive_closed_connection(caller, callee, audio_stream):
+    """Transports kept after their connection is closed and collected report closed"""
     caller.add_track(audio_stream.get_tracks()[0])
     await exchange_offer_answer(caller, callee)
 
@@ -250,6 +266,7 @@ async def test_transports_outlive_closed_connection(caller, callee, audio_stream
 
 
 def test_getters_while_connection_is_closed_and_dropped(audio_stream):
+    """Reading from other threads while the connection is closed and dropped neither crashes nor deadlocks"""
     track = audio_stream.get_tracks()[0]
 
     for _ in range(20):
@@ -286,3 +303,137 @@ def test_getters_while_connection_is_closed_and_dropped(audio_stream):
             assert not reader.is_alive(), 'reader thread is stuck'
         assert not errors, errors
         collect()
+
+
+@pytest.mark.asyncio
+async def test_handlers_referencing_their_connection_do_not_keep_it_alive():
+    """The garbage collector sees the handlers while Python alone owns the connection"""
+    baseline = alive_factories()
+    delivered = asyncio.get_running_loop().create_future()
+
+    def create():
+        pc = webrtc.RTCPeerConnection()
+
+        @pc.on('negotiationneeded')
+        def on_negotiation(event):
+            pc.get_transceivers()
+            if not delivered.done():
+                delivered.set_result(None)
+
+        pc.add_transceiver(webrtc.MediaType.audio)
+        return weakref.ref(pc)
+
+    ref = create()
+    await asyncio.wait_for(delivered, 5)
+    collect()
+
+    assert ref() is None
+    assert alive_factories() == baseline
+
+
+@pytest.mark.asyncio
+async def test_channel_handlers_do_not_dangle_after_close_and_gc():
+    """Handlers of a channel collected with echoed messages in flight are never called again, and nothing crashes"""
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    channel = caller.create_data_channel('lifetime')
+    received = []
+
+    def on_close(event):
+        received.append('close')
+
+    channel.on('message', lambda event: received.append(event.data))
+    channel.on('close', on_close)
+
+    @callee.on('datachannel')
+    def on_channel(event):
+        remote = event.channel
+
+        @remote.on('message')
+        def echo(message):
+            remote.send(message.data)
+
+    opened = wait_for_event(channel, 'open')
+    await connect(caller, callee)
+    await opened
+
+    channel.send('ping')
+    caller.close()
+    callee.close()
+    del channel, caller, callee
+    collect()
+    await asyncio.sleep(QUIET_PERIOD)
+    collect()
+    assert 'close' not in received
+
+
+@pytest.mark.asyncio
+async def test_connections_dropped_while_emitting_events():
+    """Events of connections that are destroyed meanwhile are dropped safely: a crash test, for sanitizers"""
+    for _ in range(20):
+        pc = webrtc.RTCPeerConnection()
+        pc.on('icecandidate', lambda event: None)
+        pc.on('icegatheringstatechange', lambda event: None)
+        pc.create_data_channel('gather')
+        await pc.set_local_description()
+        del pc
+        collect()
+    # the events of the gathering that goes on
+    await asyncio.sleep(QUIET_PERIOD)
+    collect()
+
+
+def test_process_exits_after_connecting():
+    """Wrappers destroyed at exit unregister while libwebrtc threads may be wrapping objects, without deadlock"""
+    script = textwrap.dedent(
+        '''
+        import asyncio
+        import webrtc
+        from tests.helpers import connect
+
+        async def main():
+            for _ in range(3):
+                caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+                channel = caller.create_data_channel('exit')
+                await connect(caller, callee)
+                caller.sctp.transport.ice_transport.on('selectedcandidatepairchange', lambda event: None)
+                channel.send('bye')
+            print('connected')
+
+        asyncio.run(main())
+        '''
+    )
+    # from the root of the project, which has the tests package (pytest may run from elsewhere, like cibuildwheel)
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=60, cwd=root)
+    assert 'connected' in result.stdout, result.stderr[-2000:]
+    assert result.returncode == 0, result.stderr[-2000:]
+
+
+@pytest.mark.asyncio
+async def test_stream_tracks_read_while_they_change(caller, callee, audio_stream):
+    """Reading a remote stream's tracks while a description changes them doesn't deadlock with its observer"""
+    audio = audio_stream.get_audio_tracks()[0]
+    sender = caller.add_track(audio, audio_stream)
+    track_event = wait_for_event(callee, 'track')
+    await exchange_offer_answer(caller, callee)
+    remote = (await track_event).streams[0]
+
+    stop = threading.Event()
+
+    def read():
+        while not stop.is_set():
+            remote.get_tracks()
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    try:
+        for _ in range(10):
+            # removing and adding the track back changes the tracks of the remote stream
+            caller.remove_track(sender)
+            await asyncio.wait_for(exchange_offer_answer(caller, callee), 5)
+            sender = caller.add_track(audio, audio_stream)
+            await asyncio.wait_for(exchange_offer_answer(caller, callee), 5)
+    finally:
+        stop.set()
+        reader.join(5)
+    assert not reader.is_alive()

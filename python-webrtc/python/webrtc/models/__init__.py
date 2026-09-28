@@ -4,3 +4,5 @@
 #  Use of this source code is governed by a BSD-style license
 #  that can be found in the LICENSE.md file in the root of the project.
 #
+
+"""Values the API takes and returns: dataclasses, or wrappers of native objects."""

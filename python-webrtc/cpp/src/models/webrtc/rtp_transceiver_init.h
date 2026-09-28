@@ -10,6 +10,8 @@
 #include <pybind11/pybind11.h>
 #include <api/rtp_transceiver_interface.h>
 
+#include "../../enums/enums.h"
+
 namespace python_webrtc {
 
   static void bindRtpTransceiverInit(pybind11::module &m) {

@@ -7,49 +7,16 @@
 
 #include "enums.h"
 
-#include "webrtc/peer_connection_state.h"
-#include "webrtc/signaling_state.h"
-#include "webrtc/ice_connection_state.h"
-#include "webrtc/ice_gathering_state.h"
-#include "webrtc/sdp_type.h"
-#include "webrtc/track_state.h"
-#include "webrtc/source_state.h"
-#include "webrtc/media_type.h"
-#include "webrtc/rtp_transceiver_direction.h"
-#include "webrtc/cricket_ice_gathering_state.h"
-#include "webrtc/rtc_ice_role.h"
-#include "webrtc/rtc_ice_transport_state.h"
-#include "webrtc/dtls_transport_state.h"
-#include "webrtc/sctp_transport_state.h"
-#include "python_webrtc/rtc_ice_component.h"
-
 namespace python_webrtc {
 
-  void Enums::Init(pybind11::module &m) {
-    // webrtc
-
-    PeerConnectionState::Init(m);
-    SignalingState::Init(m);
-    IceConnectionState::Init(m);
-    IceGatheringState::Init(m);
-
-    SdpType::Init(m);
-
-    TrackState::Init(m);
-    SourceState::Init(m);
-    MediaType::Init(m);
-
-    RTPTransceiverDirection::Init(m);
-
-    CricketIceGatheringState::Init(m);
-    RTCIceRole::Init(m);
-    RTCIceTransportState::Init(m);
-    DtlsTransportState::Init(m);
-    SctpTransportState::Init(m);
-
-    // python_webrtc
-
-    RTCIceComponent_::Init(m);
+  std::optional<webrtc::MediaType> mediaTypeOf(const std::string &kind) {
+    if (kind == "audio") {
+      return webrtc::MediaType::AUDIO;
+    }
+    if (kind == "video") {
+      return webrtc::MediaType::VIDEO;
+    }
+    return std::nullopt;
   }
 
 } // namespace python_webrtc

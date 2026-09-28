@@ -7,9 +7,12 @@
 
 #pragma once
 
+#include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <api/scoped_refptr.h>
 
@@ -19,12 +22,12 @@ namespace python_webrtc {
 
   class PeerConnectionFactory;
 
-  // Keeps at most one wrapper per libwebrtc object, so Python always sees the same object for it.
-  // Entries are weak: the cache never keeps a wrapper, nor the libwebrtc object behind it, alive.
-  // Ownership lives in shared_ptrs held by Python and by parent wrappers.
-  //
-  // T — wrapper class, constructible from (std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<U>)
-  // U — wrapped libwebrtc interface
+  // A wrapper of a libwebrtc object that takes a single observer: a new wrapper of the object must not register
+  // before the dying one has unregistered. Wrappers of objects that take any number of observers don't wait.
+  struct SingleObserverSlot {};
+
+  // At most one wrapper T per libwebrtc object U, so Python always sees the same object for it. Entries are weak:
+  // Python and parent wrappers own the wrappers.
   template<typename T, typename U>
   class InstanceHolder {
   public:
@@ -34,8 +37,12 @@ namespace python_webrtc {
       }
 
       // wrappers may create nested wrappers (sctp -> dtls -> ice) while holding the lock
-      std::lock_guard<std::recursive_mutex> lock(_mutex);
+      std::unique_lock<std::recursive_mutex> lock(_mutex);
       auto key = object.get();
+      // a wrapper of the object being destroyed first unregisters from it, the new one registers after
+      if constexpr (std::is_base_of_v<SingleObserverSlot, T>) {
+        _destroyed.wait(lock, [&]() { return _destroying.count(key) == 0; });
+      }
       auto it = _store.find(key);
       if (it != _store.end()) {
         if (auto instance = it->second.lock()) {
@@ -48,9 +55,17 @@ namespace python_webrtc {
       return instance;
     }
 
+    // The live wrapper of a libwebrtc object, if there's one
+    std::shared_ptr<T> Find(const U *object) {
+      std::lock_guard<std::recursive_mutex> lock(_mutex);
+      auto it = _store.find(const_cast<U *>(object));
+      return it != _store.end() ? it->second.lock() : nullptr;
+    }
+
     // Whether another wrapper of the same libwebrtc object is alive. Only meaningful in a destructor of the wrapper,
     // where it tells that the object was re-wrapped meanwhile and the new wrapper has taken over its observer slot.
     bool HasLive(const U *object) {
+      // called from the destructor of the dying wrapper, which Destroy runs without holding the lock
       std::lock_guard<std::recursive_mutex> lock(_mutex);
       auto it = _store.find(const_cast<U *>(object));
       return it != _store.end() && !it->second.expired();
@@ -60,17 +75,29 @@ namespace python_webrtc {
     void Destroy(U *key, T *dying) {
       gil_release_if_held release;
 
-      // destroy under the lock, so a replacement can't register its observers while this one unregisters
-      std::lock_guard<std::recursive_mutex> lock(_mutex);
-      auto it = _store.find(key);
-      if (it != _store.end() && it->second.expired()) {
-        _store.erase(it);
+      {
+        std::lock_guard<std::recursive_mutex> lock(_mutex);
+        auto it = _store.find(key);
+        if (it != _store.end() && it->second.expired()) {
+          _store.erase(it);
+        }
+        _destroying.insert(key);
       }
+      // Out of the lock: destructors block on libwebrtc threads (to unregister observers), which may be waiting
+      // for this lock themselves (a callback wrapping an object). A replacement waits for this to finish.
       delete dying;
+      {
+        std::lock_guard<std::recursive_mutex> lock(_mutex);
+        _destroying.erase(_destroying.find(key));
+      }
+      _destroyed.notify_all();
     }
 
     std::recursive_mutex _mutex;
+    std::condition_variable_any _destroyed;
     std::unordered_map<U *, std::weak_ptr<T>> _store;
+    // objects whose wrapper is being destroyed
+    std::unordered_multiset<U *> _destroying;
   };
 
 } // namespace python_webrtc

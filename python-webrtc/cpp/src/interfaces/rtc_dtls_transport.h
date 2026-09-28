@@ -7,17 +7,24 @@
 
 #pragma once
 
+#include <memory>
+#include <mutex>
+#include <vector>
+
 #include <api/dtls_transport_interface.h>
 
 #include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
 
 #include "peer_connection_factory.h"
 #include "rtc_ice_transport.h"
+#include "../utils/instance_holder.h"
+#include "../utils/listeners.h"
+#include "../utils/surfaced.h"
+#include "../enums/enums.h"
 
 namespace python_webrtc {
 
-  class RTCDtlsTransport : public webrtc::DtlsTransportObserverInterface {
+  class RTCDtlsTransport : public webrtc::DtlsTransportObserverInterface, public Listeners, public SingleObserverSlot {
   public:
     explicit RTCDtlsTransport(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::DtlsTransportInterface>);
 
@@ -33,14 +40,23 @@ namespace python_webrtc {
 
     void OnError(webrtc::RTCError) override;
 
+    // a closed connection fires no events of its transports, which show their current state
+    void OnPeerConnectionClosed();
+
     std::shared_ptr<RTCIceTransport> GetIceTransport();
 
     webrtc::DtlsTransportState GetState();
 
-  protected:
-    void Stop();
+    // the DER certificates of the remote peer
+    std::vector<webrtc::Buffer> GetRemoteCertificates();
+
+    // see Surfaced
+    void SurfaceState(webrtc::DtlsTransportState state);
 
   private:
+    // on the network thread
+    void Stop();
+
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::DtlsTransportInterface> _transport;
     // a dtls transport runs over the same ice transport for its whole life
@@ -51,6 +67,7 @@ namespace python_webrtc {
 
     std::mutex _mutex;
     webrtc::DtlsTransportState _state;
+    Surfaced<webrtc::DtlsTransportState> _surfacedState;
     std::vector<webrtc::Buffer> _certificates;
   };
 

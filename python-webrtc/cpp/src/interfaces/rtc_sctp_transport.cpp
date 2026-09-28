@@ -18,8 +18,9 @@ namespace python_webrtc {
       dtlsTransport = _transport->dtls_transport();
       _transport->RegisterObserver(this);
       _observing = true;
+      _lastState = _transport->Information().state();
 
-      if (_transport->Information().state() == webrtc::SctpTransportState::kClosed) {
+      if (_lastState == webrtc::SctpTransportState::kClosed) {
         Stop();
       }
     });
@@ -42,14 +43,16 @@ namespace python_webrtc {
 
     _dtlsTransport = nullptr;
     _transport = nullptr;
+    DropListeners();
   }
 
   void RTCSctpTransport::Init(pybind11::module &m) {
-    pybind11::class_<RTCSctpTransport, std::shared_ptr<RTCSctpTransport>>(m, "RTCSctpTransport")
+    Listeners::BindClass<RTCSctpTransport>(m, "RTCSctpTransport")
         .def_property_readonly("transport", nogil_fn(&RTCSctpTransport::GetTransport))
         .def_property_readonly("state", nogil_fn(&RTCSctpTransport::GetState))
         .def_property_readonly("maxMessageSize", nogil_fn(&RTCSctpTransport::GetMaxMessageSize))
-        .def_property_readonly("maxChannels", nogil_fn(&RTCSctpTransport::GetMaxChannels));
+        .def_property_readonly("maxChannels", nogil_fn(&RTCSctpTransport::GetMaxChannels))
+        .def("_surfaceState", &RTCSctpTransport::SurfaceState, nogil(), pybind11::arg("state"));
   }
 
   InstanceHolder<RTCSctpTransport, webrtc::SctpTransportInterface> &RTCSctpTransport::holder() {
@@ -66,11 +69,20 @@ namespace python_webrtc {
   }
 
   void RTCSctpTransport::OnStateChange(webrtc::SctpTransportInformation info) {
-    // TODO call callback
+    if (info.state() != _lastState) {
+      _surfacedState.Changed(IsTracked(), _lastState);
+      _lastState = info.state();
+      Emit("statechange", info.state());
+    }
 
     if (info.state() == webrtc::SctpTransportState::kClosed) {
       Stop();
     }
+  }
+
+  void RTCSctpTransport::OnPeerConnectionClosed() {
+    Mute();
+    _surfacedState.Reset();
   }
 
   std::shared_ptr<RTCDtlsTransport> RTCSctpTransport::GetTransport() {
@@ -83,25 +95,29 @@ namespace python_webrtc {
   }
 
   webrtc::SctpTransportState RTCSctpTransport::GetState() {
-    return Information().state();
+    return _surfacedState.Get(Information().state());
+  }
+
+  void RTCSctpTransport::SurfaceState(webrtc::SctpTransportState state) {
+    _surfacedState.Surface(state);
   }
 
   std::optional<double> RTCSctpTransport::GetMaxMessageSize() {
-    auto size = Information().MaxMessageSize();
-    if (size.has_value()) {
-      return size.value();
-    }
+    auto getter = _maxMessageSizeGetter.Get();
+    return getter ? getter() : Information().MaxMessageSize();
+  }
 
-    return {};
+  void RTCSctpTransport::SetMaxMessageSizeGetter(std::function<std::optional<double>()> getter) {
+    _maxMessageSizeGetter.Set(std::move(getter));
   }
 
   std::optional<int> RTCSctpTransport::GetMaxChannels() {
-    auto maxChannels = Information().MaxChannels();
-    if (maxChannels.has_value()) {
-      return maxChannels.value();
+    // known once connected, as Python sees the state change along with its event
+    auto state = GetState();
+    if (state == webrtc::SctpTransportState::kNew || state == webrtc::SctpTransportState::kConnecting) {
+      return {};
     }
-
-    return {};
+    return Information().MaxChannels();
   }
 
 } // namespace python_webrtc

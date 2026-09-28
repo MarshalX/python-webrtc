@@ -22,13 +22,23 @@ def rtc_peer_connection(request):
     return pc
 
 
-# aliases
-pc = caller = callee = rtc_peer_connection
+pc = caller = callee = callee2 = rtc_peer_connection
+
+
+@pytest.fixture
+def create_pc(request):
+    """Creates connections with a configuration, closed after the test"""
+
+    def create(configuration=None):
+        pc = webrtc.RTCPeerConnection(configuration)
+        request.addfinalizer(pc.close)
+        return pc
+
+    return create
 
 
 def get_stream(constraints, request):
-    # TODO pass constraints when cpp part will be ready
-    stream = webrtc.get_user_media()
+    stream = webrtc.get_user_media(**constraints)
 
     def stop_tracks():
         for track in stream.get_tracks():
@@ -41,13 +51,12 @@ def get_stream(constraints, request):
 
 @pytest.fixture
 def audio_stream(request):
-    return get_stream(None, request)
+    return get_stream({'audio': True}, request)
 
 
-# alias
 audio_stream2 = audio_stream
 
 
 @pytest.fixture
 def video_stream(request):
-    return get_stream(None, request)
+    return get_stream({'audio': False, 'video': True}, request)

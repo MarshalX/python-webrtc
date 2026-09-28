@@ -19,7 +19,6 @@ def test_1(pc, audio_stream):
     pc.close()
 
     with pytest.raises(webrtc.PythonWebRTCException):
-        # invalid pc state
         pc.add_track(track, audio_stream)
 
 
@@ -62,7 +61,6 @@ def test_4(pc, audio_stream):
     """add_track with single track argument and multiple streams should succeed"""
     track, *_ = audio_stream.get_tracks()
 
-    # MediaStream can't be constructed from Python yet, so build the second stream from a clone
     stream2 = audio_stream.clone()
     stream2.add_track(track)
     sender = pc.add_track(track, [audio_stream, stream2])
@@ -138,8 +136,7 @@ async def test_8(caller, callee, audio_stream):
 
 
 def test_9(pc, audio_stream):
-    """add_track with existing sender with null track, different kind,
-    and recvonly direction should create new sender"""
+    """add_track with existing recvonly sender with null track of a different kind should create new sender"""
     init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.recvonly)
     transceiver = pc.add_transceiver(webrtc.MediaType.video, init)
 
@@ -187,8 +184,7 @@ async def test_10(caller, callee, audio_stream, audio_stream2):
 
 @pytest.mark.asyncio
 async def test_11(caller, callee, audio_stream):
-    """Calling add_track while set_remote_description(offer) is pending should allow
-    the new remote transceiver to be the same one that add_track creates"""
+    """add_track while set_remote_description(offer) is pending should reuse the transceiver the offer creates"""
     track, *_ = audio_stream.get_tracks()
 
     caller.add_track(track)

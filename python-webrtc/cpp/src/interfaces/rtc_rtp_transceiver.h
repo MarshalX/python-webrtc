@@ -8,18 +8,24 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <string>
+#include <vector>
 
-#include <api/scoped_refptr.h>
 #include <api/rtp_transceiver_interface.h>
+#include <api/scoped_refptr.h>
 
 #include <pybind11/pybind11.h>
 
 #include "peer_connection_factory.h"
-#include "rtc_rtp_sender.h"
 #include "rtc_rtp_receiver.h"
+#include "rtc_rtp_sender.h"
+#include "../enums/enums.h"
 
 namespace python_webrtc {
+
+  class RTCPeerConnection;
 
   class RTCRtpTransceiver {
   public:
@@ -29,13 +35,20 @@ namespace python_webrtc {
 
     static InstanceHolder<RTCRtpTransceiver, webrtc::RtpTransceiverInterface> &holder();
 
+    // the connection of the transceiver, where stop() fails once it's closed; set by the connection
+    void SetConnection(std::weak_ptr<RTCPeerConnection> connection);
+
     std::optional<std::string> GetMid();
 
     std::shared_ptr<RTCRtpSender> GetSender();
 
     std::shared_ptr<RTCRtpReceiver> GetReceiver();
 
+    webrtc::MediaType GetKind();
+
     bool GetStopped();
+
+    bool GetStopping();
 
     webrtc::RtpTransceiverDirection GetDirection();
 
@@ -45,8 +58,16 @@ namespace python_webrtc {
 
     void Stop();
 
-    // TODO bind webrtc::RtpCodecCapability
-    //  void SetCodecPreferences();
+    // libwebrtc takes the codecs as a mutable view
+    void SetCodecPreferences(std::vector<webrtc::RtpCodecCapability> codecs);
+
+    std::vector<webrtc::RtpCodecCapability> GetCodecPreferences();
+
+    std::vector<webrtc::RtpHeaderExtensionCapability> GetHeaderExtensionsToNegotiate();
+
+    void SetHeaderExtensionsToNegotiate(const std::vector<webrtc::RtpHeaderExtensionCapability> &extensions);
+
+    std::vector<webrtc::RtpHeaderExtensionCapability> GetNegotiatedHeaderExtensions();
 
   private:
     std::shared_ptr<PeerConnectionFactory> _factory;
@@ -55,6 +76,9 @@ namespace python_webrtc {
     // a transceiver pairs the same sender and receiver for its whole life
     std::shared_ptr<RTCRtpSender> _sender;
     std::shared_ptr<RTCRtpReceiver> _receiver;
+
+    std::mutex _mutex;
+    std::weak_ptr<RTCPeerConnection> _connection;
   };
 
 } // namespace python_webrtc

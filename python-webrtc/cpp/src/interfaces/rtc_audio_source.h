@@ -27,7 +27,6 @@ namespace python_webrtc {
     void OnData(RTCOnDataEvent &);
 
   private:
-    // TODO(mroberts): Again, we have some implicit factory we are threading around. How to handle?
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<RTCAudioTrackSource> _source;
   };

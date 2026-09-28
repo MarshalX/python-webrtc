@@ -44,5 +44,8 @@ several times.
 exception types, the way WebIDL bindings do in a browser. Behavior belongs to the library. If a test only passes by
 adding logic to the shim, the library is still missing that behavior.
 
+`polyfills.js`, evaluated before it, adds the platform globals the shell lacks (like `TextEncoder`, `Blob` or
+`performance`), as far as the tests use them.
+
 Every case runs in its own process, because PythonMonkey has a single global object and WPT helpers declare
 top-level constants.

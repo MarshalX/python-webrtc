@@ -6,7 +6,9 @@
 #
 
 from abc import ABCMeta
-from typing import List
+from typing import List, Optional
+
+from webrtc.utils.events import EventTarget
 
 
 class WebRTCObject(metaclass=ABCMeta):
@@ -26,11 +28,22 @@ class WebRTCObject(metaclass=ABCMeta):
 
     @classmethod
     def _wrap(cls, item) -> 'WebRTCObject':
-        return cls(item)
+        """The wrapper of a native object. Constructors take the arguments of the public API, so it's not created
+        with the constructor of the class."""
+        obj = cls.__new__(cls)
+        WebRTCObject.__init__(obj, item)
+        if isinstance(obj, EventTarget):
+            obj._attach()
+        return obj
+
+    @classmethod
+    def _wrap_optional(cls, item) -> Optional['WebRTCObject']:
+        """The wrapper of a native object, or :obj:`None` for :obj:`None`."""
+        return cls._wrap(item) if item is not None else None
 
     @classmethod
     def _wrap_many(cls, items) -> List['WebRTCObject']:
-        return [cls(item) for item in items]
+        return [cls._wrap(item) for item in items]
 
     def __repr__(self):
         return f'<webrtc.{self.__class__.__name__} object at {hex(id(self))}'

@@ -6,9 +6,52 @@
 //
 
 #include "rtc_ice_transport.h"
+
+#include <algorithm>
+
+#include <api/environment/environment_factory.h>
+#include <p2p/base/basic_packet_socket_factory.h>
+#include <p2p/base/p2p_constants.h>
+#include <p2p/base/p2p_transport_channel.h>
+#include <p2p/client/basic_port_allocator.h>
+#include <pc/ice_server_parsing.h>
+#include <pc/ice_transport.h>
+#include <rtc_base/crypto_random.h>
+#include <rtc_base/network.h>
+
+#include <pybind11/stl.h>
+
+#include "../exceptions.h"
 #include "../utils/gil.h"
 
 namespace python_webrtc {
+
+  // Owned by the transport, created and destroyed on the network thread, after the ICE transport that uses it
+  struct StandaloneIce {
+    explicit StandaloneIce(webrtc::Thread *networkThread)
+        : env(webrtc::CreateEnvironment()),
+          networkManager(std::make_unique<webrtc::BasicNetworkManager>(env, networkThread->socketserver())),
+          socketFactory(std::make_unique<webrtc::BasicPacketSocketFactory>(networkThread->socketserver())),
+          allocator(std::make_unique<webrtc::BasicPortAllocator>(env, networkManager.get(), socketFactory.get())) {
+      allocator->Initialize();
+      // like the connections of the factory, which use every network (see PeerConnectionFactory)
+      allocator->SetNetworkIgnoreMask(0);
+    }
+
+    ~StandaloneIce() {
+      if (transport) {
+        transport->Clear();
+      }
+      channel = nullptr;
+    }
+
+    webrtc::Environment env;
+    std::unique_ptr<webrtc::BasicNetworkManager> networkManager;
+    std::unique_ptr<webrtc::BasicPacketSocketFactory> socketFactory;
+    std::unique_ptr<webrtc::BasicPortAllocator> allocator;
+    std::unique_ptr<webrtc::P2PTransportChannel> channel;
+    webrtc::scoped_refptr<webrtc::IceTransportWithPointer> transport;
+  };
 
   RTCIceTransport::RTCIceTransport(
       std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::IceTransportInterface> transport)
@@ -32,9 +75,6 @@ namespace python_webrtc {
         _subscribed = internal;
       }
       TakeSnapshot();
-      if (_state == webrtc::IceTransportState::kClosed) {
-        Stop();
-      }
     });
   }
 
@@ -48,17 +88,41 @@ namespace python_webrtc {
       if (_subscribed && _transport->internal() == _subscribed) {
         _subscribed->RemoveGatheringStateCallback(this);
       }
+      if (_standalone) {
+        // on the network thread, before what it uses
+        _transport = nullptr;
+        _standalone = nullptr;
+      }
     });
 
     _transport = nullptr;
+    DropListeners();
   }
 
   void RTCIceTransport::Init(pybind11::module &m) {
-    pybind11::class_<RTCIceTransport, std::shared_ptr<RTCIceTransport>>(m, "RTCIceTransport")
+    Listeners::BindClass<RTCIceTransport>(m, "RTCIceTransport")
+        // a transport of its own
+        .def(pybind11::init([]() { return CreateStandalone(PeerConnectionFactory::GetOrCreateDefault()); }), nogil())
         .def_property_readonly("component", nogil_fn(&RTCIceTransport::GetComponent))
         .def_property_readonly("gatheringState", nogil_fn(&RTCIceTransport::GetGatheringState))
         .def_property_readonly("role", nogil_fn(&RTCIceTransport::GetRole))
-        .def_property_readonly("state", nogil_fn(&RTCIceTransport::GetState));
+        .def_property_readonly("state", nogil_fn(&RTCIceTransport::GetState))
+        .def("getSelectedCandidatePair", &RTCIceTransport::GetSelectedCandidatePair, nogil())
+        .def("getLocalCandidates", &RTCIceTransport::GetLocalCandidates, nogil())
+        .def("getRemoteCandidates", &RTCIceTransport::GetRemoteCandidates, nogil())
+        .def("getLocalParameters", &RTCIceTransport::GetLocalParameters, nogil())
+        .def("getRemoteParameters", &RTCIceTransport::GetRemoteParameters, nogil())
+        .def("gather", &RTCIceTransport::Gather, nogil(), pybind11::arg("policy"), pybind11::arg("iceServers"))
+        .def("start", &RTCIceTransport::Start, nogil(),
+             pybind11::arg("usernameFragment"), pybind11::arg("password"), pybind11::arg("role"))
+        .def("addRemoteCandidate", &RTCIceTransport::AddStandaloneRemoteCandidate, nogil(),
+             pybind11::arg("candidate"), pybind11::arg("sdpMid"), pybind11::arg("sdpMLineIndex"),
+             pybind11::arg("usernameFragment"))
+        .def("stop", &RTCIceTransport::StopStandalone, nogil())
+        .def_property_readonly("_standalone", &RTCIceTransport::IsStandalone)
+        .def("_surfaceState", &RTCIceTransport::SurfaceState, nogil(), pybind11::arg("state"))
+        .def("_surfaceGatheringState", &RTCIceTransport::SurfaceGatheringState, nogil(), pybind11::arg("state"))
+        .def("_surfaceCandidate", &RTCIceTransport::SurfaceLocalCandidate, nogil());
   }
 
   InstanceHolder<RTCIceTransport, webrtc::IceTransportInterface> &RTCIceTransport::holder() {
@@ -67,74 +131,426 @@ namespace python_webrtc {
     return *holder;
   }
 
-  void RTCIceTransport::TakeSnapshot() {
+  RTCIceTransport::StateChange RTCIceTransport::TakeSnapshot() {
     std::lock_guard<std::mutex> lock(_mutex);
+    StateChange change{_state, _state, _gatheringState, _gatheringState};
+    if (_stopped) {
+      return change;
+    }
     auto internal = _transport->internal();
     if (internal) {
-      if (internal->component() == 1) {
-        _component = RTCIceComponent::kRtp;
-      } else {
-        _component = RTCIceComponent::kRtcp;
-      }
-
+      _component = internal->component() == 1 ? RTCIceComponent::kRtp : RTCIceComponent::kRtcp;
       _role = internal->GetIceRole();
       _state = internal->GetIceTransportState();
-      _gathering_state = internal->gathering_state();
+      if (_standalone && _state == webrtc::IceTransportState::kNew && _remoteParameters && !_remoteCandidates.empty()) {
+        // started with remote candidates: checking, as a transport of its own is from then on, even before it
+        // has candidates to check them with
+        _state = webrtc::IceTransportState::kChecking;
+      }
+      if (!_gatheringFrozen) {
+        _gatheringState = internal->gathering_state();
+      }
     } else {
       _state = webrtc::IceTransportState::kClosed;
-      _gathering_state = webrtc::IceGatheringState::kIceGatheringComplete;
+      if (!_gatheringFrozen) {
+        _gatheringState = webrtc::IceGatheringState::kIceGatheringComplete;
+      }
     }
+    change.state = _state;
+    change.gatheringState = _gatheringState;
+    return change;
   }
 
   void RTCIceTransport::OnRTCDtlsTransportStopped() {
-    std::lock_guard<std::mutex> lock(_mutex);
-    _state = webrtc::IceTransportState::kClosed;
-    _gathering_state = webrtc::IceGatheringState::kIceGatheringComplete;
-    Stop();
-  }
-
-  void RTCIceTransport::Stop() {
-
-  }
-
-  void RTCIceTransport::OnStateChanged(webrtc::IceTransportInternal *) {
-    TakeSnapshot();
-
-    // TODO call callback
-
-    if (_state == webrtc::IceTransportState::kClosed) {
-      Stop();
+    webrtc::IceTransportState previous;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      previous = _state;
+      _state = webrtc::IceTransportState::kClosed;
+    }
+    if (previous != webrtc::IceTransportState::kClosed) {
+      // closed by a description (like the one bundling its media section on another transport), with its event;
+      // a closed connection mutes its transports first, which are closed right away
+      _surfacedState.Changed(IsTracked(), previous);
+      Emit("statechange", webrtc::IceTransportState::kClosed);
     }
   }
 
-  void RTCIceTransport::OnGatheringStateChanged(webrtc::IceTransportInternal *) {
-    TakeSnapshot();
+  void RTCIceTransport::OnPeerConnectionClosed() {
+    Mute();
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      _gatheringState = _surfacedGatheringState.Get(_gatheringState);
+      _gatheringFrozen = true;
+    }
+    _surfacedState.Reset();
+    _surfacedGatheringState.Reset();
+  }
 
-    // TODO call callback
+  void RTCIceTransport::OnStateChanged(webrtc::IceTransportInternal *) {
+    auto change = TakeSnapshot();
+    if (change.state == change.previousState) {
+      return;
+    }
+    if (_standalone && change.state == webrtc::IceTransportState::kChecking) {
+      // a transport of its own checks from start() or addRemoteCandidate() on, which change the state themselves
+      _surfacedState.Surface(change.state);
+      return;
+    }
+    if (_standalone) {
+      // the pair it connects with first, then the state
+      CheckSelectedCandidatePair();
+    }
+    _surfacedState.Changed(IsTracked(), change.previousState);
+    Emit("statechange", change.state);
+  }
+
+  void RTCIceTransport::OnGatheringStateChanged(webrtc::IceTransportInternal *) {
+    auto change = TakeSnapshot();
+    auto current = change.gatheringState;
+    if (current == change.previousGatheringState) {
+      return;
+    }
+    _surfacedGatheringState.Changed(IsTracked(), change.previousGatheringState);
+    if (_standalone) {
+      // a transport of its own completes by itself, its candidates end first (gather() started gathering,
+      // without an event)
+      if (current == webrtc::IceGatheringState::kIceGatheringComplete) {
+        Emit("icecandidate", std::optional<IceCandidateInit>());
+        Emit("gatheringstatechange", current);
+      }
+    } else if (current != webrtc::IceGatheringState::kIceGatheringComplete) {
+      // completion is emitted by the connection, along with its own (see RTCPeerConnection::OnIceGatheringChange)
+      Emit("gatheringstatechange", current);
+    }
   }
 
   RTCIceComponent RTCIceTransport::GetComponent() {
     std::lock_guard<std::mutex> lock(_mutex);
-    if (_component == 1) {
-      return RTCIceComponent::kRtp;
-    } else {
-      return RTCIceComponent::kRtcp;
-    }
+    return _component;
   }
 
   webrtc::IceGatheringState RTCIceTransport::GetGatheringState() {
-    std::lock_guard<std::mutex> lock(_mutex);
-    return _gathering_state;
+    webrtc::IceGatheringState state;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      state = _gatheringState;
+    }
+    return _surfacedGatheringState.Get(state);
   }
 
   webrtc::IceRole RTCIceTransport::GetRole() {
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (!_roleKnown) {
+        return webrtc::IceRole::ICEROLE_UNKNOWN;
+      }
+    }
+    auto role = _factory->_workerThread->BlockingCall([this]() {
+      auto internal = _transport ? _transport->internal() : nullptr;
+      return internal ? internal->GetIceRole() : webrtc::IceRole::ICEROLE_UNKNOWN;
+    });
     std::lock_guard<std::mutex> lock(_mutex);
+    // a closed transport has the last one
+    if (role != webrtc::IceRole::ICEROLE_UNKNOWN) {
+      _role = role;
+    }
     return _role;
   }
 
-  webrtc::IceTransportState RTCIceTransport::GetState() {
+  void RTCIceTransport::SetRoleKnown() {
     std::lock_guard<std::mutex> lock(_mutex);
-    return _state;
+    _roleKnown = true;
+  }
+
+  webrtc::IceTransportState RTCIceTransport::GetState() {
+    webrtc::IceTransportState state;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      state = _state;
+    }
+    return _surfacedState.Get(state);
+  }
+
+  std::optional<std::tuple<IceCandidateInit, IceCandidateInit, bool>> RTCIceTransport::GetSelectedCandidatePair() {
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (_stopped) {
+        return std::nullopt;
+      }
+    }
+    std::optional<std::tuple<IceCandidateInit, IceCandidateInit, bool>> result;
+    _factory->_workerThread->BlockingCall([&]() {
+      auto internal = _transport ? _transport->internal() : nullptr;
+      auto pair = internal ? internal->GetSelectedCandidatePair() : std::nullopt;
+      if (!pair) {
+        return;
+      }
+      // the transport is named after the media section it's negotiated in
+      auto mid = internal->transport_name();
+      auto local = webrtc::CreateIceCandidate(mid, 0, pair->local_candidate());
+      auto remote = webrtc::CreateIceCandidate(mid, 0, pair->remote_candidate());
+      auto signaled = pair->remote_candidate().is_prflx() ? FindSignaledCandidate(pair->remote_candidate())
+                                                           : std::nullopt;
+      bool peerReflexive = pair->remote_candidate().is_prflx() && !signaled;
+      result.emplace(IceCandidateInit(*local), signaled ? *signaled : IceCandidateInit(*remote), peerReflexive);
+    });
+    return result;
+  }
+
+  std::optional<IceCandidateInit> RTCIceTransport::FindSignaledCandidate(const webrtc::Candidate &candidate) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    for (const auto &signaled: _remoteCandidates) {
+      webrtc::SdpParseError error;
+      auto parsed = webrtc::IceCandidate::Create(signaled.sdpMid, signaled.sdpMLineIndex, signaled.candidate, &error);
+      if (parsed && parsed->candidate().address().port() == candidate.address().port() &&
+          parsed->candidate().protocol() == candidate.protocol()) {
+        return signaled;
+      }
+    }
+    return std::nullopt;
+  }
+
+  static void addCandidate(std::vector<IceCandidateInit> &candidates, const IceCandidateInit &candidate) {
+    if (candidate.candidate.empty()) {
+      return;
+    }
+    for (const auto &known: candidates) {
+      if (known.candidate == candidate.candidate) {
+        return;
+      }
+    }
+    candidates.push_back(candidate);
+  }
+
+  void RTCIceTransport::AddLocalCandidate(const IceCandidateInit &candidate) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    addCandidate(_localCandidates, candidate);
+  }
+
+  void RTCIceTransport::AddRemoteCandidate(const IceCandidateInit &candidate) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    addCandidate(_remoteCandidates, candidate);
+  }
+
+  std::vector<IceCandidateInit> RTCIceTransport::GetLocalCandidates() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (_standalone && HasListeners()) {
+      // the candidates of a transport of its own come with their events
+      return {_localCandidates.begin(), _localCandidates.begin() + std::min(_surfacedLocal, _localCandidates.size())};
+    }
+    return _localCandidates;
+  }
+
+  void RTCIceTransport::SurfaceLocalCandidate() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    ++_surfacedLocal;
+  }
+
+  std::vector<IceCandidateInit> RTCIceTransport::GetRemoteCandidates() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _remoteCandidates;
+  }
+
+  void RTCIceTransport::SetParametersGetter(std::function<ParametersGetter> getter) {
+    _parametersGetter.Set(std::move(getter));
+  }
+
+  std::optional<std::pair<std::string, std::string>> RTCIceTransport::GetParameters(bool local) {
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (_standalone) {
+        return local ? _localParameters : _remoteParameters;
+      }
+    }
+    auto getter = _parametersGetter.Get();
+    return getter ? getter(local) : std::nullopt;
+  }
+
+  std::optional<std::pair<std::string, std::string>> RTCIceTransport::GetLocalParameters() {
+    return GetParameters(true);
+  }
+
+  std::optional<std::pair<std::string, std::string>> RTCIceTransport::GetRemoteParameters() {
+    return GetParameters(false);
+  }
+
+  std::shared_ptr<RTCIceTransport> RTCIceTransport::CreateStandalone(
+      const std::shared_ptr<PeerConnectionFactory> &factory) {
+    std::shared_ptr<StandaloneIce> standalone;
+    webrtc::scoped_refptr<webrtc::IceTransportInterface> transport;
+    std::pair<std::string, std::string> parameters(
+        webrtc::CreateRandomString(webrtc::ICE_UFRAG_LENGTH), webrtc::CreateRandomString(webrtc::ICE_PWD_LENGTH));
+    factory->_workerThread->BlockingCall([&]() {
+      standalone = std::make_shared<StandaloneIce>(factory->_workerThread.get());
+      webrtc::IceTransportInit init(standalone->env);
+      init.set_port_allocator(standalone->allocator.get());
+      standalone->channel = webrtc::P2PTransportChannel::Create("", 1, std::move(init));
+      standalone->transport = webrtc::make_ref_counted<webrtc::IceTransportWithPointer>(standalone->channel.get());
+      transport = standalone->transport;
+      transport->internal()->SetIceParameters(webrtc::IceParameters(parameters.first, parameters.second, false));
+    });
+
+    auto wrapper = holder().GetOrCreate(factory, transport);
+    {
+      std::lock_guard<std::mutex> lock(wrapper->_mutex);
+      wrapper->_standalone = std::move(standalone);
+      wrapper->_localParameters = parameters;
+    }
+    factory->_workerThread->BlockingCall([&]() {
+      auto internal = transport->internal();
+      auto alive = wrapper->_alive;
+      auto *self = wrapper.get();
+      internal->SubscribeCandidateGathered(
+          self, [self, alive](webrtc::IceTransportInternal *, const webrtc::Candidate &candidate) {
+            if (*alive) {
+              IceCandidateInit init(*webrtc::CreateIceCandidate("", 0, candidate));
+              self->AddLocalCandidate(init);
+              self->Emit("icecandidate", std::optional<IceCandidateInit>(init));
+            }
+          });
+      // both ends took the same role: the one told to switch does (RFC 8445 section 7.3.1.1)
+      internal->SubscribeRoleConflict(self, [alive](webrtc::IceTransportInternal *transport) {
+        if (*alive) {
+          transport->SetIceRole(transport->GetIceRole() == webrtc::ICEROLE_CONTROLLING
+                                ? webrtc::ICEROLE_CONTROLLED : webrtc::ICEROLE_CONTROLLING);
+        }
+      });
+      internal->SetCandidatePairChangeCallback([self, alive](const webrtc::CandidatePairChangeEvent &) {
+        if (*alive) {
+          self->CheckSelectedCandidatePair();
+        }
+      });
+    });
+    return wrapper;
+  }
+
+  void RTCIceTransport::Gather(
+      webrtc::PeerConnectionInterface::IceTransportsType policy, const std::vector<IceServerInit> &iceServers) {
+    auto servers = toIceServers(iceServers);
+    webrtc::RTCError error;
+    _factory->_workerThread->BlockingCall([&]() {
+      webrtc::ServerAddresses stunServers;
+      std::vector<webrtc::RelayServerConfig> turnServers;
+      error = webrtc::ParseIceServersOrError(servers, &stunServers, &turnServers);
+      if (!error.ok() || !_standalone) {
+        return;
+      }
+      _standalone->allocator->SetConfiguration(stunServers, turnServers, 0, webrtc::NO_PRUNE);
+      _standalone->allocator->SetCandidateFilter(
+          policy == webrtc::PeerConnectionInterface::kRelay ? webrtc::CF_RELAY : webrtc::CF_ALL);
+      _transport->internal()->MaybeStartGathering();
+    });
+    if (!error.ok()) {
+      throw RTCException(error);
+    }
+    SurfaceCurrent();
+  }
+
+  void RTCIceTransport::Start(const std::string &usernameFragment, const std::string &password, webrtc::IceRole role) {
+    bool changed;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (_startedRole && *_startedRole != role) {
+        throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "The transport started with another role");
+      }
+      _startedRole = role;
+      std::pair<std::string, std::string> parameters(usernameFragment, password);
+      changed = _remoteParameters && *_remoteParameters != parameters;
+      _remoteParameters = parameters;
+      _roleKnown = true;
+      if (changed) {
+        _remoteCandidates.clear();
+      }
+    }
+    _factory->_workerThread->BlockingCall([&]() {
+      auto internal = _transport->internal();
+      if (changed) {
+        // the candidates were for the previous remote agent
+        internal->RemoveAllRemoteCandidates();
+      }
+      internal->SetIceRole(role);
+      internal->SetRemoteIceParameters(webrtc::IceParameters(usernameFragment, password, false));
+    });
+    SurfaceCurrent();
+  }
+
+  void RTCIceTransport::AddStandaloneRemoteCandidate(
+      const std::string &candidate, const std::string &sdpMid, int sdpMLineIndex,
+      const std::optional<std::string> &usernameFragment) {
+    IceCandidateInit init(sdpMid, sdpMLineIndex, usernameFragment);
+    init.candidate = candidate;
+    webrtc::SdpParseError error;
+    auto parsed = webrtc::IceCandidate::Create(sdpMid, sdpMLineIndex, candidate, &error);
+    if (!parsed) {
+      throw RTCException(webrtc::RTCErrorType::INTERNAL_ERROR, "Failed to parse the ICE candidate: " + error.description);
+    }
+    AddRemoteCandidate(init);
+    _factory->_workerThread->BlockingCall([&]() {
+      _transport->internal()->AddRemoteCandidate(parsed->candidate());
+    });
+    SurfaceCurrent();
+  }
+
+  void RTCIceTransport::StopStandalone() {
+    _factory->_workerThread->BlockingCall([&]() {
+      // nothing more to connect with, and no more events
+      *_alive = false;
+      _transport->internal()->RemoveAllRemoteCandidates();
+    });
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      _stopped = true;
+      _state = webrtc::IceTransportState::kClosed;
+    }
+    Mute();
+    _surfacedState.Reset();
+    _surfacedGatheringState.Reset();
+  }
+
+  void RTCIceTransport::SurfaceCurrent() {
+    _factory->_workerThread->BlockingCall([this]() { TakeSnapshot(); });
+    std::lock_guard<std::mutex> lock(_mutex);
+    _surfacedState.Surface(_state);
+    _surfacedGatheringState.Surface(_gatheringState);
+  }
+
+  void RTCIceTransport::CreatedByDescription() {
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (_gatheringState == webrtc::IceGatheringState::kIceGatheringNew) {
+        return;
+      }
+    }
+    _surfacedGatheringState.Surface(webrtc::IceGatheringState::kIceGatheringNew);
+    Emit("gatheringstatechange", webrtc::IceGatheringState::kIceGatheringGathering);
+  }
+
+  void RTCIceTransport::EmitGatheringComplete() {
+    Emit("gatheringstatechange", webrtc::IceGatheringState::kIceGatheringComplete);
+  }
+
+  void RTCIceTransport::CheckSelectedCandidatePair() {
+    auto pair = GetSelectedCandidatePair();
+    auto key = pair ? std::get<0>(*pair).candidate + "|" + std::get<1>(*pair).candidate : std::string();
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (key == _selectedPair) {
+        return;
+      }
+      _selectedPair = key;
+    }
+    if (pair) {
+      Emit("selectedcandidatepairchange");
+    }
+  }
+
+  void RTCIceTransport::SurfaceState(webrtc::IceTransportState state) {
+    _surfacedState.Surface(state);
+  }
+
+  void RTCIceTransport::SurfaceGatheringState(webrtc::IceGatheringState state) {
+    _surfacedGatheringState.Surface(state);
   }
 
 } // namespace python_webrtc

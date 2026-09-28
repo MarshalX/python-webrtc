@@ -25,20 +25,20 @@ async def main():
     wrtc.ping()
 
     enums = [
-        wrtc.RTCPeerConnectionState,
-        wrtc.RTCIceConnectionState,
-        wrtc.RTCIceGatheringState,
-        wrtc.RTCSdpType,
-        wrtc.MediaStreamTrackState,
-        wrtc.MediaStreamSourceState,
-        wrtc.TransceiverDirection,
-        wrtc.RTCIceComponent,
-        wrtc.RTCIceRole,
-        wrtc.RTCIceTransportState,
-        wrtc.CricketIceGatheringState,
-        wrtc.DtlsTransportState,
-        wrtc.SctpTransportState,
-        wrtc.MediaType,
+        webrtc.RTCPeerConnectionState,
+        webrtc.RTCIceConnectionState,
+        webrtc.RTCIceGatheringState,
+        webrtc.RTCSdpType,
+        webrtc.MediaStreamTrackState,
+        webrtc.MediaStreamSourceState,
+        webrtc.TransceiverDirection,
+        webrtc.RTCIceComponent,
+        webrtc.RTCIceRole,
+        webrtc.RTCIceTransportState,
+        webrtc.CricketIceGatheringState,
+        webrtc.DtlsTransportState,
+        webrtc.SctpTransportState,
+        webrtc.MediaType,
     ]
     for enum in enums:
         print(f'{enum!r} = {enum.__members__}')

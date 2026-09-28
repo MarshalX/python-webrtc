@@ -16,16 +16,19 @@ class RTCOnDataEvent(WebRTCObject):
 
     Note:
         :obj:`webrtc.RTCOnDataEvent` should represent 10 ms of audio samples.
+
+    Args:
+        audio_data (:obj:`bytes`): The samples.
+        number_of_frames (:obj:`int`): The number of frames (samples per channel).
     """
 
     _class = wrtc.RTCOnDataEvent
 
     def __init__(self, audio_data: AnyStr, number_of_frames: int):
-        self._set_native_obj(self._class(audio_data, number_of_frames))
+        super().__init__(self._class(audio_data, number_of_frames))
 
     @property
     def audio_data(self) -> AnyStr:
-        # TODO actually its number. could be represented as string in python
         """:obj:`AnyStr`: An audio data."""
         return self._native_obj.audioData
 

@@ -19,10 +19,18 @@ namespace python_webrtc {
   using nogil = pybind11::call_guard<pybind11::gil_scoped_release>;
 
   // Property getters/setters can't take a call guard directly, wrap them into a function instead.
-  // Wrappers are returned as std::shared_ptr, so Python shares ownership of them with the C++ side.
   template<typename F>
   pybind11::cpp_function nogil_fn(F &&f) {
     return pybind11::cpp_function(std::forward<F>(f), nogil());
+  }
+
+  // Whether Python code can still run: libwebrtc threads may outlive the interpreter
+  inline bool PythonAlive() {
+#if PY_VERSION_HEX >= 0x030D0000
+    return Py_IsInitialized() && !Py_IsFinalizing();
+#else
+    return Py_IsInitialized() && !_Py_IsFinalizing();
+#endif
   }
 
   // Destructors of wrappers block on libwebrtc threads (to unregister observers, to stop threads),

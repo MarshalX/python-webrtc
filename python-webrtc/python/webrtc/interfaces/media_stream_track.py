@@ -8,17 +8,33 @@
 from typing import TYPE_CHECKING
 
 from webrtc import WebRTCObject, wrtc
+from webrtc.utils.events import EventTarget
 
 if TYPE_CHECKING:
     import webrtc
 
 
-class MediaStreamTrack(WebRTCObject):
+class MediaStreamTrack(WebRTCObject, EventTarget):
     """The MediaStreamTrack interface represents a single media track within a stream;
     typically, these are audio or video tracks, but other track types may exist as well.
+
+    Events (see :meth:`on`):
+        ``mute`` and ``unmute`` (:obj:`webrtc.Event`): :attr:`muted` changed: a remote track is muted until media
+        arrives, and when it's no longer negotiated.
+        ``ended`` (:obj:`webrtc.Event`): The track ended, other than with :meth:`stop`, like when the remote peer
+        stopped sending it.
     """
 
-    _class = wrtc.RTCPeerConnection
+    _class = wrtc.MediaStreamTrack
+    _events = ('mute', 'unmute', 'ended')
+
+    def _on_event(self, name: str, *args):
+        # muted changes along with the events
+        if name in ('mute', 'unmute'):
+            (muted,) = args
+            self._native_obj._surfaceMuted(muted)
+        elif name == 'ended':
+            self._native_obj._surfaceEnded()
 
     @property
     def enabled(self) -> bool:
@@ -33,8 +49,13 @@ class MediaStreamTrack(WebRTCObject):
 
     @property
     def id(self) -> str:
-        """:obj:`bool`: A unique identifier (GUID) for the track."""
+        """:obj:`str`: A unique identifier (GUID) for the track."""
         return self._native_obj.id
+
+    @property
+    def label(self) -> str:
+        """:obj:`str`: The label of the source, ``'remote audio'`` or ``'remote video'`` for a remote track."""
+        return self._native_obj.label
 
     @property
     def kind(self) -> 'webrtc.MediaType':
