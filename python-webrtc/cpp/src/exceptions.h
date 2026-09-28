@@ -8,23 +8,13 @@
 #pragma once
 
 #include <optional>
+#include <string>
+
+#include <api/rtc_error.h>
 
 #include <pybind11/pybind11.h>
 
-#include <api/rtc_error.h>
-#include <api/jsep.h>
-
 namespace python_webrtc {
-
-  class CallbackPythonWebRTCException {
-  public:
-    explicit CallbackPythonWebRTCException(std::string msg) : _msg(std::move(msg)) {}
-
-    [[nodiscard]] const char *what() const noexcept;
-
-  private:
-    std::string _msg;
-  };
 
   class PythonWebRTCException : public std::exception {
   public:
@@ -37,13 +27,13 @@ namespace python_webrtc {
   };
 
   // An error of libwebrtc. Raised in Python as the subclass of webrtc.RTCException for its type
-  // (see webrtc/exceptions.py), the way browsers turn webrtc::RTCError into DOM exceptions.
+  // (see webrtc/exceptions.py).
   class RTCException : public PythonWebRTCException {
   public:
     explicit RTCException(webrtc::RTCError error)
         : PythonWebRTCException(error.message()), _error(std::move(error)) {}
 
-    RTCException(webrtc::RTCErrorType type, std::string msg)
+    RTCException(webrtc::RTCErrorType type, const std::string &msg)
         : PythonWebRTCException(msg), _error(type, msg) {}
 
     [[nodiscard]] const webrtc::RTCError &error() const { return _error; }
@@ -57,13 +47,12 @@ namespace python_webrtc {
   };
 
   // An RTCException passed to a Python callback of an asynchronous operation instead of being raised
-  class RTCCallbackException : public CallbackPythonWebRTCException {
+  class RTCCallbackException {
   public:
     explicit RTCCallbackException(webrtc::RTCError error, std::optional<int> sdpLineNumber = std::nullopt)
-        : CallbackPythonWebRTCException(error.message()), _error(std::move(error)), _sdpLineNumber(sdpLineNumber) {}
+        : _error(std::move(error)), _sdpLineNumber(sdpLineNumber) {}
 
-    RTCCallbackException(webrtc::RTCErrorType type, std::string msg)
-        : CallbackPythonWebRTCException(msg), _error(type, msg) {}
+    RTCCallbackException(webrtc::RTCErrorType type, const std::string &msg) : _error(type, msg) {}
 
     [[nodiscard]] const webrtc::RTCError &error() const { return _error; }
 
@@ -75,14 +64,11 @@ namespace python_webrtc {
     std::optional<int> _sdpLineNumber;
   };
 
-  RTCException wrapRTCError(const webrtc::RTCError &error);
-
-  SdpParseException wrapSdpParseError(const webrtc::SdpParseError &error);
-
-  RTCCallbackException wrapRTCErrorForCallback(const webrtc::RTCError &error);
+  // The error of a method called on a closed connection, or on an object of one
+  webrtc::RTCError closedError(const std::string &method, const std::string &interface = "RTCPeerConnection");
 
   // the Python exception (a webrtc.RTCException subclass) for a libwebrtc error
-  pybind11::object RTCErrorToPython(const webrtc::RTCError &error, std::optional<int> sdpLineNumber = std::nullopt);
+  pybind11::object rtcErrorToPython(const webrtc::RTCError &error, std::optional<int> sdpLineNumber = std::nullopt);
 
   class Exceptions {
   public:

@@ -9,17 +9,19 @@ import asyncio
 import collections
 import threading
 import weakref
-from typing import Callable
+from typing import Callable, NamedTuple, Tuple
+
+
+class _Item(NamedTuple):
+    callback: Callable
+    args: Tuple
+    resumes: bool
+    after_ready: bool
 
 
 class TaskQueue:
-    """Runs callbacks posted from any thread on an event loop, in the order they were posted, before callbacks
-    the loop gets later (like timers), as a browser runs its queued tasks.
-
-    Events and results of asynchronous operations of libwebrtc go through the queue of their loop, so they arrive
-    in the order libwebrtc reported them, and whatever a callback schedules (like the continuation of a coroutine
-    awaiting a result) runs before the next callback, as a browser runs microtasks between tasks.
-    """
+    """Runs callbacks posted from any thread on an event loop in order, each with what it schedules with
+    ``call_soon`` before the next one (like browser tasks and microtasks)."""
 
     #: How many times a callback waits for other ready callbacks of the loop
     MAX_DEFERRALS = 100
@@ -39,26 +41,49 @@ class TaskQueue:
 
     @classmethod
     def of(cls, loop: asyncio.AbstractEventLoop) -> 'TaskQueue':
+        """Returns the queue of a loop.
+
+        Args:
+            loop (:obj:`asyncio.AbstractEventLoop`): The loop.
+
+        Returns:
+            :obj:`TaskQueue`: Its queue, created on first use.
+        """
         with cls._queues_lock:
             queue = cls._queues.get(loop)
             if queue is None:
                 queue = cls._queues[loop] = cls(loop)
             return queue
 
+    @classmethod
+    def post_to_running(cls, callback: Callable, *args, **kwargs) -> bool:
+        """Posts a callback to the queue of the running loop (see :meth:`post`).
+
+        Returns:
+            :obj:`bool`: Whether it was posted: :obj:`False` outside of a running loop.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+        cls.of(loop).post(callback, *args, **kwargs)
+        return True
+
     def post(self, callback: Callable, *args, resumes: bool = False, after_ready: bool = False) -> None:
         """Schedules a callback, from any thread. Callbacks posted to a closed loop are dropped.
 
         Args:
-            callback: The callback.
+            callback (:obj:`callable`): The callback.
             *args: Its arguments.
-            resumes: Whether the callback resumes code awaiting it, like the result of an operation. The next
-                callback waits for what's resumed to run first, as microtasks run before the next task in a browser.
-            after_ready: Whether the callback waits for the callbacks the loop has ready, like the end of the
-                current task (with its microtasks) in a browser.
+            resumes (:obj:`bool`, optional): Whether the callback resumes code awaiting it, like the result of
+                an operation. The next callback waits for what's resumed to run first.
+            after_ready (:obj:`bool`, optional): Whether the callback waits for the callbacks the loop has ready,
+                like the end of the current task, with its microtasks.
         """
+        item = _Item(callback, args, resumes, after_ready)
         # Nothing is allocated under the lock: an allocation may run the garbage collector, and so the destructor
         # of a native object, which may wait for a libwebrtc thread that is posting here. Appending is atomic.
-        self._items.append((callback, args, resumes, after_ready))
+        self._items.append(item)
         with self._lock:
             if self._scheduled:
                 return
@@ -71,6 +96,7 @@ class TaskQueue:
     def _others_ready(self) -> bool:
         """Whether the loop has callbacks ready that are like microtasks: the steps of coroutines and callbacks
         scheduled with ``call_soon``, rather than timers, the loop's own ones or the ones of this queue"""
+        # CPython internals (loop._ready, handle._callback): other loops (like uvloop) never report any
         ready = getattr(self._loop, '_ready', None) or ()
         for handle in ready:
             callback = getattr(handle, '_callback', None)
@@ -79,47 +105,48 @@ class TaskQueue:
             return True
         return False
 
+    def _defers(self, deferred: int, resumed: bool) -> bool:
+        """Whether a callback waits for the code the previous one resumed, or for the microtasks the loop has
+        ready. Deferring is bounded, so a busy loop can't starve the queue."""
+        return (resumed or self._others_ready()) and deferred < self.MAX_DEFERRALS
+
     def _settle(self, deferred: int = 0):
         # the code a callback resumed runs until the loop has nothing else ready (a coroutine continues over
-        # several iterations): from then on, callbacks don't wait for it anymore, as the next browser task
-        # doesn't wait for the microtasks of an earlier one
-        if self._others_ready() and deferred < self.MAX_DEFERRALS:
+        # several iterations): from then on, callbacks don't wait for it anymore
+        if self._defers(deferred, resumed=False):
             self._loop.call_soon(self._settle, deferred + 1)
         else:
             self._resumed = False
 
     def _run(self, deferred: int = 0):
-        # after a callback that resumed code, the callbacks that code scheduled run first. Deferring is bounded,
-        # so a busy loop can't starve the queue.
-        # like a browser task, a callback waits for the microtasks the loop has ready (a coroutine or a promise
-        # continuing over several iterations)
-        if (self._resumed or self._others_ready()) and deferred < self.MAX_DEFERRALS:
+        if self._defers(deferred, self._resumed):
             self._loop.call_soon(self._run, deferred + 1)
             return
 
-        ready = getattr(self._loop, '_ready', None)
+        # without the internals _others_ready() reads, one callback runs per iteration of the loop
+        can_inspect_ready = hasattr(self._loop, '_ready')
         more = True
         try:
             for _ in range(self.MAX_BATCH):
                 with self._lock:
                     item = self._items.popleft()
-                callback, args, resumes, _ = item
+                resumes = item.resumes
                 if resumes:
                     self._resumed = True
                     self._loop.call_soon(self._settle)
-                callback(*args)
+                item.callback(*item.args)
                 # released outside of the lock: the destructor of a native object may wait for a libwebrtc thread,
                 # which may be posting here
-                item = callback = args = None
+                item = None
                 with self._lock:
                     more = bool(self._items)
                     self._scheduled = more
                     if not more:
                         return
-                    after_ready = self._items[0][3]
-                # the next callback runs right away, like the next browser task, unless something like a microtask
-                # is ready (what this one scheduled runs before the next one)
-                if resumes or after_ready or ready is None or self._others_ready():
+                    after_ready = self._items[0].after_ready
+                # the next callback runs right away, unless this one resumed code, the next one waits for the ready
+                # callbacks, or this one scheduled some (they run first)
+                if resumes or after_ready or not can_inspect_ready or self._others_ready():
                     break
         except BaseException:
             with self._lock:

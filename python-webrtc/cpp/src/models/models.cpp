@@ -19,16 +19,12 @@
 namespace python_webrtc {
 
   void Models::Init(pybind11::module &m) {
-    // python_webrtc
-
     RTCSessionDescriptionInit::Init(m);
     RTCSessionDescription::Init(m);
     RTCOnDataEvent::Init(m);
     RTCIceCandidate::Init(m);
-    Certificate::Init(m);
+    RTCCertificate::Init(m);
     ConfigurationInit::Init(m);
-
-    // webrtc
 
     bindRtpParameters(m);
     bindRtpTransceiverInit(m);

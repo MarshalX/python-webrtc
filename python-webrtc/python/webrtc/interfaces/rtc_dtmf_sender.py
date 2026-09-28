@@ -7,7 +7,7 @@
 
 import re
 
-from webrtc import WebRTCObject, wrtc
+from webrtc import InvalidCharacterError, RTCDTMFToneChangeEvent, WebRTCObject, wrtc
 from webrtc.utils.events import EventTarget
 
 _TONES = re.compile(r'[0-9A-Da-d#*,]*')
@@ -25,13 +25,13 @@ class RTCDTMFSender(WebRTCObject, EventTarget):
     _events = ('tonechange',)
 
     def _on_event(self, name: str, *args):
+        _, tone_buffer, insertion = args
         # the tone buffer is shortened along with the event
-        self._native_obj._surfaceBuffer(args[1], args[2])
+        self._native_obj._surfaceBuffer(tone_buffer, insertion)
 
     def _create_event(self, name: str, *args):
-        from webrtc import RTCDTMFToneChangeEvent
-
-        return RTCDTMFToneChangeEvent(name, args[0], target=self)
+        tone, _, _ = args
+        return RTCDTMFToneChangeEvent(name, tone, target=self)
 
     def insert_dtmf(self, tones: str, duration: int = 100, inter_tone_gap: int = 70) -> None:
         """Plays tones, replacing the ones not played yet.
@@ -46,8 +46,6 @@ class RTCDTMFSender(WebRTCObject, EventTarget):
             :obj:`webrtc.InvalidCharacterError`: If ``tones`` has another character.
             :obj:`webrtc.InvalidStateError`: If the transceiver of the sender is stopped or doesn't send.
         """
-        from webrtc import InvalidCharacterError
-
         if not _TONES.fullmatch(tones):
             raise InvalidCharacterError(f'{tones!r} has characters that are not DTMF tones')
         duration = min(max(int(duration), 40), 6000)

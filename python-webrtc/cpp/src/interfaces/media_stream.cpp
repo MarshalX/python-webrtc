@@ -6,9 +6,10 @@
 //
 
 #include "media_stream.h"
-#include "../utils/gil.h"
 
 #include <rtc_base/crypto_random.h>
+
+#include "../utils/gil.h"
 
 namespace python_webrtc {
 
@@ -18,8 +19,7 @@ namespace python_webrtc {
     for (const auto &track: tracks()) {
       _known.insert(track.get());
     }
-    // Posted, not blocking: wrappers are created under locks that the signaling thread may wait for.
-    // The destructor unregisters with a call to the signaling thread, which runs after this.
+    // see AliveGuard
     _factory->_signalingThread->PostTask(_alive.Guard([this]() { _stream->RegisterObserver(this); }));
   }
 
@@ -103,20 +103,17 @@ namespace python_webrtc {
   }
 
   void MediaStream::Init(pybind11::module &m) {
-    pybind11::class_<MediaStream, std::shared_ptr<MediaStream>> cls(
-        m, "MediaStream", Listeners::TypeSetup<MediaStream>());
-    Listeners::Bind(cls);
-    cls
+    Listeners::BindClass<MediaStream>(m, "MediaStream")
         .def_property_readonly("id", nogil_fn(&MediaStream::GetId))
         .def_property_readonly("active", nogil_fn(&MediaStream::GetActive))
         .def("getAudioTracks", &MediaStream::GetAudioTracks, nogil())
         .def("getVideoTracks", &MediaStream::GetVideoTracks, nogil())
         .def("getTracks", &MediaStream::GetTracks, nogil())
-        .def("getTrackById", &MediaStream::GetTrackById, nogil())
-        .def("addTrack", &MediaStream::AddTrack, nogil())
-        .def("removeTrack", &MediaStream::RemoveTrack, nogil())
+        .def("getTrackById", &MediaStream::GetTrackById, nogil(), pybind11::arg("id"))
+        .def("addTrack", &MediaStream::AddTrack, nogil(), pybind11::arg("track"))
+        .def("removeTrack", &MediaStream::RemoveTrack, nogil(), pybind11::arg("track"))
         .def("clone", &MediaStream::Clone, nogil())
-        .def_static("create", &MediaStream::Create, nogil());
+        .def_static("create", &MediaStream::Create, nogil(), pybind11::arg("tracks"));
   }
 
   std::string MediaStream::GetId() {
@@ -179,10 +176,10 @@ namespace python_webrtc {
       _known.insert(track.get());
     }
 
-    if (track->kind() == track->kAudioKind) {
-      _stream->AddTrack(webrtc::scoped_refptr<webrtc::AudioTrackInterface>(dynamic_cast<webrtc::AudioTrackInterface *>(track.get())));
+    if (track->kind() == webrtc::MediaStreamTrackInterface::kAudioKind) {
+      _stream->AddTrack(static_cast<webrtc::scoped_refptr<webrtc::AudioTrackInterface>>(*mediaStreamTrack));
     } else {
-      _stream->AddTrack(webrtc::scoped_refptr<webrtc::VideoTrackInterface>(dynamic_cast<webrtc::VideoTrackInterface *>(track.get())));
+      _stream->AddTrack(static_cast<webrtc::scoped_refptr<webrtc::VideoTrackInterface>>(*mediaStreamTrack));
     }
 
     std::lock_guard<std::mutex> lock(_tracksMutex);
@@ -197,10 +194,10 @@ namespace python_webrtc {
       _known.erase(track.get());
     }
 
-    if (track->kind() == track->kAudioKind) {
-      _stream->RemoveTrack(webrtc::scoped_refptr<webrtc::AudioTrackInterface>(dynamic_cast<webrtc::AudioTrackInterface *>(track.get())));
+    if (track->kind() == webrtc::MediaStreamTrackInterface::kAudioKind) {
+      _stream->RemoveTrack(static_cast<webrtc::scoped_refptr<webrtc::AudioTrackInterface>>(mediaStreamTrack));
     } else {
-      _stream->RemoveTrack(webrtc::scoped_refptr<webrtc::VideoTrackInterface>(dynamic_cast<webrtc::VideoTrackInterface *>(track.get())));
+      _stream->RemoveTrack(static_cast<webrtc::scoped_refptr<webrtc::VideoTrackInterface>>(mediaStreamTrack));
     }
 
     std::shared_ptr<MediaStreamTrack> removed;

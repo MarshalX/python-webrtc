@@ -5,8 +5,37 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-import wrtc
+import wrtc  # noqa: F401 (the modules import it from the package)
 
+from .enums import (
+    RTCPeerConnectionState,
+    RTCSignalingState,
+    RTCIceConnectionState,
+    RTCIceGatheringState,
+    RTCSdpType,
+    MediaStreamTrackState,
+    MediaStreamSourceState,
+    TransceiverDirection,
+    RTCIceComponent,
+    RTCIceRole,
+    RTCIceTransportState,
+    CricketIceGatheringState,
+    DtlsTransportState,
+    SctpTransportState,
+    MediaType,
+    RTCDataChannelState,
+    RTCPriorityType,
+    RTCDegradationPreference,
+    RTCIceTransportPolicy,
+    RTCBundlePolicy,
+    RTCRtcpMuxPolicy,
+    RTCRtpHeaderEncryptionPolicy,
+    RTCIceCandidateType,
+    RTCIceProtocol,
+    RTCIceTcpCandidateType,
+    RTCIceServerTransportProtocol,
+    RTCErrorDetailType,
+)
 from .base import WebRTCObject
 from .exceptions import (
     PythonWebRTCExceptionBase,
@@ -22,7 +51,6 @@ from .exceptions import (
     InvalidSyntaxError,
     InvalidRangeError,
     InvalidCharacterError,
-    RTCErrorDetailType,
     RTCError,
 )
 from .utils.events import EventTarget
@@ -39,27 +67,11 @@ from .models.events import (
 )
 
 # the order matters: modules import each other through the package namespace
-from .interfaces.rtc_peer_connection import RTCPeerConnection
-from .interfaces.media_stream_track import MediaStreamTrack
-from .interfaces.media_stream import MediaStream
-from .interfaces.rtc_rtp_sender import RTCRtpSender
-from .interfaces.rtc_rtp_receiver import RTCRtpReceiver
-from .interfaces.rtc_rtp_transceiver import RTCRtpTransceiver
-from .interfaces.rtc_ice_transport import RTCIceTransport
-from .interfaces.rtc_dtls_transport import RTCDtlsTransport
-from .interfaces.rtc_sctp_transport import RTCSctpTransport
-from .interfaces.rtc_audio_source import RTCAudioSource
-from .interfaces.rtc_video_source import RTCVideoSource, RTCVideoFrame
-from .interfaces.rtc_data_channel import RTCDataChannel, RTCDataChannelState, RTCPriorityType
-from .interfaces.rtc_dtmf_sender import RTCDTMFSender
-
-from .functions.get_user_media import getUserMedia, get_user_media
-
 from .models.rtc_session_description_init import RTCSessionDescriptionInit
 from .models.rtc_session_description import RTCSessionDescription
 from .models.rtc_on_data_event import RTCOnDataEvent
+from .models.rtc_video_frame import RTCVideoFrame
 from .models.rtp_parameters import (
-    RTCDegradationPreference,
     RTCRtpCodec,
     RTCRtpCodecParameters,
     RTCRtpHeaderExtensionParameters,
@@ -70,9 +82,6 @@ from .models.rtp_parameters import (
     RTCRtpHeaderExtensionCapability,
     RTCRtpCapabilities,
 )
-
-#: The former name of :obj:`RTCRtpEncodingParameters`
-RtpEncodingParameters = RTCRtpEncodingParameters
 from .models.rtp_transceiver_init import RtpTransceiverInit
 from .models.rtc_stats import RTCStats, RTCStatsReport
 from .models.rtp_source import RTCRtpContributingSource, RTCRtpSynchronizationSource
@@ -81,40 +90,33 @@ from .models.rtc_configuration import (
     RTCConfiguration,
     RTCIceServer,
     RTCOAuthCredential,
-    RTCIceTransportPolicy,
-    RTCBundlePolicy,
-    RTCRtcpMuxPolicy,
-    RTCRtpHeaderEncryptionPolicy,
 )
 from .models.rtc_ice_candidate import (
     RTCIceCandidate,
     RTCIceCandidatePair,
     RTCIceParameters,
-    RTCIceCandidateType,
-    RTCIceProtocol,
-    RTCIceTcpCandidateType,
-    RTCIceServerTransportProtocol,
 )
 
-# enums
-RTCPeerConnectionState = wrtc.RTCPeerConnectionState
-RTCSignalingState = wrtc.RTCSignalingState
-RTCIceConnectionState = wrtc.RTCIceConnectionState
-RTCIceGatheringState = wrtc.RTCIceGatheringState
-RTCSdpType = wrtc.RTCSdpType
-MediaStreamTrackState = wrtc.MediaStreamTrackState
-MediaStreamSourceState = wrtc.MediaStreamSourceState
-TransceiverDirection = wrtc.TransceiverDirection
-RTCIceComponent = wrtc.RTCIceComponent
-RTCIceRole = wrtc.RTCIceRole
-RTCIceTransportState = wrtc.RTCIceTransportState
-CricketIceGatheringState = wrtc.CricketIceGatheringState
-DtlsTransportState = wrtc.DtlsTransportState
-SctpTransportState = wrtc.SctpTransportState
-MediaType = wrtc.MediaType
+from .interfaces.rtc_peer_connection import RTCPeerConnection
+from .interfaces.media_stream_track import MediaStreamTrack
+from .interfaces.media_stream import MediaStream
+from .interfaces.rtc_rtp_sender import RTCRtpSender
+from .interfaces.rtc_rtp_receiver import RTCRtpReceiver
+from .interfaces.rtc_rtp_transceiver import RTCRtpTransceiver
+from .interfaces.rtc_ice_transport import RTCIceTransport
+from .interfaces.rtc_dtls_transport import RTCDtlsTransport
+from .interfaces.rtc_sctp_transport import RTCSctpTransport
+from .interfaces.rtc_audio_source import RTCAudioSource
+from .interfaces.rtc_video_source import RTCVideoSource
+from .interfaces.rtc_data_channel import RTCDataChannel
+from .interfaces.rtc_dtmf_sender import RTCDTMFSender
+
+from .functions.get_user_media import getUserMedia, get_user_media
+
+#: Alias for :obj:`RTCRtpEncodingParameters`
+RtpEncodingParameters = RTCRtpEncodingParameters
 
 __all__ = [
-    # exceptions
     'PythonWebRTCExceptionBase',
     'PythonWebRTCException',
     'RTCException',
@@ -129,7 +131,6 @@ __all__ = [
     'InvalidRangeError',
     'InvalidCharacterError',
     'RTCError',
-    # enums
     'RTCPeerConnectionState',
     'RTCSignalingState',
     'RTCIceConnectionState',
@@ -156,10 +157,9 @@ __all__ = [
     'RTCRtpHeaderEncryptionPolicy',
     'RTCDataChannelState',
     'RTCPriorityType',
-    # base
+    'RTCDegradationPreference',
     'WebRTCObject',
     'EventTarget',
-    # events
     'Event',
     'RTCPeerConnectionIceEvent',
     'RTCPeerConnectionIceErrorEvent',
@@ -169,8 +169,6 @@ __all__ = [
     'RTCDataChannelEvent',
     'MediaStreamTrackEvent',
     'RTCDTMFToneChangeEvent',
-    'RTCDTMFSender',
-    # interfaces
     'RTCPeerConnection',
     'MediaStreamTrack',
     'MediaStream',
@@ -182,17 +180,15 @@ __all__ = [
     'RTCSctpTransport',
     'RTCAudioSource',
     'RTCVideoSource',
-    'RTCVideoFrame',
     'RTCDataChannel',
-    # functions
+    'RTCDTMFSender',
     'getUserMedia',
     'get_user_media',
-    # models
     'RTCSessionDescriptionInit',
     'RTCSessionDescription',
     'RTCOnDataEvent',
+    'RTCVideoFrame',
     'RtpEncodingParameters',
-    'RTCDegradationPreference',
     'RTCRtpCodec',
     'RTCRtpCodecParameters',
     'RTCRtpHeaderExtensionParameters',

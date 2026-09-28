@@ -48,7 +48,8 @@ namespace python_webrtc {
     _workerThread = webrtc::Thread::CreateWithSocketServer();
     assert(_workerThread);
 
-    bool result = _workerThread->SetName("PeerConnectionFactory:workerThread", nullptr);
+    // checked by assert only, in debug builds
+    [[maybe_unused]] bool result = _workerThread->SetName("PeerConnectionFactory:workerThread", nullptr);
     assert(result);
 
     result = _workerThread->Start();
@@ -134,10 +135,7 @@ namespace python_webrtc {
   }
 
   void PeerConnectionFactory::Init(pybind11::module &m) {
-    bool result;
-    (void) result;
-
-    result = webrtc::InitializeSSL();
+    [[maybe_unused]] bool result = webrtc::InitializeSSL();
     assert(result);
 
     pybind11::class_<PeerConnectionFactory, std::shared_ptr<PeerConnectionFactory>>(m, "PeerConnectionFactory")

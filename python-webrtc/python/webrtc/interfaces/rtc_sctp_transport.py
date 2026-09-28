@@ -28,8 +28,9 @@ class RTCSctpTransport(WebRTCObject, EventTarget):
     _events = ('statechange',)
 
     def _on_event(self, name: str, *args):
+        (state,) = args
         # the state changes along with its event
-        self._native_obj._surface(args[0])
+        self._native_obj._surfaceState(state)
 
     @property
     def transport(self) -> 'webrtc.RTCDtlsTransport':
@@ -41,13 +42,13 @@ class RTCSctpTransport(WebRTCObject, EventTarget):
 
     @property
     def state(self) -> 'webrtc.SctpTransportState':
-        """:obj:`webrtc.SctpTransportState`: A enumerated value indicating the state of the SCTP transport."""
+        """:obj:`webrtc.SctpTransportState`: An enumerated value indicating the state of the SCTP transport."""
         return self._native_obj.state
 
     @property
     def max_message_size(self) -> Optional[float]:
-        """:obj:`float`, optional: An integer value indicating the maximum size, in bytes, of a message which can be
-        sent using the :attr:`webrtc.RTCDataChannel.send` method."""
+        """:obj:`float`, optional: The maximum size, in bytes, of a message which can be sent using the
+        :meth:`webrtc.RTCDataChannel.send` method."""
         return self._native_obj.maxMessageSize
 
     @property

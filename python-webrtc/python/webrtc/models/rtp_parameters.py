@@ -7,12 +7,12 @@
 
 """RTP parameters and capabilities of senders, receivers and transceivers."""
 
-import enum
+import dataclasses
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-import wrtc
-from webrtc.interfaces.rtc_data_channel import RTCPriorityType
+from webrtc import MediaType, RTCDegradationPreference, RTCPriorityType, TransceiverDirection, wrtc
+from webrtc.utils.names import alias
 
 # the bitrate priorities of libwebrtc for RTCRtpEncodingParameters.priority, as Chromium maps them
 _BITRATE_PRIORITY = {
@@ -21,15 +21,6 @@ _BITRATE_PRIORITY = {
     RTCPriorityType.medium: 2.0,
     RTCPriorityType.high: 4.0,
 }
-
-
-class RTCDegradationPreference(str, enum.Enum):
-    """What a video sender degrades first when it can't keep up."""
-
-    maintain_framerate = 'maintain-framerate'
-    maintain_resolution = 'maintain-resolution'
-    balanced = 'balanced'
-    maintain_framerate_and_resolution = 'maintain-framerate-and-resolution'
 
 
 def _parse_fmtp(line: Optional[str]) -> Dict[str, str]:
@@ -53,6 +44,16 @@ def _format_fmtp(parameters: Dict[str, str]) -> Optional[str]:
     return ';'.join(f'{key}={value}' if key else value for key, value in parameters.items())
 
 
+def _codec_members(native: 'wrtc.RtpCodec') -> Dict[str, Any]:
+    """The members RTCRtpCodec and RTCRtpCodecParameters share."""
+    return {
+        'mime_type': native.mimeType,
+        'clock_rate': native.clockRate,
+        'channels': native.numChannels,
+        'sdp_fmtp_line': _format_fmtp(native.parameters),
+    }
+
+
 @dataclass
 class RTCRtpCodec:
     """A codec.
@@ -72,19 +73,15 @@ class RTCRtpCodec:
 
     @classmethod
     def _from_native(cls, native: 'wrtc.RtpCodec') -> 'RTCRtpCodec':
-        return cls(
-            mime_type=native.mimeType,
-            clock_rate=native.clockRate,
-            channels=native.numChannels,
-            sdp_fmtp_line=_format_fmtp(native.parameters),
-        )
+        return cls(**_codec_members(native))
 
-    def _to_native(self, native_class=wrtc.RtpCodecCapability):
+    def _to_native(self, native_class: type):
+        """Creates a native codec of a class: ``wrtc.RtpCodec`` or ``wrtc.RtpCodecCapability``."""
         kind, _, name = self.mime_type.partition('/')
         if not name:
             raise ValueError(f'{self.mime_type!r} is not a valid MIME type of a codec')
         native = native_class()
-        native.kind = wrtc.MediaType.video if kind.lower() == 'video' else wrtc.MediaType.audio
+        native.kind = MediaType.video if kind.lower() == 'video' else MediaType.audio
         native.name = name
         native.clockRate = self.clock_rate
         native.numChannels = self.channels
@@ -99,6 +96,13 @@ class RTCRtpCodec:
             and (self.channels or 1) == (other.channels or 1)
             and _parse_fmtp(self.sdp_fmtp_line) == _parse_fmtp(other.sdp_fmtp_line)
         )
+
+    #: Alias for :attr:`mime_type`
+    mimeType = alias('mime_type')
+    #: Alias for :attr:`clock_rate`
+    clockRate = alias('clock_rate')
+    #: Alias for :attr:`sdp_fmtp_line`
+    sdpFmtpLine = alias('sdp_fmtp_line')
 
 
 @dataclass
@@ -121,13 +125,16 @@ class RTCRtpCodecParameters:
 
     @classmethod
     def _from_native(cls, native: 'wrtc.RtpCodecParameters') -> 'RTCRtpCodecParameters':
-        return cls(
-            payload_type=native.payloadType,
-            mime_type=native.mimeType,
-            clock_rate=native.clockRate,
-            channels=native.numChannels,
-            sdp_fmtp_line=_format_fmtp(native.parameters),
-        )
+        return cls(payload_type=native.payloadType, **_codec_members(native))
+
+    #: Alias for :attr:`payload_type`
+    payloadType = alias('payload_type')
+    #: Alias for :attr:`mime_type`
+    mimeType = alias('mime_type')
+    #: Alias for :attr:`clock_rate`
+    clockRate = alias('clock_rate')
+    #: Alias for :attr:`sdp_fmtp_line`
+    sdpFmtpLine = alias('sdp_fmtp_line')
 
 
 @dataclass
@@ -161,6 +168,9 @@ class RTCRtcpParameters:
     cname: Optional[str] = None
     reduced_size: Optional[bool] = None
 
+    #: Alias for :attr:`reduced_size`
+    reducedSize = alias('reduced_size')
+
 
 @dataclass
 class RTCRtpEncodingParameters:
@@ -170,8 +180,8 @@ class RTCRtpEncodingParameters:
         active (:obj:`bool`, optional): Whether the encoding is sent.
         max_bitrate (:obj:`int`, optional): The highest bitrate in bits per second.
         max_framerate (:obj:`float`, optional): The highest frame rate of video.
-        scale_resolution_down_by (:obj:`float`, optional): How much video is scaled down (at least 1).
         rid (:obj:`str`, optional): The RTP stream id of a simulcast layer. Can't be changed once set.
+        scale_resolution_down_by (:obj:`float`, optional): How much video is scaled down (at least 1).
         priority (:obj:`webrtc.RTCPriorityType`, optional): The share of the bitrate the encoding gets.
         network_priority (:obj:`webrtc.RTCPriorityType`, optional): The DSCP marking of its packets.
         scalability_mode (:obj:`str`, optional): The SVC mode of video, like ``'L1T3'``.
@@ -182,8 +192,8 @@ class RTCRtpEncodingParameters:
     active: bool = True
     max_bitrate: Optional[int] = None
     max_framerate: Optional[float] = None
-    scale_resolution_down_by: Optional[float] = None
     rid: Optional[str] = None
+    scale_resolution_down_by: Optional[float] = None
     priority: RTCPriorityType = RTCPriorityType.low
     network_priority: RTCPriorityType = RTCPriorityType.low
     scalability_mode: Optional[str] = None
@@ -200,20 +210,27 @@ class RTCRtpEncodingParameters:
             scale_resolution_down_by=native.scaleResolutionDownBy,
             rid=native.rid or None,
             priority=priority,
-            network_priority=RTCPriorityType(native.networkPriority.name.replace('_', '-')),
+            network_priority=native.networkPriority,
             scalability_mode=native.scalabilityMode,
             adaptive_ptime=native.adaptivePtime,
             codec=RTCRtpCodec._from_native(native.codec) if native.codec is not None else None,
         )
 
+    def _for_kind(self, kind: MediaType) -> 'RTCRtpEncodingParameters':
+        """The encoding for a sender of a kind: members of video encodings are ignored for audio, whatever
+        their value."""
+        if kind == MediaType.video:
+            return self
+        return dataclasses.replace(self, max_framerate=None, scale_resolution_down_by=None)
+
     def _apply(self, native: 'wrtc.RtpEncodingParameters') -> 'wrtc.RtpEncodingParameters':
-        """Sets the members that can be set on a native encoding"""
+        """:meth:`_to_native` into an existing native encoding: sets the members that can be changed."""
         native.active = bool(self.active)
         native.maxBitrate = self.max_bitrate
         native.maxFramerate = self.max_framerate
         native.scaleResolutionDownBy = self.scale_resolution_down_by
         native.bitratePriority = _BITRATE_PRIORITY[RTCPriorityType(self.priority)]
-        native.networkPriority = getattr(wrtc.NativePriority, RTCPriorityType(self.network_priority).name)
+        native.networkPriority = self.network_priority
         native.scalabilityMode = self.scalability_mode
         native.adaptivePtime = bool(self.adaptive_ptime)
         native.codec = self.codec._to_native(wrtc.RtpCodec) if self.codec is not None else None
@@ -223,6 +240,19 @@ class RTCRtpEncodingParameters:
         native = self._apply(wrtc.RtpEncodingParameters())
         native.rid = self.rid or ''
         return native
+
+    #: Alias for :attr:`max_bitrate`
+    maxBitrate = alias('max_bitrate')
+    #: Alias for :attr:`max_framerate`
+    maxFramerate = alias('max_framerate')
+    #: Alias for :attr:`scale_resolution_down_by`
+    scaleResolutionDownBy = alias('scale_resolution_down_by')
+    #: Alias for :attr:`network_priority`
+    networkPriority = alias('network_priority')
+    #: Alias for :attr:`scalability_mode`
+    scalabilityMode = alias('scalability_mode')
+    #: Alias for :attr:`adaptive_ptime`
+    adaptivePtime = alias('adaptive_ptime')
 
 
 @dataclass
@@ -246,6 +276,9 @@ class RTCRtpReceiveParameters:
             header_extensions=[RTCRtpHeaderExtensionParameters._from_native(e) for e in native.headerExtensions],
             rtcp=RTCRtcpParameters(reduced_size=native.rtcp.reducedSize),
         )
+
+    #: Alias for :attr:`header_extensions`
+    headerExtensions = alias('header_extensions')
 
 
 @dataclass
@@ -273,17 +306,21 @@ class RTCRtpSendParameters:
 
     @classmethod
     def _from_native(cls, native: 'wrtc.RtpParameters') -> 'RTCRtpSendParameters':
-        preference = native.degradationPreference
         return cls(
             transaction_id=native.transactionId,
             encodings=[RTCRtpEncodingParameters._from_native(e) for e in native.encodings],
             codecs=[RTCRtpCodecParameters._from_native(c) for c in native.codecs],
             header_extensions=[RTCRtpHeaderExtensionParameters._from_native(e) for e in native.headerExtensions],
             rtcp=RTCRtcpParameters(cname=native.rtcp.cname, reduced_size=native.rtcp.reducedSize),
-            degradation_preference=(
-                RTCDegradationPreference(preference.name.replace('_', '-')) if preference is not None else None
-            ),
+            degradation_preference=native.degradationPreference,
         )
+
+    #: Alias for :attr:`transaction_id`
+    transactionId = alias('transaction_id')
+    #: Alias for :attr:`header_extensions`
+    headerExtensions = alias('header_extensions')
+    #: Alias for :attr:`degradation_preference`
+    degradationPreference = alias('degradation_preference')
 
 
 @dataclass
@@ -297,7 +334,7 @@ class RTCRtpHeaderExtensionCapability:
     """
 
     uri: str
-    direction: 'wrtc.TransceiverDirection' = wrtc.TransceiverDirection.sendrecv
+    direction: TransceiverDirection = TransceiverDirection.sendrecv
 
     @classmethod
     def _from_native(cls, native: 'wrtc.RtpHeaderExtensionCapability') -> 'RTCRtpHeaderExtensionCapability':
@@ -320,8 +357,16 @@ class RTCRtpCapabilities:
     def _from_native(cls, native: 'wrtc.RtpCapabilities') -> 'RTCRtpCapabilities':
         return cls(
             codecs=[RTCRtpCodec._from_native(c) for c in native.codecs],
-            header_extensions=[
-                RTCRtpHeaderExtensionCapability(uri=e.uri, direction=wrtc.TransceiverDirection.sendrecv)
-                for e in native.headerExtensions
-            ],
+            # only the URIs: the directions are the ones of a transceiver (see get_header_extensions_to_negotiate)
+            header_extensions=[RTCRtpHeaderExtensionCapability(uri=e.uri) for e in native.headerExtensions],
         )
+
+    @classmethod
+    def _supported(cls, native_class: type, kind: MediaType) -> Optional['RTCRtpCapabilities']:
+        """The capabilities of ``wrtc.RTCRtpSender`` or ``wrtc.RTCRtpReceiver`` for a kind, :obj:`None` for
+        another kind."""
+        native = native_class.getCapabilities(str(kind))
+        return cls._from_native(native) if native is not None else None
+
+    #: Alias for :attr:`header_extensions`
+    headerExtensions = alias('header_extensions')

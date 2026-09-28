@@ -8,7 +8,9 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -17,10 +19,12 @@
 #include <pybind11/pybind11.h>
 
 #include "peer_connection_factory.h"
-#include "../exceptions.h"
-#include "../utils/instance_holder.h"
 #include "../utils/alive_guard.h"
+#include "../utils/instance_holder.h"
 #include "../utils/listeners.h"
+#include "../utils/locked_function.h"
+#include "../utils/surfaced.h"
+#include "../enums/enums.h"
 
 namespace python_webrtc {
 
@@ -32,6 +36,8 @@ namespace python_webrtc {
 
   class RTCDataChannel : public webrtc::DataChannelObserver, public Listeners, public SingleObserverSlot {
   public:
+    using DataState = webrtc::DataChannelInterface::DataState;
+
     // Starts holding its events (see Listeners::Hold), Python releases them once it has the channel
     RTCDataChannel(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::DataChannelInterface>);
 
@@ -48,19 +54,36 @@ namespace python_webrtc {
 
     void OnMessage(const webrtc::DataBuffer &buffer) override;
 
-    void OnBufferedAmountChange(uint64_t sent_data_size) override;
+    void OnBufferedAmountChange(uint64_t sentDataSize) override;
 
     void OnAnnounced();
 
     // a connection being closed fires no events of its channels
     void OnPeerConnectionClosed();
 
-    void Send(const std::string &data, bool binary);
-
     // the largest message the remote peer takes, from the SCTP transport of the connection
     void SetMaxMessageSizeGetter(std::function<std::optional<double>()> getter);
 
-    void Close();
+    std::string GetLabel();
+
+    bool GetOrdered();
+
+    std::optional<int> GetMaxPacketLifeTime();
+
+    std::optional<int> GetMaxRetransmits();
+
+    std::string GetProtocol();
+
+    bool GetNegotiated();
+
+    std::optional<int> GetId();
+
+    webrtc::Priority GetPriority();
+
+    // see Surfaced
+    DataState GetReadyState();
+
+    void SurfaceState(DataState state);
 
     uint64_t GetBufferedAmount();
 
@@ -68,15 +91,12 @@ namespace python_webrtc {
 
     void SetBufferedAmountLowThreshold(uint64_t threshold);
 
-    std::optional<int> GetId();
-
-    // readyState as Python sees it: it changes when its event is delivered (see RTCPeerConnection::SurfaceState)
-    webrtc::DataChannelInterface::DataState GetReadyState();
-
-    void SurfaceState(int state);
-
     // whether bufferedAmount dropped to the threshold
     bool DecreaseBufferedAmount(uint64_t sent);
+
+    void Send(const std::string &data, bool binary);
+
+    void Close();
 
   private:
     std::shared_ptr<PeerConnectionFactory> _factory;
@@ -86,17 +106,18 @@ namespace python_webrtc {
     // bytes passed to send() and not reported sent yet, as Python sees it: it grows in send()
     // and drops when the event of sent bytes is delivered (see DecreaseBufferedAmount)
     std::atomic<uint64_t> _bufferedAmount{0};
-    webrtc::DataChannelInterface::DataState _lastState = webrtc::DataChannelInterface::DataState::kConnecting;
+    // on the signaling thread
+    DataState _lastState = DataState::kConnecting;
 
-    std::mutex _stateMutex;
-    std::optional<webrtc::DataChannelInterface::DataState> _surfacedState;
-    // closing locally sets the state to closing right away, without a closing event
+    Surfaced<DataState> _surfacedState;
+    // closing locally sets the state to closing right away, without a closing event; guards the state changes
+    // that depend on it
+    std::mutex _closeMutex;
     bool _closeRequested = false;
 
-    std::mutex _getterMutex;
-    std::function<std::optional<double>()> _maxMessageSizeGetter;
+    LockedFunction<std::optional<double>()> _maxMessageSizeGetter;
 
-    // the observer registration posted by the constructor
+    // see AliveGuard
     AliveGuard _alive;
   };
 

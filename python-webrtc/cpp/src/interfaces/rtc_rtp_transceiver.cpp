@@ -6,8 +6,10 @@
 //
 
 #include "rtc_rtp_transceiver.h"
-#include "../utils/gil.h"
+
+#include "rtc_peer_connection.h"
 #include "../exceptions.h"
+#include "../utils/gil.h"
 
 namespace python_webrtc {
 
@@ -24,18 +26,15 @@ namespace python_webrtc {
         .def_property_readonly("sender", nogil_fn(&RTCRtpTransceiver::GetSender))
         .def_property_readonly("receiver", nogil_fn(&RTCRtpTransceiver::GetReceiver))
         .def_property_readonly("stopped", nogil_fn(&RTCRtpTransceiver::GetStopped))
+        .def_property_readonly("stopping", nogil_fn(&RTCRtpTransceiver::GetStopping))
+        .def_property_readonly("kind", nogil_fn(&RTCRtpTransceiver::GetKind))
         .def_property("direction", nogil_fn(&RTCRtpTransceiver::GetDirection), nogil_fn(&RTCRtpTransceiver::SetDirection))
         .def_property_readonly("currentDirection", nogil_fn(&RTCRtpTransceiver::GetCurrentDirection))
-        .def_property_readonly("stopping", nogil_fn([](RTCRtpTransceiver &self) {
-          return self._transceiver->stopping();
-        }))
-        .def_property_readonly("kind", nogil_fn([](RTCRtpTransceiver &self) {
-          return self._transceiver->media_type();
-        }))
-        .def("setCodecPreferences", &RTCRtpTransceiver::SetCodecPreferences, nogil())
+        .def("setCodecPreferences", &RTCRtpTransceiver::SetCodecPreferences, nogil(), pybind11::arg("codecs"))
         .def("getCodecPreferences", &RTCRtpTransceiver::GetCodecPreferences, nogil())
         .def("getHeaderExtensionsToNegotiate", &RTCRtpTransceiver::GetHeaderExtensionsToNegotiate, nogil())
-        .def("setHeaderExtensionsToNegotiate", &RTCRtpTransceiver::SetHeaderExtensionsToNegotiate, nogil())
+        .def("setHeaderExtensionsToNegotiate", &RTCRtpTransceiver::SetHeaderExtensionsToNegotiate, nogil(),
+             pybind11::arg("extensions"))
         .def("getNegotiatedHeaderExtensions", &RTCRtpTransceiver::GetNegotiatedHeaderExtensions, nogil())
         .def("stop", &RTCRtpTransceiver::Stop, nogil());
   }
@@ -44,6 +43,11 @@ namespace python_webrtc {
     // never destroyed: wrappers may outlive static destructors
     static auto holder = new InstanceHolder<RTCRtpTransceiver, webrtc::RtpTransceiverInterface>();
     return *holder;
+  }
+
+  void RTCRtpTransceiver::SetConnection(std::weak_ptr<RTCPeerConnection> connection) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _connection = std::move(connection);
   }
 
   std::optional<std::string> RTCRtpTransceiver::GetMid() {
@@ -62,9 +66,16 @@ namespace python_webrtc {
     return _receiver;
   }
 
+  webrtc::MediaType RTCRtpTransceiver::GetKind() {
+    return _transceiver->media_type();
+  }
+
   bool RTCRtpTransceiver::GetStopped() {
-    // TODO Deprecated: This feature is no longer recommended.
     return _transceiver->stopped();
+  }
+
+  bool RTCRtpTransceiver::GetStopping() {
+    return _transceiver->stopping();
   }
 
   webrtc::RtpTransceiverDirection RTCRtpTransceiver::GetDirection() {
@@ -74,7 +85,7 @@ namespace python_webrtc {
   void RTCRtpTransceiver::SetDirection(webrtc::RtpTransceiverDirection direction) {
     auto result = _transceiver->SetDirectionWithError(direction);
     if (!result.ok()) {
-      throw wrapRTCError(result);
+      throw RTCException(result);
     }
   }
 
@@ -86,31 +97,25 @@ namespace python_webrtc {
     return {};
   }
 
-  void RTCRtpTransceiver::SetConnectionClosed(std::function<bool()> connectionClosed) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    _connectionClosed = std::move(connectionClosed);
-  }
-
   void RTCRtpTransceiver::Stop() {
-    std::function<bool()> connectionClosed;
+    std::shared_ptr<RTCPeerConnection> connection;
     {
       std::lock_guard<std::mutex> lock(_mutex);
-      connectionClosed = _connectionClosed;
+      connection = _connection.lock();
     }
-    if (connectionClosed && connectionClosed()) {
-      throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "The RTCPeerConnection is closed");
+    if (!connection || connection->IsClosed()) {
+      throw RTCException(closedError("stop", "RTCRtpTransceiver"));
     }
     auto result = _transceiver->StopStandard();
     if (!result.ok()) {
-      throw wrapRTCError(result);
+      throw RTCException(result);
     }
   }
 
-  void RTCRtpTransceiver::SetCodecPreferences(const std::vector<webrtc::RtpCodecCapability> &codecs) {
-    auto preferences = codecs;
-    auto result = _transceiver->SetCodecPreferences(preferences);
+  void RTCRtpTransceiver::SetCodecPreferences(std::vector<webrtc::RtpCodecCapability> codecs) {
+    auto result = _transceiver->SetCodecPreferences(codecs);
     if (!result.ok()) {
-      throw wrapRTCError(result);
+      throw RTCException(result);
     }
   }
 
@@ -126,7 +131,7 @@ namespace python_webrtc {
       const std::vector<webrtc::RtpHeaderExtensionCapability> &extensions) {
     auto result = _transceiver->SetHeaderExtensionsToNegotiate(extensions);
     if (!result.ok()) {
-      throw wrapRTCError(result);
+      throw RTCException(result);
     }
   }
 

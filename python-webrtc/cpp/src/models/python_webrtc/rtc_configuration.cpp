@@ -11,16 +11,21 @@
 
 namespace python_webrtc {
 
-  webrtc::PeerConnectionInterface::RTCConfiguration ConfigurationInit::Apply(
-      webrtc::PeerConnectionInterface::RTCConfiguration configuration) const {
-    configuration.servers.clear();
+  webrtc::PeerConnectionInterface::IceServers toIceServers(const std::vector<IceServerInit> &iceServers) {
+    webrtc::PeerConnectionInterface::IceServers servers;
     for (const auto &server: iceServers) {
       webrtc::PeerConnectionInterface::IceServer iceServer;
       iceServer.urls = server.urls;
       iceServer.username = server.username.value_or("");
       iceServer.password = server.credential.value_or("");
-      configuration.servers.push_back(std::move(iceServer));
+      servers.push_back(std::move(iceServer));
     }
+    return servers;
+  }
+
+  webrtc::PeerConnectionInterface::RTCConfiguration ConfigurationInit::Apply(
+      webrtc::PeerConnectionInterface::RTCConfiguration configuration) const {
+    configuration.servers = toIceServers(iceServers);
     configuration.type = iceTransportPolicy;
     configuration.bundle_policy = bundlePolicy;
     configuration.rtcp_mux_policy = rtcpMuxPolicy;
@@ -41,22 +46,6 @@ namespace python_webrtc {
   }
 
   void ConfigurationInit::Init(pybind11::module &m) {
-    pybind11::enum_<webrtc::PeerConnectionInterface::IceTransportsType>(m, "RTCIceTransportPolicy")
-        .value("all", webrtc::PeerConnectionInterface::IceTransportsType::kAll)
-        .value("relay", webrtc::PeerConnectionInterface::IceTransportsType::kRelay);
-
-    pybind11::enum_<webrtc::PeerConnectionInterface::BundlePolicy>(m, "RTCBundlePolicy")
-        .value("balanced", webrtc::PeerConnectionInterface::BundlePolicy::kBundlePolicyBalanced)
-        .value("max_compat", webrtc::PeerConnectionInterface::BundlePolicy::kBundlePolicyMaxCompat)
-        .value("max_bundle", webrtc::PeerConnectionInterface::BundlePolicy::kBundlePolicyMaxBundle);
-
-    pybind11::enum_<webrtc::PeerConnectionInterface::RtcpMuxPolicy>(m, "RTCRtcpMuxPolicy")
-        .value("require", webrtc::PeerConnectionInterface::RtcpMuxPolicy::kRtcpMuxPolicyRequire);
-
-    pybind11::enum_<webrtc::CryptoOptions::Srtp::CryptexPolicy>(m, "RTCRtpHeaderEncryptionPolicy")
-        .value("negotiate", webrtc::CryptoOptions::Srtp::CryptexPolicy::kNegotiate)
-        .value("require", webrtc::CryptoOptions::Srtp::CryptexPolicy::kRequire);
-
     pybind11::class_<IceServerInit>(m, "IceServerInit")
         .def(pybind11::init<>())
         .def_readwrite("urls", &IceServerInit::urls)

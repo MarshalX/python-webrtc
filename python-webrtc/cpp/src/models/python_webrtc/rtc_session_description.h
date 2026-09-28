@@ -27,8 +27,6 @@ namespace python_webrtc {
 
     std::string getSdp();
 
-//     TODO (MarshalX) .toJSON() method?
-//    https://github.com/MarshalX/python-webrtc/issues/172
   private:
     // not parsed: an invalid description is only rejected when it's set
     RTCSessionDescriptionInit _init;

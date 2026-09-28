@@ -14,13 +14,22 @@ if TYPE_CHECKING:
 
 
 class RtpTransceiverInit(WebRTCObject):
-    """A model for specifying any options when creating the new transceiver."""
+    """The options of a new transceiver, for :meth:`webrtc.RTCPeerConnection.add_transceiver`.
+
+    Args:
+        direction (:obj:`webrtc.TransceiverDirection`, optional): The direction of the transceiver, ``sendrecv``
+            by default.
+        send_encodings (:obj:`list` of :obj:`webrtc.RTCRtpEncodingParameters`, optional): The encodings of its
+            sender, one per simulcast layer.
+        streams (:obj:`list` of :obj:`webrtc.MediaStream`, optional): The streams the remote peer receives the track
+            of its sender in.
+    """
 
     _class = wrtc.RtpTransceiverInit
 
     def __init__(
         self,
-        direction: Optional['webrtc.RtpTransceiverDirection'] = None,
+        direction: Optional['webrtc.TransceiverDirection'] = None,
         send_encodings: Optional[List['webrtc.RTCRtpEncodingParameters']] = None,
         streams: Optional[List['webrtc.MediaStream']] = None,
     ):

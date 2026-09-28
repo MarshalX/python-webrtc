@@ -11,7 +11,7 @@
 
 namespace python_webrtc {
 
-  static std::optional<std::string> Optional(const std::string &value) {
+  static std::optional<std::string> optionalIfNonEmpty(const std::string &value) {
     return value.empty() ? std::nullopt : std::optional<std::string>(value);
   }
 
@@ -19,9 +19,9 @@ namespace python_webrtc {
       : candidate(iceCandidate.ToString()),
         sdpMid(iceCandidate.sdp_mid()),
         sdpMLineIndex(iceCandidate.sdp_mline_index()),
-        usernameFragment(Optional(iceCandidate.candidate().username())),
-        url(Optional(iceCandidate.server_url())),
-        relayProtocol(Optional(iceCandidate.candidate().relay_protocol())) {}
+        usernameFragment(optionalIfNonEmpty(iceCandidate.candidate().username())),
+        url(optionalIfNonEmpty(iceCandidate.server_url())),
+        relayProtocol(optionalIfNonEmpty(iceCandidate.candidate().relay_protocol())) {}
 
   IceCandidateInit::IceCandidateInit(
       std::string sdpMid, int sdpMLineIndex, std::optional<std::string> usernameFragment)

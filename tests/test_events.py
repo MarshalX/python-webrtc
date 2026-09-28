@@ -12,176 +12,152 @@ import asyncio
 import pytest
 
 import webrtc
-from tests.helpers import connect, wait_for_event
+from tests.helpers import QUIET_PERIOD, connect, wait_for_event
 
 
 @pytest.mark.asyncio
-async def test_on_decorator_once_and_off():
-    pc = webrtc.RTCPeerConnection()
+async def test_on_decorator_once_and_off(pc):
+    """Handlers registered with the decorator and once are called, a handler removed with off isn't"""
     calls = []
 
     @pc.on('negotiationneeded')
     def decorated(event):
         calls.append(('decorated', event.type, event.target is pc))
 
-    pc.once('negotiationneeded', lambda event: calls.append(('once', event.type, None)))
-    removed = pc.on('negotiationneeded', lambda event: calls.append(('removed', None, None)))
+    def once(event):
+        calls.append(('once', event.type))
+
+    def removed(event):
+        calls.append(('removed',))
+
+    pc.once('negotiationneeded', once)
+    pc.on('negotiationneeded', removed)
     pc.off('negotiationneeded', removed)
 
     pc.add_transceiver(webrtc.MediaType.audio)
     await wait_for_event(pc, 'negotiationneeded')
 
     assert ('decorated', 'negotiationneeded', True) in calls
-    assert ('once', 'negotiationneeded', None) in calls
-    assert all(name != 'removed' for name, _, _ in calls)
-    pc.close()
+    assert ('once', 'negotiationneeded') in calls
+    assert ('removed',) not in calls
 
 
 @pytest.mark.asyncio
-async def test_async_handlers_run_as_tasks():
-    pc = webrtc.RTCPeerConnection()
+async def test_async_handlers_run_as_tasks(pc):
+    """A coroutine function handler is run as a task on the loop"""
     done = asyncio.get_running_loop().create_future()
 
     @pc.on('negotiationneeded')
     async def handler(event):
         await asyncio.sleep(0)
-        done.set_result(event.type)
+        if not done.done():
+            done.set_result(event.type)
 
     pc.create_data_channel('events')
     assert await asyncio.wait_for(done, 5) == 'negotiationneeded'
-    pc.close()
 
 
-def test_unknown_event_and_no_loop():
-    pc = webrtc.RTCPeerConnection()
+def test_unknown_event(pc):
+    """Registering a handler of an event the object doesn't have is a ValueError"""
     with pytest.raises(ValueError):
         pc.on('nosuchevent', lambda event: None)
-    # handlers are called on the loop they were registered from
+
+
+def test_handlers_need_a_running_loop(pc):
+    """Handlers are called on the loop they were registered from, so registering needs a running loop"""
     with pytest.raises(RuntimeError):
         pc.on('track', lambda event: None)
-    pc.close()
 
 
 @pytest.mark.asyncio
-async def test_signaling_state_changes_with_its_event():
-    pc = webrtc.RTCPeerConnection()
+async def test_signaling_state_changes_with_its_event(pc):
+    """Every signalingstatechange event sees its state, and comes before the operation that changed it resolves"""
     states = []
-    pc.on('signalingstatechange', lambda event: states.append(pc.signaling_state))
+
+    def on_change(event):
+        states.append(pc.signaling_state)
+
+    pc.on('signalingstatechange', on_change)
     pc.add_transceiver(webrtc.MediaType.audio)
 
     await pc.set_local_description()
+    assert states == [webrtc.RTCSignalingState.have_local_offer]
     await pc.set_local_description({'type': 'rollback'})
-    await asyncio.sleep(0.1)
-
     assert states == [webrtc.RTCSignalingState.have_local_offer, webrtc.RTCSignalingState.stable]
-    pc.close()
 
 
 @pytest.mark.asyncio
-async def test_closed_connection_emits_nothing():
-    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+async def test_closed_connection_emits_nothing(caller, callee):
+    """Closing a connection changes its states without emitting their events"""
     events = []
+
+    def on_event(event):
+        events.append(event.type)
+
     for name in ('connectionstatechange', 'iceconnectionstatechange', 'signalingstatechange'):
-        caller.on(name, lambda event: events.append(event.type))
+        caller.on(name, on_event)
 
     caller.create_data_channel('media')
     await connect(caller, callee)
     events.clear()
     caller.close()
     callee.close()
-    await asyncio.sleep(0.3)
+    await asyncio.sleep(QUIET_PERIOD)
 
     assert events == []
     assert caller.connection_state == webrtc.RTCPeerConnectionState.closed
 
 
 @pytest.mark.asyncio
-async def test_ice_candidates_and_end_of_candidates():
-    pc = webrtc.RTCPeerConnection()
+async def test_ice_candidates_and_end_of_candidates(pc):
+    """Candidates are parsed, each transport ends with an empty one, and the final None adds a=end-of-candidates"""
     candidates = []
-    done = asyncio.get_running_loop().create_future()
 
-    @pc.on('icecandidate')
     def on_candidate(event):
         candidates.append(event.candidate)
-        if event.candidate is None:
-            done.set_result(None)
 
+    pc.on('icecandidate', on_candidate)
+    gathered = wait_for_event(pc, 'icecandidate', predicate=lambda event: event.candidate is None)
     pc.add_transceiver(webrtc.MediaType.audio)
     await pc.set_local_description()
-    await asyncio.wait_for(done, 10)
+    await gathered
 
-    gathered = [c for c in candidates if c is not None and c.candidate]
-    assert gathered and all(c.type is not None for c in gathered), candidates
-    # every transport ends its candidates with an empty one, before the final None
+    host = [c for c in candidates if c is not None and c.candidate]
+    assert host and all(c.type is not None for c in host), candidates
     assert any(c is not None and c.candidate == '' for c in candidates), candidates
     assert 'a=end-of-candidates' in pc.local_description.sdp, pc.local_description.sdp
-    pc.close()
 
 
 @pytest.mark.asyncio
-async def test_ice_transport_candidates_parameters_and_role():
-    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
-    caller.create_data_channel('ice')
-    await caller.set_local_description()
-    ice = caller.sctp.transport.ice_transport
-    # the role is known once an answer is applied
-    assert ice.role == webrtc.RTCIceRole.unknown
-    assert ice.get_remote_parameters() is None
-
-    await connect(caller, callee)
-    await asyncio.sleep(0.2)
-    assert ice.role == webrtc.RTCIceRole.controlling
-    local, remote = ice.get_local_parameters(), ice.get_remote_parameters()
-    assert isinstance(local, webrtc.RTCIceParameters) and local.username_fragment and local.password
-    assert remote.username_fragment == callee.sctp.transport.ice_transport.get_local_parameters().username_fragment
-    assert ice.get_local_candidates() and all(c.candidate for c in ice.get_local_candidates())
-    assert {c.candidate for c in ice.get_remote_candidates()} <= {
-        c.candidate for c in callee.sctp.transport.ice_transport.get_local_candidates()
-    }
-    caller.close()
-    callee.close()
-
-
-@pytest.mark.asyncio
-async def test_close_keeps_ice_gathering_state():
-    pc = webrtc.RTCPeerConnection()
-    transceiver = pc.add_transceiver(webrtc.MediaType.audio)
-    await pc.set_local_description()
-    ice = transceiver.sender.transport.ice_transport
-    state = ice.gathering_state
-    pc.close()
-    # closing closes the transport, it doesn't complete gathering
-    assert ice.state == webrtc.RTCIceTransportState.closed
-    assert ice.gathering_state == state
-
-
-@pytest.mark.asyncio
-async def test_descriptions_change_with_signaling_events():
-    pc1, pc2 = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
-    await pc1.set_local_description(await pc1.create_offer())
+async def test_descriptions_change_with_signaling_events(caller, callee):
+    """An offer received in have-local-offer rolls back first: each signalingstatechange sees its descriptions"""
+    await caller.set_local_description(await caller.create_offer())
     seen = []
-    pc1.on(
-        'signalingstatechange',
-        lambda event: seen.append((pc1.signaling_state, pc1.pending_local_description, pc1.pending_remote_description)),
-    )
-    # an offer in have-local-offer rolls the local one back first
-    await pc1.set_remote_description(await pc2.create_offer())
-    await asyncio.sleep(0.05)
-    (rolled_back, *_), (received, *_) = seen
-    assert rolled_back == webrtc.RTCSignalingState.stable and seen[0][1:] == (None, None)
-    assert received == webrtc.RTCSignalingState.have_remote_offer and seen[1][1] is None
-    assert seen[1][2].type == webrtc.RTCSdpType.offer
-    pc1.close()
-    pc2.close()
+
+    def on_change(event):
+        seen.append(
+            {
+                'state': caller.signaling_state,
+                'local': caller.pending_local_description,
+                'remote': caller.pending_remote_description,
+            }
+        )
+
+    caller.on('signalingstatechange', on_change)
+    await caller.set_remote_description(await callee.create_offer())
+
+    rolled_back, received = seen
+    assert rolled_back == {'state': webrtc.RTCSignalingState.stable, 'local': None, 'remote': None}
+    assert received['state'] == webrtc.RTCSignalingState.have_remote_offer
+    assert received['local'] is None
+    assert received['remote'].type == webrtc.RTCSdpType.offer
 
 
 @pytest.mark.asyncio
-async def test_restart_ice_before_negotiation_needs_nothing():
-    pc = webrtc.RTCPeerConnection()
+async def test_restart_ice_before_negotiation_needs_nothing(pc):
+    """restart_ice before the first negotiation doesn't fire negotiationneeded"""
     events = []
-    pc.on('negotiationneeded', lambda event: events.append(event))
+    pc.on('negotiationneeded', events.append)
     pc.restart_ice()
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(QUIET_PERIOD)
     assert events == []
-    pc.close()

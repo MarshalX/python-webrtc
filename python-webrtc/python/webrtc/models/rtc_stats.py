@@ -6,13 +6,12 @@
 #
 
 import json
-import re
-from typing import TYPE_CHECKING, Any, Dict, Iterable, Iterator, Mapping
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Iterator, List, Mapping
+
+from webrtc.utils.names import camel_case
 
 if TYPE_CHECKING:
     import webrtc
-
-_CAMEL = re.compile(r'_([a-z0-9])')
 
 
 class RTCStats(Dict[str, Any]):
@@ -27,7 +26,7 @@ class RTCStats(Dict[str, Any]):
     """
 
     def __getattr__(self, name: str) -> Any:
-        key = _CAMEL.sub(lambda match: match.group(1).upper(), name)
+        key = camel_case(name)
         try:
             return self[key]
         except KeyError:
@@ -57,7 +56,8 @@ class RTCStatsReport(Mapping[str, RTCStats]):
         self._stats = dict(stats)
 
     @classmethod
-    def _from_json(cls, report: str, receivers: Iterable['webrtc.RTCRtpReceiver'] = ()) -> 'RTCStatsReport':
+    def _from_native(cls, report: str, receivers: Iterable['webrtc.RTCRtpReceiver'] = ()) -> 'RTCStatsReport':
+        """The report from the JSON libwebrtc serializes it to, with the receivers whose tracks it refers to."""
         # remote tracks have their own ids, rather than the libwebrtc ones in the stats
         track_ids = {receiver.track._native_obj._nativeId: receiver.track.id for receiver in receivers}
         stats = [RTCStats(entry) for entry in json.loads(report or '[]')]
@@ -80,7 +80,7 @@ class RTCStatsReport(Mapping[str, RTCStats]):
     def __len__(self) -> int:
         return len(self._stats)
 
-    def of_type(self, stats_type: str) -> 'list[RTCStats]':
+    def of_type(self, stats_type: str) -> List[RTCStats]:
         """Returns the stats of a type.
 
         Args:
@@ -93,3 +93,6 @@ class RTCStatsReport(Mapping[str, RTCStats]):
 
     def __repr__(self):
         return f'RTCStatsReport({len(self)} stats)'
+
+    #: Alias for :attr:`of_type`
+    ofType = of_type

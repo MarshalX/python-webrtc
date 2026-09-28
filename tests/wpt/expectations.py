@@ -13,6 +13,9 @@ The file has two sections:
 
 A result is either one status or, for a flaky test, the list of statuses it is allowed to have, as in WPT
 metadata. `update --repeat N` finds flaky tests by running every case several times.
+
+Record them with Python 3.12 or later: before 3.12, async methods start one iteration of the loop later (see
+bridge.call_async_method), which can change results that depend on the order of events.
 """
 
 from __future__ import annotations

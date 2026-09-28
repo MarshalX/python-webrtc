@@ -8,73 +8,30 @@
 #pragma once
 
 #include <atomic>
-#include <functional>
 #include <memory>
-#include <mutex>
-#include <optional>
 #include <utility>
-#include <vector>
 
 #include <pybind11/pybind11.h>
 
+#include "gil.h"
+#include "held_events.h"
+
 namespace python_webrtc {
 
-  // Whether Python code can still run: libwebrtc threads may outlive the interpreter
-  inline bool PythonAlive() {
-#if PY_VERSION_HEX >= 0x030D0000
-    return Py_IsInitialized() && !Py_IsFinalizing();
-#else
-    return Py_IsInitialized() && !_Py_IsFinalizing();
-#endif
-  }
-
-  // An attribute that changes along with its event, as in a browser, where both change in the same task.
-  // While the wrapper has listeners, a change reported by libwebrtc is seen once Python delivers its event
-  // (which calls Surface); without listeners there are no events, and the current value is seen.
-  template<typename T>
-  class Surfaced {
-  public:
-    // a change reported by libwebrtc, before its event is emitted
-    void Changed(bool listening, T previous) {
-      std::lock_guard<std::mutex> lock(_mutex);
-      if (!listening) {
-        _value.reset();
-      } else if (!_value) {
-        _value = previous;
-      }
-    }
-
-    void Surface(T value) {
-      std::lock_guard<std::mutex> lock(_mutex);
-      _value = value;
-    }
-
-    // shows the current value again, like when events stop
-    void Reset() {
-      std::lock_guard<std::mutex> lock(_mutex);
-      _value.reset();
-    }
-
-    T Get(T current) {
-      std::lock_guard<std::mutex> lock(_mutex);
-      return _value ? *_value : current;
-    }
-
-  private:
-    std::mutex _mutex;
-    std::optional<T> _value;
-  };
-
-  // Event listeners of a wrapper. The Python side (webrtc.utils.events) keeps handlers in a listeners object,
-  // which the wrapper holds, so the handlers live as long as the libwebrtc object, not as its Python wrapper.
-  //
-  // Emit() is called on libwebrtc threads. It takes the GIL and passes the event to the listeners object,
-  // which only schedules the handlers on their event loops, so no Python code runs on libwebrtc threads.
-  // The listeners object is only touched with the GIL held.
+  // Event listeners of a wrapper, held here so handlers live as long as the libwebrtc object. Emit() runs on
+  // libwebrtc threads: with the GIL, the Python listeners object only schedules handlers on their event loops.
   class Listeners {
   public:
     virtual ~Listeners() {
       DropListeners();
+    }
+
+    // the class of a wrapper, with its listeners property
+    template<typename T>
+    static pybind11::class_<T, std::shared_ptr<T>> BindClass(pybind11::module &m, const char *name) {
+      pybind11::class_<T, std::shared_ptr<T>> cls(m, name, TypeSetup<T>());
+      cls.def_property("_listeners", &T::GetListeners, &T::SetListeners);
+      return cls;
     }
 
     pybind11::object GetListeners() {
@@ -90,19 +47,60 @@ namespace python_webrtc {
       }
     }
 
+    bool HasListeners() const {
+      return _active;
+    }
+
+    // whether events are held, and so are going to be delivered once Python has the object
+    bool IsHeld() {
+      return _held.IsHeld();
+    }
+
     // whether events are delivered or held for Python
-    bool Tracked() {
+    bool IsTracked() {
       return HasListeners() || IsHeld();
     }
 
-    // Adds the listeners property and lets the garbage collector see the handlers, when Python is the only owner
-    // of the wrapper, so that handlers referencing the wrapper itself don't keep it alive forever.
-    // While libwebrtc (or a parent wrapper) also owns it, the handlers are kept, like listeners in a browser.
-    template<typename T, typename... Options>
-    static void Bind(pybind11::class_<T, Options...> &cls) {
-      cls.def_property("_listeners", &T::GetListeners, &T::SetListeners);
+    // Events emitted while held are emitted on release: an object that Python doesn't have yet
+    // (like a data channel before its datachannel event) mustn't lose its first events
+    void Hold() {
+      _held.Hold();
     }
 
+    void Release() {
+      _held.Release();
+    }
+
+    // Stops delivering events without releasing the handlers, e.g. while closing
+    void Mute() {
+      _active = false;
+    }
+
+  protected:
+    // Calls the listeners object with the event name and arguments, on any thread
+    template<typename... Args>
+    void Emit(const char *name, Args... args) {
+      _held.Emit([this, name, args...]() { EmitNow(name, args...); });
+    }
+
+    // No events are delivered anymore, and the handlers are released. The destructors of wrappers call it once
+    // their libwebrtc objects are released, rather than leaving it to ~Listeners, which runs after the members.
+    void DropListeners() {
+      _active = false;
+      if (!PythonAlive()) {
+        // the interpreter is gone, and so are the objects
+        (void) _listeners.release();
+        return;
+      }
+      if (_listeners) {
+        pybind11::gil_scoped_acquire gil;
+        pybind11::object dropped = std::move(_listeners);
+      }
+    }
+
+  private:
+    // Lets the garbage collector see the handlers while Python is the only owner, so handlers referencing
+    // the wrapper don't keep it alive forever
     template<typename T>
     static pybind11::custom_type_setup TypeSetup() {
       return pybind11::custom_type_setup([](PyHeapTypeObject *heap_type) {
@@ -126,35 +124,18 @@ namespace python_webrtc {
       });
     }
 
-    // Events emitted while held are kept, and emitted on release: an object that Python doesn't have yet
-    // (like a data channel before its datachannel event) mustn't lose its first events
-    void Hold() {
-      std::lock_guard<std::mutex> lock(_heldMutex);
-      _held = true;
-    }
-
-    void Release() {
-      std::lock_guard<std::mutex> lock(_heldMutex);
-      // emitted under the lock, so that events emitted meanwhile come after these
-      for (auto &emit: _heldEvents) {
-        emit();
+    template<typename T>
+    static Listeners *OwnedListeners(PyObject *self) {
+      auto *inst = reinterpret_cast<pybind11::detail::instance *>(self);
+      auto v_h = inst->get_value_and_holder();
+      if (!v_h.holder_constructed()) {
+        return nullptr;
       }
-      _heldEvents.clear();
-      _held = false;
-    }
-
-  protected:
-    // Calls the listeners object with the event name and arguments, on any thread
-    template<typename... Args>
-    void Emit(const char *name, Args... args) {
-      {
-        std::lock_guard<std::mutex> lock(_heldMutex);
-        if (_held) {
-          _heldEvents.emplace_back([this, name, args...]() { EmitNow(name, args...); });
-          return;
-        }
+      auto &holder = v_h.template holder<std::shared_ptr<T>>();
+      if (!holder || holder.use_count() != 1) {
+        return nullptr;
       }
-      EmitNow(name, std::move(args)...);
+      return static_cast<Listeners *>(holder.get());
     }
 
     template<typename... Args>
@@ -176,57 +157,9 @@ namespace python_webrtc {
       }
     }
 
-    // No events are delivered anymore, and the handlers are released
-    void DropListeners() {
-      _active = false;
-      if (!PythonAlive()) {
-        // the interpreter is gone, and so are the objects
-        (void) _listeners.release();
-        return;
-      }
-      if (_listeners) {
-        pybind11::gil_scoped_acquire gil;
-        pybind11::object dropped = std::move(_listeners);
-      }
-    }
-
-  public:
-    bool HasListeners() const {
-      return _active;
-    }
-
-    // whether events are held, and so are going to be delivered once Python has the object
-    bool IsHeld() {
-      std::lock_guard<std::mutex> lock(_heldMutex);
-      return _held;
-    }
-
-    // Stops delivering events without releasing the handlers, e.g. while closing
-    void Mute() {
-      _active = false;
-    }
-
-  private:
-    template<typename T>
-    static Listeners *OwnedListeners(PyObject *self) {
-      auto *inst = reinterpret_cast<pybind11::detail::instance *>(self);
-      auto v_h = inst->get_value_and_holder();
-      if (!v_h.holder_constructed()) {
-        return nullptr;
-      }
-      auto &holder = v_h.template holder<std::shared_ptr<T>>();
-      if (!holder || holder.use_count() != 1) {
-        return nullptr;
-      }
-      return static_cast<Listeners *>(holder.get());
-    }
-
     std::atomic<bool> _active{false};
     pybind11::object _listeners;
-
-    std::mutex _heldMutex;
-    bool _held = false;
-    std::vector<std::function<void()>> _heldEvents;
+    HeldEvents _held;
   };
 
 } // namespace python_webrtc

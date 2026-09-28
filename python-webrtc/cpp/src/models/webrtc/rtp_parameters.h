@@ -9,6 +9,8 @@
 
 #include <pybind11/pybind11.h>
 
+#include "../../enums/enums.h"
+
 namespace python_webrtc {
 
   // The structs of api/rtp_parameters.h as plain values; webrtc.models.rtp_parameters converts them to Python models

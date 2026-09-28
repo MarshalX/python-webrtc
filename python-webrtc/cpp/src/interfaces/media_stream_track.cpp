@@ -6,17 +6,17 @@
 //
 
 #include "media_stream_track.h"
-#include "../utils/gil.h"
 
 #include <rtc_base/crypto_random.h>
+
+#include "../utils/gil.h"
 
 namespace python_webrtc {
 
   MediaStreamTrack::MediaStreamTrack(std::shared_ptr<PeerConnectionFactory> factory,
                                      webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track)
       : _factory(std::move(factory)), _track(std::move(track)) {
-    // Posted, not blocking: wrappers are created under locks that the signaling thread may wait for.
-    // The destructor unregisters with a call to the signaling thread, which runs after this.
+    // see AliveGuard
     _factory->_signalingThread->PostTask(_alive.Guard([this]() {
       _track->RegisterObserver(this);
       _observing = true;
@@ -34,25 +34,23 @@ namespace python_webrtc {
       }
     });
 
-    DropListeners();
     _track = nullptr;
+    DropListeners();
   }
 
   void MediaStreamTrack::Init(pybind11::module &m) {
-    pybind11::class_<MediaStreamTrack, std::shared_ptr<MediaStreamTrack>> cls(
-        m, "MediaStreamTrack", Listeners::TypeSetup<MediaStreamTrack>());
-    Listeners::Bind(cls);
-    cls.def("_surface", &MediaStreamTrack::SurfaceMuted, nogil());
-    cls.def("_surfaceEnded", &MediaStreamTrack::SurfaceEnded, nogil());
-    cls.def_property_readonly("label", nogil_fn(&MediaStreamTrack::GetLabel));
-    cls.def_property_readonly("_nativeId", nogil_fn([](MediaStreamTrack &self) { return self.track()->id(); }));
-    cls.def_property("enabled", nogil_fn(&MediaStreamTrack::GetEnabled), nogil_fn(&MediaStreamTrack::SetEnabled))
+    Listeners::BindClass<MediaStreamTrack>(m, "MediaStreamTrack")
+        .def_property("enabled", nogil_fn(&MediaStreamTrack::GetEnabled), nogil_fn(&MediaStreamTrack::SetEnabled))
         .def_property_readonly("id", nogil_fn(&MediaStreamTrack::GetId))
+        .def_property_readonly("label", nogil_fn(&MediaStreamTrack::GetLabel))
         .def_property_readonly("kind", nogil_fn(&MediaStreamTrack::GetKind))
         .def_property_readonly("readyState", nogil_fn(&MediaStreamTrack::GetReadyState))
         .def_property_readonly("muted", nogil_fn(&MediaStreamTrack::GetMuted))
         .def("clone", &MediaStreamTrack::Clone, nogil())
-        .def("stop", &MediaStreamTrack::Stop, nogil());
+        .def("stop", &MediaStreamTrack::Stop, nogil())
+        .def_property_readonly("_nativeId", nogil_fn(&MediaStreamTrack::GetNativeId))
+        .def("_surfaceMuted", &MediaStreamTrack::SurfaceMuted, nogil(), pybind11::arg("muted"))
+        .def("_surfaceEnded", &MediaStreamTrack::SurfaceEnded, nogil());
   }
 
   void MediaStreamTrack::Stop() {
@@ -75,17 +73,12 @@ namespace python_webrtc {
       // ended by the remote peer or by renegotiation, rather than by stop()
       bool emit = !_stopped;
       if (emit) {
-        // the track is live until its ended event, as in a browser
-        _surfacedEnded.Changed(Tracked(), false);
+        // the track is live until its ended event (see Surfaced)
+        _surfacedEnded.Changed(IsTracked(), false);
       }
       StopOnSignalingThread();
       if (emit) {
-        std::lock_guard<std::mutex> lock(_endedMutex);
-        if (_holdingEnded) {
-          _endedHeld = true;
-        } else {
-          Emit("ended");
-        }
+        _heldEnded.Emit([this]() { Emit("ended"); });
       }
     }
   }
@@ -117,7 +110,8 @@ namespace python_webrtc {
     }
     bool previous = _muted.exchange(muted);
     if (previous != muted) {
-      _surfacedMuted.Changed(HasListeners(), previous);
+      // a held remote track keeps showing the previous value until its event is delivered
+      _surfacedMuted.Changed(IsTracked(), previous);
       Emit(muted ? "mute" : "unmute", muted);
     }
   }
@@ -127,17 +121,11 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrack::HoldEnded() {
-    std::lock_guard<std::mutex> lock(_endedMutex);
-    _holdingEnded = true;
+    _heldEnded.Hold();
   }
 
   void MediaStreamTrack::ReleaseEnded() {
-    std::lock_guard<std::mutex> lock(_endedMutex);
-    _holdingEnded = false;
-    if (_endedHeld) {
-      _endedHeld = false;
-      Emit("ended");
-    }
+    _heldEnded.Release();
   }
 
   void MediaStreamTrack::SurfaceEnded() {
@@ -161,9 +149,18 @@ namespace python_webrtc {
     return _id ? *_id : _track->id();
   }
 
+  std::string MediaStreamTrack::GetNativeId() {
+    return _track->id();
+  }
+
   std::string MediaStreamTrack::GetLabel() {
     std::lock_guard<std::mutex> lock(_idMutex);
     return _label;
+  }
+
+  void MediaStreamTrack::SetLabel(const std::string &label) {
+    std::lock_guard<std::mutex> lock(_idMutex);
+    _label = label;
   }
 
   webrtc::MediaType MediaStreamTrack::GetKind() {
@@ -201,10 +198,7 @@ namespace python_webrtc {
     }
 
     auto clonedMediaStreamTrack = holder().GetOrCreate(_factory, clonedTrack);
-    {
-      std::lock_guard<std::mutex> lock(clonedMediaStreamTrack->_idMutex);
-      clonedMediaStreamTrack->_label = GetLabel();
-    }
+    clonedMediaStreamTrack->SetLabel(GetLabel());
     if (_ended) {
       clonedMediaStreamTrack->Stop();
     }

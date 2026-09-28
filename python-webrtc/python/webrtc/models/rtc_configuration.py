@@ -8,16 +8,20 @@
 import ipaddress
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
-import wrtc
-from webrtc.exceptions import InvalidAccessError, InvalidSyntaxError, NotSupportedError
-from webrtc.models.rtc_certificate import RTCCertificate
-
-RTCIceTransportPolicy = wrtc.RTCIceTransportPolicy
-RTCBundlePolicy = wrtc.RTCBundlePolicy
-RTCRtcpMuxPolicy = wrtc.RTCRtcpMuxPolicy
-RTCRtpHeaderEncryptionPolicy = wrtc.RTCRtpHeaderEncryptionPolicy
+from webrtc import (
+    InvalidAccessError,
+    InvalidSyntaxError,
+    NotSupportedError,
+    RTCBundlePolicy,
+    RTCCertificate,
+    RTCIceTransportPolicy,
+    RTCRtcpMuxPolicy,
+    RTCRtpHeaderEncryptionPolicy,
+    wrtc,
+)
+from webrtc.utils.names import alias
 
 # the longest TURN username, as browsers limit it
 _MAX_USERNAME_LENGTH = 509
@@ -68,6 +72,11 @@ class RTCOAuthCredential:
     mac_key: str
     access_token: str
 
+    #: Alias for :attr:`mac_key`
+    macKey = alias('mac_key')
+    #: Alias for :attr:`access_token`
+    accessToken = alias('access_token')
+
 
 @dataclass
 class RTCIceServer:
@@ -88,7 +97,12 @@ class RTCIceServer:
     credential: Optional[Union[str, RTCOAuthCredential]] = None
     credential_type: str = 'password'
 
-    def _validate(self) -> 'wrtc.IceServerInit':
+    @classmethod
+    def _to_native_list(cls, servers: Iterable[Union['RTCIceServer', Dict[str, Any]]]) -> List['wrtc.IceServerInit']:
+        """The native servers of a list of servers, or of their keyword arguments."""
+        return [(cls(**server) if isinstance(server, dict) else server)._to_native() for server in servers]
+
+    def _to_native(self) -> 'wrtc.IceServerInit':
         urls = [self.urls] if isinstance(self.urls, str) else list(self.urls)
         if not urls:
             raise InvalidSyntaxError('urls of an ICE server must not be empty')
@@ -113,6 +127,9 @@ class RTCIceServer:
         native.credential = self.credential
         return native
 
+    #: Alias for :attr:`credential_type`
+    credentialType = alias('credential_type')
+
 
 @dataclass
 class RTCConfiguration:
@@ -120,7 +137,7 @@ class RTCConfiguration:
 
     Args:
         ice_servers (:obj:`list` of :obj:`webrtc.RTCIceServer`, optional): STUN and TURN servers to gather
-            ICE candidates with.
+            ICE candidates with. A :obj:`dict` of the arguments of :obj:`webrtc.RTCIceServer` is accepted too.
         ice_transport_policy (:obj:`webrtc.RTCIceTransportPolicy`, optional): Which candidates may be used,
             all of them (the default) or only relay ones.
         bundle_policy (:obj:`webrtc.RTCBundlePolicy`, optional): How media is bundled when the remote peer
@@ -140,7 +157,7 @@ class RTCConfiguration:
             a remote description without it fails (``require``). Can't be changed.
     """
 
-    ice_servers: List[RTCIceServer] = field(default_factory=list)
+    ice_servers: List[Union[RTCIceServer, Dict[str, Any]]] = field(default_factory=list)
     ice_transport_policy: RTCIceTransportPolicy = RTCIceTransportPolicy.all
     bundle_policy: RTCBundlePolicy = RTCBundlePolicy.balanced
     rtcp_mux_policy: RTCRtcpMuxPolicy = RTCRtcpMuxPolicy.require
@@ -150,8 +167,8 @@ class RTCConfiguration:
     always_negotiate_data_channels: bool = False
     rtp_header_encryption_policy: RTCRtpHeaderEncryptionPolicy = RTCRtpHeaderEncryptionPolicy.negotiate
 
-    def _validate(self) -> 'wrtc.ConfigurationInit':
-        """The native configuration.
+    def _to_native(self) -> 'wrtc.ConfigurationInit':
+        """Validates the configuration and creates the native one.
 
         Raises:
             :obj:`TypeError`: If a member has a wrong type.
@@ -160,18 +177,16 @@ class RTCConfiguration:
             :obj:`webrtc.InvalidAccessError`: If a TURN server has no credentials.
         """
         native = wrtc.ConfigurationInit()
-        native.iceServers = [
-            (RTCIceServer(**server) if isinstance(server, dict) else server)._validate() for server in self.ice_servers
-        ]
-        native.iceTransportPolicy = _enum(RTCIceTransportPolicy, self.ice_transport_policy)
-        native.bundlePolicy = _enum(RTCBundlePolicy, self.bundle_policy)
-        native.rtcpMuxPolicy = _enum(RTCRtcpMuxPolicy, self.rtcp_mux_policy)
+        native.iceServers = RTCIceServer._to_native_list(self.ice_servers)
+        native.iceTransportPolicy = self.ice_transport_policy
+        native.bundlePolicy = self.bundle_policy
+        native.rtcpMuxPolicy = self.rtcp_mux_policy
 
         if not isinstance(self.ice_candidate_pool_size, int) or not 0 <= self.ice_candidate_pool_size <= 255:
             raise ValueError(f'ice_candidate_pool_size must be from 0 to 255, not {self.ice_candidate_pool_size}')
         native.iceCandidatePoolSize = self.ice_candidate_pool_size
         native.alwaysNegotiateDataChannels = bool(self.always_negotiate_data_channels)
-        native.rtpHeaderEncryptionPolicy = _enum(RTCRtpHeaderEncryptionPolicy, self.rtp_header_encryption_policy)
+        native.rtpHeaderEncryptionPolicy = self.rtp_header_encryption_policy
 
         if self.certificates is not None:
             for certificate in self.certificates:
@@ -202,19 +217,24 @@ class RTCConfiguration:
             rtcp_mux_policy=native.rtcpMuxPolicy,
             ice_candidate_pool_size=native.iceCandidatePoolSize,
             port_range=tuple(native.portRange) if native.portRange else None,
-            certificates=[RTCCertificate(c) for c in native.certificates] if native.certificates else [],
+            certificates=RTCCertificate._wrap_many(native.certificates) if native.certificates else [],
             always_negotiate_data_channels=native.alwaysNegotiateDataChannels,
             rtp_header_encryption_policy=native.rtpHeaderEncryptionPolicy,
         )
 
-
-def _enum(cls, value):
-    """A member of a native enum, also accepted by its name with dashes (like ``'max-bundle'``)"""
-    if isinstance(value, cls):
-        return value
-    if isinstance(value, str):
-        member = getattr(cls, value.replace('-', '_'), None)
-        if isinstance(member, cls):
-            return member
-        raise ValueError(f'{value!r} is not a valid {cls.__name__}')
-    raise TypeError(f'expected {cls.__name__}, not {type(value).__name__}')
+    #: Alias for :attr:`ice_servers`
+    iceServers = alias('ice_servers')
+    #: Alias for :attr:`ice_transport_policy`
+    iceTransportPolicy = alias('ice_transport_policy')
+    #: Alias for :attr:`bundle_policy`
+    bundlePolicy = alias('bundle_policy')
+    #: Alias for :attr:`rtcp_mux_policy`
+    rtcpMuxPolicy = alias('rtcp_mux_policy')
+    #: Alias for :attr:`ice_candidate_pool_size`
+    iceCandidatePoolSize = alias('ice_candidate_pool_size')
+    #: Alias for :attr:`port_range`
+    portRange = alias('port_range')
+    #: Alias for :attr:`always_negotiate_data_channels`
+    alwaysNegotiateDataChannels = alias('always_negotiate_data_channels')
+    #: Alias for :attr:`rtp_header_encryption_policy`
+    rtpHeaderEncryptionPolicy = alias('rtp_header_encryption_policy')

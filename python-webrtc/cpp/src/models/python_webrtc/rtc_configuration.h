@@ -17,6 +17,7 @@
 #include <api/peer_connection_interface.h>
 
 #include "rtc_certificate.h"
+#include "../../enums/enums.h"
 
 namespace python_webrtc {
 
@@ -43,7 +44,7 @@ namespace python_webrtc {
     webrtc::CryptoOptions::Srtp::CryptexPolicy rtpHeaderEncryptionPolicy =
         webrtc::CryptoOptions::Srtp::CryptexPolicy::kNegotiate;
     // when unset, the connection keeps the certificates it has
-    std::optional<std::vector<std::shared_ptr<Certificate>>> certificates;
+    std::optional<std::vector<std::shared_ptr<RTCCertificate>>> certificates;
 
     // the libwebrtc configuration, on top of the one the connection has (for its settings that can't change)
     [[nodiscard]] webrtc::PeerConnectionInterface::RTCConfiguration Apply(
@@ -51,5 +52,7 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
   };
+
+  webrtc::PeerConnectionInterface::IceServers toIceServers(const std::vector<IceServerInit> &iceServers);
 
 } // namespace python_webrtc

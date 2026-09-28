@@ -1,6 +1,11 @@
 webrtc.utils package
 ====================
 
+.. automodule:: webrtc.utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Submodules
 ----------
 

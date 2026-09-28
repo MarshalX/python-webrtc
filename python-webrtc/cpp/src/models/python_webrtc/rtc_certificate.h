@@ -20,15 +20,15 @@
 namespace python_webrtc {
 
   // A DTLS certificate of a connection (webrtc.RTCCertificate)
-  class Certificate {
+  class RTCCertificate {
   public:
-    explicit Certificate(webrtc::scoped_refptr<webrtc::RTCCertificate> certificate)
+    explicit RTCCertificate(webrtc::scoped_refptr<webrtc::RTCCertificate> certificate)
         : _certificate(std::move(certificate)) {}
 
     static void Init(pybind11::module &m);
 
-    // "ecdsa" (P-256) or "rsa"; null if the key can't be generated
-    static std::shared_ptr<Certificate> Generate(
+    // "rsa", or ECDSA (P-256) for any other key type; null if the key can't be generated
+    static std::shared_ptr<RTCCertificate> Generate(
         const std::string &keyType, int modulusLength, int publicExponent, std::optional<uint64_t> expiresMs);
 
     webrtc::scoped_refptr<webrtc::RTCCertificate> certificate() const { return _certificate; }

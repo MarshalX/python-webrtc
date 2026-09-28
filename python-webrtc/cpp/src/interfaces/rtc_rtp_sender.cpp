@@ -6,11 +6,13 @@
 //
 
 #include "rtc_rtp_sender.h"
-#include "rtc_peer_connection.h"
-#include "../utils/gil.h"
 
 #include <pybind11/functional.h>
 #include <pybind11/stl.h>
+
+#include "rtc_peer_connection.h"
+#include "../enums/enums.h"
+#include "../utils/gil.h"
 
 namespace python_webrtc {
 
@@ -22,34 +24,46 @@ namespace python_webrtc {
     pybind11::class_<RTCRtpSender, std::shared_ptr<RTCRtpSender>>(m, "RTCRtpSender")
         .def_property_readonly("track", nogil_fn(&RTCRtpSender::GetTrack))
         .def_property_readonly("transport", nogil_fn(&RTCRtpSender::GetTransport))
-        .def_property_readonly("kind", nogil_fn([](RTCRtpSender &self) { return self._sender->media_type(); }))
+        .def_property_readonly("kind", nogil_fn(&RTCRtpSender::GetKind))
         .def_property_readonly("dtmf", nogil_fn(&RTCRtpSender::GetDtmf))
         .def("getParameters", &RTCRtpSender::GetParameters, nogil())
-        .def("_transceiverStopped", [](RTCRtpSender &self) {
-          std::function<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>()> lookup;
-          {
-            std::lock_guard<std::mutex> lock(self._mutex);
-            lookup = self._transceiver;
-          }
-          auto transceiver = lookup ? lookup() : nullptr;
-          return !transceiver || transceiver->stopping() || transceiver->stopped();
-        }, nogil())
-        .def("getStats", &RTCRtpSender::GetStats, nogil())
-        .def_property_readonly("_connection", nogil_fn(&RTCRtpSender::GetConnection))
+        .def("setParameters", &RTCRtpSender::SetParameters, nogil(),
+             pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("parameters"))
+        .def("replaceTrack", &RTCRtpSender::ReplaceTrack, nogil(), pybind11::arg("track"))
+        .def("setStreams", &RTCRtpSender::SetStreams, nogil(), pybind11::arg("streamIds"))
+        .def("getStreamIds", &RTCRtpSender::GetStreamIds, nogil())
+        .def("getStats", &RTCRtpSender::GetStats, nogil(), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
+        .def_static("getCapabilities", &RTCRtpSender::GetCapabilities, nogil(), pybind11::arg("kind"))
+        .def("_transceiverStopped", &RTCRtpSender::IsTransceiverStopped, nogil())
         .def("_lastParameters", &RTCRtpSender::GetLastParameters, nogil())
         .def("_expireParameters", &RTCRtpSender::ExpireParameters, nogil(),
-             pybind11::arg("transactionId") = std::nullopt)
-        .def("setParameters", &RTCRtpSender::SetParameters, nogil())
-        .def("replaceTrack", &RTCRtpSender::ReplaceTrack, nogil())
-        .def("setStreams", &RTCRtpSender::SetStreams, nogil())
-        .def("getStreamIds", &RTCRtpSender::GetStreamIds, nogil())
-        .def_static("getCapabilities", &RTCRtpSender::GetCapabilities, nogil());
+             pybind11::arg("transactionId") = std::nullopt);
   }
 
   InstanceHolder<RTCRtpSender, webrtc::RtpSenderInterface> &RTCRtpSender::holder() {
     // never destroyed: wrappers may outlive static destructors
     static auto holder = new InstanceHolder<RTCRtpSender, webrtc::RtpSenderInterface>();
     return *holder;
+  }
+
+  void RTCRtpSender::SetConnection(std::weak_ptr<RTCPeerConnection> connection) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _connection = std::move(connection);
+    if (_dtmf) {
+      _dtmf->SetTransceiver(TransceiverGetter());
+    }
+  }
+
+  std::shared_ptr<RTCPeerConnection> RTCRtpSender::GetConnection() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _connection.lock();
+  }
+
+  std::function<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>()> RTCRtpSender::TransceiverGetter() {
+    return [connection = _connection, sender = _sender]() -> webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> {
+      auto pc = connection.lock();
+      return pc ? pc->TransceiverOf(sender) : nullptr;
+    };
   }
 
   std::optional<std::shared_ptr<MediaStreamTrack>> RTCRtpSender::GetTrack() {
@@ -84,6 +98,20 @@ namespace python_webrtc {
     return {};
   }
 
+  webrtc::MediaType RTCRtpSender::GetKind() {
+    return _sender->media_type();
+  }
+
+  std::shared_ptr<RTCDTMFSender> RTCRtpSender::GetDtmf() {
+    auto dtmf = _sender->GetDtmfSender();
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (dtmf && (!_dtmf || _dtmf.get() != RTCDTMFSender::holder().Find(dtmf.get()).get())) {
+      _dtmf = RTCDTMFSender::holder().GetOrCreate(_factory, dtmf);
+      _dtmf->SetTransceiver(TransceiverGetter());
+    }
+    return dtmf ? _dtmf : nullptr;
+  }
+
   webrtc::RtpParameters RTCRtpSender::GetParameters() {
     {
       // the same parameters until they expire
@@ -93,14 +121,10 @@ namespace python_webrtc {
       }
     }
     auto parameters = _sender->GetParameters();
-    std::function<std::vector<webrtc::RtpCodecParameters>()> negotiatedCodecs;
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      negotiatedCodecs = _negotiatedCodecs;
-    }
     // the negotiated codecs this side can send (libwebrtc also lists remote codecs it doesn't know),
     // read out of the lock: it's a call to the signaling thread
-    auto negotiated = negotiatedCodecs ? negotiatedCodecs() : std::vector<webrtc::RtpCodecParameters>();
+    auto connection = GetConnection();
+    auto negotiated = connection ? connection->NegotiatedCodecs(_sender) : std::vector<webrtc::RtpCodecParameters>();
     if (!negotiated.empty()) {
       parameters.codecs = std::move(negotiated);
     }
@@ -157,7 +181,7 @@ namespace python_webrtc {
       if (error.ok()) {
         onSuccess();
       } else {
-        onFailure(wrapRTCErrorForCallback(error));
+        onFailure(RTCCallbackException(std::move(error)));
       }
     });
   }
@@ -166,52 +190,10 @@ namespace python_webrtc {
     return _sender->SetTrack(track ? track->get().track().get() : nullptr);
   }
 
-  void RTCRtpSender::SetTransceiver(
-      std::function<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>()> transceiver) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    _transceiver = std::move(transceiver);
-    if (_dtmf) {
-      _dtmf->SetTransceiver(_transceiver);
-    }
-  }
-
-  std::shared_ptr<RTCDTMFSender> RTCRtpSender::GetDtmf() {
-    auto dtmf = _sender->GetDtmfSender();
-    std::lock_guard<std::mutex> lock(_mutex);
-    if (dtmf && (!_dtmf || _dtmf.get() != RTCDTMFSender::holder().Find(dtmf.get()).get())) {
-      _dtmf = RTCDTMFSender::holder().GetOrCreate(_factory, dtmf);
-      _dtmf->SetTransceiver(_transceiver);
-    }
-    return dtmf ? _dtmf : nullptr;
-  }
-
-  void RTCRtpSender::SetConnection(std::function<std::shared_ptr<RTCPeerConnection>()> connection) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    _connection = std::move(connection);
-  }
-
-  std::shared_ptr<RTCPeerConnection> RTCRtpSender::GetConnection() {
-    std::function<std::shared_ptr<RTCPeerConnection>()> connection;
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      connection = _connection;
-    }
-    return connection ? connection() : nullptr;
-  }
-
-  void RTCRtpSender::SetConnectionClosed(std::function<bool()> connectionClosed) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    _connectionClosed = std::move(connectionClosed);
-  }
-
   void RTCRtpSender::SetStreams(const std::vector<std::string> &streamIds) {
-    std::function<bool()> connectionClosed;
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      connectionClosed = _connectionClosed;
-    }
-    if (connectionClosed && connectionClosed()) {
-      throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "The RTCPeerConnection is closed");
+    auto connection = GetConnection();
+    if (!connection || connection->IsClosed()) {
+      throw RTCException(closedError("setStreams", "RTCRtpSender"));
     }
     _sender->SetStreams(streamIds);
   }
@@ -220,40 +202,28 @@ namespace python_webrtc {
     return _sender->stream_ids();
   }
 
-  std::optional<webrtc::RtpCapabilities> RTCRtpSender::GetCapabilities(const std::string &kind) {
-    webrtc::MediaType type;
-    if (kind == "audio") {
-      type = webrtc::MediaType::AUDIO;
-    } else if (kind == "video") {
-      type = webrtc::MediaType::VIDEO;
-    } else {
-      return std::nullopt;
-    }
-    return PeerConnectionFactory::GetOrCreateDefault()->factory()->GetRtpSenderCapabilities(type);
-  }
-
-  void RTCRtpSender::SetNegotiatedCodecs(std::function<std::vector<webrtc::RtpCodecParameters>()> negotiatedCodecs) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    _negotiatedCodecs = std::move(negotiatedCodecs);
-  }
-
-  void RTCRtpSender::SetStatsGetter(StatsGetter getStats) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    _getStats = std::move(getStats);
-  }
-
   void RTCRtpSender::GetStats(std::function<void(std::string)> &onSuccess,
-                          std::function<void(RTCCallbackException)> &onFailure) {
-    StatsGetter getStats;
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      getStats = _getStats;
-    }
-    if (!getStats) {
-      onFailure(RTCCallbackException(webrtc::RTCErrorType::INVALID_STATE, "The RtpSender has no connection"));
+                              std::function<void(RTCCallbackException)> &onFailure) {
+    auto connection = GetConnection();
+    if (!connection) {
+      onFailure(RTCCallbackException(closedError("getStats", "RTCRtpSender")));
       return;
     }
-    getStats(onSuccess, onFailure);
+    connection->CollectStats(_sender, onSuccess, onFailure);
+  }
+
+  bool RTCRtpSender::IsTransceiverStopped() {
+    auto connection = GetConnection();
+    auto transceiver = connection ? connection->TransceiverOf(_sender) : nullptr;
+    return !transceiver || transceiver->stopping() || transceiver->stopped();
+  }
+
+  std::optional<webrtc::RtpCapabilities> RTCRtpSender::GetCapabilities(const std::string &kind) {
+    auto type = mediaTypeOf(kind);
+    if (!type) {
+      return std::nullopt;
+    }
+    return PeerConnectionFactory::GetOrCreateDefault()->factory()->GetRtpSenderCapabilities(*type);
   }
 
 } // namespace python_webrtc

@@ -9,7 +9,11 @@
 
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <set>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <api/scoped_refptr.h>
 
@@ -20,8 +24,6 @@
 #include "media_stream_track.h"
 #include "../utils/alive_guard.h"
 #include "../utils/listeners.h"
-
-#include <set>
 
 namespace webrtc {
 
@@ -43,7 +45,7 @@ namespace python_webrtc {
     // ObserverInterface, on the signaling thread
     void OnChanged() override;
 
-    void static Init(pybind11::module &m);
+    static void Init(pybind11::module &m);
 
     // A new stream of these tracks (new MediaStream() in a browser)
     static std::shared_ptr<MediaStream> Create(const std::vector<std::shared_ptr<MediaStreamTrack>> &tracks);
@@ -86,7 +88,7 @@ namespace python_webrtc {
     // the tracks the stream had when last notified, or as Python changed them, guarded by _tracksMutex
     std::set<webrtc::MediaStreamTrackInterface *> _known;
 
-    // the observer registration posted by the constructor
+    // see AliveGuard
     AliveGuard _alive;
   };
 

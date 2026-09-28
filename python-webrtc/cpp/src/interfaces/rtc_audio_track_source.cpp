@@ -8,6 +8,8 @@
 #include "rtc_audio_track_source.h"
 
 #include <chrono>
+#include <cstdint>
+#include <vector>
 
 namespace python_webrtc {
 
@@ -17,18 +19,6 @@ namespace python_webrtc {
 
   bool RTCAudioTrackSource::remote() const {
     return false;
-  }
-
-  RTCAudioTrackSource::~RTCAudioTrackSource() {
-    {
-      std::lock_guard<std::mutex> lock(_microphoneMutex);
-      _stopping = true;
-    }
-    _microphoneStop.notify_all();
-    // the microphone thread never holds a reference, so the source isn't destroyed on it
-    if (_microphone.joinable()) {
-      _microphone.join();
-    }
   }
 
   void RTCAudioTrackSource::AddSink(webrtc::AudioTrackSinkInterface *sink) {
@@ -56,29 +46,18 @@ namespace python_webrtc {
   }
 
   void RTCAudioTrackSource::StartMicrophone() {
-    _microphone = std::thread([this]() { RunMicrophone(); });
-  }
-
-  void RTCAudioTrackSource::RunMicrophone() {
     constexpr int sampleRate = 48000;
     constexpr size_t frames = sampleRate / 100;
-    std::vector<int16_t> samples(frames);
-    uint32_t seed = 1;
-    auto next = std::chrono::steady_clock::now();
-    while (true) {
-      {
-        std::unique_lock<std::mutex> lock(_microphoneMutex);
-        if (_microphoneStop.wait_until(lock, next, [this]() { return _stopping; })) {
-          return;
-        }
-      }
-      next += std::chrono::milliseconds(10);
+    // the thread never holds a reference to the source, so the source isn't destroyed on it
+    auto tick = [this, samples = std::vector<int16_t>(frames), seed = uint32_t(1)]() mutable {
       for (auto &sample: samples) {
+        // quiet noise (within 256 of silence), from a linear congruential generator (Numerical Recipes constants)
         seed = seed * 1664525 + 1013904223;
         sample = static_cast<int16_t>(static_cast<int32_t>(seed >> 16) % 512 - 256);
       }
       PushSamples(samples.data(), 16, sampleRate, 1, frames);
-    }
+    };
+    _microphone.Start(std::chrono::milliseconds(10), std::move(tick));
   }
 
 } // namespace python_webrtc

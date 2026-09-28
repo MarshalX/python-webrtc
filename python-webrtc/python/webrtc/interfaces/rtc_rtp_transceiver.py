@@ -7,7 +7,7 @@
 
 from typing import TYPE_CHECKING, List, Optional
 
-from webrtc import WebRTCObject, wrtc
+from webrtc import InvalidModificationError, RTCRtpCodec, RTCRtpHeaderExtensionCapability, WebRTCObject, wrtc
 
 if TYPE_CHECKING:
     import webrtc
@@ -78,16 +78,14 @@ class RTCRtpTransceiver(WebRTCObject):
         and :obj:`webrtc.RTCRtpReceiver`.
 
         Note:
-            The :attr:`stopped` property was provided to return :obj:`True` if the connection is stopped.
-            That property has been deprecated and will be removed at some point. Instead, check the value
-            of :attr:`currentDirection`. If it's :obj:`webrtc.TransceiverDirection.stopped`, the transceiver
-            has been stopped.
+            To check whether the transceiver is stopped, compare :attr:`currentDirection` with
+            :obj:`webrtc.TransceiverDirection.stopped` rather than reading the deprecated :attr:`stopped`.
         """
         self._native_obj.stop()
 
     @property
     def kind(self) -> 'webrtc.MediaType':
-        """:obj:`webrtc.MediaType`: Whether the transceiver sends and receives audio or video."""
+        """:obj:`webrtc.MediaType`: The kind of media the transceiver sends and receives, audio or video."""
         return self._native_obj.kind
 
     def set_codec_preferences(self, codecs: List['webrtc.RTCRtpCodec']) -> None:
@@ -102,9 +100,7 @@ class RTCRtpTransceiver(WebRTCObject):
             :obj:`webrtc.InvalidModificationError`: If a codec isn't supported, or only resiliency codecs
                 (like RTX or FEC) are given.
         """
-        from webrtc import InvalidModificationError, RTCRtpCodec
-
-        kind = self.kind.name
+        kind = self.kind
         natives = []
         for source in (wrtc.RTCRtpReceiver.getCapabilities(kind), wrtc.RTCRtpSender.getCapabilities(kind)):
             natives.extend(source.codecs if source is not None else [])
@@ -124,8 +120,6 @@ class RTCRtpTransceiver(WebRTCObject):
             :obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionCapability`: The extensions, with the direction they're
             negotiated in, :attr:`webrtc.TransceiverDirection.stopped` for the ones that aren't.
         """
-        from webrtc import RTCRtpHeaderExtensionCapability
-
         return [
             RTCRtpHeaderExtensionCapability._from_native(e) for e in self._native_obj.getHeaderExtensionsToNegotiate()
         ]
@@ -162,8 +156,6 @@ class RTCRtpTransceiver(WebRTCObject):
             :obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionCapability`: Every extension that can be negotiated,
             :attr:`webrtc.TransceiverDirection.stopped` for the ones that weren't.
         """
-        from webrtc import RTCRtpHeaderExtensionCapability
-
         return [
             RTCRtpHeaderExtensionCapability._from_native(e) for e in self._native_obj.getNegotiatedHeaderExtensions()
         ]

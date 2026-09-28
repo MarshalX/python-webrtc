@@ -7,7 +7,6 @@
 
 #include "rtc_session_description.h"
 
-
 namespace python_webrtc {
 
   RTCSessionDescription::RTCSessionDescription(const RTCSessionDescriptionInit &init) : _init(init) {}

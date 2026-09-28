@@ -5,44 +5,22 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Python side of the WPT shim.
-
-It knows nothing about WebRTC interfaces: shim.js decides what to read, write and call, and this module does it
-on `webrtc` objects. Every call returns {'ok': value} or {'error': {...}}, so that exceptions reach JS with their
-Python type and error code instead of as a generic Error.
-"""
+"""Python side of the WPT shim: does what shim.js asks on `webrtc` objects, returning {'ok': value} or
+{'error': {...}} so exceptions reach JS with their type."""
 
 import asyncio
 import dataclasses
+import enum
 import sys
 import time
 
 import pythonmonkey as pm
 
 import webrtc
+import webrtc.enums
 
-# WebIDL enums the shim converts, by the name of their webrtc counterpart
 # The loop of the test, set by the runner: code called from JS may not see it as the running loop
 LOOP = None
-
-_ENUMS = {
-    'MediaType': webrtc.MediaType,
-    'TransceiverDirection': webrtc.TransceiverDirection,
-    'RTCSdpType': webrtc.RTCSdpType,
-    'RTCIceTransportPolicy': webrtc.RTCIceTransportPolicy,
-    'RTCIceRole': webrtc.RTCIceRole,
-    'RTCBundlePolicy': webrtc.RTCBundlePolicy,
-    'RTCRtcpMuxPolicy': webrtc.RTCRtcpMuxPolicy,
-    'RTCRtpHeaderEncryptionPolicy': webrtc.RTCRtpHeaderEncryptionPolicy,
-    'RTCPriorityType': webrtc.RTCPriorityType,
-    'RTCDegradationPreference': webrtc.RTCDegradationPreference,
-    'RTCErrorDetailType': webrtc.RTCErrorDetailType,
-}
-
-
-def _is_enum(value):
-    return hasattr(type(value), '__members__') and hasattr(value, 'name')
-
 
 # Python objects without a native object, exposed to JS as interfaces
 _PLAIN_INTERFACES = (webrtc.RTCIceCandidate,)
@@ -54,12 +32,12 @@ def _camel_case(name):
 
 
 def to_js(value):
-    if isinstance(value, webrtc.RTCDtlsFingerprint):
-        # a dictionary in WebIDL
-        return {'algorithm': value.algorithm, 'value': value.value}
+    if isinstance(value, enum.Enum):
+        # the values of the enums are the WebIDL ones
+        return value.value
     if isinstance(value, webrtc.RTCSessionDescriptionInit):
-        # a dictionary in WebIDL
-        return {'type': to_js(value.type), 'sdp': value.sdp}
+        # a dictionary in WebIDL, but a WebRTCObject (it holds a native one) here, not a dataclass
+        return value.to_json()
     if isinstance(value, webrtc.WebRTCObject):
         # Wrappers are created per access, but the native object is shared, so its id identifies the WebRTC object
         return {'__type': type(value).__name__, '__id': id(value._native_obj), '__obj': value}
@@ -86,20 +64,19 @@ def to_js(value):
         return {k: to_js(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [to_js(v) for v in value]
-    if _is_enum(value):
-        return {'__enum': value.name}
     return value
 
 
 def _to_enum(value):
-    enum_cls = _ENUMS[value['__enum']]
-    member = getattr(enum_cls, str(value['value']).replace('-', '_'), None)
-    if isinstance(member, enum_cls):
-        return member
-    if value.get('strict', True):
-        raise TypeError(f"'{value['value']}' is not a valid value for enumeration {value['__enum']}")
-    # A DOMString in WebIDL rather than an enum, so it's up to the library to reject it
-    return value['value']
+    # named after its webrtc counterpart, whose values are the WebIDL ones
+    enum_cls = getattr(webrtc.enums, value['__enum'])
+    try:
+        return enum_cls(value['value'])
+    except ValueError:
+        if value.get('strict', True):
+            raise TypeError(f"'{value['value']}' is not a valid value for enumeration {value['__enum']}") from None
+        # A DOMString in WebIDL rather than an enum, so it's up to the library to reject it
+        return value['value']
 
 
 def from_js(value):
@@ -128,6 +105,8 @@ def _error(exc):
         if cls.__module__ in ('webrtc.exceptions', 'wrtc', 'builtins'):
             kind = cls.__name__
             break
+    else:
+        kind = 'Error'
     error = {'kind': kind, 'message': str(exc)}
     if isinstance(exc, webrtc.RTCError):
         error['init'] = {
@@ -156,38 +135,32 @@ def set_attr(obj, name, value):
     return _guard(lambda: setattr(obj, name, from_js(value)))
 
 
+def _call(obj, name, args, kwargs):
+    return getattr(obj, name)(*from_js(list(args)), **from_js(dict(kwargs or {})))
+
+
 def call_method(obj, name, args, kwargs=None):
-    return _guard(lambda: getattr(obj, name)(*from_js(list(args)), **from_js(dict(kwargs or {}))))
+    return _guard(lambda: _call(obj, name, args, kwargs))
 
 
 async def _call_async_method(obj, name, args, kwargs):
     try:
-        return {'ok': to_js(await getattr(obj, name)(*from_js(list(args)), **from_js(dict(kwargs or {}))))}
+        return {'ok': to_js(await _call(obj, name, args, kwargs))}
     except Exception as e:
         return _error(e)
 
 
 def call_async_method(obj, name, args, kwargs=None):
-    # Started right away, as a browser runs the synchronous steps of a method when it's called: a coroutine
-    # would otherwise only start on the next iteration of the loop
+    # Started eagerly so the synchronous steps of the method run when it's called, not on the next iteration of
+    # the loop. Before Python 3.12 they run one iteration later, so results that depend on event order may differ.
     coroutine = _call_async_method(obj, name, args, kwargs)
     if sys.version_info >= (3, 12):
         return asyncio.Task(coroutine, loop=LOOP, eager_start=True)
     return asyncio.ensure_future(coroutine, loop=LOOP)
 
 
-def _construct(name, kwargs):
-    kwargs = from_js(dict(kwargs))
-    if name == 'RTCSessionDescription':
-        init = webrtc.RTCSessionDescriptionInit(kwargs['type'], kwargs.get('sdp', ''))
-        return webrtc.RTCSessionDescription(init)
-    if name == 'RtpTransceiverInit':
-        kwargs['send_encodings'] = [webrtc.RtpEncodingParameters(**e) for e in kwargs.get('send_encodings') or []]
-    return getattr(webrtc, name)(**kwargs)
-
-
 def construct(name, kwargs):
-    return _guard(lambda: _construct(name, kwargs))
+    return _guard(lambda: getattr(webrtc, name)(**from_js(dict(kwargs))))
 
 
 def get_user_media(kwargs):
@@ -209,7 +182,15 @@ def now():
 
 def subscribe(obj, name, callback):
     """Delivers the events of a type to a JS callback, which dispatches them to the JS listeners"""
-    return _guard(lambda: obj.on(name, lambda event: callback(to_js(event))) and None)
+
+    def deliver(event):
+        callback(to_js(event))
+
+    def add_listener():
+        # nothing to return to JS: on() returns the handler
+        obj.on(name, deliver)
+
+    return _guard(add_listener)
 
 
 EXPORTS = {

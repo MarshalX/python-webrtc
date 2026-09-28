@@ -9,6 +9,8 @@
 
 from typing import TYPE_CHECKING, Any, List, Optional, Union
 
+from webrtc.utils.names import alias
+
 if TYPE_CHECKING:
     import webrtc
 
@@ -81,6 +83,11 @@ class RTCPeerConnectionIceErrorEvent(Event):
         self.url = url
         self.error_code = error_code
         self.error_text = error_text
+
+    #: Alias for :attr:`error_code`
+    errorCode = alias('error_code')
+    #: Alias for :attr:`error_text`
+    errorText = alias('error_text')
 
 
 class MessageEvent(Event):

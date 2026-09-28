@@ -7,15 +7,20 @@
 
 #pragma once
 
+#include <memory>
+#include <mutex>
+#include <vector>
+
 #include <api/dtls_transport_interface.h>
 
 #include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
 
 #include "peer_connection_factory.h"
 #include "rtc_ice_transport.h"
-#include "../exceptions.h"
+#include "../utils/instance_holder.h"
 #include "../utils/listeners.h"
+#include "../utils/surfaced.h"
+#include "../enums/enums.h"
 
 namespace python_webrtc {
 
@@ -35,23 +40,23 @@ namespace python_webrtc {
 
     void OnError(webrtc::RTCError) override;
 
+    // a closed connection fires no events of its transports, which show their current state
+    void OnPeerConnectionClosed();
+
     std::shared_ptr<RTCIceTransport> GetIceTransport();
 
     webrtc::DtlsTransportState GetState();
 
-    void SurfaceState(int state);
+    // the DER certificates of the remote peer
+    std::vector<webrtc::Buffer> GetRemoteCertificates();
 
-  protected:
-    void Stop();
-
-  public:
-    // a closed connection fires no events of its transports, which show their current state
-    void OnPeerConnectionClosed() {
-      Mute();
-      _surfacedState.Reset();
-    }
+    // see Surfaced
+    void SurfaceState(webrtc::DtlsTransportState state);
 
   private:
+    // on the network thread
+    void Stop();
+
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::DtlsTransportInterface> _transport;
     // a dtls transport runs over the same ice transport for its whole life

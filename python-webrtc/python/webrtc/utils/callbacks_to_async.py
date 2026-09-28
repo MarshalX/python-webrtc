@@ -7,23 +7,24 @@
 
 import asyncio
 
-from .convert_exceptions import convert_from_callback_exception_to_exception
-from .task_queue import TaskQueue
+from webrtc.utils.task_queue import TaskQueue
 
 
-class _ThreadSafeEvent(asyncio.Event):
+class _QueuedEvent(asyncio.Event):
+    """An :obj:`asyncio.Event` set from any thread through the task queue of its loop, so the code awaiting the
+    result of an operation runs after the handlers of the events libwebrtc emitted before completing it."""
+
     def __init__(self):
-        self.loop = asyncio.events.get_running_loop()
+        self.loop = asyncio.get_running_loop()
         super().__init__()
 
     def set(self):
-        # in order with the events libwebrtc emitted before completing the operation
         TaskQueue.of(self.loop).post(super().set, resumes=True, after_ready=True)
 
 
 class _AsyncWrapper:
     def __init__(self, func: callable):
-        self.__event = _ThreadSafeEvent()
+        self.__event = _QueuedEvent()
         self.__func = func
 
         self.__args_for_run = []
@@ -34,7 +35,7 @@ class _AsyncWrapper:
     def set(self):
         self.__event.set()
 
-    def _on_success(self, result=None):  # TODO many results mb
+    def _on_success(self, result=None):
         self.__result = result
         self.set()
 
@@ -47,7 +48,8 @@ class _AsyncWrapper:
         await asyncio.wait_for(self.__event.wait(), timeout)
 
         if self.__error:
-            raise convert_from_callback_exception_to_exception(self.__error)
+            # an RTCCallbackException
+            raise self.__error.toPython()
 
         return self.__result
 

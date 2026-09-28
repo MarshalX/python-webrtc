@@ -5,125 +5,19 @@
  *  that can be found in the LICENSE.md file in the root of the project.
  */
 
-// Exposes python-webrtc to web-platform-tests as the browser WebRTC API.
-//
-// This file must stay a binding and never become an implementation. It does what WebIDL bindings do in a
-// browser: maps names, converts enums and dictionaries, keeps object identity and turns errors into the
-// right exception types. Behavior belongs to the library, so a failing test points at a gap in the library.
-//
-// Expects globalThis.__wpt = {bridge, unsupported, complete} to be set by the runner.
+// Exposes python-webrtc to web-platform-tests as the browser WebRTC API. Like WebIDL bindings, it only maps
+// names, types, identity, errors and events: behavior belongs to the library.
 
 (() => {
   'use strict';
 
   const {bridge, unsupported} = globalThis.__wpt;
 
-  // Globals a browser has and a shell doesn't
-  globalThis.self = globalThis;
-  globalThis.window = globalThis;
-  // an event handler attribute of the window, which scripts assign as a global
-  globalThis.onmessage ??= null;
-  // The global is an EventTarget, where exceptions of event listeners are reported (testharness listens there)
-  const globalTarget = new EventTarget();
-  for (const method of ['addEventListener', 'removeEventListener', 'dispatchEvent']) {
-    globalThis[method] ??= globalTarget[method].bind(globalTarget);
-  }
-  if (!globalThis.performance) {
-    const timeOrigin = bridge.now();
-    globalThis.performance = {timeOrigin, now: () => bridge.now() - timeOrigin};
-  }
-
-  // UTF-8 only
-  globalThis.TextEncoder ??= class TextEncoder {
-    get encoding() { return 'utf-8'; }
-    encode(input = '') {
-      const wellFormed = String(input).replace(
-        /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
-      return Uint8Array.from(unescape(encodeURIComponent(wellFormed)), (c) => c.charCodeAt(0));
-    }
-  };
-  globalThis.TextDecoder ??= class TextDecoder {
-    get encoding() { return 'utf-8'; }
-    decode(input = new Uint8Array()) {
-      const bytes = input instanceof ArrayBuffer
-        ? new Uint8Array(input) : new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
-      let binary = '';
-      for (const byte of bytes) binary += String.fromCharCode(byte);
-      try {
-        return decodeURIComponent(escape(binary));
-      } catch {
-        return binary;
-      }
-    }
-  };
-
-  // Blob and structuredClone as far as tests of WebRTC use them: in-memory bytes and plain data
-  globalThis.Blob ??= class Blob {
-    #bytes;
-    #type;
-
-    constructor(parts = [], options = {}) {
-      const chunks = Array.from(parts, (part) => {
-        if (part instanceof Blob) return part.#bytes;
-        if (part instanceof ArrayBuffer) return new Uint8Array(part.slice(0));
-        if (ArrayBuffer.isView(part)) return new Uint8Array(part.buffer.slice(part.byteOffset, part.byteOffset + part.byteLength));
-        return new TextEncoder().encode(String(part));
-      });
-      this.#bytes = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
-      let offset = 0;
-      for (const chunk of chunks) {
-        this.#bytes.set(chunk, offset);
-        offset += chunk.length;
-      }
-      this.#type = String(options.type ?? '').toLowerCase();
-    }
-
-    get size() { return this.#bytes.length; }
-    get type() { return this.#type; }
-    async arrayBuffer() { return this.#bytes.slice().buffer; }
-    async text() { return new TextDecoder().decode(this.#bytes); }
-    slice(start = 0, end = this.size, type = '') { return new Blob([this.#bytes.slice(start, end)], {type}); }
-    static bytesOf(blob) { return blob.#bytes; }
-  };
-  globalThis.FileReader ??= class FileReader extends EventTarget {
-    result = null;
-    readyState = 0;
-    error = null;
-    onload = null;
-    onloadend = null;
-    onerror = null;
-
-    #read(blob, convert) {
-      this.readyState = 1;
-      setTimeout(() => {
-        this.result = convert(Blob.bytesOf(blob));
-        this.readyState = 2;
-        this.dispatchEvent(new Event('load'));
-        this.dispatchEvent(new Event('loadend'));
-      }, 0);
-    }
-
-    readAsArrayBuffer(blob) { this.#read(blob, (bytes) => bytes.slice().buffer); }
-    readAsText(blob) { this.#read(blob, (bytes) => new TextDecoder().decode(bytes)); }
-  };
-  globalThis.structuredClone ??= function structuredClone(value) {
-    if (value === null || typeof value !== 'object') return value;
-    if (value instanceof ArrayBuffer) return value.slice(0);
-    if (ArrayBuffer.isView(value)) return new value.constructor(value);
-    if (value instanceof Blob) return value;
-    if (Array.isArray(value)) return value.map(structuredClone);
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, structuredClone(v)]));
-  };
-
   function reportException(error) {
     const event = new Event('error');
     Object.assign(event, {error, message: String(error?.message ?? error), filename: '', lineno: 0, colno: 0});
     globalThis.dispatchEvent(event);
   }
-  globalThis.queueMicrotask ??= (callback) => Promise.resolve().then(callback);
-  globalThis.test_driver = {
-    set_permission: async () => {},
-  };
 
   const pyObjects = new WeakMap(); // JS wrapper to Python object
   const wrappersById = new Map(); // native object id to JS wrapper, for [SameObject] and === comparisons
@@ -133,7 +27,6 @@
     if (value === undefined || value === null) return null;
     if (Array.isArray(value)) return Array.from(value, fromPy);
     if (typeof value !== 'object') return value;
-    if ('__enum' in value) return value.__enum.replace(/_/g, '-');
     if ('__type' in value) {
       const cls = interfaces[value.__type];
       if (!cls) throw new Error(`No JS interface for ${value.__type}`);
@@ -172,8 +65,7 @@
   const pyModel = (name, kwargs) => ({__model: name, kwargs});
 
   // USVString conversion replaces lone surrogates
-  const toUSVString = (value) => String(value).replace(
-    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
+  const toUSVString = (value) => String(value).toWellFormed();
 
   // [EnforceRange] integer conversion
   function enforceRange(value, min, max) {
@@ -182,6 +74,15 @@
     const integer = Math.trunc(number);
     if (integer < min || integer > max) throw new TypeError(`${value} is out of range`);
     return integer;
+  }
+
+  // unsigned long integer conversion, which wraps around
+  const toUnsignedLong = (value) => Math.trunc(Number(value)) >>> 0;
+
+  function requireArguments(args, count, method) {
+    if (args.length < count) {
+      throw new TypeError(`${method}: ${count} argument${count === 1 ? '' : 's'} required`);
+    }
   }
 
   function requireDictionary(value, name) {
@@ -210,7 +111,7 @@
   };
 
   function toJsError({kind, message, init}) {
-    if (kind === 'RTCError') return new RTCError(init, message);
+    if (kind === 'RTCError') return new RTCError(INTERNAL, {init, message});
     if (kind in JS_ERROR_BY_CLASS) return new JS_ERROR_BY_CLASS[kind](message);
     if (kind in DOM_EXCEPTION_BY_CLASS) return new DOMException(message, DOM_EXCEPTION_BY_CLASS[kind]);
     // PythonWebRTCException has no error type, so there's no DOMException name to give it
@@ -230,12 +131,13 @@
 
   const getAttr = (self, name) => unwrap(bridge.get_attr(pyObjects.get(self), name));
   const setAttr = (self, name, value) => unwrap(bridge.set_attr(pyObjects.get(self), name, value));
-  const callMethod = (self, name, ...args) =>
-    unwrap(bridge.call_method(pyObjects.get(self), name, args.map(toPy)));
+  const callMethod = (self, name, ...args) => callMethodWithKeywords(self, name, args, {});
   const callMethodWithKeywords = (self, name, args, kwargs) =>
     unwrap(bridge.call_method(pyObjects.get(self), name, args.map(toPy), kwargs));
-  const callAsyncMethod = async (self, name, ...args) =>
-    unwrap(await bridge.call_async_method(pyObjects.get(self), name, args.map(toPy)));
+  const callAsyncMethod = async (self, name, ...args) => callAsyncMethodWithKeywords(self, name, args, {});
+  const callAsyncMethodWithKeywords = async (self, name, args, kwargs) =>
+    unwrap(await bridge.call_async_method(pyObjects.get(self), name, args.map(toPy), kwargs));
+  const callStatic = (className, name, ...args) => unwrap(bridge.call_static(className, name, args.map(toPy)));
 
   // Members the library doesn't support are reported rather than silently dropped
   function convertDictionary(dict, dictName, members) {
@@ -252,8 +154,7 @@
     return converted;
   }
 
-  // EventTarget as in the DOM. The library emits events through on(), subscribed to when the first listener
-  // of a type is added; its events are then dispatched to the JS listeners.
+  // Not the native EventTarget, which has no hook to subscribe to the library when the first listener is added
   const listenersOf = new WeakMap(); // target to Map(type to [{callback, once}])
   const subscriptionsOf = new WeakMap(); // target to Set(type)
   const eventHandlersOf = new WeakMap(); // target to Map(type to {handler, listener})
@@ -263,7 +164,7 @@
       if (token !== INTERNAL) throw new TypeError('Illegal constructor');
       pyObjects.set(this, ref.__obj);
       wrappersById.set(ref.__id, this);
-      // not sealed: tests add their own properties, as scripts can in a browser; event handler attributes
+      // not sealed: tests add their own properties; event handler attributes
       // are defined for every event of the specification and report the ones the library lacks
     }
 
@@ -283,7 +184,10 @@
       const list = listenersOf.get(this)?.get(type);
       if (!list) return;
       const index = list.findIndex((l) => l.callback === callback);
-      if (index >= 0) list[index].removed = true, list.splice(index, 1);
+      if (index >= 0) {
+        list[index].removed = true;
+        list.splice(index, 1);
+      }
     }
 
     dispatchEvent(event) {
@@ -296,13 +200,17 @@
           if (typeof listener.callback === 'function') listener.callback.call(this, event);
           else listener.callback.handleEvent(event);
         } catch (e) {
-          // like a browser, an exception of a listener is reported and doesn't stop the others
+          // an exception of a listener is reported and doesn't stop the others
           reportException(e);
         }
       }
       return true;
     }
   }
+
+  // The Python object of an interface constructed by a script (created from the arguments), or of a wrapper
+  // the shim creates for an existing one
+  const pyObjectOf = (args, create) => (args[0] === INTERNAL ? args[1] : create(...args));
 
   function subscribe(target, type) {
     if (!subscriptionsOf.has(target)) subscriptionsOf.set(target, new Set());
@@ -311,7 +219,7 @@
     subscriptions.add(type);
     const result = bridge.subscribe(pyObjects.get(target), type, (pyEvent) => {
       const event = fromPy(pyEvent);
-      // a binary message is converted to the binaryType of the channel
+      // a binary message is converted to the binaryType of the channel: Blob is a JS type the library doesn't know
       if (target instanceof RTCDataChannel && event.data instanceof ArrayBuffer && target.binaryType === 'blob') {
         event.data = new Blob([event.data]);
       }
@@ -348,7 +256,7 @@
   function defineEvent(name, required = [], defaults = {}, types = {}) {
     const cls = class extends Event {
       constructor(type, init) {
-        if (arguments.length < 1) throw new TypeError(`${name}: 1 argument required`);
+        requireArguments(arguments, 1, name);
         super(String(type));
         Object.defineProperty(this, 'bubbles', {value: Boolean(init?.bubbles), configurable: true});
         Object.defineProperty(this, 'cancelable', {value: Boolean(init?.cancelable), configurable: true});
@@ -403,17 +311,14 @@
 
   class MediaStream extends Interface {
     constructor(...args) {
-      if (args[0] === INTERNAL) {
-        super(...args);
-        return;
-      }
-      let tracks = [];
-      if (args.length && args[0] !== undefined) {
-        const source = args[0];
-        tracks = source instanceof MediaStream ? source.getTracks() : Array.from(source,
-          (track) => requireInterface(track, MediaStreamTrack, 'MediaStream constructor'));
-      }
-      super(INTERNAL, construct('MediaStream', {tracks: tracks.map(toPy)}));
+      super(INTERNAL, pyObjectOf(args, (source) => {
+        let tracks = [];
+        if (source !== undefined) {
+          tracks = source instanceof MediaStream ? source.getTracks() : Array.from(source,
+            (track) => requireInterface(track, MediaStreamTrack, 'MediaStream constructor'));
+        }
+        return construct('MediaStream', {tracks: tracks.map(toPy)});
+      }));
     }
 
     getTracks() { return callMethod(this, 'get_tracks'); }
@@ -455,18 +360,16 @@
 
   class RTCIceCandidate extends Interface {
     constructor(...args) {
-      if (args[0] === INTERNAL) {
-        super(...args);
-        return;
-      }
-      const init = args[0] ?? {};
-      super(INTERNAL, construct('RTCIceCandidate', {
-        candidate: init.candidate === undefined ? '' : String(init.candidate),
-        sdp_mid: init.sdpMid === undefined || init.sdpMid === null ? null : String(init.sdpMid),
-        sdp_m_line_index: init.sdpMLineIndex ?? null,
-        username_fragment: init.usernameFragment ?? null,
-        relay_protocol: init.relayProtocol ?? null,
-        url: init.url ?? null,
+      super(INTERNAL, pyObjectOf(args, (init) => {
+        init ??= {};
+        return construct('RTCIceCandidate', {
+          candidate: init.candidate === undefined ? '' : String(init.candidate),
+          sdp_mid: init.sdpMid === undefined || init.sdpMid === null ? null : String(init.sdpMid),
+          sdp_m_line_index: init.sdpMLineIndex ?? null,
+          username_fragment: init.usernameFragment ?? null,
+          relay_protocol: init.relayProtocol ?? null,
+          url: init.url ?? null,
+        });
       }));
     }
 
@@ -493,18 +396,13 @@
 
   class RTCSessionDescription extends Interface {
     constructor(...args) {
-      if (args[0] === INTERNAL) {
-        super(...args);
-        return;
-      }
-      const init = args[0] ?? {};
-      super(INTERNAL, construct('RTCSessionDescription', {
-        type: pyEnum('RTCSdpType', init.type),
-        sdp: init.sdp ?? '',
-      }));
+      super(INTERNAL, pyObjectOf(args, (init) => construct('RTCSessionDescription', {
+        type: pyEnum('RTCSdpType', init?.type),
+        sdp: init?.sdp ?? '',
+      })));
     }
 
-    toJSON() { return {type: this.type, sdp: this.sdp}; }
+    toJSON() { return callMethod(this, 'to_json'); }
   }
   defineAttributes(RTCSessionDescription, [
     ['type', 'type'],
@@ -513,15 +411,11 @@
 
   class RTCIceTransport extends Interface {
     constructor(...args) {
-      if (args[0] === INTERNAL) {
-        super(...args);
-        return;
-      }
-      super(INTERNAL, construct('RTCIceTransport', {}));
+      super(INTERNAL, pyObjectOf(args, () => construct('RTCIceTransport')));
     }
 
     gather(options) {
-      const init = requireDictionary(options, 'RTCIceGatherOptions') ?? {};
+      const init = requireDictionary(options, 'RTCIceGatherOptions');
       const kwargs = {};
       if (init.gatherPolicy !== undefined) kwargs.gather_policy = pyEnum('RTCIceTransportPolicy', init.gatherPolicy);
       if (init.iceServers !== undefined) {
@@ -532,7 +426,7 @@
     }
 
     start(remoteParameters, role = 'controlled') {
-      const init = requireDictionary(remoteParameters, 'RTCIceParameters') ?? {};
+      const init = requireDictionary(remoteParameters, 'RTCIceParameters');
       if (init.usernameFragment === undefined || init.password === undefined) {
         throw new TypeError('RTCIceParameters: usernameFragment and password are required');
       }
@@ -548,17 +442,12 @@
         candidate instanceof RTCIceCandidate ? candidate : new RTCIceCandidate(candidate));
     }
 
-    getSelectedCandidatePair() {
-      const pair = callMethod(this, 'get_selected_candidate_pair');
-      return pair === null ? null : {local: pair[0], remote: pair[1]};
-    }
+    getSelectedCandidatePair() { return callMethod(this, 'get_selected_candidate_pair'); }
     getLocalCandidates() { return callMethod(this, 'get_local_candidates'); }
     getRemoteCandidates() { return callMethod(this, 'get_remote_candidates'); }
-    getLocalParameters() { return toIceParameters(callMethod(this, 'get_local_parameters')); }
-    getRemoteParameters() { return toIceParameters(callMethod(this, 'get_remote_parameters')); }
+    getLocalParameters() { return callMethod(this, 'get_local_parameters'); }
+    getRemoteParameters() { return callMethod(this, 'get_remote_parameters'); }
   }
-  const toIceParameters = (parameters) =>
-    parameters === null ? null : {usernameFragment: parameters[0], password: parameters[1]};
   defineAttributes(RTCIceTransport, [
     ['component', 'component'],
     ['gatheringState', 'gathering_state'],
@@ -615,8 +504,7 @@
     requireMembers(parameters, 'RTCRtpSendParameters', ['transactionId', 'encodings']);
     return pyModel('RTCRtpSendParameters', {
       transaction_id: String(parameters.transactionId),
-      encodings: Array.from(parameters.encodings, (e) => pyModel('RTCRtpEncodingParameters',
-        convertDictionary(e, 'RTCRtpEncodingParameters', ENCODING_PARAMETERS))),
+      encodings: toEncodings(parameters.encodings),
       codecs: Array.from(parameters.codecs ?? [], (c) => pyModel('RTCRtpCodecParameters', convertDictionary(
         requireMembers(c, 'RTCRtpCodecParameters', ['payloadType', 'mimeType', 'clockRate']),
         'RTCRtpCodecParameters', CODEC_PARAMETERS))),
@@ -631,14 +519,12 @@
     });
   }
 
-  const callStatic = (className, name, ...args) => unwrap(bridge.call_static(className, name, args.map(toPy)));
-
   class RTCDTMFSender extends Interface {
     insertDTMF(tones, duration, interToneGap) {
-      if (arguments.length < 1) throw new TypeError('RTCDTMFSender.insertDTMF: 1 argument required');
+      requireArguments(arguments, 1, 'RTCDTMFSender.insertDTMF');
       const args = [String(tones)];
-      if (duration !== undefined) args.push(Math.trunc(Number(duration)) >>> 0);
-      if (interToneGap !== undefined) args.push(Math.trunc(Number(interToneGap)) >>> 0);
+      if (duration !== undefined) args.push(toUnsignedLong(duration));
+      if (interToneGap !== undefined) args.push(toUnsignedLong(interToneGap));
       callMethod(this, 'insert_dtmf', ...args);
     }
   }
@@ -653,15 +539,14 @@
     async getStats() { return callAsyncMethod(this, 'get_stats'); }
     async setParameters(parameters, options) {
       const converted = toSendParameters(parameters);
-      const encodingOptions = requireDictionary(options, 'RTCSetParameterOptions')?.encodingOptions;
+      const {encodingOptions} = requireDictionary(options, 'RTCSetParameterOptions');
       if (encodingOptions === undefined) return callAsyncMethod(this, 'set_parameters', converted);
       const keyFrames = Array.from(encodingOptions, (option) => Boolean(option?.keyFrame));
-      return unwrap(await bridge.call_async_method(pyObjects.get(this), 'set_parameters', [toPy(converted)],
-        {key_frames: keyFrames}));
+      return callAsyncMethodWithKeywords(this, 'set_parameters', [converted], {key_frames: keyFrames});
     }
 
     async replaceTrack(track) {
-      if (arguments.length < 1) throw new TypeError('RTCRtpSender.replaceTrack: 1 argument required');
+      requireArguments(arguments, 1, 'RTCRtpSender.replaceTrack');
       if (track !== null) requireInterface(track, MediaStreamTrack, 'RTCRtpSender.replaceTrack');
       return callAsyncMethod(this, 'replace_track', track);
     }
@@ -672,7 +557,7 @@
     }
 
     static getCapabilities(kind) {
-      if (arguments.length < 1) throw new TypeError('RTCRtpSender.getCapabilities: 1 argument required');
+      requireArguments(arguments, 1, 'RTCRtpSender.getCapabilities');
       return callStatic('RTCRtpSender', 'get_capabilities', String(kind));
     }
   }
@@ -689,7 +574,7 @@
     getContributingSources() { return callMethod(this, 'get_contributing_sources'); }
 
     static getCapabilities(kind) {
-      if (arguments.length < 1) throw new TypeError('RTCRtpReceiver.getCapabilities: 1 argument required');
+      requireArguments(arguments, 1, 'RTCRtpReceiver.getCapabilities');
       return callStatic('RTCRtpReceiver', 'get_capabilities', String(kind));
     }
   }
@@ -704,16 +589,14 @@
     stop() { callMethod(this, 'stop'); }
 
     setCodecPreferences(codecs) {
-      if (arguments.length < 1) throw new TypeError('RTCRtpTransceiver.setCodecPreferences: 1 argument required');
+      requireArguments(arguments, 1, 'RTCRtpTransceiver.setCodecPreferences');
       callMethod(this, 'set_codec_preferences', Array.from(codecs, (codec) => toCodec(codec)));
     }
 
     getHeaderExtensionsToNegotiate() { return callMethod(this, 'get_header_extensions_to_negotiate'); }
     getNegotiatedHeaderExtensions() { return callMethod(this, 'get_negotiated_header_extensions'); }
     setHeaderExtensionsToNegotiate(extensions) {
-      if (arguments.length < 1) {
-        throw new TypeError('RTCRtpTransceiver.setHeaderExtensionsToNegotiate: 1 argument required');
-      }
+      requireArguments(arguments, 1, 'RTCRtpTransceiver.setHeaderExtensionsToNegotiate');
       callMethod(this, 'set_header_extensions_to_negotiate', Array.from(extensions, (e) => {
         requireMembers(e, 'RTCRtpHeaderExtensionCapability', ['uri']);
         return pyModel('RTCRtpHeaderExtensionCapability', {
@@ -735,6 +618,7 @@
   const binaryTypes = new WeakMap();
 
   class RTCDataChannel extends Interface {
+    // kept here: it only chooses the JS type of received binary messages (see subscribe)
     get binaryType() { return binaryTypes.get(this) ?? 'arraybuffer'; }
     // an enum attribute ignores values it doesn't have
     set binaryType(value) {
@@ -742,7 +626,7 @@
     }
 
     send(data) {
-      if (arguments.length < 1) throw new TypeError('RTCDataChannel.send: 1 argument required');
+      requireArguments(arguments, 1, 'RTCDataChannel.send');
       if (data instanceof ArrayBuffer) return callMethod(this, 'send', data);
       if (ArrayBuffer.isView(data)) {
         return callMethod(this, 'send', new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
@@ -764,7 +648,7 @@
     ['priority', 'priority'],
     ['readyState', 'ready_state'],
     ['bufferedAmount', 'buffered_amount'],
-    // unsigned long long, which wraps around
+    // unsigned long long: a negative value is 0 here, as a JS number can't wrap around to 2^64 exactly
     ['bufferedAmountLowThreshold', 'buffered_amount_low_threshold', (v) => Math.max(0, Math.trunc(Number(v)) || 0)],
   ]);
   defineEventHandlers(RTCDataChannel, ['open', 'bufferedamountlow', 'error', 'closing', 'close', 'message']);
@@ -791,14 +675,13 @@
     adaptivePtime: ['adaptive_ptime', Boolean],
     codec: ['codec', (v) => toCodec(v)],
   };
+  const toEncodings = (encodings) => Array.from(encodings, (e) => pyModel('RTCRtpEncodingParameters',
+    convertDictionary(e, 'RTCRtpEncodingParameters', ENCODING_PARAMETERS)));
 
   const TRANSCEIVER_INIT = {
     direction: ['direction', (v) => pyEnum('TransceiverDirection', v)],
     streams: ['streams', (v) => Array.from(v, toPy)],
-    sendEncodings: [
-      'send_encodings',
-      (v) => Array.from(v, (e) => convertDictionary(e, 'RTCRtpEncodingParameters', ENCODING_PARAMETERS)),
-    ],
+    sendEncodings: ['send_encodings', (v) => toEncodings(v)],
   };
 
   const ICE_SERVER = {
@@ -855,25 +738,21 @@
     return {type: pyEnum('RTCSdpType', init.type), sdp};
   }
 
-
   class RTCPeerConnection extends Interface {
     constructor(...args) {
-      if (args[0] === INTERNAL) {
-        super(...args);
-        return;
-      }
-      super(INTERNAL, construct('RTCPeerConnection', {configuration: toConfiguration(args[0])}));
+      super(INTERNAL, pyObjectOf(args,
+        (configuration) => construct('RTCPeerConnection', {configuration: toConfiguration(configuration)})));
     }
 
     async createOffer(options) {
       const kwargs = convertDictionary(requireDictionary(options, 'RTCOfferOptions'), 'RTCOfferOptions', OFFER_OPTIONS);
-      return unwrap(await bridge.call_async_method(pyObjects.get(this), 'create_offer', [], kwargs));
+      return callAsyncMethodWithKeywords(this, 'create_offer', [], kwargs);
     }
 
     async createAnswer(options) {
       const kwargs = convertDictionary(requireDictionary(options, 'RTCAnswerOptions'), 'RTCAnswerOptions',
         ANSWER_OPTIONS);
-      return unwrap(await bridge.call_async_method(pyObjects.get(this), 'create_answer', [], kwargs));
+      return callAsyncMethodWithKeywords(this, 'create_answer', [], kwargs);
     }
 
     async setLocalDescription(description) {
@@ -895,8 +774,8 @@
         ? pyEnum('MediaType', trackOrKind, false)
         : requireInterface(trackOrKind, MediaStreamTrack, 'RTCPeerConnection.addTransceiver');
       if (init === undefined) return callMethod(this, 'add_transceiver', trackOrPyKind);
-      const pyInit = construct('RtpTransceiverInit', convertDictionary(init, 'RTCRtpTransceiverInit', TRANSCEIVER_INIT));
-      return callMethod(this, 'add_transceiver', trackOrPyKind, pyInit.__obj);
+      return callMethod(this, 'add_transceiver', trackOrPyKind,
+        pyModel('RtpTransceiverInit', convertDictionary(init, 'RTCRtpTransceiverInit', TRANSCEIVER_INIT)));
     }
 
     getTransceivers() { return callMethod(this, 'get_transceivers'); }
@@ -907,7 +786,7 @@
     }
 
     createDataChannel(label, init = {}) {
-      if (arguments.length < 1) throw new TypeError('RTCPeerConnection.createDataChannel: 1 argument required');
+      requireArguments(arguments, 1, 'RTCPeerConnection.createDataChannel');
       const kwargs = convertDictionary(requireDictionary(init, 'RTCDataChannelInit'), 'RTCDataChannelInit',
         DATA_CHANNEL_INIT);
       return callMethodWithKeywords(this, 'create_data_channel', [toUSVString(label)], kwargs);
@@ -915,6 +794,7 @@
 
     async addIceCandidate(candidate) {
       if (candidate instanceof RTCIceCandidate) return callAsyncMethod(this, 'add_ice_candidate', candidate);
+      // the JSON form of a candidate (the keys of RTCIceCandidateInit), which add_ice_candidate takes as it is
       const init = candidate ?? {};
       return callAsyncMethod(this, 'add_ice_candidate', {
         candidate: init.candidate === undefined ? '' : String(init.candidate),
@@ -932,7 +812,7 @@
     }
 
     static async generateCertificate(algorithm) {
-      if (arguments.length < 1) throw new TypeError('RTCPeerConnection.generateCertificate: 1 argument required');
+      requireArguments(arguments, 1, 'RTCPeerConnection.generateCertificate');
       const args = [toAlgorithm(algorithm)];
       if (typeof algorithm === 'object' && algorithm !== null && algorithm.expires !== undefined) {
         args.push(enforceRange(algorithm.expires, 0, Number.MAX_SAFE_INTEGER));
@@ -985,11 +865,16 @@
 
   class RTCError extends DOMException {
     constructor(init, message = '') {
-      if (init === undefined || init === null || init.errorDetail === undefined) {
-        throw new TypeError('RTCError: missing required member errorDetail');
+      if (init === INTERNAL) {
+        // an error of the library, which is valid already: new RTCError(INTERNAL, {init, message})
+        ({init, message} = message);
+      } else {
+        if (init === undefined || init === null || init.errorDetail === undefined) {
+          throw new TypeError('RTCError: missing required member errorDetail');
+        }
+        // the library validates the error detail, an RTCErrorDetailType
+        construct('RTCError', {error_detail: pyEnum('RTCErrorDetailType', init.errorDetail), message: String(message)});
       }
-      // the library validates the error detail, an RTCErrorDetailType
-      construct('RTCError', {error_detail: pyEnum('RTCErrorDetailType', init.errorDetail), message: String(message)});
       super(message, 'OperationError');
       const detail = {
         sdpLineNumber: null, sctpCauseCode: null, receivedAlert: null, sentAlert: null, httpRequestStatusCode: null,
@@ -1036,19 +921,15 @@
   const {Event: _, ...eventInterfaces} = events;
   Object.assign(globalThis, eventInterfaces, {RTCError, RTCStatsReport});
 
+  // each a value, or a constraint on it (ConstrainULong, ConstrainDouble), which the library takes as they are
+  const VIDEO_CONSTRAINTS = {width: ['width'], height: ['height'], frameRate: ['frame_rate']};
+
   globalThis.navigator = {
     mediaDevices: {
       async getUserMedia(constraints = {}) {
-        if (!constraints.audio && !constraints.video) throw new TypeError('audio or video must be requested');
         const kwargs = {audio: Boolean(constraints.audio), video: Boolean(constraints.video)};
-        // a number, or the ideal or exact value of a constraint
-        const value = (constraint) => (typeof constraint === 'object' && constraint !== null
-          ? constraint.exact ?? constraint.ideal ?? constraint.max ?? constraint.min : constraint);
-        if (typeof constraints.video === 'object') {
-          for (const [js, py] of [['width', 'width'], ['height', 'height'], ['frameRate', 'frame_rate']]) {
-            const v = value(constraints.video[js]);
-            if (typeof v === 'number') kwargs[py] = v;
-          }
+        if (typeof constraints.video === 'object' && constraints.video !== null) {
+          Object.assign(kwargs, convertDictionary(constraints.video, 'MediaTrackConstraints', VIDEO_CONSTRAINTS));
         }
         return unwrap(bridge.get_user_media(kwargs));
       },

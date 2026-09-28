@@ -26,13 +26,17 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
+    bool GetIsScreencast();
+
+    std::optional<bool> GetNeedsDenoising();
+
     std::shared_ptr<MediaStreamTrack> CreateTrack();
 
     // an I420 frame: the Y plane, then the U and V ones, without padding
     void OnFrame(int width, int height, const std::string &i420, int rotation, std::optional<int64_t> timestampUs);
 
     // a video track of the synthetic camera, for get_user_media
-    static std::shared_ptr<MediaStreamTrack> CreateCameraTrack(
+    static webrtc::scoped_refptr<webrtc::VideoTrackInterface> CreateCameraTrack(
         const std::shared_ptr<PeerConnectionFactory> &factory, int width, int height, double frameRate);
 
   private:

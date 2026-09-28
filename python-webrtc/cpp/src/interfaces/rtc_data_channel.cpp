@@ -9,6 +9,7 @@
 
 #include <pybind11/stl.h>
 
+#include "../exceptions.h"
 #include "../utils/gil.h"
 
 namespace python_webrtc {
@@ -18,21 +19,18 @@ namespace python_webrtc {
       : _factory(std::move(factory)), _channel(std::move(channel)) {
     Hold();
     // open only once the open event is delivered
-    _surfacedState = webrtc::DataChannelInterface::DataState::kConnecting;
-    // Posted, not blocking: wrappers are created under locks that the signaling thread may wait for.
-    // The destructor unregisters with a call to the signaling thread, which runs after this.
+    _surfacedState.Surface(DataState::kConnecting);
+    // see AliveGuard
     _factory->_signalingThread->PostTask(_alive.Guard([this]() {
       _lastState = _channel->state();
-      if (_lastState != webrtc::DataChannelInterface::DataState::kOpen &&
-          _lastState != webrtc::DataChannelInterface::DataState::kConnecting) {
-        std::lock_guard<std::mutex> lock(_stateMutex);
-        _surfacedState = _lastState;
+      if (_lastState != DataState::kOpen && _lastState != DataState::kConnecting) {
+        _surfacedState.Surface(_lastState);
       }
       // messages received meanwhile are delivered to the observer once it's registered, and are held too
       _channel->RegisterObserver(this);
       // a channel announced by the remote peer is open already, but its open event follows the datachannel one
-      if (_lastState == webrtc::DataChannelInterface::DataState::kOpen) {
-        Emit("open", static_cast<int>(_lastState));
+      if (_lastState == DataState::kOpen) {
+        Emit("open", _lastState);
       }
     }));
   }
@@ -48,17 +46,11 @@ namespace python_webrtc {
         _channel->UnregisterObserver();
       }
     });
-    DropListeners();
     _channel = nullptr;
+    DropListeners();
   }
 
   void RTCDataChannel::Init(pybind11::module &m) {
-    pybind11::enum_<webrtc::DataChannelInterface::DataState>(m, "RTCDataChannelState")
-        .value("connecting", webrtc::DataChannelInterface::DataState::kConnecting)
-        .value("open", webrtc::DataChannelInterface::DataState::kOpen)
-        .value("closing", webrtc::DataChannelInterface::DataState::kClosing)
-        .value("closed", webrtc::DataChannelInterface::DataState::kClosed);
-
     pybind11::class_<DataChannelMessage>(m, "DataChannelMessage")
         .def_property_readonly("data", [](const DataChannelMessage &message) -> pybind11::object {
           if (message.binary) {
@@ -69,34 +61,23 @@ namespace python_webrtc {
               PyUnicode_DecodeUTF8(message.data.data(), static_cast<Py_ssize_t>(message.data.size()), "replace"));
         });
 
-    pybind11::class_<RTCDataChannel, std::shared_ptr<RTCDataChannel>> cls(
-        m, "RTCDataChannel", Listeners::TypeSetup<RTCDataChannel>());
-    Listeners::Bind(cls);
-    cls
-        .def_property_readonly("label", nogil_fn([](RTCDataChannel &self) { return self._channel->label(); }))
-        .def_property_readonly("ordered", nogil_fn([](RTCDataChannel &self) { return self._channel->ordered(); }))
-        .def_property_readonly("maxPacketLifeTime", nogil_fn([](RTCDataChannel &self) {
-          return self._channel->maxPacketLifeTime();
-        }))
-        .def_property_readonly("maxRetransmits", nogil_fn([](RTCDataChannel &self) {
-          return self._channel->maxRetransmitsOpt();
-        }))
-        .def_property_readonly("protocol", nogil_fn([](RTCDataChannel &self) { return self._channel->protocol(); }))
-        .def_property_readonly("negotiated", nogil_fn([](RTCDataChannel &self) {
-          return self._channel->negotiated();
-        }))
+    Listeners::BindClass<RTCDataChannel>(m, "RTCDataChannel")
+        .def_property_readonly("label", nogil_fn(&RTCDataChannel::GetLabel))
+        .def_property_readonly("ordered", nogil_fn(&RTCDataChannel::GetOrdered))
+        .def_property_readonly("maxPacketLifeTime", nogil_fn(&RTCDataChannel::GetMaxPacketLifeTime))
+        .def_property_readonly("maxRetransmits", nogil_fn(&RTCDataChannel::GetMaxRetransmits))
+        .def_property_readonly("protocol", nogil_fn(&RTCDataChannel::GetProtocol))
+        .def_property_readonly("negotiated", nogil_fn(&RTCDataChannel::GetNegotiated))
         .def_property_readonly("id", nogil_fn(&RTCDataChannel::GetId))
-        .def_property_readonly("priority", nogil_fn([](RTCDataChannel &self) {
-          return static_cast<int>(self._channel->priority().value());
-        }))
+        .def_property_readonly("priority", nogil_fn(&RTCDataChannel::GetPriority))
         .def_property_readonly("readyState", nogil_fn(&RTCDataChannel::GetReadyState))
-        .def("_surface", &RTCDataChannel::SurfaceState, nogil())
-        .def("_decreaseBufferedAmount", &RTCDataChannel::DecreaseBufferedAmount, nogil())
         .def_property_readonly("bufferedAmount", nogil_fn(&RTCDataChannel::GetBufferedAmount))
         .def_property("bufferedAmountLowThreshold", nogil_fn(&RTCDataChannel::GetBufferedAmountLowThreshold),
                       nogil_fn(&RTCDataChannel::SetBufferedAmountLowThreshold))
-        .def("send", &RTCDataChannel::Send, nogil())
+        .def("send", &RTCDataChannel::Send, nogil(), pybind11::arg("data"), pybind11::arg("binary"))
         .def("close", &RTCDataChannel::Close, nogil())
+        .def("_surfaceState", &RTCDataChannel::SurfaceState, nogil(), pybind11::arg("state"))
+        .def("_decreaseBufferedAmount", &RTCDataChannel::DecreaseBufferedAmount, nogil(), pybind11::arg("sent"))
         .def("_release", &RTCDataChannel::Release);
   }
 
@@ -115,38 +96,33 @@ namespace python_webrtc {
     _lastState = state;
 
     {
-      std::lock_guard<std::mutex> lock(_stateMutex);
-      if (_closeRequested && state == webrtc::DataChannelInterface::DataState::kClosing) {
+      std::lock_guard<std::mutex> lock(_closeMutex);
+      if (_closeRequested && state == DataState::kClosing) {
         // closing locally has shown the closing state already, and fires no event
         return;
       }
-      if (!HasListeners() && !IsHeld()) {
-        _surfacedState.reset();
-      } else if (!_surfacedState) {
-        _surfacedState = previous;
-      }
+      _surfacedState.Changed(IsTracked(), previous);
     }
 
-    auto value = static_cast<int>(state);
     switch (state) {
-      case webrtc::DataChannelInterface::DataState::kOpen:
-        Emit("open", value);
+      case DataState::kOpen:
+        Emit("open", state);
         break;
-      case webrtc::DataChannelInterface::DataState::kClosing:
-        Emit("closing", value);
+      case DataState::kClosing:
+        Emit("closing", state);
         break;
-      case webrtc::DataChannelInterface::DataState::kClosed: {
+      case DataState::kClosed: {
         auto error = _channel->error();
         // closing locally isn't an error, even if queued messages couldn't be sent
         bool closedLocally;
         {
-          std::lock_guard<std::mutex> lock(_stateMutex);
+          std::lock_guard<std::mutex> lock(_closeMutex);
           closedLocally = _closeRequested;
         }
         if (!error.ok() && !closedLocally) {
           Emit("error", RTCCallbackException(std::move(error)));
         }
-        Emit("close", value);
+        Emit("close", state);
         break;
       }
       default:
@@ -154,106 +130,90 @@ namespace python_webrtc {
     }
   }
 
-  webrtc::DataChannelInterface::DataState RTCDataChannel::GetReadyState() {
-    auto state = _channel->state();
-    std::lock_guard<std::mutex> lock(_stateMutex);
-    return _surfacedState ? *_surfacedState : state;
-  }
-
-  void RTCDataChannel::SurfaceState(int state) {
-    std::lock_guard<std::mutex> lock(_stateMutex);
-    auto surfaced = static_cast<webrtc::DataChannelInterface::DataState>(state);
-    // an open event that was queued before closing locally doesn't reopen the channel
-    if (_closeRequested && surfaced == webrtc::DataChannelInterface::DataState::kOpen) {
-      return;
-    }
-    _surfacedState = surfaced;
-  }
-
   void RTCDataChannel::OnMessage(const webrtc::DataBuffer &buffer) {
     Emit("message", DataChannelMessage{std::string(buffer.data.cdata<char>(), buffer.size()), buffer.binary});
   }
 
-  void RTCDataChannel::OnBufferedAmountChange(uint64_t sent_data_size) {
+  void RTCDataChannel::OnBufferedAmountChange(uint64_t sentDataSize) {
     // an internal event: Python decreases bufferedAmount when it's delivered
-    Emit("_sent", sent_data_size);
-  }
-
-  bool RTCDataChannel::DecreaseBufferedAmount(uint64_t sent) {
-    uint64_t amount = _bufferedAmount.load();
-    uint64_t decreased;
-    do {
-      decreased = amount > sent ? amount - sent : 0;
-    } while (!_bufferedAmount.compare_exchange_weak(amount, decreased));
-
-    auto threshold = _bufferedAmountLowThreshold.load();
-    return amount > threshold && decreased <= threshold;
+    Emit("_sent", sentDataSize);
   }
 
   void RTCDataChannel::OnAnnounced() {
-    std::lock_guard<std::mutex> lock(_stateMutex);
+    std::lock_guard<std::mutex> lock(_closeMutex);
     // a channel announced by the remote peer is open when its datachannel event fires
-    if (_lastState == webrtc::DataChannelInterface::DataState::kConnecting ||
-        _lastState == webrtc::DataChannelInterface::DataState::kOpen) {
-      _surfacedState = webrtc::DataChannelInterface::DataState::kOpen;
+    if (_lastState == DataState::kConnecting || _lastState == DataState::kOpen) {
+      _surfacedState.Surface(DataState::kOpen);
     }
   }
 
   void RTCDataChannel::OnPeerConnectionClosed() {
     Mute();
-    {
-      std::lock_guard<std::mutex> lock(_stateMutex);
-      _surfacedState.reset();
-    }
-  }
-
-  void RTCDataChannel::Send(const std::string &data, bool binary) {
-    if (GetReadyState() != webrtc::DataChannelInterface::DataState::kOpen) {
-      throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "RTCDataChannel.readyState is not 'open'");
-    }
-
-    std::function<std::optional<double>()> getter;
-    {
-      std::lock_guard<std::mutex> lock(_getterMutex);
-      getter = _maxMessageSizeGetter;
-    }
-    auto maxMessageSize = getter ? getter() : std::nullopt;
-    if (maxMessageSize && static_cast<double>(data.size()) > *maxMessageSize) {
-      throw pybind11::value_error("The message is larger than the maxMessageSize of the SCTP transport");
-    }
-
-    // a full queue fails the send, rather than libwebrtc closing the channel with an error
-    if (_bufferedAmount + data.size() > webrtc::DataChannelInterface::MaxSendQueueSize()) {
-      throw RTCException(webrtc::RTCErrorType::RESOURCE_EXHAUSTED, "The send queue of the RTCDataChannel is full");
-    }
-    _bufferedAmount += data.size();
-    auto sent = _channel->Send(webrtc::DataBuffer(webrtc::CopyOnWriteBuffer(data.data(), data.size()), binary));
-    if (!sent && _channel->state() == webrtc::DataChannelInterface::DataState::kOpen) {
-      _bufferedAmount -= data.size();
-      throw RTCException(webrtc::RTCErrorType::RESOURCE_EXHAUSTED, "The send queue of the RTCDataChannel is full");
-    }
-
+    _surfacedState.Reset();
   }
 
   void RTCDataChannel::SetMaxMessageSizeGetter(std::function<std::optional<double>()> getter) {
-    std::lock_guard<std::mutex> lock(_getterMutex);
-    _maxMessageSizeGetter = std::move(getter);
+    _maxMessageSizeGetter.Set(std::move(getter));
   }
 
-  void RTCDataChannel::Close() {
-    // read before locking: it's a call to the signaling thread, which takes the lock in OnStateChange
-    auto current = _channel->state();
-    {
-      std::lock_guard<std::mutex> lock(_stateMutex);
-      auto state = _surfacedState ? *_surfacedState : current;
-      if (state == webrtc::DataChannelInterface::DataState::kClosing ||
-          state == webrtc::DataChannelInterface::DataState::kClosed) {
-        return;
-      }
-      _closeRequested = true;
-      _surfacedState = webrtc::DataChannelInterface::DataState::kClosing;
+  std::string RTCDataChannel::GetLabel() {
+    return _channel->label();
+  }
+
+  bool RTCDataChannel::GetOrdered() {
+    return _channel->ordered();
+  }
+
+  std::optional<int> RTCDataChannel::GetMaxPacketLifeTime() {
+    return _channel->maxPacketLifeTime();
+  }
+
+  std::optional<int> RTCDataChannel::GetMaxRetransmits() {
+    return _channel->maxRetransmitsOpt();
+  }
+
+  std::string RTCDataChannel::GetProtocol() {
+    return _channel->protocol();
+  }
+
+  bool RTCDataChannel::GetNegotiated() {
+    return _channel->negotiated();
+  }
+
+  std::optional<int> RTCDataChannel::GetId() {
+    auto id = _channel->id();
+    if (id < 0) {
+      return std::nullopt;
     }
-    _channel->Close();
+    return id;
+  }
+
+  webrtc::Priority RTCDataChannel::GetPriority() {
+    // the ranges Chromium maps priority values to
+    auto value = _channel->priority().value();
+    if (value <= 192) {
+      return webrtc::Priority::kVeryLow;
+    }
+    if (value <= 384) {
+      return webrtc::Priority::kLow;
+    }
+    if (value <= 768) {
+      return webrtc::Priority::kMedium;
+    }
+    return webrtc::Priority::kHigh;
+  }
+
+  RTCDataChannel::DataState RTCDataChannel::GetReadyState() {
+    return _surfacedState.Get(_channel->state());
+  }
+
+  void RTCDataChannel::SurfaceState(DataState state) {
+    std::lock_guard<std::mutex> lock(_closeMutex);
+    // an open event that was queued before closing locally doesn't reopen the channel
+    if (_closeRequested && state == DataState::kOpen) {
+      return;
+    }
+    _surfacedState.Surface(state);
   }
 
   uint64_t RTCDataChannel::GetBufferedAmount() {
@@ -268,12 +228,57 @@ namespace python_webrtc {
     _bufferedAmountLowThreshold = threshold;
   }
 
-  std::optional<int> RTCDataChannel::GetId() {
-    auto id = _channel->id();
-    if (id < 0) {
-      return std::nullopt;
+  bool RTCDataChannel::DecreaseBufferedAmount(uint64_t sent) {
+    uint64_t amount = _bufferedAmount.load();
+    uint64_t decreased;
+    do {
+      decreased = amount > sent ? amount - sent : 0;
+    } while (!_bufferedAmount.compare_exchange_weak(amount, decreased));
+
+    auto threshold = _bufferedAmountLowThreshold.load();
+    return amount > threshold && decreased <= threshold;
+  }
+
+  static RTCException sendQueueFullError() {
+    return {webrtc::RTCErrorType::RESOURCE_EXHAUSTED, "The send queue of the RTCDataChannel is full"};
+  }
+
+  void RTCDataChannel::Send(const std::string &data, bool binary) {
+    if (GetReadyState() != DataState::kOpen) {
+      throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "RTCDataChannel.readyState is not 'open'");
     }
-    return id;
+
+    auto getter = _maxMessageSizeGetter.Get();
+    auto maxMessageSize = getter ? getter() : std::nullopt;
+    if (maxMessageSize && static_cast<double>(data.size()) > *maxMessageSize) {
+      throw pybind11::value_error("The message is larger than the maxMessageSize of the SCTP transport");
+    }
+
+    // a full queue fails the send, rather than libwebrtc closing the channel with an error
+    if (_bufferedAmount + data.size() > webrtc::DataChannelInterface::MaxSendQueueSize()) {
+      throw sendQueueFullError();
+    }
+    _bufferedAmount += data.size();
+    auto sent = _channel->Send(webrtc::DataBuffer(webrtc::CopyOnWriteBuffer(data.data(), data.size()), binary));
+    if (!sent && _channel->state() == DataState::kOpen) {
+      _bufferedAmount -= data.size();
+      throw sendQueueFullError();
+    }
+  }
+
+  void RTCDataChannel::Close() {
+    // read before locking: it's a call to the signaling thread, which takes the lock in OnStateChange
+    auto current = _channel->state();
+    {
+      std::lock_guard<std::mutex> lock(_closeMutex);
+      auto state = _surfacedState.Get(current);
+      if (state == DataState::kClosing || state == DataState::kClosed) {
+        return;
+      }
+      _closeRequested = true;
+      _surfacedState.Surface(DataState::kClosing);
+    }
+    _channel->Close();
   }
 
 } // namespace python_webrtc

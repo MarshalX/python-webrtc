@@ -49,6 +49,18 @@ def _text(value):
     return value if isinstance(value, str) else None
 
 
+def _log_unhandled_rejections(loop, context):
+    """PythonMonkey's handler of unhandled rejections stops its timers, which leaves the rest of the file hanging.
+    It also reports rejections that get handled later (as testharness does), so they are only logged. Any other
+    exception goes to the default handler."""
+    import pythonmonkey as pm
+
+    if isinstance(context.get('exception'), pm.SpiderMonkeyError):
+        print('unhandled rejection:', context['exception'], file=sys.stderr)
+    else:
+        loop.default_exception_handler(context)
+
+
 async def run_in_process(case: str) -> dict:
     import pythonmonkey as pm
 
@@ -65,10 +77,8 @@ async def run_in_process(case: str) -> dict:
         if not completed.done():
             completed.set_result(result)
 
-    # PythonMonkey's handler of unhandled rejections stops its timers, which leaves the rest of the file hanging.
-    # It also reports rejections that get handled later (as testharness does), so they are only logged.
     bridge.LOOP = loop
-    loop.set_exception_handler(lambda _, context: print('unhandled:', context.get('exception'), file=sys.stderr))
+    loop.set_exception_handler(_log_unhandled_rejections)
 
     pm.eval('(env) => { globalThis.__wpt = env; }')(
         {'bridge': bridge.EXPORTS, 'unsupported': unsupported.add, 'complete': complete}
@@ -88,7 +98,7 @@ async def run_in_process(case: str) -> dict:
     try:
         result = await asyncio.wait_for(asyncio.shield(completed), timeout)
     except asyncio.TimeoutError:
-        # Marks unfinished tests as timed out and completes the harness, as a browser does
+        # marks unfinished tests as timed out and completes the harness
         pm.eval('timeout')()
         try:
             result = await asyncio.wait_for(completed, 5)

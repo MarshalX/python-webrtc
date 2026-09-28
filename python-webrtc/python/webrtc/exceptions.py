@@ -5,17 +5,12 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Exceptions raised by WebRTC operations.
+"""Exceptions raised by WebRTC operations, named after the ``DOMException`` of the specification."""
 
-Errors of libwebrtc are raised as a subclass of :obj:`RTCException` named after the ``DOMException`` a browser
-throws for them, so ``except webrtc.InvalidStateError`` catches exactly what ``InvalidStateError`` is in the
-WebRTC specification. Wrong argument types raise :obj:`TypeError`, like in any Python function.
-"""
-
-import enum
 from typing import Optional
 
-import wrtc
+from webrtc import RTCErrorDetailType, wrtc
+from webrtc.utils.names import alias
 
 PythonWebRTCExceptionBase = wrtc.PythonWebRTCExceptionBase
 PythonWebRTCException = wrtc.PythonWebRTCException
@@ -62,18 +57,6 @@ class InvalidCharacterError(RTCException, ValueError):
     """A string has a character that isn't allowed, like a DTMF tone that doesn't exist."""
 
 
-class RTCErrorDetailType(str, enum.Enum):
-    """The WebRTC-specific cause of an :obj:`RTCError`."""
-
-    data_channel_failure = 'data-channel-failure'
-    dtls_failure = 'dtls-failure'
-    fingerprint_failure = 'fingerprint-failure'
-    sctp_failure = 'sctp-failure'
-    sdp_syntax_error = 'sdp-syntax-error'
-    hardware_encoder_not_available = 'hardware-encoder-not-available'
-    hardware_encoder_error = 'hardware-encoder-error'
-
-
 class RTCError(OperationError):
     """An error carrying WebRTC-specific information.
 
@@ -110,6 +93,19 @@ class RTCError(OperationError):
         self.sent_alert = sent_alert
         self.http_request_status_code = http_request_status_code
 
+    #: Alias for :attr:`error_detail`
+    errorDetail = alias('error_detail')
+    #: Alias for :attr:`sdp_line_number`
+    sdpLineNumber = alias('sdp_line_number')
+    #: Alias for :attr:`sctp_cause_code`
+    sctpCauseCode = alias('sctp_cause_code')
+    #: Alias for :attr:`received_alert`
+    receivedAlert = alias('received_alert')
+    #: Alias for :attr:`sent_alert`
+    sentAlert = alias('sent_alert')
+    #: Alias for :attr:`http_request_status_code`
+    httpRequestStatusCode = alias('http_request_status_code')
+
 
 _BY_RTC_ERROR_TYPE = {
     # the same mapping as Chromium's
@@ -125,28 +121,19 @@ _BY_RTC_ERROR_TYPE = {
     'INTERNAL_ERROR': OperationError,
 }
 
-_DETAIL_BY_NATIVE = {
-    'DATA_CHANNEL_FAILURE': RTCErrorDetailType.data_channel_failure,
-    'DTLS_FAILURE': RTCErrorDetailType.dtls_failure,
-    'FINGERPRINT_FAILURE': RTCErrorDetailType.fingerprint_failure,
-    'SCTP_FAILURE': RTCErrorDetailType.sctp_failure,
-    'SDP_SYNTAX_ERROR': RTCErrorDetailType.sdp_syntax_error,
-    'HARDWARE_ENCODER_NOT_AVAILABLE': RTCErrorDetailType.hardware_encoder_not_available,
-    'HARDWARE_ENCODER_ERROR': RTCErrorDetailType.hardware_encoder_error,
-}
-
 
 def _from_native(
     error_type: str,
     message: str,
-    detail: str,
+    detail: Optional[RTCErrorDetailType],
     sctp_cause_code: Optional[int],
     sdp_line_number: Optional[int] = None,
 ) -> RTCException:
-    """Creates the exception for a webrtc::RTCError, called by the native module"""
-    if error_type == 'OPERATION_ERROR_WITH_DATA' or detail in _DETAIL_BY_NATIVE:
+    """Creates the exception for a webrtc::RTCError. Called by name, with positional arguments, from
+    cpp/src/exceptions.cpp."""
+    if error_type == 'OPERATION_ERROR_WITH_DATA' or detail is not None:
         return RTCError(
-            _DETAIL_BY_NATIVE.get(detail, RTCErrorDetailType.data_channel_failure),
+            detail or RTCErrorDetailType.data_channel_failure,
             message,
             sctp_cause_code=sctp_cause_code,
             sdp_line_number=sdp_line_number,

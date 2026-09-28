@@ -8,9 +8,9 @@
 #pragma once
 
 #include <condition_variable>
-#include <type_traits>
 #include <memory>
 #include <mutex>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -26,12 +26,8 @@ namespace python_webrtc {
   // before the dying one has unregistered. Wrappers of objects that take any number of observers don't wait.
   struct SingleObserverSlot {};
 
-  // Keeps at most one wrapper per libwebrtc object, so Python always sees the same object for it.
-  // Entries are weak: the cache never keeps a wrapper, nor the libwebrtc object behind it, alive.
-  // Ownership lives in shared_ptrs held by Python and by parent wrappers.
-  //
-  // T — wrapper class, constructible from (std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<U>)
-  // U — wrapped libwebrtc interface
+  // At most one wrapper T per libwebrtc object U, so Python always sees the same object for it. Entries are weak:
+  // Python and parent wrappers own the wrappers.
   template<typename T, typename U>
   class InstanceHolder {
   public:
@@ -69,7 +65,7 @@ namespace python_webrtc {
     // Whether another wrapper of the same libwebrtc object is alive. Only meaningful in a destructor of the wrapper,
     // where it tells that the object was re-wrapped meanwhile and the new wrapper has taken over its observer slot.
     bool HasLive(const U *object) {
-      // called by the dying wrapper itself, out of the lock
+      // called from the destructor of the dying wrapper, which Destroy runs without holding the lock
       std::lock_guard<std::recursive_mutex> lock(_mutex);
       auto it = _store.find(const_cast<U *>(object));
       return it != _store.end() && !it->second.expired();

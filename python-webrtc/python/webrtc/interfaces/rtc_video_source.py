@@ -5,34 +5,12 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
-from webrtc import MediaStreamTrack, WebRTCObject, wrtc
+from webrtc import MediaStreamTrack, RTCVideoFrame, WebRTCObject, wrtc
 
 if TYPE_CHECKING:
     import webrtc
-
-
-@dataclass
-class RTCVideoFrame:
-    """A video frame in the I420 format.
-
-    Args:
-        width (:obj:`int`): The width in pixels.
-        height (:obj:`int`): The height in pixels.
-        data (:obj:`bytes`): The Y plane (``width * height`` bytes), then the U and V planes
-            (``ceil(width / 2) * ceil(height / 2)`` bytes each), without padding.
-        rotation (:obj:`int`, optional): How the frame is to be rotated clockwise to be shown: 0, 90, 180 or 270.
-        timestamp_us (:obj:`int`, optional): When the frame was captured, in microseconds of a monotonic clock.
-            The time it's pushed at by default.
-    """
-
-    width: int
-    height: int
-    data: bytes
-    rotation: int = 0
-    timestamp_us: Optional[int] = None
 
 
 class RTCVideoSource(WebRTCObject):
@@ -47,12 +25,8 @@ class RTCVideoSource(WebRTCObject):
 
     _class = wrtc.RTCVideoSource
 
-    def __init__(self, is_screencast: bool = False, needs_denoising: Optional[bool] = None, *, _native_obj=None):
-        super().__init__(_native_obj or self._class(is_screencast, needs_denoising))
-
-    @classmethod
-    def _wrap(cls, item) -> 'RTCVideoSource':
-        return cls(_native_obj=item)
+    def __init__(self, is_screencast: bool = False, needs_denoising: Optional[bool] = None):
+        super().__init__(self._class(is_screencast, needs_denoising))
 
     @property
     def is_screencast(self) -> bool:
@@ -84,6 +58,10 @@ class RTCVideoSource(WebRTCObject):
         """
         self._native_obj.onFrame(frame.width, frame.height, bytes(frame.data), frame.rotation, frame.timestamp_us)
 
+    #: Alias for :attr:`is_screencast`
+    isScreencast = is_screencast
+    #: Alias for :attr:`needs_denoising`
+    needsDenoising = needs_denoising
     #: Alias for :attr:`create_track`
     createTrack = create_track
     #: Alias for :attr:`on_frame`

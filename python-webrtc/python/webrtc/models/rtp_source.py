@@ -6,7 +6,9 @@
 #
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
+
+from webrtc.utils.names import alias
 
 
 @dataclass(frozen=True)
@@ -27,12 +29,19 @@ class RTCRtpContributingSource:
     rtp_timestamp: int
     audio_level: Optional[float] = None
 
-    @staticmethod
-    def _audio_level(level: Optional[int]) -> Optional[float]:
+    @classmethod
+    def _from_native(cls, native: Tuple[bool, int, float, int, Optional[int]]) -> 'RTCRtpContributingSource':
+        """A source from the native one: whether it's an SSRC, the source, timestamp, RTP timestamp and level."""
+        _, source, timestamp, rtp_timestamp, level = native
         # RFC 6464 and RFC 6465 levels are -dBov, 127 being silence
-        if level is None:
-            return None
-        return 0.0 if level >= 127 else 10 ** (-level / 20)
+        if level is not None:
+            level = 0.0 if level >= 127 else 10 ** (-level / 20)
+        return cls(timestamp, source, rtp_timestamp, level)
+
+    #: Alias for :attr:`rtp_timestamp`
+    rtpTimestamp = alias('rtp_timestamp')
+    #: Alias for :attr:`audio_level`
+    audioLevel = alias('audio_level')
 
 
 @dataclass(frozen=True)

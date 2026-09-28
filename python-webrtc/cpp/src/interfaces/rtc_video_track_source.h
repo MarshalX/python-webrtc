@@ -8,15 +8,15 @@
 #pragma once
 
 #include <atomic>
-#include <condition_variable>
-#include <mutex>
+#include <cstdint>
 #include <optional>
-#include <thread>
 
 #include <api/media_stream_interface.h>
 #include <api/notifier.h>
 #include <api/video/video_broadcaster.h>
 #include <api/video/video_frame.h>
+
+#include "../utils/paced_thread.h"
 
 namespace python_webrtc {
 
@@ -25,8 +25,6 @@ namespace python_webrtc {
   class RTCVideoTrackSource : public webrtc::Notifier<webrtc::VideoTrackSourceInterface> {
   public:
     RTCVideoTrackSource(bool isScreencast, std::optional<bool> needsDenoising);
-
-    ~RTCVideoTrackSource() override;
 
     // Starts the synthetic camera
     void StartCamera(int width, int height, double frameRate);
@@ -57,7 +55,7 @@ namespace python_webrtc {
     void RemoveEncodedSink(webrtc::VideoSinkInterface<webrtc::RecordableEncodedFrame> *sink) override {}
 
   private:
-    void RunCamera(int width, int height, double frameRate);
+    void DrawFrame(int width, int height, uint32_t frame);
 
     const bool _isScreencast;
     const std::optional<bool> _needsDenoising;
@@ -65,10 +63,8 @@ namespace python_webrtc {
     std::atomic<int> _width{0};
     std::atomic<int> _height{0};
 
-    std::mutex _cameraMutex;
-    std::condition_variable _cameraStop;
-    bool _stopping = false;
-    std::thread _camera;
+    // last, to be stopped before the rest is destroyed
+    PacedThread _camera;
   };
 
 } // namespace python_webrtc

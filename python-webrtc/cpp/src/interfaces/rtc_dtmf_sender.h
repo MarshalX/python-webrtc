@@ -9,6 +9,8 @@
 
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 
 #include <api/dtmf_sender_interface.h>
@@ -17,9 +19,10 @@
 #include <pybind11/pybind11.h>
 
 #include "peer_connection_factory.h"
-#include "../utils/instance_holder.h"
 #include "../utils/alive_guard.h"
+#include "../utils/instance_holder.h"
 #include "../utils/listeners.h"
+#include "../utils/locked_function.h"
 
 namespace python_webrtc {
 
@@ -38,13 +41,14 @@ namespace python_webrtc {
     void SetTransceiver(std::function<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>()> transceiver);
 
     // DtmfSenderObserverInterface, on the signaling thread
-    void OnToneChange(const std::string &tone, const std::string &tone_buffer) override;
+    void OnToneChange(const std::string &tone, const std::string &toneBuffer) override;
 
     void InsertDtmf(const std::string &tones, int duration, int interToneGap);
 
     // the tones not played yet, as Python sees them: set by insertDTMF(), shortened along with tonechange events
     std::string GetToneBuffer();
 
+    // the buffer a delivered tonechange event left, if no insertDTMF() came after the tone
     void SurfaceBuffer(const std::string &buffer, uint64_t insertion);
 
     bool GetCanInsertDtmf();
@@ -52,15 +56,14 @@ namespace python_webrtc {
   private:
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::DtmfSenderInterface> _dtmf;
-    std::mutex _mutex;
-    std::function<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>()> _transceiver;
-
-    // the observer registration posted by the constructor
-    AliveGuard _alive;
+    LockedFunction<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>()> _transceiver;
 
     std::mutex _bufferMutex;
     std::optional<std::string> _surfacedBuffer;
     uint64_t _insertions = 0;
+
+    // see AliveGuard
+    AliveGuard _alive;
   };
 
 } // namespace python_webrtc

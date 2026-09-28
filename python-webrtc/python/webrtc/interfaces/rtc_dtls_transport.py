@@ -7,7 +7,7 @@
 
 from typing import TYPE_CHECKING, List
 
-from webrtc import WebRTCObject, wrtc
+from webrtc import RTCErrorEvent, WebRTCObject, wrtc
 from webrtc.utils.events import EventTarget
 
 if TYPE_CHECKING:
@@ -30,13 +30,13 @@ class RTCDtlsTransport(WebRTCObject, EventTarget):
     def _on_event(self, name: str, *args):
         # the state changes along with its event
         if name == 'statechange':
-            self._native_obj._surface(args[0])
+            (state,) = args
+            self._native_obj._surfaceState(state)
 
     def _create_event(self, name: str, *args):
         if name == 'error':
-            from webrtc import RTCErrorEvent
-
-            return RTCErrorEvent(name, args[0].to_python(), target=self)
+            (error,) = args
+            return RTCErrorEvent(name, error.toPython(), target=self)
         return super()._create_event(name, *args)
 
     @property

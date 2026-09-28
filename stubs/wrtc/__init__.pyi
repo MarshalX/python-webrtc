@@ -1,12 +1,10 @@
 from __future__ import annotations
 import collections.abc
 import typing
-__all__: list[str] = ['CallbackPythonWebRTCException', 'ConfigurationInit', 'CricketIceGatheringState', 'DataChannelMessage', 'DtlsTransportState', 'IceCandidateInit', 'IceServerInit', 'MediaStream', 'MediaStreamSourceState', 'MediaStreamTrack', 'MediaStreamTrackState', 'MediaType', 'NativeDegradationPreference', 'NativePriority', 'PeerConnectionFactory', 'PythonWebRTCException', 'PythonWebRTCExceptionBase', 'RTCAudioSource', 'RTCBundlePolicy', 'RTCCallbackException', 'RTCCertificate', 'RTCDTMFSender', 'RTCDataChannel', 'RTCDataChannelState', 'RTCDtlsTransport', 'RTCIceComponent', 'RTCIceConnectionState', 'RTCIceGatheringState', 'RTCIceRole', 'RTCIceTransport', 'RTCIceTransportPolicy', 'RTCIceTransportState', 'RTCOnDataEvent', 'RTCPeerConnection', 'RTCPeerConnectionState', 'RTCRtcpMuxPolicy', 'RTCRtpHeaderEncryptionPolicy', 'RTCRtpReceiver', 'RTCRtpSender', 'RTCRtpTransceiver', 'RTCSctpTransport', 'RTCSdpType', 'RTCSessionDescription', 'RTCSessionDescriptionInit', 'RTCSignalingState', 'RTCVideoSource', 'RtcpParameters', 'RtpCapabilities', 'RtpCodec', 'RtpCodecCapability', 'RtpCodecParameters', 'RtpEncodingParameters', 'RtpExtension', 'RtpHeaderExtensionCapability', 'RtpParameters', 'RtpTransceiverInit', 'SctpTransportState', 'SdpParseException', 'TransceiverDirection', 'answer', 'audio', 'checking', 'closed', 'complete', 'completed', 'connected', 'connecting', 'controlled', 'controlling', 'data', 'disconnected', 'ended', 'failed', 'gathering', 'getUserMedia', 'have_local_offer', 'have_local_pranswer', 'have_remote_offer', 'have_remote_pranswer', 'inactive', 'initializing', 'live', 'max', 'muted', 'new', 'offer', 'ping', 'pranswer', 'recvonly', 'rollback', 'rtcp', 'rtp', 'sendonly', 'sendrecv', 'stable', 'stopped', 'unknown', 'unsupported', 'video']
-class CallbackPythonWebRTCException:
-    def what(self) -> str:
-        ...
-class RTCCallbackException(CallbackPythonWebRTCException):
-    def to_python(self) -> typing.Any:
+import webrtc.enums
+__all__: list[str] = ['ConfigurationInit', 'DataChannelMessage', 'IceCandidateInit', 'IceServerInit', 'MediaStream', 'MediaStreamTrack', 'PeerConnectionFactory', 'PythonWebRTCException', 'PythonWebRTCExceptionBase', 'RTCAudioSource', 'RTCCallbackException', 'RTCCertificate', 'RTCDTMFSender', 'RTCDataChannel', 'RTCDtlsTransport', 'RTCIceTransport', 'RTCOnDataEvent', 'RTCPeerConnection', 'RTCRtpReceiver', 'RTCRtpSender', 'RTCRtpTransceiver', 'RTCSctpTransport', 'RTCSessionDescription', 'RTCSessionDescriptionInit', 'RTCVideoSource', 'RtcpParameters', 'RtpCapabilities', 'RtpCodec', 'RtpCodecCapability', 'RtpCodecParameters', 'RtpEncodingParameters', 'RtpExtension', 'RtpHeaderExtensionCapability', 'RtpParameters', 'RtpTransceiverInit', 'SdpParseException', 'getUserMedia', 'ping']
+class RTCCallbackException:
+    def toPython(self) -> typing.Any:
         ...
 class PythonWebRTCExceptionBase(Exception):
     pass
@@ -14,841 +12,10 @@ class PythonWebRTCException(PythonWebRTCExceptionBase):
     pass
 class SdpParseException(PythonWebRTCExceptionBase):
     pass
-class RTCPeerConnectionState:
-    """
-    Members:
-    
-      new
-    
-      connecting
-    
-      connected
-    
-      disconnected
-    
-      failed
-    
-      closed
-    """
-    __members__: typing.ClassVar[dict[str, RTCPeerConnectionState]]
-    closed: typing.ClassVar[RTCPeerConnectionState]
-    connected: typing.ClassVar[RTCPeerConnectionState]
-    connecting: typing.ClassVar[RTCPeerConnectionState]
-    disconnected: typing.ClassVar[RTCPeerConnectionState]
-    failed: typing.ClassVar[RTCPeerConnectionState]
-    new: typing.ClassVar[RTCPeerConnectionState]
-    @typing.overload
-    def __eq__(self, other: RTCPeerConnectionState) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: RTCPeerConnectionState) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class RTCSignalingState:
-    """
-    Members:
-    
-      stable
-    
-      have_local_offer
-    
-      have_local_pranswer
-    
-      have_remote_offer
-    
-      have_remote_pranswer
-    
-      closed
-    """
-    __members__: typing.ClassVar[dict[str, RTCSignalingState]]
-    closed: typing.ClassVar[RTCSignalingState]
-    have_local_offer: typing.ClassVar[RTCSignalingState]
-    have_local_pranswer: typing.ClassVar[RTCSignalingState]
-    have_remote_offer: typing.ClassVar[RTCSignalingState]
-    have_remote_pranswer: typing.ClassVar[RTCSignalingState]
-    stable: typing.ClassVar[RTCSignalingState]
-    @typing.overload
-    def __eq__(self, other: RTCSignalingState) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: RTCSignalingState) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class RTCIceConnectionState:
-    """
-    Members:
-    
-      new
-    
-      checking
-    
-      connected
-    
-      completed
-    
-      failed
-    
-      disconnected
-    
-      closed
-    
-      max
-    """
-    __members__: typing.ClassVar[dict[str, RTCIceConnectionState]]
-    checking: typing.ClassVar[RTCIceConnectionState]
-    closed: typing.ClassVar[RTCIceConnectionState]
-    completed: typing.ClassVar[RTCIceConnectionState]
-    connected: typing.ClassVar[RTCIceConnectionState]
-    disconnected: typing.ClassVar[RTCIceConnectionState]
-    failed: typing.ClassVar[RTCIceConnectionState]
-    max: typing.ClassVar[RTCIceConnectionState]
-    new: typing.ClassVar[RTCIceConnectionState]
-    @typing.overload
-    def __eq__(self, other: RTCIceConnectionState) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: RTCIceConnectionState) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class RTCIceGatheringState:
-    """
-    Members:
-    
-      new
-    
-      gathering
-    
-      complete
-    """
-    __members__: typing.ClassVar[dict[str, RTCIceGatheringState]]
-    complete: typing.ClassVar[RTCIceGatheringState]
-    gathering: typing.ClassVar[RTCIceGatheringState]
-    new: typing.ClassVar[RTCIceGatheringState]
-    @typing.overload
-    def __eq__(self, other: RTCIceGatheringState) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: RTCIceGatheringState) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class RTCSdpType:
-    """
-    Members:
-    
-      offer
-    
-      pranswer
-    
-      answer
-    
-      rollback
-    """
-    __members__: typing.ClassVar[dict[str, RTCSdpType]]
-    answer: typing.ClassVar[RTCSdpType]
-    offer: typing.ClassVar[RTCSdpType]
-    pranswer: typing.ClassVar[RTCSdpType]
-    rollback: typing.ClassVar[RTCSdpType]
-    @typing.overload
-    def __eq__(self, other: RTCSdpType) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: RTCSdpType) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class MediaStreamTrackState:
-    """
-    Members:
-    
-      live
-    
-      ended
-    """
-    __members__: typing.ClassVar[dict[str, MediaStreamTrackState]]
-    ended: typing.ClassVar[MediaStreamTrackState]
-    live: typing.ClassVar[MediaStreamTrackState]
-    @typing.overload
-    def __eq__(self, other: MediaStreamTrackState) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: MediaStreamTrackState) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class MediaStreamSourceState:
-    """
-    Members:
-    
-      initializing
-    
-      live
-    
-      ended
-    
-      muted
-    """
-    __members__: typing.ClassVar[dict[str, MediaStreamSourceState]]
-    ended: typing.ClassVar[MediaStreamSourceState]
-    initializing: typing.ClassVar[MediaStreamSourceState]
-    live: typing.ClassVar[MediaStreamSourceState]
-    muted: typing.ClassVar[MediaStreamSourceState]
-    @typing.overload
-    def __eq__(self, other: MediaStreamSourceState) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: MediaStreamSourceState) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class MediaType:
-    """
-    Members:
-    
-      audio
-    
-      video
-    
-      data
-    
-      unsupported
-    """
-    __members__: typing.ClassVar[dict[str, MediaType]]
-    audio: typing.ClassVar[MediaType]
-    data: typing.ClassVar[MediaType]
-    unsupported: typing.ClassVar[MediaType]
-    video: typing.ClassVar[MediaType]
-    @typing.overload
-    def __eq__(self, other: MediaType) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: MediaType) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class TransceiverDirection:
-    """
-    Members:
-    
-      sendrecv
-    
-      sendonly
-    
-      recvonly
-    
-      inactive
-    
-      stopped
-    """
-    __members__: typing.ClassVar[dict[str, TransceiverDirection]]
-    inactive: typing.ClassVar[TransceiverDirection]
-    recvonly: typing.ClassVar[TransceiverDirection]
-    sendonly: typing.ClassVar[TransceiverDirection]
-    sendrecv: typing.ClassVar[TransceiverDirection]
-    stopped: typing.ClassVar[TransceiverDirection]
-    @typing.overload
-    def __eq__(self, other: TransceiverDirection) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: TransceiverDirection) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class CricketIceGatheringState:
-    """
-    Members:
-    
-      new
-    
-      gathering
-    
-      complete
-    """
-    __members__: typing.ClassVar[dict[str, CricketIceGatheringState]]
-    complete: typing.ClassVar[CricketIceGatheringState]
-    gathering: typing.ClassVar[CricketIceGatheringState]
-    new: typing.ClassVar[CricketIceGatheringState]
-    @typing.overload
-    def __eq__(self, other: CricketIceGatheringState) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: CricketIceGatheringState) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class RTCIceRole:
-    """
-    Members:
-    
-      controlling
-    
-      controlled
-    
-      unknown
-    """
-    __members__: typing.ClassVar[dict[str, RTCIceRole]]
-    controlled: typing.ClassVar[RTCIceRole]
-    controlling: typing.ClassVar[RTCIceRole]
-    unknown: typing.ClassVar[RTCIceRole]
-    @typing.overload
-    def __eq__(self, other: RTCIceRole) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: RTCIceRole) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class RTCIceTransportState:
-    """
-    Members:
-    
-      new
-    
-      checking
-    
-      connected
-    
-      completed
-    
-      disconnected
-    
-      failed
-    
-      closed
-    """
-    __members__: typing.ClassVar[dict[str, RTCIceTransportState]]
-    checking: typing.ClassVar[RTCIceTransportState]
-    closed: typing.ClassVar[RTCIceTransportState]
-    completed: typing.ClassVar[RTCIceTransportState]
-    connected: typing.ClassVar[RTCIceTransportState]
-    disconnected: typing.ClassVar[RTCIceTransportState]
-    failed: typing.ClassVar[RTCIceTransportState]
-    new: typing.ClassVar[RTCIceTransportState]
-    @typing.overload
-    def __eq__(self, other: RTCIceTransportState) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: RTCIceTransportState) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class DtlsTransportState:
-    """
-    Members:
-    
-      new
-    
-      connecting
-    
-      connected
-    
-      closed
-    
-      failed
-    """
-    __members__: typing.ClassVar[dict[str, DtlsTransportState]]
-    closed: typing.ClassVar[DtlsTransportState]
-    connected: typing.ClassVar[DtlsTransportState]
-    connecting: typing.ClassVar[DtlsTransportState]
-    failed: typing.ClassVar[DtlsTransportState]
-    new: typing.ClassVar[DtlsTransportState]
-    @typing.overload
-    def __eq__(self, other: DtlsTransportState) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: DtlsTransportState) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class SctpTransportState:
-    """
-    Members:
-    
-      new
-    
-      connecting
-    
-      connected
-    
-      closed
-    """
-    __members__: typing.ClassVar[dict[str, SctpTransportState]]
-    closed: typing.ClassVar[SctpTransportState]
-    connected: typing.ClassVar[SctpTransportState]
-    connecting: typing.ClassVar[SctpTransportState]
-    new: typing.ClassVar[SctpTransportState]
-    @typing.overload
-    def __eq__(self, other: SctpTransportState) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: SctpTransportState) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class RTCIceComponent:
-    """
-    Members:
-    
-      rtp
-    
-      rtcp
-    """
-    __members__: typing.ClassVar[dict[str, RTCIceComponent]]
-    rtcp: typing.ClassVar[RTCIceComponent]
-    rtp: typing.ClassVar[RTCIceComponent]
-    @typing.overload
-    def __eq__(self, other: RTCIceComponent) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: RTCIceComponent) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
 class RTCSessionDescriptionInit:
     sdp: str
-    type: RTCSdpType
-    def __init__(self, arg0: RTCSdpType, arg1: str) -> None:
+    type: webrtc.enums.RTCSdpType
+    def __init__(self, arg0: webrtc.enums.RTCSdpType, arg1: str) -> None:
         ...
 class RTCSessionDescription:
     def __init__(self, arg0: RTCSessionDescriptionInit) -> None:
@@ -860,7 +27,7 @@ class RTCSessionDescription:
     def sdp(self) -> str:
         ...
     @property
-    def type(self) -> RTCSdpType:
+    def type(self) -> webrtc.enums.RTCSdpType:
         ...
 class RTCOnDataEvent:
     audioData: bytes
@@ -895,210 +62,12 @@ class IceCandidateInit:
         ...
 class RTCCertificate:
     @staticmethod
-    def generate(arg0: str, arg1: typing.SupportsInt | typing.SupportsIndex, arg2: typing.SupportsInt | typing.SupportsIndex, arg3: typing.SupportsInt | typing.SupportsIndex | None) -> RTCCertificate:
+    def generate(keyType: str, modulusLength: typing.SupportsInt | typing.SupportsIndex, publicExponent: typing.SupportsInt | typing.SupportsIndex, expires: typing.SupportsInt | typing.SupportsIndex | None) -> RTCCertificate:
         ...
     def fingerprints(self) -> list[tuple[str, str]]:
         ...
     @property
     def expires(self) -> int:
-        ...
-class RTCIceTransportPolicy:
-    """
-    Members:
-    
-      all
-    
-      relay
-    """
-    __members__: typing.ClassVar[dict[str, RTCIceTransportPolicy]]
-    all: typing.ClassVar[RTCIceTransportPolicy]
-    relay: typing.ClassVar[RTCIceTransportPolicy]
-    @typing.overload
-    def __eq__(self, other: RTCIceTransportPolicy) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: RTCIceTransportPolicy) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class RTCBundlePolicy:
-    """
-    Members:
-    
-      balanced
-    
-      max_compat
-    
-      max_bundle
-    """
-    __members__: typing.ClassVar[dict[str, RTCBundlePolicy]]
-    balanced: typing.ClassVar[RTCBundlePolicy]
-    max_bundle: typing.ClassVar[RTCBundlePolicy]
-    max_compat: typing.ClassVar[RTCBundlePolicy]
-    @typing.overload
-    def __eq__(self, other: RTCBundlePolicy) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: RTCBundlePolicy) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class RTCRtcpMuxPolicy:
-    """
-    Members:
-    
-      require
-    """
-    __members__: typing.ClassVar[dict[str, RTCRtcpMuxPolicy]]
-    require: typing.ClassVar[RTCRtcpMuxPolicy]
-    @typing.overload
-    def __eq__(self, other: RTCRtcpMuxPolicy) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: RTCRtcpMuxPolicy) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class RTCRtpHeaderEncryptionPolicy:
-    """
-    Members:
-    
-      negotiate
-    
-      require
-    """
-    __members__: typing.ClassVar[dict[str, RTCRtpHeaderEncryptionPolicy]]
-    negotiate: typing.ClassVar[RTCRtpHeaderEncryptionPolicy]
-    require: typing.ClassVar[RTCRtpHeaderEncryptionPolicy]
-    @typing.overload
-    def __eq__(self, other: RTCRtpHeaderEncryptionPolicy) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: RTCRtpHeaderEncryptionPolicy) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
         ...
 class IceServerInit:
     credential: str | None
@@ -1113,10 +82,10 @@ class IceServerInit:
         ...
 class ConfigurationInit:
     alwaysNegotiateDataChannels: bool
-    bundlePolicy: RTCBundlePolicy
-    iceTransportPolicy: RTCIceTransportPolicy
-    rtcpMuxPolicy: RTCRtcpMuxPolicy
-    rtpHeaderEncryptionPolicy: RTCRtpHeaderEncryptionPolicy
+    bundlePolicy: webrtc.enums.RTCBundlePolicy
+    iceTransportPolicy: webrtc.enums.RTCIceTransportPolicy
+    rtcpMuxPolicy: webrtc.enums.RTCRtcpMuxPolicy
+    rtpHeaderEncryptionPolicy: webrtc.enums.RTCRtpHeaderEncryptionPolicy
     def __init__(self) -> None:
         ...
     @property
@@ -1143,110 +112,8 @@ class ConfigurationInit:
     @portRange.setter
     def portRange(self, arg0: tuple[typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex] | None) -> None:
         ...
-class NativePriority:
-    """
-    Members:
-    
-      very_low
-    
-      low
-    
-      medium
-    
-      high
-    """
-    __members__: typing.ClassVar[dict[str, NativePriority]]
-    high: typing.ClassVar[NativePriority]
-    low: typing.ClassVar[NativePriority]
-    medium: typing.ClassVar[NativePriority]
-    very_low: typing.ClassVar[NativePriority]
-    @typing.overload
-    def __eq__(self, other: NativePriority) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: NativePriority) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class NativeDegradationPreference:
-    """
-    Members:
-    
-      maintain_framerate_and_resolution
-    
-      maintain_framerate
-    
-      maintain_resolution
-    
-      balanced
-    """
-    __members__: typing.ClassVar[dict[str, NativeDegradationPreference]]
-    balanced: typing.ClassVar[NativeDegradationPreference]
-    maintain_framerate: typing.ClassVar[NativeDegradationPreference]
-    maintain_framerate_and_resolution: typing.ClassVar[NativeDegradationPreference]
-    maintain_resolution: typing.ClassVar[NativeDegradationPreference]
-    @typing.overload
-    def __eq__(self, other: NativeDegradationPreference) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: NativeDegradationPreference) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
 class RtpCodec:
-    kind: MediaType
+    kind: webrtc.enums.MediaType
     name: str
     def __init__(self) -> None:
         ...
@@ -1301,7 +168,7 @@ class RtpExtension:
     def id(self, arg1: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...
 class RtpHeaderExtensionCapability:
-    direction: TransceiverDirection
+    direction: webrtc.enums.TransceiverDirection
     uri: str
     def __init__(self) -> None:
         ...
@@ -1320,7 +187,7 @@ class RtpEncodingParameters:
     active: bool
     adaptivePtime: bool
     codec: RtpCodec | None
-    networkPriority: NativePriority
+    networkPriority: webrtc.enums.RTCPriorityType
     requestKeyFrame: bool
     rid: str
     scalabilityMode: str | None
@@ -1357,7 +224,7 @@ class RtpEncodingParameters:
     def ssrc(self, arg0: typing.SupportsInt | typing.SupportsIndex | None) -> None:
         ...
 class RtpParameters:
-    degradationPreference: NativeDegradationPreference | None
+    degradationPreference: webrtc.enums.RTCDegradationPreference | None
     mid: str
     rtcp: RtcpParameters
     transactionId: str
@@ -1397,7 +264,7 @@ class RtpCapabilities:
     def headerExtensions(self, arg0: collections.abc.Sequence[RtpHeaderExtensionCapability]) -> None:
         ...
 class RtpTransceiverInit:
-    direction: TransceiverDirection
+    direction: webrtc.enums.TransceiverDirection
     def __init__(self) -> None:
         ...
     @property
@@ -1424,9 +291,9 @@ class PeerConnectionFactory:
 class MediaStreamTrack:
     _listeners: typing.Any
     enabled: bool
-    def _surface(self, arg0: bool) -> None:
-        ...
     def _surfaceEnded(self) -> None:
+        ...
+    def _surfaceMuted(self, muted: bool) -> None:
         ...
     def clone(self) -> MediaStreamTrack:
         ...
@@ -1439,7 +306,7 @@ class MediaStreamTrack:
     def id(self) -> str:
         ...
     @property
-    def kind(self) -> MediaType:
+    def kind(self) -> webrtc.enums.MediaType:
         ...
     @property
     def label(self) -> str:
@@ -1448,26 +315,26 @@ class MediaStreamTrack:
     def muted(self) -> bool:
         ...
     @property
-    def readyState(self) -> MediaStreamTrackState:
+    def readyState(self) -> webrtc.enums.MediaStreamTrackState:
         ...
 class MediaStream:
     _listeners: typing.Any
     @staticmethod
-    def create(arg0: collections.abc.Sequence[MediaStreamTrack]) -> MediaStream:
+    def create(tracks: collections.abc.Sequence[MediaStreamTrack]) -> MediaStream:
         ...
-    def addTrack(self, arg0: MediaStreamTrack) -> None:
+    def addTrack(self, track: MediaStreamTrack) -> None:
         ...
     def clone(self) -> MediaStream:
         ...
     def getAudioTracks(self) -> list[MediaStreamTrack]:
         ...
-    def getTrackById(self, arg0: str) -> MediaStreamTrack | None:
+    def getTrackById(self, id: str) -> MediaStreamTrack | None:
         ...
     def getTracks(self) -> list[MediaStreamTrack]:
         ...
     def getVideoTracks(self) -> list[MediaStreamTrack]:
         ...
-    def removeTrack(self, arg0: MediaStreamTrack) -> None:
+    def removeTrack(self, track: MediaStreamTrack) -> None:
         ...
     @property
     def active(self) -> bool:
@@ -1479,13 +346,15 @@ class RTCIceTransport:
     _listeners: typing.Any
     def __init__(self) -> None:
         ...
-    def _surface(self, arg0: str, arg1: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
     def _surfaceCandidate(self) -> None:
         ...
-    def addRemoteCandidate(self, arg0: str, arg1: str, arg2: typing.SupportsInt | typing.SupportsIndex, arg3: str | None) -> None:
+    def _surfaceGatheringState(self, state: webrtc.enums.CricketIceGatheringState) -> None:
         ...
-    def gather(self, arg0: bool, arg1: collections.abc.Sequence[IceServerInit]) -> None:
+    def _surfaceState(self, state: webrtc.enums.RTCIceTransportState) -> None:
+        ...
+    def addRemoteCandidate(self, candidate: str, sdpMid: str, sdpMLineIndex: typing.SupportsInt | typing.SupportsIndex, usernameFragment: str | None) -> None:
+        ...
+    def gather(self, policy: webrtc.enums.RTCIceTransportPolicy, iceServers: collections.abc.Sequence[IceServerInit]) -> None:
         ...
     def getLocalCandidates(self) -> list[IceCandidateInit]:
         ...
@@ -1495,9 +364,9 @@ class RTCIceTransport:
         ...
     def getRemoteParameters(self) -> tuple[str, str] | None:
         ...
-    def getSelectedCandidatePair(self) -> tuple[IceCandidateInit, IceCandidateInit] | None:
+    def getSelectedCandidatePair(self) -> tuple[IceCandidateInit, IceCandidateInit, bool] | None:
         ...
-    def start(self, arg0: str, arg1: str, arg2: RTCIceRole) -> None:
+    def start(self, usernameFragment: str, password: str, role: webrtc.enums.RTCIceRole) -> None:
         ...
     def stop(self) -> None:
         ...
@@ -1505,20 +374,20 @@ class RTCIceTransport:
     def _standalone(self) -> bool:
         ...
     @property
-    def component(self) -> RTCIceComponent:
+    def component(self) -> webrtc.enums.RTCIceComponent:
         ...
     @property
-    def gatheringState(self) -> CricketIceGatheringState:
+    def gatheringState(self) -> webrtc.enums.CricketIceGatheringState:
         ...
     @property
-    def role(self) -> RTCIceRole:
+    def role(self) -> webrtc.enums.RTCIceRole:
         ...
     @property
-    def state(self) -> RTCIceTransportState:
+    def state(self) -> webrtc.enums.RTCIceTransportState:
         ...
 class RTCDtlsTransport:
     _listeners: typing.Any
-    def _surface(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
+    def _surfaceState(self, state: webrtc.enums.DtlsTransportState) -> None:
         ...
     def getRemoteCertificates(self) -> list:
         ...
@@ -1526,11 +395,11 @@ class RTCDtlsTransport:
     def iceTransport(self) -> RTCIceTransport:
         ...
     @property
-    def state(self) -> DtlsTransportState:
+    def state(self) -> webrtc.enums.DtlsTransportState:
         ...
 class RTCSctpTransport:
     _listeners: typing.Any
-    def _surface(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
+    def _surfaceState(self, state: webrtc.enums.SctpTransportState) -> None:
         ...
     @property
     def maxChannels(self) -> int | None:
@@ -1539,16 +408,16 @@ class RTCSctpTransport:
     def maxMessageSize(self) -> float | None:
         ...
     @property
-    def state(self) -> SctpTransportState:
+    def state(self) -> webrtc.enums.SctpTransportState:
         ...
     @property
     def transport(self) -> RTCDtlsTransport:
         ...
 class RTCDTMFSender:
     _listeners: typing.Any
-    def _surfaceBuffer(self, arg0: str, arg1: typing.SupportsInt | typing.SupportsIndex) -> None:
+    def _surfaceBuffer(self, buffer: str, insertion: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...
-    def insertDTMF(self, arg0: str, arg1: typing.SupportsInt | typing.SupportsIndex, arg2: typing.SupportsInt | typing.SupportsIndex) -> None:
+    def insertDTMF(self, tones: str, duration: typing.SupportsInt | typing.SupportsIndex, interToneGap: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...
     @property
     def canInsertDTMF(self) -> bool:
@@ -1558,7 +427,7 @@ class RTCDTMFSender:
         ...
 class RTCRtpSender:
     @staticmethod
-    def getCapabilities(arg0: str) -> RtpCapabilities | None:
+    def getCapabilities(kind: str) -> RtpCapabilities | None:
         ...
     def _expireParameters(self, transactionId: str | None = None) -> None:
         ...
@@ -1568,24 +437,21 @@ class RTCRtpSender:
         ...
     def getParameters(self) -> RtpParameters:
         ...
-    def getStats(self, arg0: collections.abc.Callable[[str], None], arg1: collections.abc.Callable[[RTCCallbackException], None]) -> None:
+    def getStats(self, onSuccess: collections.abc.Callable[[str], None], onFailure: collections.abc.Callable[[RTCCallbackException], None]) -> None:
         ...
     def getStreamIds(self) -> list[str]:
         ...
-    def replaceTrack(self, arg0: MediaStreamTrack | None) -> bool:
+    def replaceTrack(self, track: MediaStreamTrack | None) -> bool:
         ...
-    def setParameters(self, arg0: collections.abc.Callable[[], None], arg1: collections.abc.Callable[[RTCCallbackException], None], arg2: RtpParameters) -> None:
+    def setParameters(self, onSuccess: collections.abc.Callable[[], None], onFailure: collections.abc.Callable[[RTCCallbackException], None], parameters: RtpParameters) -> None:
         ...
-    def setStreams(self, arg0: collections.abc.Sequence[str]) -> None:
-        ...
-    @property
-    def _connection(self) -> ...:
+    def setStreams(self, streamIds: collections.abc.Sequence[str]) -> None:
         ...
     @property
     def dtmf(self) -> RTCDTMFSender:
         ...
     @property
-    def kind(self) -> MediaType:
+    def kind(self) -> webrtc.enums.MediaType:
         ...
     @property
     def track(self) -> MediaStreamTrack | None:
@@ -1595,13 +461,13 @@ class RTCRtpSender:
         ...
 class RTCRtpReceiver:
     @staticmethod
-    def getCapabilities(arg0: str) -> RtpCapabilities | None:
+    def getCapabilities(kind: str) -> RtpCapabilities | None:
         ...
     def _getSources(self) -> list[tuple[bool, int, float, int, int | None]]:
         ...
     def getParameters(self) -> RtpParameters:
         ...
-    def getStats(self, arg0: collections.abc.Callable[[str], None], arg1: collections.abc.Callable[[RTCCallbackException], None]) -> None:
+    def getStats(self, onSuccess: collections.abc.Callable[[str], None], onFailure: collections.abc.Callable[[RTCCallbackException], None]) -> None:
         ...
     @property
     def jitterBufferTarget(self) -> float | None:
@@ -1616,24 +482,24 @@ class RTCRtpReceiver:
     def transport(self) -> RTCDtlsTransport | None:
         ...
 class RTCRtpTransceiver:
-    direction: TransceiverDirection
+    direction: webrtc.enums.TransceiverDirection
     def getCodecPreferences(self) -> list[RtpCodecCapability]:
         ...
     def getHeaderExtensionsToNegotiate(self) -> list[RtpHeaderExtensionCapability]:
         ...
     def getNegotiatedHeaderExtensions(self) -> list[RtpHeaderExtensionCapability]:
         ...
-    def setCodecPreferences(self, arg0: collections.abc.Sequence[RtpCodecCapability]) -> None:
+    def setCodecPreferences(self, codecs: collections.abc.Sequence[RtpCodecCapability]) -> None:
         ...
-    def setHeaderExtensionsToNegotiate(self, arg0: collections.abc.Sequence[RtpHeaderExtensionCapability]) -> None:
+    def setHeaderExtensionsToNegotiate(self, extensions: collections.abc.Sequence[RtpHeaderExtensionCapability]) -> None:
         ...
     def stop(self) -> None:
         ...
     @property
-    def currentDirection(self) -> TransceiverDirection | None:
+    def currentDirection(self) -> webrtc.enums.TransceiverDirection | None:
         ...
     @property
-    def kind(self) -> MediaType:
+    def kind(self) -> webrtc.enums.MediaType:
         ...
     @property
     def mid(self) -> str | None:
@@ -1650,78 +516,21 @@ class RTCRtpTransceiver:
     @property
     def stopping(self) -> bool:
         ...
-class RTCDataChannelState:
-    """
-    Members:
-    
-      connecting
-    
-      open
-    
-      closing
-    
-      closed
-    """
-    __members__: typing.ClassVar[dict[str, RTCDataChannelState]]
-    closed: typing.ClassVar[RTCDataChannelState]
-    closing: typing.ClassVar[RTCDataChannelState]
-    connecting: typing.ClassVar[RTCDataChannelState]
-    open: typing.ClassVar[RTCDataChannelState]
-    @typing.overload
-    def __eq__(self, other: RTCDataChannelState) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __eq__(self, other: typing.Any) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    @typing.overload
-    def __ne__(self, other: RTCDataChannelState) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.SupportsInt | typing.SupportsIndex) -> bool:
-        ...
-    @typing.overload
-    def __ne__(self, other: typing.Any) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
 class DataChannelMessage:
     @property
     def data(self) -> typing.Any:
         ...
 class RTCDataChannel:
     _listeners: typing.Any
-    def _decreaseBufferedAmount(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> bool:
+    def _decreaseBufferedAmount(self, sent: typing.SupportsInt | typing.SupportsIndex) -> bool:
         ...
     def _release(self) -> None:
         ...
-    def _surface(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
+    def _surfaceState(self, state: webrtc.enums.RTCDataChannelState) -> None:
         ...
     def close(self) -> None:
         ...
-    def send(self, arg0: str, arg1: bool) -> None:
+    def send(self, data: str, binary: bool) -> None:
         ...
     @property
     def bufferedAmount(self) -> int:
@@ -1751,47 +560,56 @@ class RTCDataChannel:
     def ordered(self) -> bool:
         ...
     @property
-    def priority(self) -> int:
+    def priority(self) -> webrtc.enums.RTCPriorityType:
         ...
     @property
     def protocol(self) -> str:
         ...
     @property
-    def readyState(self) -> RTCDataChannelState:
+    def readyState(self) -> webrtc.enums.RTCDataChannelState:
         ...
 class RTCPeerConnection:
     _listeners: typing.Any
+    @staticmethod
+    def _connectionOf(sender: RTCRtpSender) -> RTCPeerConnection | None:
+        ...
     def __init__(self, arg0: ConfigurationInit | None) -> None:
         ...
     def _applyDescriptions(self, snapshot: typing.SupportsInt | typing.SupportsIndex | None = None) -> None:
         ...
     def _refreshDescriptions(self) -> None:
         ...
-    def _shouldFireNegotiationNeededEvent(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> bool:
+    def _shouldFireNegotiationNeededEvent(self, eventId: typing.SupportsInt | typing.SupportsIndex) -> bool:
         ...
-    def _surface(self, arg0: str, arg1: typing.SupportsInt | typing.SupportsIndex) -> None:
+    def _surfaceConnectionState(self, state: webrtc.enums.RTCPeerConnectionState) -> None:
         ...
-    def addIceCandidate(self, arg0: collections.abc.Callable[[], None], arg1: collections.abc.Callable[[RTCCallbackException], None], arg2: str, arg3: str | None, arg4: typing.SupportsInt | typing.SupportsIndex | None, arg5: str | None) -> None:
+    def _surfaceIceConnectionState(self, state: webrtc.enums.RTCIceConnectionState) -> None:
         ...
-    @typing.overload
-    def addTrack(self, arg0: MediaStreamTrack, arg1: MediaStream | None) -> RTCRtpSender:
+    def _surfaceIceGatheringState(self, state: webrtc.enums.RTCIceGatheringState) -> None:
         ...
-    @typing.overload
-    def addTrack(self, arg0: MediaStreamTrack, arg1: collections.abc.Sequence[MediaStream]) -> RTCRtpSender:
+    def _surfaceSignalingState(self, state: webrtc.enums.RTCSignalingState) -> None:
         ...
-    @typing.overload
-    def addTransceiver(self, arg0: MediaType, arg1: RtpTransceiverInit | None) -> RTCRtpTransceiver:
+    def addIceCandidate(self, onSuccess: collections.abc.Callable[[], None], onFailure: collections.abc.Callable[[RTCCallbackException], None], candidate: str, sdpMid: str | None, sdpMLineIndex: typing.SupportsInt | typing.SupportsIndex | None, usernameFragment: str | None) -> None:
         ...
     @typing.overload
-    def addTransceiver(self, arg0: MediaStreamTrack, arg1: RtpTransceiverInit | None) -> RTCRtpTransceiver:
+    def addTrack(self, track: MediaStreamTrack, stream: MediaStream | None) -> RTCRtpSender:
+        ...
+    @typing.overload
+    def addTrack(self, track: MediaStreamTrack, streams: collections.abc.Sequence[MediaStream]) -> RTCRtpSender:
+        ...
+    @typing.overload
+    def addTransceiver(self, kind: webrtc.enums.MediaType, init: RtpTransceiverInit | None) -> RTCRtpTransceiver:
+        ...
+    @typing.overload
+    def addTransceiver(self, track: MediaStreamTrack, init: RtpTransceiverInit | None) -> RTCRtpTransceiver:
         ...
     def close(self) -> None:
         ...
-    def createAnswer(self, arg0: collections.abc.Callable[[RTCSessionDescription], None], arg1: collections.abc.Callable[[RTCCallbackException], None], arg2: bool) -> None:
+    def createAnswer(self, onSuccess: collections.abc.Callable[[RTCSessionDescription], None], onFailure: collections.abc.Callable[[RTCCallbackException], None], voiceActivityDetection: bool) -> None:
         ...
-    def createDataChannel(self, arg0: str, arg1: bool, arg2: typing.SupportsInt | typing.SupportsIndex | None, arg3: typing.SupportsInt | typing.SupportsIndex | None, arg4: str, arg5: bool, arg6: typing.SupportsInt | typing.SupportsIndex | None, arg7: typing.SupportsInt | typing.SupportsIndex | None) -> RTCDataChannel:
+    def createDataChannel(self, label: str, ordered: bool, maxPacketLifeTime: typing.SupportsInt | typing.SupportsIndex | None, maxRetransmits: typing.SupportsInt | typing.SupportsIndex | None, protocol: str, negotiated: bool, id: typing.SupportsInt | typing.SupportsIndex | None, priority: webrtc.enums.RTCPriorityType) -> RTCDataChannel:
         ...
-    def createOffer(self, arg0: collections.abc.Callable[[RTCSessionDescription], None], arg1: collections.abc.Callable[[RTCCallbackException], None], arg2: bool, arg3: bool | None, arg4: bool | None, arg5: bool) -> None:
+    def createOffer(self, onSuccess: collections.abc.Callable[[RTCSessionDescription], None], onFailure: collections.abc.Callable[[RTCCallbackException], None], iceRestart: bool, voiceActivityDetection: bool) -> None:
         ...
     def getConfiguration(self) -> ConfigurationInit:
         ...
@@ -1799,25 +617,25 @@ class RTCPeerConnection:
         ...
     def getSenders(self) -> list[RTCRtpSender]:
         ...
-    def getStats(self, arg0: collections.abc.Callable[[str], None], arg1: collections.abc.Callable[[RTCCallbackException], None]) -> None:
+    def getStats(self, onSuccess: collections.abc.Callable[[str], None], onFailure: collections.abc.Callable[[RTCCallbackException], None]) -> None:
         ...
     def getTransceivers(self) -> list[RTCRtpTransceiver]:
         ...
-    def removeTrack(self, arg0: RTCRtpSender) -> None:
+    def removeTrack(self, sender: RTCRtpSender) -> None:
         ...
     def restartIce(self) -> None:
         ...
-    def setConfiguration(self, arg0: ConfigurationInit) -> None:
+    def setConfiguration(self, configuration: ConfigurationInit) -> None:
         ...
-    def setLocalDescription(self, arg0: collections.abc.Callable[[], None], arg1: collections.abc.Callable[[RTCCallbackException], None], arg2: RTCSessionDescriptionInit | None) -> None:
+    def setLocalDescription(self, onSuccess: collections.abc.Callable[[], None], onFailure: collections.abc.Callable[[RTCCallbackException], None], description: RTCSessionDescriptionInit | None) -> None:
         ...
-    def setRemoteDescription(self, arg0: collections.abc.Callable[[], None], arg1: collections.abc.Callable[[RTCCallbackException], None], arg2: RTCSessionDescriptionInit) -> None:
+    def setRemoteDescription(self, onSuccess: collections.abc.Callable[[], None], onFailure: collections.abc.Callable[[RTCCallbackException], None], description: RTCSessionDescriptionInit) -> None:
         ...
     @property
     def canTrickleIceCandidates(self) -> bool | None:
         ...
     @property
-    def connectionState(self) -> RTCPeerConnectionState:
+    def connectionState(self) -> webrtc.enums.RTCPeerConnectionState:
         ...
     @property
     def currentLocalDescription(self) -> RTCSessionDescription:
@@ -1826,10 +644,10 @@ class RTCPeerConnection:
     def currentRemoteDescription(self) -> RTCSessionDescription:
         ...
     @property
-    def iceConnectionState(self) -> RTCIceConnectionState:
+    def iceConnectionState(self) -> webrtc.enums.RTCIceConnectionState:
         ...
     @property
-    def iceGatheringState(self) -> RTCIceGatheringState:
+    def iceGatheringState(self) -> webrtc.enums.RTCIceGatheringState:
         ...
     @property
     def localDescription(self) -> RTCSessionDescription:
@@ -1847,7 +665,7 @@ class RTCPeerConnection:
     def sctp(self) -> RTCSctpTransport | None:
         ...
     @property
-    def signalingState(self) -> RTCSignalingState:
+    def signalingState(self) -> webrtc.enums.RTCSignalingState:
         ...
 class RTCAudioSource:
     def __init__(self) -> None:
@@ -1857,11 +675,11 @@ class RTCAudioSource:
     def onData(self, arg0: RTCOnDataEvent) -> None:
         ...
 class RTCVideoSource:
-    def __init__(self, arg0: bool, arg1: bool | None) -> None:
+    def __init__(self, isScreencast: bool, needsDenoising: bool | None) -> None:
         ...
     def createTrack(self) -> MediaStreamTrack:
         ...
-    def onFrame(self, arg0: typing.SupportsInt | typing.SupportsIndex, arg1: typing.SupportsInt | typing.SupportsIndex, arg2: str, arg3: typing.SupportsInt | typing.SupportsIndex, arg4: typing.SupportsInt | typing.SupportsIndex | None) -> None:
+    def onFrame(self, width: typing.SupportsInt | typing.SupportsIndex, height: typing.SupportsInt | typing.SupportsIndex, i420: str, rotation: typing.SupportsInt | typing.SupportsIndex, timestampUs: typing.SupportsInt | typing.SupportsIndex | None) -> None:
         ...
     @property
     def isScreencast(self) -> bool:
@@ -1871,45 +689,7 @@ class RTCVideoSource:
         ...
 def _alive_factories() -> int:
     ...
-def getUserMedia(audio: bool = True, video: bool = False, width: typing.SupportsInt | typing.SupportsIndex = 640, height: typing.SupportsInt | typing.SupportsIndex = 480, frameRate: typing.SupportsFloat | typing.SupportsIndex = 30.0) -> MediaStream:
+def getUserMedia(audio: bool, video: bool, width: typing.SupportsInt | typing.SupportsIndex, height: typing.SupportsInt | typing.SupportsIndex, frameRate: typing.SupportsFloat | typing.SupportsIndex) -> MediaStream:
     ...
 def ping() -> None:
     ...
-answer: RTCSdpType
-audio: MediaType
-checking: RTCIceTransportState
-closed: SctpTransportState
-complete: CricketIceGatheringState
-completed: RTCIceTransportState
-connected: SctpTransportState
-connecting: SctpTransportState
-controlled: RTCIceRole
-controlling: RTCIceRole
-data: MediaType
-disconnected: RTCIceTransportState
-ended: MediaStreamSourceState
-failed: DtlsTransportState
-gathering: CricketIceGatheringState
-have_local_offer: RTCSignalingState
-have_local_pranswer: RTCSignalingState
-have_remote_offer: RTCSignalingState
-have_remote_pranswer: RTCSignalingState
-inactive: TransceiverDirection
-initializing: MediaStreamSourceState
-live: MediaStreamSourceState
-max: RTCIceConnectionState
-muted: MediaStreamSourceState
-new: SctpTransportState
-offer: RTCSdpType
-pranswer: RTCSdpType
-recvonly: TransceiverDirection
-rollback: RTCSdpType
-rtcp: RTCIceComponent
-rtp: RTCIceComponent
-sendonly: TransceiverDirection
-sendrecv: TransceiverDirection
-stable: RTCSignalingState
-stopped: TransceiverDirection
-unknown: RTCIceRole
-unsupported: MediaType
-video: MediaType

@@ -13,8 +13,7 @@ from tests.helpers import exchange_offer_answer
 
 @pytest.mark.asyncio
 async def test_1(pc):
-    """A transceiver added and stopped before the initial offer generation
-    should not trigger an offer m-section generation"""
+    """A transceiver added and stopped before the initial offer should not get an m-section in it"""
     init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
     pc.add_transceiver(webrtc.MediaType.audio, init)
     pc.add_transceiver(webrtc.MediaType.video)
@@ -39,8 +38,7 @@ def test_2(pc):
 
 @pytest.mark.asyncio
 async def test_3(caller, callee):
-    """During renegotiation, adding and stopping a transceiver
-    should not trigger a renegotiated offer m-section generation"""
+    """During renegotiation, a transceiver added and stopped should not get an m-section in the offer"""
     caller.add_transceiver(webrtc.MediaType.audio)
 
     await exchange_offer_answer(caller, callee)

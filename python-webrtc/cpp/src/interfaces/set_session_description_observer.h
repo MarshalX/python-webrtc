@@ -7,30 +7,14 @@
 
 #pragma once
 
-#include "rtc_peer_connection.h"
+#include <functional>
+#include <utility>
 
+#include <api/rtc_error.h>
 #include <api/set_local_description_observer_interface.h>
 #include <api/set_remote_description_observer_interface.h>
 
-namespace webrtc { class RTCError; }
-
 namespace python_webrtc {
-
-  class SetSessionDescriptionObserver : public webrtc::SetSessionDescriptionObserver {
-  public:
-    SetSessionDescriptionObserver(
-        std::function<void()> &onSuccess,
-        std::function<void(RTCCallbackException)> &onFailure) :
-        _onSuccess(onSuccess), _onFailure(onFailure) {}
-
-    void OnSuccess() override;
-
-    void OnFailure(webrtc::RTCError) override;
-
-  private:
-    std::function<void()> _onSuccess = nullptr;
-    std::function<void(RTCCallbackException)> _onFailure = nullptr;
-  };
 
   // Completion of SetLocalDescription/SetRemoteDescription, called on the signaling thread
   class SetLocalDescriptionObserver : public webrtc::SetLocalDescriptionObserverInterface {

@@ -5,41 +5,13 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-import enum
 from typing import TYPE_CHECKING, Optional, Union
 
-from webrtc import WebRTCObject, wrtc
+from webrtc import MessageEvent, RTCDataChannelState, RTCErrorEvent, WebRTCObject, wrtc
 from webrtc.utils.events import EventTarget
 
 if TYPE_CHECKING:
     import webrtc
-
-RTCDataChannelState = wrtc.RTCDataChannelState
-
-
-class RTCPriorityType(str, enum.Enum):
-    """The priority of a data channel or an encoding, relative to the others."""
-
-    very_low = 'very-low'
-    low = 'low'
-    medium = 'medium'
-    high = 'high'
-
-    @property
-    def _native(self) -> int:
-        # RFC 8831 priorities, as libwebrtc takes them
-        return {'very-low': 128, 'low': 256, 'medium': 512, 'high': 1024}[self.value]
-
-    @classmethod
-    def _from_native(cls, value: int) -> 'RTCPriorityType':
-        # the ranges Chromium maps libwebrtc priorities to
-        if value <= 192:
-            return cls.very_low
-        if value <= 384:
-            return cls.low
-        if value <= 768:
-            return cls.medium
-        return cls.high
 
 
 class RTCDataChannel(WebRTCObject, EventTarget):
@@ -54,10 +26,6 @@ class RTCDataChannel(WebRTCObject, EventTarget):
         ``error`` (:obj:`webrtc.RTCErrorEvent`): The channel failed, it's closed right after.
         ``closing`` (:obj:`webrtc.Event`): The channel started closing.
         ``close`` (:obj:`webrtc.Event`): The channel is closed.
-
-    Events of a channel aren't lost before handlers can be registered: they start to be delivered on the next
-    iteration of the event loop after :meth:`webrtc.RTCPeerConnection.create_data_channel`, or after
-    the handlers of the ``datachannel`` event have run.
     """
 
     _class = wrtc.RTCDataChannel
@@ -66,21 +34,24 @@ class RTCDataChannel(WebRTCObject, EventTarget):
     def _on_event(self, name: str, *args):
         # readyState changes along with the events
         if name in ('open', 'closing', 'close'):
-            self._native_obj._surface(args[0])
-        elif name == '_sent' and self._native_obj._decreaseBufferedAmount(args[0]):
-            # in the same task as the decrease, before anything that arrived meanwhile
-            self._dispatch('bufferedamountlow')
+            (state,) = args
+            self._native_obj._surfaceState(state)
+        elif name == '_sent':
+            (size,) = args
+            if self._native_obj._decreaseBufferedAmount(size):
+                # in the same task as the decrease, before anything that arrived meanwhile
+                self._dispatch('bufferedamountlow')
 
     def _create_event(self, name: str, *args):
-        import webrtc
-
         if name == 'open' and self.ready_state != RTCDataChannelState.open:
             # closed before it opened
             return None
         if name == 'message':
-            return webrtc.MessageEvent(name, args[0].data, target=self)
+            (message,) = args
+            return MessageEvent(name, message.data, target=self)
         if name == 'error':
-            return webrtc.RTCErrorEvent(name, args[0].to_python(), target=self)
+            (error,) = args
+            return RTCErrorEvent(name, error.toPython(), target=self)
         return super()._create_event(name, *args)
 
     @property
@@ -119,9 +90,9 @@ class RTCDataChannel(WebRTCObject, EventTarget):
         return self._native_obj.id
 
     @property
-    def priority(self) -> RTCPriorityType:
+    def priority(self) -> 'webrtc.RTCPriorityType':
         """:obj:`webrtc.RTCPriorityType`: The priority of the channel."""
-        return RTCPriorityType._from_native(self._native_obj.priority)
+        return self._native_obj.priority
 
     @property
     def ready_state(self) -> 'webrtc.RTCDataChannelState':
@@ -141,7 +112,7 @@ class RTCDataChannel(WebRTCObject, EventTarget):
     @buffered_amount_low_threshold.setter
     def buffered_amount_low_threshold(self, value: int):
         if not 0 <= value < 2**64:
-            raise ValueError(f'buffered_amount_low_threshold must not be negative, not {value}')
+            raise ValueError(f'buffered_amount_low_threshold must be from 0 to 2**64-1, not {value}')
         self._native_obj.bufferedAmountLowThreshold = value
 
     def send(self, data: Union[str, bytes, bytearray, memoryview]) -> None:

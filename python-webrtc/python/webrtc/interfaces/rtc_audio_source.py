@@ -14,9 +14,8 @@ if TYPE_CHECKING:
 
 
 class RTCAudioSource(WebRTCObject):
-    """The :obj:`webrtc.MediaStreamTrack` interface represents a single media track within a stream;
-    typically, these are audio or video tracks, but other track types may exist as well.
-    """
+    """A source of audio the application produces: the samples pushed with :meth:`on_data` are sent on the tracks
+    of the source."""
 
     _class = wrtc.RTCAudioSource
 
@@ -30,7 +29,7 @@ class RTCAudioSource(WebRTCObject):
 
     def on_data(self, data: 'webrtc.RTCOnDataEvent'):
         """Push a new audio samples to every non-stopped local audio :obj:`webrtc.MediaStreamTrack`
-        created with :attr:`createTrack`.
+        created with :meth:`create_track`.
 
         Args:
             data (:obj:`webrtc.RTCOnDataEvent`): A :obj:`webrtc.RTCOnDataEvent` object representing new audio samples.

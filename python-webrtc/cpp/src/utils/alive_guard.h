@@ -13,13 +13,9 @@
 
 namespace python_webrtc {
 
-  // Tasks a wrapper posts to a libwebrtc thread (like registering itself as an observer from its constructor) that
-  // don't run once the wrapper is destroyed.
-  //
-  // A destructor running on another thread waits for the posted task with a blocking call to the same thread, but
-  // one running on that thread (when libwebrtc callbacks drop the last reference) runs its blocking call inline,
-  // before the task: the task then finds the guard gone. Tasks and destructors never overlap, as they either run
-  // on the same thread or the destructor waits for that thread.
+  // Tasks a wrapper posts to a libwebrtc thread (like its observer registration: it's created under locks the
+  // signaling thread may wait for) that don't run once the wrapper is destroyed. Destructors run on the task's
+  // thread or block on it, so a task never overlaps a destructor.
   class AliveGuard {
   public:
     ~AliveGuard() {

@@ -7,33 +7,36 @@
 
 import asyncio
 import time
-from typing import Any, List, Mapping, NamedTuple, Optional, Union
+from dataclasses import dataclass
+from typing import Any, List, Mapping, Optional, Union
 
-import wrtc
-from webrtc.base import WebRTCObject
+from webrtc import NotSupportedError, WebRTCObject, wrtc
+from webrtc.utils.names import snake_case
 
+#: A WebCrypto algorithm: its name (like ``'ECDSA'``), or a dictionary with its name and parameters.
 Algorithm = Union[str, Mapping[str, Any]]
 
 
-class RTCDtlsFingerprint(NamedTuple):
-    """A fingerprint of a certificate, as in the ``a=fingerprint`` line of SDP."""
+@dataclass(frozen=True)
+class RTCDtlsFingerprint:
+    """A fingerprint of a certificate, as in the ``a=fingerprint`` line of SDP.
 
-    #: :obj:`str`: The hash function, like ``'sha-256'``.
+    Args:
+        algorithm (:obj:`str`): The hash function, like ``'sha-256'``.
+        value (:obj:`str`): The hash in lowercase hex bytes separated with colons.
+    """
+
     algorithm: str
-    #: :obj:`str`: The hash in lowercase hex bytes separated with colons.
     value: str
 
 
 def _member(algorithm: Mapping[str, Any], name: str, default=None):
-    """A member of a WebCrypto algorithm dictionary, by its camelCase or snake_case name"""
-    snake = ''.join(f'_{c.lower()}' if c.isupper() else c for c in name)
-    return algorithm.get(name, algorithm.get(snake, default))
+    """A member of a WebCrypto algorithm dictionary, by its camelCase or snake_case name."""
+    return algorithm.get(name, algorithm.get(snake_case(name), default))
 
 
 def _key_params(algorithm: Algorithm):
-    """The key type, modulus length and public exponent for an algorithm, as generate_certificate takes them"""
-    from webrtc import NotSupportedError
-
+    """The key type, modulus length and public exponent for an algorithm, as the native generate() takes them."""
     if isinstance(algorithm, str):
         algorithm = {'name': algorithm}
     name = str(_member(algorithm, 'name', '')).upper()
@@ -84,8 +87,6 @@ class RTCCertificate(WebRTCObject):
             :obj:`webrtc.NotSupportedError`: If the algorithm isn't supported.
             :obj:`ValueError`: If ``expires`` is negative.
         """
-        from webrtc import NotSupportedError
-
         key_type, modulus_length, exponent = _key_params(algorithm)
         if expires is not None and expires < 0:
             raise ValueError(f'expires must not be negative, not {expires}')
@@ -99,7 +100,7 @@ class RTCCertificate(WebRTCObject):
         )
         if native is None:
             raise NotSupportedError('the key could not be generated with these parameters')
-        return cls(native)
+        return cls._wrap(native)
 
     @property
     def expires(self) -> float:

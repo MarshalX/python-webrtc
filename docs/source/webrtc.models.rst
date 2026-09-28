@@ -20,6 +20,7 @@ Submodules
    webrtc.models.rtc_session_description
    webrtc.models.rtc_session_description_init
    webrtc.models.rtc_stats
+   webrtc.models.rtc_video_frame
    webrtc.models.rtp_parameters
    webrtc.models.rtp_source
    webrtc.models.rtp_transceiver_init

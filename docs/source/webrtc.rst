@@ -24,4 +24,5 @@ Submodules
    :maxdepth: 4
 
    webrtc.base
+   webrtc.enums
    webrtc.exceptions

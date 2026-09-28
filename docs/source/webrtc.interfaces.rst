@@ -17,6 +17,7 @@ Submodules
    webrtc.interfaces.rtc_audio_source
    webrtc.interfaces.rtc_data_channel
    webrtc.interfaces.rtc_dtls_transport
+   webrtc.interfaces.rtc_dtmf_sender
    webrtc.interfaces.rtc_ice_transport
    webrtc.interfaces.rtc_peer_connection
    webrtc.interfaces.rtc_rtp_receiver

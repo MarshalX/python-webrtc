@@ -31,7 +31,8 @@ class MediaStreamTrack(WebRTCObject, EventTarget):
     def _on_event(self, name: str, *args):
         # muted changes along with the events
         if name in ('mute', 'unmute'):
-            self._native_obj._surface(args[0])
+            (muted,) = args
+            self._native_obj._surfaceMuted(muted)
         elif name == 'ended':
             self._native_obj._surfaceEnded()
 
@@ -48,7 +49,7 @@ class MediaStreamTrack(WebRTCObject, EventTarget):
 
     @property
     def id(self) -> str:
-        """:obj:`bool`: A unique identifier (GUID) for the track."""
+        """:obj:`str`: A unique identifier (GUID) for the track."""
         return self._native_obj.id
 
     @property

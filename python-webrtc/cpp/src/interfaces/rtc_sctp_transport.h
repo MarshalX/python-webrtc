@@ -7,10 +7,17 @@
 
 #pragma once
 
+#include <functional>
+#include <memory>
+#include <optional>
+
 #include <api/sctp_transport_interface.h>
 
 #include "rtc_dtls_transport.h"
 #include "../utils/listeners.h"
+#include "../utils/locked_function.h"
+#include "../utils/surfaced.h"
+#include "../enums/enums.h"
 
 namespace python_webrtc {
 
@@ -28,11 +35,12 @@ namespace python_webrtc {
 
     void OnStateChange(webrtc::SctpTransportInformation) override;
 
+    // a closed connection fires no events of its transports, which show their current state
+    void OnPeerConnectionClosed();
+
     std::shared_ptr<RTCDtlsTransport> GetTransport();
 
     webrtc::SctpTransportState GetState();
-
-    void SurfaceState(int state);
 
     std::optional<double> GetMaxMessageSize();
 
@@ -41,17 +49,13 @@ namespace python_webrtc {
 
     std::optional<int> GetMaxChannels();
 
-  protected:
-    void Stop();
-
-  public:
-    // a closed connection fires no events of its transports, which show their current state
-    void OnPeerConnectionClosed() {
-      Mute();
-      _surfacedState.Reset();
-    }
+    // see Surfaced
+    void SurfaceState(webrtc::SctpTransportState state);
 
   private:
+    // on the network thread
+    void Stop();
+
     webrtc::SctpTransportInformation Information();
 
     std::shared_ptr<PeerConnectionFactory> _factory;
@@ -61,13 +65,10 @@ namespace python_webrtc {
 
     // accessed on the network thread only
     bool _observing = false;
-
-    // on the network thread
     webrtc::SctpTransportState _lastState = webrtc::SctpTransportState::kNew;
-    Surfaced<webrtc::SctpTransportState> _surfacedState;
 
-    std::mutex _getterMutex;
-    std::function<std::optional<double>()> _maxMessageSizeGetter;
+    Surfaced<webrtc::SctpTransportState> _surfacedState;
+    LockedFunction<std::optional<double>()> _maxMessageSizeGetter;
   };
 
 } // namespace python_webrtc

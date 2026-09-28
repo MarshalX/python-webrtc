@@ -14,24 +14,7 @@
 
 namespace python_webrtc {
 
-  template<typename T>
-  static std::optional<int> IdOf(const T &value) {
-    return value.value();
-  }
-
   void bindRtpParameters(pybind11::module &m) {
-    pybind11::enum_<webrtc::Priority>(m, "NativePriority")
-        .value("very_low", webrtc::Priority::kVeryLow)
-        .value("low", webrtc::Priority::kLow)
-        .value("medium", webrtc::Priority::kMedium)
-        .value("high", webrtc::Priority::kHigh);
-
-    pybind11::enum_<webrtc::DegradationPreference>(m, "NativeDegradationPreference")
-        .value("maintain_framerate_and_resolution", webrtc::DegradationPreference::MAINTAIN_FRAMERATE_AND_RESOLUTION)
-        .value("maintain_framerate", webrtc::DegradationPreference::MAINTAIN_FRAMERATE)
-        .value("maintain_resolution", webrtc::DegradationPreference::MAINTAIN_RESOLUTION)
-        .value("balanced", webrtc::DegradationPreference::BALANCED);
-
     pybind11::class_<webrtc::RtpCodec>(m, "RtpCodec")
         .def(pybind11::init<>())
         .def_readwrite("name", &webrtc::RtpCodec::name)

@@ -19,9 +19,12 @@
 #include <pybind11/pybind11.h>
 
 #include "peer_connection_factory.h"
-#include "../utils/instance_holder.h"
 #include "../utils/alive_guard.h"
+#include "../utils/held_events.h"
+#include "../utils/instance_holder.h"
 #include "../utils/listeners.h"
+#include "../utils/surfaced.h"
+#include "../enums/enums.h"
 
 namespace python_webrtc {
 
@@ -32,7 +35,7 @@ namespace python_webrtc {
 
     ~MediaStreamTrack() override;
 
-    void static Init(pybind11::module &m);
+    static void Init(pybind11::module &m);
 
     static InstanceHolder<MediaStreamTrack, webrtc::MediaStreamTrackInterface> &holder();
 
@@ -49,7 +52,12 @@ namespace python_webrtc {
 
     std::string GetId();
 
+    // the id of the libwebrtc track, which the stats refer to
+    std::string GetNativeId();
+
     std::string GetLabel();
+
+    void SetLabel(const std::string &label);
 
     webrtc::MediaType GetKind();
 
@@ -62,12 +70,13 @@ namespace python_webrtc {
 
     void SetMuted(bool muted);
 
+    // see Surfaced
     void SurfaceMuted(bool muted);
 
     void SurfaceEnded();
 
-    // Keeps the ended event until ReleaseEnded(), as a description operation queues it after it completes,
-    // while other events (like mute) come before
+    // Keeps the ended event until ReleaseEnded(): an operation that ends the track (like setting a description)
+    // resolves before it, while the other events of the track (like mute) aren't held
     void HoldEnded();
 
     void ReleaseEnded();
@@ -99,10 +108,7 @@ namespace python_webrtc {
     std::atomic<bool> _muted = false;
     Surfaced<bool> _surfacedMuted;
     Surfaced<bool> _surfacedEnded;
-
-    std::mutex _endedMutex;
-    bool _holdingEnded = false;
-    bool _endedHeld = false;
+    HeldEvents _heldEnded;
 
     std::mutex _idMutex;
     std::optional<std::string> _id;
@@ -110,7 +116,7 @@ namespace python_webrtc {
     // stop() ends a track without an ended event
     std::atomic<bool> _stopped = false;
 
-    // the observer registration posted by the constructor
+    // see AliveGuard
     AliveGuard _alive;
   };
 
