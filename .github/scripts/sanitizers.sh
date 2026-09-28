@@ -20,10 +20,11 @@ dnf install -y -q clang lld compiler-rt llvm
 "$PYTHON" -m venv "$BUILD/venv"
 # shellcheck disable=SC1091
 source "$BUILD/venv/bin/activate"
-python -m pip install -q cmake ninja "pybind11>=3.0" pytest pytest-asyncio
+python -m pip install -q cmake ninja "pybind11>=3.0" pytest pytest-asyncio pytest-timeout
 
 CC=clang CXX=clang++ cmake -S "$SRC" -B "$BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DCMAKE_UNITY_BUILD=ON \
     -DWRTC_SANITIZE=address,undefined \
     -Dpybind11_DIR="$(python -m pybind11 --cmakedir)"
 cmake --build "$BUILD"

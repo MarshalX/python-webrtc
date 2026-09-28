@@ -52,7 +52,7 @@ Tracker = "https://github.com/MarshalX/python-webrtc/issues"
 Author = "https://github.com/MarshalX"
 
 [dependency-groups]
-test = ["pytest>=8", "pytest-asyncio>=0.24"]
+test = ["pytest>=8", "pytest-asyncio>=0.24", "pytest-timeout>=2.3"]
 dev = [
     { include-group = "test" },
     "scikit-build-core>=0.11",
@@ -80,6 +80,8 @@ sdist.exclude = [
 build = "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
 skip = "*-musllinux_*"
 build-frontend = "build[uv]"
+# dev builds stay per file to catch missing includes
+config-settings = { "cmake.define.CMAKE_UNITY_BUILD" = "ON" }
 test-groups = ["test"]
 test-command = "pytest {project}/tests"
 
@@ -101,6 +103,9 @@ archs = ["AMD64"]
 testpaths = ["tests"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+timeout = 120
+timeout_method = "thread"
+faulthandler_timeout = 60
 
 [tool.ruff]
 line-length = 120
