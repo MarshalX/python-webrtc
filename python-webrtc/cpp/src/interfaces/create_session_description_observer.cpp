@@ -7,6 +7,8 @@
 
 #include "create_session_description_observer.h"
 
+#include <thread>
+
 namespace python_webrtc {
 
   void CreateSessionDescriptionObserver::OnSuccess(webrtc::SessionDescriptionInterface *description) {
@@ -16,7 +18,12 @@ namespace python_webrtc {
     // and other methods which take SDP as input now directly accept an object conforming to the
     // RTCSessionDescriptionInit dictionary, so you don't have to instantiate an RTCSessionDescription yourself.
 
-    _peerConnection->SaveLastSdp(RTCSessionDescriptionInit::Wrap(description));
+    if (auto peerConnection = _peerConnection.lock()) {
+      peerConnection->SaveLastSdp(RTCSessionDescriptionInit::Wrap(description));
+      // Python may have dropped the connection meanwhile, and a connection closes itself when destroyed,
+      // which can't happen here, on the signaling thread, in the middle of its own callback
+      std::thread([peerConnection = std::move(peerConnection)]() mutable { peerConnection = nullptr; }).detach();
+    }
     _onSuccess(RTCSessionDescription::Wrap(description));
     delete description;
   }

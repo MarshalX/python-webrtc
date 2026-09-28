@@ -11,44 +11,42 @@
 namespace python_webrtc {
 
   RTCRtpReceiver::RTCRtpReceiver(
-      PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver
-  ) : _factory(factory), _receiver(std::move(receiver)) {}
-
-  RTCRtpReceiver::~RTCRtpReceiver() {
-    _factory = nullptr;
-    holder()->Release(this);
-  }
+      std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver
+  ) : _factory(std::move(factory)), _receiver(std::move(receiver)) {}
 
   void RTCRtpReceiver::Init(pybind11::module &m) {
-    pybind11::class_<RTCRtpReceiver>(m, "RTCRtpReceiver")
-        .def_property_readonly("track", nogil_fn(&RTCRtpReceiver::GetTrack), pybind11::return_value_policy::reference)
+    pybind11::class_<RTCRtpReceiver, std::shared_ptr<RTCRtpReceiver>>(m, "RTCRtpReceiver")
+        .def_property_readonly("track", nogil_fn(&RTCRtpReceiver::GetTrack))
         .def_property_readonly("transport", nogil_fn(&RTCRtpReceiver::GetTransport));
   }
 
-  InstanceHolder<RTCRtpReceiver *, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>, PeerConnectionFactory *> *
-  RTCRtpReceiver::holder() {
-    static auto holder = new InstanceHolder<
-        RTCRtpReceiver *, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>, PeerConnectionFactory *
-    >(RTCRtpReceiver::Create);
-    return holder;
+  InstanceHolder<RTCRtpReceiver, webrtc::RtpReceiverInterface> &RTCRtpReceiver::holder() {
+    // never destroyed: wrappers may outlive static destructors
+    static auto holder = new InstanceHolder<RTCRtpReceiver, webrtc::RtpReceiverInterface>();
+    return *holder;
   }
 
-  RTCRtpReceiver *RTCRtpReceiver::Create(
-      PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver) {
-    // who caring about freeing memory?
-    return new RTCRtpReceiver(factory, std::move(receiver));
+  std::shared_ptr<MediaStreamTrack> RTCRtpReceiver::GetTrack() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (!_track) {
+      _track = MediaStreamTrack::holder().GetOrCreate(_factory, _receiver->track());
+    }
+    return _track;
   }
 
-  MediaStreamTrack *RTCRtpReceiver::GetTrack() {
-    return MediaStreamTrack::holder()->GetOrCreate(_factory, _receiver->track());
-  }
-
-  std::optional<RTCDtlsTransport *> RTCRtpReceiver::GetTransport() {
+  std::optional<std::shared_ptr<RTCDtlsTransport>> RTCRtpReceiver::GetTransport() {
     auto transport = _receiver->dtls_transport();
-    if (transport) {
-      return RTCDtlsTransport::holder()->GetOrCreate(_factory, transport);
+
+    std::shared_ptr<RTCDtlsTransport> previous;
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (!_transport || _transport->transport() != transport) {
+      previous = std::move(_transport);
+      _transport = RTCDtlsTransport::holder().GetOrCreate(_factory, transport);
     }
 
+    if (_transport) {
+      return _transport;
+    }
     return {};
   }
 

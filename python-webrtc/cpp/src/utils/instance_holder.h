@@ -7,54 +7,70 @@
 
 #pragma once
 
-#include <map>
+#include <memory>
 #include <mutex>
+#include <unordered_map>
+
+#include <api/scoped_refptr.h>
+
+#include "gil.h"
 
 namespace python_webrtc {
 
-// T — Value. shared pointer to wrapped class
-// U — Key. original webrtc class
-// V — arguments to constructor of wrapped class
-  template<typename T, typename U, typename ...V>
+  class PeerConnectionFactory;
+
+  // Keeps at most one wrapper per libwebrtc object, so Python always sees the same object for it.
+  // Entries are weak: the cache never keeps a wrapper, nor the libwebrtc object behind it, alive.
+  // Ownership lives in shared_ptrs held by Python and by parent wrappers.
+  //
+  // T — wrapper class, constructible from (std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<U>)
+  // U — wrapped libwebrtc interface
+  template<typename T, typename U>
   class InstanceHolder {
   public:
-    InstanceHolder() = delete;
+    std::shared_ptr<T> GetOrCreate(const std::shared_ptr<PeerConnectionFactory> &factory, webrtc::scoped_refptr<U> object) {
+      if (!object) {
+        return nullptr;
+      }
 
-    explicit InstanceHolder(T(*WrapConstructor)(V..., U)) : WrapConstructor(WrapConstructor) {}
+      // wrappers may create nested wrappers (sctp -> dtls -> ice) while holding the lock
+      std::lock_guard<std::recursive_mutex> lock(_mutex);
+      auto key = object.get();
+      auto it = _store.find(key);
+      if (it != _store.end()) {
+        if (auto instance = it->second.lock()) {
+          return instance;
+        }
+      }
 
-    T GetOrCreate(V..., U);
-
-    void Release(T value);
-
-  private:
-    T (*WrapConstructor)(V..., U);
-
-    // wrappers may create nested wrappers (sctp -> dtls -> ice) while holding the lock
-    std::recursive_mutex _mutex;
-    std::map<U, T> _uToTstore;
-    std::map<T, U> _tToUstore;
-  };
-
-  template<typename T, typename U, typename... V>
-  T InstanceHolder<T, U, V...>::GetOrCreate(V... args, U key) {
-    std::lock_guard<std::recursive_mutex> lock(_mutex);
-    if (_uToTstore.find(key) != _uToTstore.end()) {
-      return _uToTstore.at(key);
+      std::shared_ptr<T> instance(new T(factory, std::move(object)), [this, key](T *dying) { Destroy(key, dying); });
+      _store[key] = instance;
+      return instance;
     }
 
-    auto instance = WrapConstructor(args..., key);
-    _uToTstore[key] = instance;
-    _tToUstore[instance] = key;
+    // Whether another wrapper of the same libwebrtc object is alive. Only meaningful in a destructor of the wrapper,
+    // where it tells that the object was re-wrapped meanwhile and the new wrapper has taken over its observer slot.
+    bool HasLive(const U *object) {
+      std::lock_guard<std::recursive_mutex> lock(_mutex);
+      auto it = _store.find(const_cast<U *>(object));
+      return it != _store.end() && !it->second.expired();
+    }
 
-    return instance;
-  }
+  private:
+    void Destroy(U *key, T *dying) {
+      gil_release_if_held release;
 
-  template<typename T, typename U, typename... V>
-  void InstanceHolder<T, U, V...>::Release(T value) {
-    std::lock_guard<std::recursive_mutex> lock(_mutex);
-    auto key = _tToUstore.at(value);
-    _tToUstore.erase(value);
-    _uToTstore.erase(key);
-  }
+      // destroy under the lock, so a replacement can't register its observers while this one unregisters
+      std::lock_guard<std::recursive_mutex> lock(_mutex);
+      auto it = _store.find(key);
+      if (it != _store.end() && it->second.expired()) {
+        _store.erase(it);
+      }
+      delete dying;
+    }
+
+    std::recursive_mutex _mutex;
+    std::unordered_map<U *, std::weak_ptr<T>> _store;
+  };
 
 } // namespace python_webrtc

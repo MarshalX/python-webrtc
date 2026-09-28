@@ -61,9 +61,17 @@ jobs:
           name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
 
+  sanitizers:
+    name: sanitizers (ASan + UBSan)
+    runs-on: ubuntu-latest
+    container: quay.io/pypa/manylinux_2_28_x86_64
+    steps:
+      - uses: actions/checkout@v7
+      - run: .github/scripts/sanitizers.sh
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [lint, sdist, wheels]
+    needs: [lint, sdist, wheels, sanitizers]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

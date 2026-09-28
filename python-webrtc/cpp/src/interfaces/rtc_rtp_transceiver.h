@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <memory>
 #include <optional>
 
 #include <api/scoped_refptr.h>
@@ -22,23 +23,17 @@ namespace python_webrtc {
 
   class RTCRtpTransceiver {
   public:
-    RTCRtpTransceiver(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>);
-
-    static RTCRtpTransceiver *Create(PeerConnectionFactory *, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>);
-
-    ~RTCRtpTransceiver();
+    RTCRtpTransceiver(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>);
 
     static void Init(pybind11::module &m);
 
-    static InstanceHolder<
-        RTCRtpTransceiver *, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>, PeerConnectionFactory *
-    > *holder();
+    static InstanceHolder<RTCRtpTransceiver, webrtc::RtpTransceiverInterface> &holder();
 
     std::optional<std::string> GetMid();
 
-    RTCRtpSender *GetSender();
+    std::shared_ptr<RTCRtpSender> GetSender();
 
-    RTCRtpReceiver *GetReceiver();
+    std::shared_ptr<RTCRtpReceiver> GetReceiver();
 
     bool GetStopped();
 
@@ -54,8 +49,12 @@ namespace python_webrtc {
     //  void SetCodecPreferences();
 
   private:
-    PeerConnectionFactory *_factory;
+    std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> _transceiver;
+
+    // a transceiver pairs the same sender and receiver for its whole life
+    std::shared_ptr<RTCRtpSender> _sender;
+    std::shared_ptr<RTCRtpReceiver> _receiver;
   };
 
 } // namespace python_webrtc

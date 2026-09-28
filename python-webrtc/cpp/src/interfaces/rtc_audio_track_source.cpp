@@ -9,11 +9,6 @@
 
 namespace python_webrtc {
 
-  RTCAudioTrackSource::~RTCAudioTrackSource() {
-    PeerConnectionFactory::Release();
-    _factory = nullptr;
-  }
-
   webrtc::MediaSourceInterface::SourceState RTCAudioTrackSource::state() const {
     return webrtc::MediaSourceInterface::SourceState::kLive;
   }

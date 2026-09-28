@@ -14,10 +14,7 @@
 
 namespace python_webrtc {
 
-  RTCPeerConnection::RTCPeerConnection() {
-    _factory = PeerConnectionFactory::GetOrCreateDefault();
-    _shouldReleaseFactory = true;
-
+  RTCPeerConnection::RTCPeerConnection() : _factory(PeerConnectionFactory::GetOrCreateDefault()) {
 //    TODO get from python
     auto configuration = webrtc::PeerConnectionInterface::RTCConfiguration();
     configuration.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
@@ -41,22 +38,63 @@ namespace python_webrtc {
 
   RTCPeerConnection::~RTCPeerConnection() {
     // destroying the peer connection blocks on the signaling thread, which may be waiting for the GIL
-    std::optional<pybind11::gil_scoped_release> release;
-    if (PyGILState_Check()) {
-      release.emplace();
-    }
+    gil_release_if_held release;
 
-    _jinglePeerConnection = nullptr;
+    // closing stops the connection from calling this observer
+    Close();
     // TODO data channels
 //    _channels.clear();
-    // the factory itself is never freed, keep the pointer for concurrent callers
-    if (_shouldReleaseFactory.exchange(false)) {
-      PeerConnectionFactory::Release();
+  }
+
+  template<typename T, typename U>
+  std::shared_ptr<T> RTCPeerConnection::Wrap(Wrappers<T, U> &wrappers, webrtc::scoped_refptr<U> object) {
+    std::lock_guard<std::mutex> lock(_wrappersMutex);
+    auto it = wrappers.find(object.get());
+    if (it != wrappers.end()) {
+      return it->second;
     }
+
+    auto wrapper = T::holder().GetOrCreate(_factory, object);
+    wrappers[object.get()] = wrapper;
+    return wrapper;
+  }
+
+  template<typename T, typename U>
+  std::vector<std::shared_ptr<T>> RTCPeerConnection::Sync(
+      Wrappers<T, U> &wrappers, const std::vector<webrtc::scoped_refptr<U>> &objects) {
+    std::vector<std::shared_ptr<T>> result;
+    Wrappers<T, U> current;
+    {
+      std::lock_guard<std::mutex> lock(_wrappersMutex);
+      for (const auto &object: objects) {
+        auto it = wrappers.find(object.get());
+        auto wrapper = it != wrappers.end() ? it->second : T::holder().GetOrCreate(_factory, object);
+        current[object.get()] = wrapper;
+        result.push_back(std::move(wrapper));
+      }
+      std::swap(wrappers, current);
+    }
+    // wrappers of the objects that are gone are released here, out of the lock
+    return result;
+  }
+
+  void RTCPeerConnection::ReleaseWrappers() {
+    decltype(_transceivers) transceivers;
+    decltype(_senders) senders;
+    decltype(_receivers) receivers;
+    decltype(_sctp) sctp;
+    {
+      std::lock_guard<std::mutex> lock(_wrappersMutex);
+      std::swap(transceivers, _transceivers);
+      std::swap(senders, _senders);
+      std::swap(receivers, _receivers);
+      std::swap(sctp, _sctp);
+    }
+    // released out of the lock, objects still referenced from Python stay alive
   }
 
   void RTCPeerConnection::Init(pybind11::module &m) {
-    pybind11::class_<RTCPeerConnection>(m, "RTCPeerConnection")
+    pybind11::class_<RTCPeerConnection, std::shared_ptr<RTCPeerConnection>>(m, "RTCPeerConnection")
         .def(pybind11::init<>(), nogil())
         .def("createOffer", &RTCPeerConnection::CreateOffer, nogil())
         .def("createAnswer", &RTCPeerConnection::CreateAnswer, nogil())
@@ -64,16 +102,16 @@ namespace python_webrtc {
         .def("setRemoteDescription", &RTCPeerConnection::SetRemoteDescription, nogil())
         .def("addTrack",
              pybind11::overload_cast<MediaStreamTrack &, std::optional<std::reference_wrapper<MediaStream>>>(
-                 &RTCPeerConnection::AddTrack), pybind11::return_value_policy::reference, nogil())
+                 &RTCPeerConnection::AddTrack), nogil())
         .def("addTrack",
              pybind11::overload_cast<MediaStreamTrack &, const std::vector<MediaStream *> &>(
-                 &RTCPeerConnection::AddTrack), pybind11::return_value_policy::reference, nogil())
+                 &RTCPeerConnection::AddTrack), nogil())
         .def("addTransceiver",
              pybind11::overload_cast<webrtc::MediaType, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &>(
-                 &RTCPeerConnection::AddTransceiver), pybind11::return_value_policy::reference, nogil())
+                 &RTCPeerConnection::AddTransceiver), nogil())
         .def("addTransceiver",
              pybind11::overload_cast<MediaStreamTrack &, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &>(
-                 &RTCPeerConnection::AddTransceiver), pybind11::return_value_policy::reference, nogil())
+                 &RTCPeerConnection::AddTransceiver), nogil())
         .def("getTransceivers", &RTCPeerConnection::GetTransceivers, nogil())
         .def("getSenders", &RTCPeerConnection::GetSenders, nogil())
         .def("getReceivers", &RTCPeerConnection::GetReceivers, nogil())
@@ -105,7 +143,7 @@ namespace python_webrtc {
       return;
     }
 
-    auto observer = new webrtc::RefCountedObject<CreateSessionDescriptionObserver>(this, onSuccess, onFailure);
+    auto observer = new webrtc::RefCountedObject<CreateSessionDescriptionObserver>(weak_from_this(), onSuccess, onFailure);
 
 //     TODO bind RTCOfferOptions (voice_activity_detection, iceRestart, offerToReceiveAudio, offerToReceiveVideo)
     auto options = webrtc::PeerConnectionInterface::RTCOfferAnswerOptions();
@@ -126,7 +164,7 @@ namespace python_webrtc {
       return;
     }
 
-    auto observer = new webrtc::RefCountedObject<CreateSessionDescriptionObserver>(this, onSuccess, onFailure);
+    auto observer = new webrtc::RefCountedObject<CreateSessionDescriptionObserver>(weak_from_this(), onSuccess, onFailure);
 //       TODO bind RTCAnswerOptions (voice_activity_detection)
     auto options = webrtc::PeerConnectionInterface::RTCOfferAnswerOptions();
     pc->CreateAnswer(observer, options);
@@ -178,7 +216,7 @@ namespace python_webrtc {
     pc->SetRemoteDescription(observer, raw_description_ptr.release());
   }
 
-  RTCRtpSender *RTCPeerConnection::AddTrack(
+  std::shared_ptr<RTCRtpSender> RTCPeerConnection::AddTrack(
       MediaStreamTrack &mediaStreamTrack, const std::vector<MediaStream *> &mediaStreams) {
     auto pc = connection();
     if (!pc) {
@@ -197,10 +235,10 @@ namespace python_webrtc {
     }
 
     auto rtpSender = result.value();
-    return RTCRtpSender::holder()->GetOrCreate(_factory, rtpSender);
+    return Wrap(_senders, rtpSender);
   }
 
-  RTCRtpSender *RTCPeerConnection::AddTrack(
+  std::shared_ptr<RTCRtpSender> RTCPeerConnection::AddTrack(
       MediaStreamTrack &mediaStreamTrack, std::optional<std::reference_wrapper<MediaStream>> mediaStream) {
     auto pc = connection();
     if (!pc) {
@@ -218,10 +256,10 @@ namespace python_webrtc {
     }
 
     auto rtpSender = result.value();
-    return RTCRtpSender::holder()->GetOrCreate(_factory, rtpSender);
+    return Wrap(_senders, rtpSender);
   }
 
-  RTCRtpTransceiver *RTCPeerConnection::AddTransceiver(
+  std::shared_ptr<RTCRtpTransceiver> RTCPeerConnection::AddTransceiver(
       webrtc::MediaType kind, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &init
   ) {
     auto pc = connection();
@@ -238,10 +276,10 @@ namespace python_webrtc {
       throw wrapRTCError(result.error());
     }
 
-    return RTCRtpTransceiver::holder()->GetOrCreate(_factory, result.value());
+    return Wrap(_transceivers, result.value());
   }
 
-  RTCRtpTransceiver *RTCPeerConnection::AddTransceiver(
+  std::shared_ptr<RTCRtpTransceiver> RTCPeerConnection::AddTransceiver(
       MediaStreamTrack &track, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &init
   ) {
     auto pc = connection();
@@ -258,55 +296,50 @@ namespace python_webrtc {
       throw wrapRTCError(result.error());
     }
 
-    return RTCRtpTransceiver::holder()->GetOrCreate(_factory, result.value());
+    return Wrap(_transceivers, result.value());
   }
 
-  std::vector<RTCRtpTransceiver *> RTCPeerConnection::GetTransceivers() {
+  std::vector<std::shared_ptr<RTCRtpTransceiver>> RTCPeerConnection::GetTransceivers() {
     auto pc = connection();
-    std::vector<RTCRtpTransceiver *> transceivers;
-
     if (pc && pc->GetConfiguration().sdp_semantics == webrtc::SdpSemantics::kUnifiedPlan) {
-      for (const auto &transceiver: pc->GetTransceivers()) {
-        transceivers.emplace_back(RTCRtpTransceiver::holder()->GetOrCreate(_factory, transceiver));
-      }
-    }
-
-    return transceivers;
-  }
-
-  std::vector<RTCRtpSender *> RTCPeerConnection::GetSenders() {
-    auto pc = connection();
-    std::vector<RTCRtpSender *> senders;
-
-    if (pc) {
-      for (const auto &sender: pc->GetSenders()) {
-        senders.emplace_back(RTCRtpSender::holder()->GetOrCreate(_factory, sender));
-      }
-    }
-
-    return senders;
-  }
-
-  std::vector<RTCRtpReceiver *> RTCPeerConnection::GetReceivers() {
-    auto pc = connection();
-    std::vector<RTCRtpReceiver *> receivers;
-
-    if (pc) {
-      for (const auto &receiver: pc->GetReceivers()) {
-        receivers.emplace_back(RTCRtpReceiver::holder()->GetOrCreate(_factory, receiver));
-      }
-    }
-
-    return receivers;
-  }
-
-  std::optional<RTCSctpTransport *> RTCPeerConnection::GetSctp() {
-    auto pc = connection();
-    if (pc && pc->GetSctpTransport()) {
-      return RTCSctpTransport::holder()->GetOrCreate(_factory, pc->GetSctpTransport());
+      return Sync(_transceivers, pc->GetTransceivers());
     }
 
     return {};
+  }
+
+  std::vector<std::shared_ptr<RTCRtpSender>> RTCPeerConnection::GetSenders() {
+    auto pc = connection();
+    if (pc) {
+      return Sync(_senders, pc->GetSenders());
+    }
+
+    return {};
+  }
+
+  std::vector<std::shared_ptr<RTCRtpReceiver>> RTCPeerConnection::GetReceivers() {
+    auto pc = connection();
+    if (pc) {
+      return Sync(_receivers, pc->GetReceivers());
+    }
+
+    return {};
+  }
+
+  std::optional<std::shared_ptr<RTCSctpTransport>> RTCPeerConnection::GetSctp() {
+    auto pc = connection();
+    auto transport = pc ? pc->GetSctpTransport() : nullptr;
+    if (!transport) {
+      return {};
+    }
+
+    std::shared_ptr<RTCSctpTransport> previous;
+    std::lock_guard<std::mutex> lock(_wrappersMutex);
+    if (!_sctp || _sctp->transport() != transport) {
+      previous = std::move(_sctp);
+      _sctp = RTCSctpTransport::holder().GetOrCreate(_factory, transport);
+    }
+    return _sctp;
   }
 
   void RTCPeerConnection::RestartIce() {
@@ -345,16 +378,13 @@ namespace python_webrtc {
 
       if (pc->GetConfiguration().sdp_semantics == webrtc::SdpSemantics::kUnifiedPlan) {
         for (const auto &transceiver: pc->GetTransceivers()) {
-          auto track = MediaStreamTrack::holder()->GetOrCreate(_factory, transceiver->receiver()->track());
-          track->OnPeerConnectionClosed();
+          Wrap(_transceivers, transceiver)->GetReceiver()->GetTrack()->OnPeerConnectionClosed();
         }
       }
     }
 
-    // the factory itself is never freed, keep the pointer for concurrent callers
-    if (_shouldReleaseFactory.exchange(false)) {
-      PeerConnectionFactory::Release();
-    }
+    // wrappers still referenced from Python keep their (closed) state
+    ReleaseWrappers();
   }
 
   webrtc::scoped_refptr<webrtc::PeerConnectionInterface> RTCPeerConnection::connection() {

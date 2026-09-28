@@ -11,17 +11,25 @@
 namespace python_webrtc {
 
   RTCIceTransport::RTCIceTransport(
-      PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::IceTransportInterface> transport) {
-    _factory = factory;
-    _transport = std::move(transport);
-
+      std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::IceTransportInterface> transport)
+      : _factory(std::move(factory)), _transport(std::move(transport)) {
     _factory->_workerThread->BlockingCall([this]() {
       auto internal = _transport->internal();
       if (internal) {
+        auto alive = _alive;
         internal->SubscribeIceTransportStateChanged(
-            this, [this](webrtc::IceTransportInternal *transport) { OnStateChanged(transport); });
+            this, [this, alive](webrtc::IceTransportInternal *transport) {
+              if (*alive) {
+                OnStateChanged(transport);
+              }
+            });
         internal->AddGatheringStateCallback(
-            this, [this](webrtc::IceTransportInternal *transport) { OnGatheringStateChanged(transport); });
+            this, [this, alive](webrtc::IceTransportInternal *transport) {
+              if (*alive) {
+                OnGatheringStateChanged(transport);
+              }
+            });
+        _subscribed = internal;
       }
       TakeSnapshot();
       if (_state == webrtc::IceTransportState::kClosed) {
@@ -31,31 +39,32 @@ namespace python_webrtc {
   }
 
   RTCIceTransport::~RTCIceTransport() {
-    _factory = nullptr;
-    holder()->Release(this);
+    gil_release_if_held release;
+
+    // callbacks run on the network thread, so after this none of them can be running or start again
+    _factory->_workerThread->BlockingCall([this]() {
+      *_alive = false;
+      // the internal transport is gone (with its callbacks) once the ice transport is cleared
+      if (_subscribed && _transport->internal() == _subscribed) {
+        _subscribed->RemoveGatheringStateCallback(this);
+      }
+    });
+
+    _transport = nullptr;
   }
 
   void RTCIceTransport::Init(pybind11::module &m) {
-    pybind11::class_<RTCIceTransport>(m, "RTCIceTransport")
+    pybind11::class_<RTCIceTransport, std::shared_ptr<RTCIceTransport>>(m, "RTCIceTransport")
         .def_property_readonly("component", nogil_fn(&RTCIceTransport::GetComponent))
         .def_property_readonly("gatheringState", nogil_fn(&RTCIceTransport::GetGatheringState))
         .def_property_readonly("role", nogil_fn(&RTCIceTransport::GetRole))
         .def_property_readonly("state", nogil_fn(&RTCIceTransport::GetState));
   }
 
-  InstanceHolder<RTCIceTransport *, webrtc::scoped_refptr<webrtc::IceTransportInterface>, PeerConnectionFactory *> *
-  RTCIceTransport::holder() {
-    static auto holder = new InstanceHolder<
-        RTCIceTransport *, webrtc::scoped_refptr<webrtc::IceTransportInterface>, PeerConnectionFactory *
-    >(RTCIceTransport::Create);
-    return holder;
-  }
-
-  RTCIceTransport *RTCIceTransport::Create(
-      PeerConnectionFactory *factory, webrtc::scoped_refptr<webrtc::IceTransportInterface> transport
-  ) {
-    // who caring about freeing memory?
-    return new RTCIceTransport(factory, std::move(transport));
+  InstanceHolder<RTCIceTransport, webrtc::IceTransportInterface> &RTCIceTransport::holder() {
+    // never destroyed: wrappers may outlive static destructors
+    static auto holder = new InstanceHolder<RTCIceTransport, webrtc::IceTransportInterface>();
+    return *holder;
   }
 
   void RTCIceTransport::TakeSnapshot() {

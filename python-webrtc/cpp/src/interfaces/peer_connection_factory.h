@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <atomic>
+#include <memory>
 #include <mutex>
 
 #include <api/peer_connection_interface.h>
@@ -25,15 +27,17 @@ namespace webrtc {
 
 namespace python_webrtc {
 
+  // Owned by every wrapper created with it, it's destroyed together with the last of them.
   class PeerConnectionFactory {
   public:
     explicit PeerConnectionFactory();
 
     ~PeerConnectionFactory();
 
-    static PeerConnectionFactory *GetOrCreateDefault();
+    static std::shared_ptr<PeerConnectionFactory> Create();
 
-    static void Release();
+    // The factory shared by everything created without an explicit one, alive while anything uses it.
+    static std::shared_ptr<PeerConnectionFactory> GetOrCreateDefault();
 
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory() { return _factory; }
 
@@ -45,9 +49,12 @@ namespace python_webrtc {
     std::unique_ptr<webrtc::Thread> _workerThread;
 
   private:
-    static PeerConnectionFactory *_default;
+    static void Destroy(PeerConnectionFactory *);
+
+    static std::weak_ptr<PeerConnectionFactory> _default;
     static std::mutex _mutex;
-    static int _references;
+    // factories constructed and not destroyed yet, lets tests check that none leaks
+    static std::atomic<int> _alive;
 
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> _factory;
     webrtc::scoped_refptr<webrtc::AudioDeviceModule> _audioDeviceModule;

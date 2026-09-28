@@ -11,7 +11,7 @@
 
 namespace python_webrtc {
 
-  static MediaStream *GetUserMedia() {
+  static std::shared_ptr<MediaStream> GetUserMedia() {
     auto factory = PeerConnectionFactory::GetOrCreateDefault();
     auto stream = factory->factory()->CreateLocalMediaStream(webrtc::CreateRandomUuid());
 
@@ -35,7 +35,7 @@ namespace python_webrtc {
 //      stream->AddTrack(track);
     }
 
-    return MediaStream::holder()->GetOrCreate(factory, stream);
+    return MediaStream::holder().GetOrCreate(factory, stream);
   }
 
 } // namespace python_webrtc

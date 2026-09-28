@@ -7,8 +7,9 @@
 
 #pragma once
 
-#include <atomic>
+#include <memory>
 #include <mutex>
+#include <unordered_map>
 
 #include <api/peer_connection_interface.h>
 #include <api/scoped_refptr.h>
@@ -33,7 +34,8 @@ namespace python_webrtc {
 
   class PeerConnectionFactory;
 
-  class RTCPeerConnection : public webrtc::PeerConnectionObserver {
+  class RTCPeerConnection
+      : public webrtc::PeerConnectionObserver, public std::enable_shared_from_this<RTCPeerConnection> {
   public:
     explicit RTCPeerConnection();
 
@@ -53,23 +55,23 @@ namespace python_webrtc {
     void SetRemoteDescription(
         std::function<void()> &, std::function<void(CallbackPythonWebRTCException)> &, RTCSessionDescription &);
 
-    RTCRtpSender *AddTrack(MediaStreamTrack &, std::optional<std::reference_wrapper<MediaStream>>);
+    std::shared_ptr<RTCRtpSender> AddTrack(MediaStreamTrack &, std::optional<std::reference_wrapper<MediaStream>>);
 
-    RTCRtpSender *AddTrack(MediaStreamTrack &, const std::vector<MediaStream *> &);
+    std::shared_ptr<RTCRtpSender> AddTrack(MediaStreamTrack &, const std::vector<MediaStream *> &);
 
-    RTCRtpTransceiver *AddTransceiver(
+    std::shared_ptr<RTCRtpTransceiver> AddTransceiver(
         webrtc::MediaType, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &);
 
-    RTCRtpTransceiver *AddTransceiver(
+    std::shared_ptr<RTCRtpTransceiver> AddTransceiver(
         MediaStreamTrack &, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &);
 
-    std::vector<RTCRtpTransceiver *> GetTransceivers();
+    std::vector<std::shared_ptr<RTCRtpTransceiver>> GetTransceivers();
 
-    std::vector<RTCRtpSender *> GetSenders();
+    std::vector<std::shared_ptr<RTCRtpSender>> GetSenders();
 
-    std::vector<RTCRtpReceiver *> GetReceivers();
+    std::vector<std::shared_ptr<RTCRtpReceiver>> GetReceivers();
 
-    std::optional<RTCSctpTransport *> GetSctp();
+    std::optional<std::shared_ptr<RTCSctpTransport>> GetSctp();
 
     void RestartIce();
 
@@ -122,6 +124,22 @@ namespace python_webrtc {
     // Python threads may call close() concurrently with other methods (the GIL is released)
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> connection();
 
+    template<typename T, typename U>
+    using Wrappers = std::unordered_map<U *, std::shared_ptr<T>>;
+
+    // the wrapper of a libwebrtc object of this connection, which the connection keeps while it's open
+    template<typename T, typename U>
+    std::shared_ptr<T> Wrap(Wrappers<T, U> &, webrtc::scoped_refptr<U>);
+
+    // wrappers of the current objects of this connection; wrappers of the objects that are gone are released
+    template<typename T, typename U>
+    std::vector<std::shared_ptr<T>> Sync(Wrappers<T, U> &, const std::vector<webrtc::scoped_refptr<U>> &);
+
+    void ReleaseWrappers();
+
+    // declared first to be destroyed last, everything else is bound to its threads
+    std::shared_ptr<PeerConnectionFactory> _factory;
+
     std::mutex _connectionMutex;
 
 //    someStructWith2FieldMinAndMax _port_range;
@@ -129,8 +147,11 @@ namespace python_webrtc {
 
     RTCSessionDescriptionInit _lastSdp;
 
-    PeerConnectionFactory *_factory;
-    std::atomic<bool> _shouldReleaseFactory;
+    std::mutex _wrappersMutex;
+    Wrappers<RTCRtpTransceiver, webrtc::RtpTransceiverInterface> _transceivers;
+    Wrappers<RTCRtpSender, webrtc::RtpSenderInterface> _senders;
+    Wrappers<RTCRtpReceiver, webrtc::RtpReceiverInterface> _receivers;
+    std::shared_ptr<RTCSctpTransport> _sctp;
   };
 
 }
