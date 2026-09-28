@@ -104,6 +104,8 @@ testpaths = ["tests"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
 timeout = 120
+timeout_method = "thread"
+faulthandler_timeout = 60
 
 [tool.ruff]
 line-length = 120
