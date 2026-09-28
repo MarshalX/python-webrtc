@@ -101,7 +101,7 @@ async def test_7(caller, callee):
     caller.add_transceiver(webrtc.MediaType.audio)
 
     await exchange_offer_answer(caller, callee)
-    caller.get_transceivers()[0].stop()
+    callee.get_transceivers()[0].stop()
     await exchange_offer_answer(callee, caller)  # switched args
 
     await caller.set_local_description(await caller.create_offer())
