@@ -9,9 +9,12 @@
 
 #include "python_webrtc/rtc_session_description.h"
 #include "python_webrtc/rtc_on_data_event.h"
+#include "python_webrtc/rtc_ice_candidate.h"
+#include "python_webrtc/rtc_configuration.h"
+#include "python_webrtc/rtc_certificate.h"
 
 #include "webrtc/rtp_transceiver_init.h"
-#include "webrtc/rtp_encoding_parameters.h"
+#include "webrtc/rtp_parameters.h"
 
 namespace python_webrtc {
 
@@ -21,10 +24,13 @@ namespace python_webrtc {
     RTCSessionDescriptionInit::Init(m);
     RTCSessionDescription::Init(m);
     RTCOnDataEvent::Init(m);
+    RTCIceCandidate::Init(m);
+    Certificate::Init(m);
+    ConfigurationInit::Init(m);
 
     // webrtc
 
+    bindRtpParameters(m);
     bindRtpTransceiverInit(m);
-    bindRtpEncodingParameters(m);
   }
 }

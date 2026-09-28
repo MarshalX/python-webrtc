@@ -21,7 +21,7 @@ namespace python_webrtc {
 
     static RTCSessionDescription Wrap(webrtc::SessionDescriptionInterface *);
 
-    explicit operator webrtc::SessionDescriptionInterface *();
+    [[nodiscard]] const RTCSessionDescriptionInit &init() const { return _init; }
 
     webrtc::SdpType getType();
 
@@ -30,7 +30,8 @@ namespace python_webrtc {
 //     TODO (MarshalX) .toJSON() method?
 //    https://github.com/MarshalX/python-webrtc/issues/172
   private:
-    std::unique_ptr<webrtc::SessionDescriptionInterface> _description;
+    // not parsed: an invalid description is only rejected when it's set
+    RTCSessionDescriptionInit _init;
   };
 
 } // namespace python_web_rtc

@@ -7,39 +7,25 @@
 
 #include "rtc_session_description.h"
 
-#include "../../exceptions.h"
 
 namespace python_webrtc {
 
-  RTCSessionDescription::RTCSessionDescription(const RTCSessionDescriptionInit &init) {
-    webrtc::SdpParseError error;
-    auto description = webrtc::CreateSessionDescription(init.type, init.sdp, &error);
-    if (!description) {
-      throw wrapSdpParseError(error);
-    }
-
-    _description = std::move(description);
-  }
+  RTCSessionDescription::RTCSessionDescription(const RTCSessionDescriptionInit &init) : _init(init) {}
 
   webrtc::SdpType RTCSessionDescription::getType() {
-    return _description->GetType();
+    return _init.type;
   }
 
   std::string RTCSessionDescription::getSdp() {
-    std::string sdp;
-    _description->ToString(&sdp);
-    return sdp;
+    return _init.sdp;
   }
 
   void RTCSessionDescription::Init(pybind11::module &m) {
-    pybind11::class_<RTCSessionDescription>(m, "RTCSessionDescription")
+    pybind11::class_<RTCSessionDescription, std::shared_ptr<RTCSessionDescription>>(m, "RTCSessionDescription")
         .def(pybind11::init<const RTCSessionDescriptionInit &>())
         .def_property_readonly("type", &RTCSessionDescription::getType)
-        .def_property_readonly("sdp", &RTCSessionDescription::getSdp);
-  }
-
-  RTCSessionDescription::operator webrtc::SessionDescriptionInterface *() {
-    return webrtc::CreateSessionDescription(this->getType(), this->getSdp()).release();
+        .def_property_readonly("sdp", &RTCSessionDescription::getSdp)
+        .def_property_readonly("init", &RTCSessionDescription::init);
   }
 
   RTCSessionDescription RTCSessionDescription::Wrap(webrtc::SessionDescriptionInterface *description) {

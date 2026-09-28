@@ -165,10 +165,11 @@ def _resolve(src: str, test_path: Path) -> Path:
     return WPT_ROOT / urlsplit(urljoin(page_url, src)).path.lstrip('/')
 
 
-def build_script(test_file: TestFile) -> str:
-    """Concatenates the shim, the harness, the helpers and the test into one script.
+def build_scripts(test_file: TestFile) -> list[str]:
+    """The shim, the harness, the helpers and the test, as the scripts of the page.
 
-    It has to be evaluated at once: in a shell, the harness considers the page loaded after the first microtask.
+    They are evaluated separately, like the scripts of a page (so a "use strict" directive applies to its own
+    script), but all at once: in a shell, the harness considers the page loaded after the first microtask.
     """
     parts = [SHIM.read_text()]
     test_src = '/' + test_file.path.relative_to(WPT_ROOT).as_posix()
@@ -190,4 +191,4 @@ def build_script(test_file: TestFile) -> str:
         parts.append(script.read_text())
         if value == HARNESS:
             parts.append(HARNESS_HOOKS)
-    return '\n;\n'.join(parts)
+    return parts

@@ -26,7 +26,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.wpt.loader import build_script, load, split_case
+from tests.wpt.loader import build_scripts, load, split_case
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -65,6 +65,11 @@ async def run_in_process(case: str) -> dict:
         if not completed.done():
             completed.set_result(result)
 
+    # PythonMonkey's handler of unhandled rejections stops its timers, which leaves the rest of the file hanging.
+    # It also reports rejections that get handled later (as testharness does), so they are only logged.
+    bridge.LOOP = loop
+    loop.set_exception_handler(lambda _, context: print('unhandled:', context.get('exception'), file=sys.stderr))
+
     pm.eval('(env) => { globalThis.__wpt = env; }')(
         {'bridge': bridge.EXPORTS, 'unsupported': unsupported.add, 'complete': complete}
     )
@@ -73,7 +78,9 @@ async def run_in_process(case: str) -> dict:
     )
 
     try:
-        pm.eval(build_script(test_file))
+        # one after another, without giving control to the loop in between
+        for script in build_scripts(test_file):
+            pm.eval(script)
     except pm.SpiderMonkeyError as e:
         return _harness_result('ERROR', str(e))
 

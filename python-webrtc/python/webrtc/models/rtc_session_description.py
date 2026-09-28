@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Union
 
 from webrtc import RTCSessionDescriptionInit, WebRTCObject, wrtc
 
@@ -39,12 +39,34 @@ class RTCSessionDescription(WebRTCObject):
 
     _class = wrtc.RTCSessionDescription
 
-    def __init__(self, rtc_session_description_init: 'webrtc.RTCSessionDescriptionInit'):
-        # TODO remove tmp solution with Init obj after changes in cpp part
-        if isinstance(rtc_session_description_init, RTCSessionDescriptionInit):
-            self._set_native_obj(self._class(rtc_session_description_init._native_obj))
+    def __init__(
+        self,
+        type: Union['webrtc.RTCSdpType', 'webrtc.RTCSessionDescriptionInit', Dict[str, Any]],
+        sdp: str = '',
+    ):
+        """
+        Args:
+            type (:obj:`webrtc.RTCSdpType`): The type of the description. An :obj:`webrtc.RTCSessionDescriptionInit`
+                or its JSON form (a :obj:`dict` with ``type`` and ``sdp`` keys) is accepted too.
+            sdp (:obj:`str`, optional): The SDP of the description. It's parsed when the description is set.
+        """
+        if isinstance(type, RTCSessionDescriptionInit):
+            super().__init__(self._class(type._native_obj))
+        elif isinstance(type, dict):
+            self.__init__(_sdp_type(type['type']), type.get('sdp') or '')
+        elif isinstance(type, wrtc.RTCSdpType) or isinstance(type, str):
+            super().__init__(self._class(RTCSessionDescriptionInit(_sdp_type(type), sdp)._native_obj))
         else:
-            super().__init__(rtc_session_description_init)
+            # a native object
+            super().__init__(type)
+
+    def to_json(self) -> Dict[str, str]:
+        """The description as a JSON-serializable dictionary, to send to the remote peer.
+
+        Returns:
+            :obj:`dict`: ``type`` (like ``'offer'``) and ``sdp``.
+        """
+        return {'type': self.type.name, 'sdp': self.sdp}
 
     @property
     def type(self) -> 'webrtc.RTCSdpType':
@@ -55,3 +77,15 @@ class RTCSessionDescription(WebRTCObject):
     def sdp(self):
         """:obj:`str`: A string containing a SDP message describing the session."""
         return self._native_obj.sdp
+
+    #: Alias for :attr:`to_json`
+    toJSON = to_json
+
+
+def _sdp_type(value) -> 'webrtc.RTCSdpType':
+    if isinstance(value, wrtc.RTCSdpType):
+        return value
+    member = getattr(wrtc.RTCSdpType, str(value), None)
+    if not isinstance(member, wrtc.RTCSdpType):
+        raise ValueError(f'{value!r} is not a valid RTCSdpType')
+    return member

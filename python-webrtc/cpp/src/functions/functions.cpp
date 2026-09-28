@@ -13,7 +13,9 @@
 namespace python_webrtc {
 
   void Functions::Init(pybind11::module &m) {
-    m.def("getUserMedia", &GetUserMedia, nogil());
+    m.def("getUserMedia", &GetUserMedia, nogil(),
+          pybind11::arg("audio") = true, pybind11::arg("video") = false, pybind11::arg("width") = 640,
+          pybind11::arg("height") = 480, pybind11::arg("frameRate") = 30.0);
   }
 
 }

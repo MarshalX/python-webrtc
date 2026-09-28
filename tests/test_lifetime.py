@@ -7,6 +7,7 @@
 
 """Ownership and lifetime of the native wrappers: no leaks, no use-after-free, stable identity and state."""
 
+import asyncio
 import gc
 import threading
 import time
@@ -286,3 +287,140 @@ def test_getters_while_connection_is_closed_and_dropped(audio_stream):
             assert not reader.is_alive(), 'reader thread is stuck'
         assert not errors, errors
         collect()
+
+
+@pytest.mark.asyncio
+async def test_handlers_referencing_their_connection_do_not_keep_it_alive():
+    """The garbage collector sees the handlers while Python alone owns the connection"""
+    import asyncio
+    import weakref
+
+    baseline = alive_factories()
+
+    def create():
+        pc = webrtc.RTCPeerConnection()
+
+        @pc.on('negotiationneeded')
+        def on_negotiation(event):
+            pc.get_transceivers()
+
+        pc.add_transceiver(webrtc.MediaType.audio)
+        return weakref.ref(pc)
+
+    ref = create()
+    await asyncio.sleep(0.05)
+    collect()
+
+    assert ref() is None
+    assert alive_factories() == baseline
+
+
+@pytest.mark.asyncio
+async def test_channel_handlers_do_not_dangle_after_close_and_gc():
+    import asyncio
+
+    from tests.helpers import connect
+
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    channel = caller.create_data_channel('lifetime')
+    received = []
+    channel.on('message', lambda event: received.append(event.data))
+    channel.on('close', lambda event: received.append('close'))
+    callee.on('datachannel', lambda event: event.channel.on('message', lambda e: event.channel.send(e.data)))
+    await connect(caller, callee)
+    await asyncio.sleep(0.1)
+
+    channel.send('ping')
+    caller.close()
+    callee.close()
+    del channel, caller, callee
+    collect()
+    # nothing delivered after close, and nothing crashes while libwebrtc tears down
+    await asyncio.sleep(0.3)
+    collect()
+    assert 'close' not in received
+
+
+@pytest.mark.asyncio
+async def test_connections_dropped_while_emitting_events():
+    """Events of connections that are destroyed meanwhile are dropped safely"""
+    import asyncio
+
+    for _ in range(20):
+        pc = webrtc.RTCPeerConnection()
+        pc.on('icecandidate', lambda event: None)
+        pc.on('icegatheringstatechange', lambda event: None)
+        pc.create_data_channel('gather')
+        await pc.set_local_description()
+        del pc
+        collect()
+    await asyncio.sleep(0.2)
+    collect()
+
+
+def test_process_exits_after_connecting():
+    """Wrappers destroyed at exit unregister from libwebrtc threads, which may be wrapping objects meanwhile:
+    this used to deadlock on the lock of the wrappers"""
+    import subprocess
+    import sys
+    import textwrap
+
+    script = textwrap.dedent(
+        '''
+        import asyncio
+        import webrtc
+        from tests.helpers import connect
+
+        async def main():
+            for _ in range(3):
+                caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+                channel = caller.create_data_channel('exit')
+                await connect(caller, callee)
+                caller.sctp.transport.ice_transport.on('selectedcandidatepairchange', lambda event: None)
+                channel.send('bye')
+            print('connected')
+
+        asyncio.run(main())
+        '''
+    )
+    result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=60)
+    assert 'connected' in result.stdout, result.stderr[-2000:]
+    assert result.returncode == 0, result.stderr[-2000:]
+
+
+@pytest.mark.asyncio
+async def test_stream_tracks_read_while_they_change():
+    """Reading the tracks of a remote stream while a description changes them doesn't deadlock with the stream
+    observer on the signaling thread"""
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    stream = webrtc.get_user_media(audio=True)
+    audio = stream.get_audio_tracks()[0]
+    sender = caller.add_track(audio, stream)
+    streams = []
+    callee.on('track', lambda event: streams.extend(event.streams))
+    await exchange_offer_answer(caller, callee)
+    await asyncio.sleep(0.05)
+    remote = streams[0]
+
+    stop = threading.Event()
+
+    def read():
+        while not stop.is_set():
+            remote.get_tracks()
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    try:
+        for _ in range(10):
+            # removing and adding the track back changes the tracks of the remote stream
+            caller.remove_track(sender)
+            await asyncio.wait_for(exchange_offer_answer(caller, callee), 5)
+            sender = caller.add_track(audio, stream)
+            await asyncio.wait_for(exchange_offer_answer(caller, callee), 5)
+    finally:
+        stop.set()
+        reader.join(5)
+    assert not reader.is_alive()
+    audio.stop()
+    caller.close()
+    callee.close()

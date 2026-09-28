@@ -5,24 +5,13 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-__CALLBACK_EXCEPTION_TO_EXCEPTION = None
+import wrtc
 
 
-def __init_callback_exception_to_exception_dict():
-    global __CALLBACK_EXCEPTION_TO_EXCEPTION
+def convert_from_callback_exception_to_exception(callback_exception) -> Exception:
+    if isinstance(callback_exception, wrtc.RTCCallbackException):
+        return callback_exception.to_python()
 
-    import webrtc
-    import wrtc
+    from webrtc import PythonWebRTCException
 
-    __CALLBACK_EXCEPTION_TO_EXCEPTION = {
-        wrtc.CallbackPythonWebRTCException: webrtc.PythonWebRTCException,
-        wrtc.RTCCallbackException: webrtc.RTCException,
-    }
-
-
-def convert_from_callback_exception_to_exception(callback_exception):
-    if not __CALLBACK_EXCEPTION_TO_EXCEPTION:
-        __init_callback_exception_to_exception_dict()
-
-    cls = __CALLBACK_EXCEPTION_TO_EXCEPTION[type(callback_exception)]
-    return cls(callback_exception.what())
+    return PythonWebRTCException(callback_exception.what())

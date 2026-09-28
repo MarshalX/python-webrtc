@@ -17,6 +17,9 @@
 #include "rtc_rtp_receiver.h"
 #include "rtc_rtp_transceiver.h"
 #include "rtc_audio_source.h"
+#include "rtc_video_source.h"
+#include "rtc_data_channel.h"
+#include "rtc_dtmf_sender.h"
 #include "rtc_peer_connection.h"
 
 namespace python_webrtc {
@@ -28,10 +31,13 @@ namespace python_webrtc {
     RTCIceTransport::Init(m);
     RTCDtlsTransport::Init(m);
     RTCSctpTransport::Init(m);
+    RTCDTMFSender::Init(m);
     RTCRtpSender::Init(m);
     RTCRtpReceiver::Init(m);
     RTCRtpTransceiver::Init(m);
+    RTCDataChannel::Init(m);
     RTCPeerConnection::Init(m);
     RTCAudioSource::Init(m);
+    RTCVideoSource::Init(m);
   }
 }

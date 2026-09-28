@@ -39,3 +39,17 @@ class RTCSessionDescriptionInit(WebRTCObject):
     @sdp.setter
     def sdp(self, value: str):
         self._native_obj.sdp = value
+
+    def to_json(self) -> dict:
+        """The description as a JSON-serializable dictionary, to send to the remote peer.
+
+        Returns:
+            :obj:`dict`: ``type`` (like ``'offer'``) and ``sdp``.
+        """
+        return {'type': self.type.name, 'sdp': self.sdp}
+
+    def __repr__(self):
+        return f'RTCSessionDescriptionInit(type={self.type.name!r}, sdp={len(self.sdp)} characters)'
+
+    #: Alias for :attr:`to_json`
+    toJSON = to_json

@@ -15,6 +15,7 @@ Subpackages
    webrtc.functions
    webrtc.interfaces
    webrtc.models
+   webrtc.utils
 
 Submodules
 ----------
@@ -23,3 +24,4 @@ Submodules
    :maxdepth: 4
 
    webrtc.base
+   webrtc.exceptions

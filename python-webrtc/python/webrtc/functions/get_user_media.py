@@ -14,15 +14,36 @@ if TYPE_CHECKING:
     import webrtc
 
 
-# TODO constraints
-def get_user_media(constraints=None) -> 'webrtc.MediaStream':
-    """Method prompts the user for permission to use a media input which produces a :obj:`webrtc.MediaStream`
-    with tracks containing the requested types of media.
+def get_user_media(
+    audio: bool = True,
+    video: bool = False,
+    *,
+    width: int = 640,
+    height: int = 480,
+    frame_rate: float = 30.0,
+) -> 'webrtc.MediaStream':
+    """Returns a stream of local media: an audio track of the default audio device, and a video track
+    of a synthetic camera, which draws a moving pattern (use :obj:`webrtc.RTCVideoSource` for real video).
+
+    Args:
+        audio (:obj:`bool`, optional): Whether the stream has an audio track.
+        video (:obj:`bool`, optional): Whether the stream has a video track.
+        width (:obj:`int`, optional): The width of the video.
+        height (:obj:`int`, optional): The height of the video.
+        frame_rate (:obj:`float`, optional): The frames per second of the video.
 
     Returns:
-        :obj:`webrtc.MediaStream`: A :obj:`webrtc.MediaStream` object representing the media stream.
+        :obj:`webrtc.MediaStream`: The stream.
+
+    Raises:
+        :obj:`TypeError`: If neither audio nor video is requested.
+        :obj:`ValueError`: If the size or the frame rate of the video isn't positive.
     """
-    return MediaStream._wrap(wrtc.getUserMedia())
+    if not audio and not video:
+        raise TypeError('audio or video must be requested')
+    if video and (width <= 0 or height <= 0 or frame_rate <= 0):
+        raise ValueError('the size and the frame rate of the video must be positive')
+    return MediaStream._wrap(wrtc.getUserMedia(bool(audio), bool(video), width, height, float(frame_rate)))
 
 
 #: Alias for :func:`get_user_media`

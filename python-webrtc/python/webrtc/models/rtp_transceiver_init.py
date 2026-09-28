@@ -21,10 +21,11 @@ class RtpTransceiverInit(WebRTCObject):
     def __init__(
         self,
         direction: Optional['webrtc.RtpTransceiverDirection'] = None,
-        send_encodings: Optional[List['webrtc.RtpEncodingParameters']] = None,
+        send_encodings: Optional[List['webrtc.RTCRtpEncodingParameters']] = None,
         streams: Optional[List['webrtc.MediaStream']] = None,
     ):
         super().__init__()
+        self.__send_encodings = []
 
         if direction:
             self.direction = direction
@@ -47,16 +48,15 @@ class RtpTransceiverInit(WebRTCObject):
         self._native_obj.direction = value
 
     @property
-    def send_encodings(self) -> List['webrtc.RtpEncodingParameters']:
-        """:obj:`list` of :obj:`webrtc.RtpEncodingParameters`: A list of encodings to allow when sending RTP media
-        from the :obj:`webrtc.RTCRtpSender`. Each entry is of type :obj:`webrtc.RtpEncodingParameters`."""
-        from webrtc import RtpEncodingParameters
-
-        return RtpEncodingParameters._wrap_many(self._native_obj.sendEncodings)
+    def send_encodings(self) -> List['webrtc.RTCRtpEncodingParameters']:
+        """:obj:`list` of :obj:`webrtc.RTCRtpEncodingParameters`: A list of encodings to allow when sending RTP media
+        from the :obj:`webrtc.RTCRtpSender`, one per simulcast layer."""
+        return list(self.__send_encodings)
 
     @send_encodings.setter
-    def send_encodings(self, value: List['webrtc.RtpEncodingParameters']):
-        self._native_obj.sendEncodings = [param._native_obj for param in value]
+    def send_encodings(self, value: List['webrtc.RTCRtpEncodingParameters']):
+        self.__send_encodings = list(value)
+        self._native_obj.sendEncodings = [param._to_native() for param in value]
 
     @property
     def streams(self) -> List['webrtc.MediaStream']:

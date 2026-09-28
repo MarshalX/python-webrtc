@@ -44,3 +44,35 @@ async def wait_for_ice_gathering_complete(pc, timeout=10):
             await asyncio.sleep(0.05)
 
     await asyncio.wait_for(_wait(), timeout)
+
+
+def wait_for_event(target, name, timeout=10):
+    """Registers for the next event of a type right away, and returns an awaitable of it"""
+    future = asyncio.get_running_loop().create_future()
+    target.once(name, lambda event: future.done() or future.set_result(event))
+    return asyncio.wait_for(future, timeout)
+
+
+def exchange_ice_candidates(caller, callee):
+    """Trickles the candidates of each connection to the other one"""
+    for pc, other in ((caller, callee), (callee, caller)):
+
+        def on_candidate(event, other=other):
+            if event.candidate is not None:
+                asyncio.ensure_future(other.add_ice_candidate(event.candidate))
+
+        pc.on('icecandidate', on_candidate)
+
+
+async def connect(caller, callee, timeout=10):
+    """Negotiates and waits until both connections are connected"""
+    exchange_ice_candidates(caller, callee)
+    await exchange_offer_answer(caller, callee)
+
+    async def _wait():
+        while webrtc.RTCPeerConnectionState.connected not in {caller.connection_state} or (
+            callee.connection_state != webrtc.RTCPeerConnectionState.connected
+        ):
+            await asyncio.sleep(0.05)
+
+    await asyncio.wait_for(_wait(), timeout)

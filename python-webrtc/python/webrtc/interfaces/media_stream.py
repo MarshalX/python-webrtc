@@ -5,21 +5,46 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, Union
 
 import wrtc
 from webrtc import MediaStreamTrack, WebRTCObject
+from webrtc.utils.events import EventTarget
 
 if TYPE_CHECKING:
     import webrtc
 
 
-class MediaStream(WebRTCObject):
+class MediaStream(WebRTCObject, EventTarget):
     """The MediaStream interface represents a stream of media content. A stream consists of several tracks,
     such as video or audio tracks. Each track is specified as an instance of :obj:`webrtc.MediaStreamTrack`.
+
+    Events (see :meth:`on`):
+        ``addtrack`` and ``removetrack`` (:obj:`webrtc.MediaStreamTrackEvent`): The remote peer added a track to
+        a remote stream, or removed one. Changes made with :meth:`add_track` and :meth:`remove_track` fire none.
     """
 
     _class = wrtc.MediaStream
+    _events = ('addtrack', 'removetrack')
+
+    def _create_event(self, name: str, *args):
+        from webrtc import MediaStreamTrackEvent
+
+        return MediaStreamTrackEvent(name, MediaStreamTrack._wrap(args[0]), target=self)
+
+    def __init__(self, tracks: Optional[Union[List['webrtc.MediaStreamTrack'], 'webrtc.MediaStream']] = None):
+        """
+        Args:
+            tracks (:obj:`list` of :obj:`webrtc.MediaStreamTrack`, optional): The tracks of the new stream,
+                or a stream whose tracks the new stream shares.
+        """
+        if isinstance(tracks, wrtc.MediaStream):
+            # a native object being wrapped
+            super().__init__(tracks)
+            return
+        if isinstance(tracks, MediaStream):
+            tracks = tracks.get_tracks()
+        super().__init__(self._class.create([track._native_obj for track in tracks or []]))
 
     @property
     def id(self) -> str:

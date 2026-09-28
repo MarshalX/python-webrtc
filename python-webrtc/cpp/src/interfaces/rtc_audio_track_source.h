@@ -8,6 +8,10 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 #include <api/media_stream_interface.h>
 #include <api/notifier.h>
@@ -21,6 +25,11 @@ namespace python_webrtc {
   public:
     RTCAudioTrackSource() = default;
 
+    ~RTCAudioTrackSource() override;
+
+    // Starts a synthetic microphone: quiet noise, in 10 ms frames of 48 kHz mono
+    void StartMicrophone();
+
     SourceState state() const override;
 
     bool remote() const override;
@@ -32,7 +41,18 @@ namespace python_webrtc {
     void RemoveSink(webrtc::AudioTrackSinkInterface *) override;
 
   private:
-    std::atomic<webrtc::AudioTrackSinkInterface *> _sink = {nullptr};
+    void PushSamples(const void *samples, int bitsPerSample, int sampleRate, size_t channels, size_t frames);
+
+    void RunMicrophone();
+
+    // guards the sink, which is removed (and may be destroyed) on another thread than the one pushing data
+    std::mutex _sinkMutex;
+    webrtc::AudioTrackSinkInterface *_sink = nullptr;
+
+    std::mutex _microphoneMutex;
+    std::condition_variable _microphoneStop;
+    bool _stopping = false;
+    std::thread _microphone;
   };
 
 } // namespace python_webrtc

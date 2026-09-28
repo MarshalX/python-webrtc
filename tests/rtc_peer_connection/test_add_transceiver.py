@@ -147,23 +147,21 @@ def test_7(pc, audio_stream):
 
 @pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
 def test_8(pc, kind):
-    """add_transceiver with rid containing invalid non-alphanumeric characters should throw RTCException"""
+    """add_transceiver with rid containing invalid non-alphanumeric characters should throw ValueError"""
     encodings = [webrtc.RtpEncodingParameters(rid="@Invalid!")]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
 
-    # will be changed to TypeError after reworking binding to rtc error?
-    with pytest.raises(webrtc.RTCException):
+    with pytest.raises(ValueError):
         pc.add_transceiver(kind, init)
 
 
 @pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
 def test_9(pc, kind):
-    """add_transceiver with rid longer than 16 characters should throw RTCException"""
+    """add_transceiver with rid longer than 16 characters, which the specification doesn't allow, should throw"""
     encodings = [webrtc.RtpEncodingParameters(rid="a" * 17)]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
 
-    # will be changed to TypeError after reworking binding to rtc error?
-    with pytest.raises(webrtc.RTCException):
+    with pytest.raises(ValueError):
         pc.add_transceiver(kind, init)
 
 

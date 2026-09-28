@@ -17,7 +17,7 @@ namespace python_webrtc {
   public:
     CreateSessionDescriptionObserver(std::weak_ptr<RTCPeerConnection> peerConnection,
                                      std::function<void(RTCSessionDescription)> &onSuccess,
-                                     std::function<void(CallbackPythonWebRTCException)> &onFailure) :
+                                     std::function<void(RTCCallbackException)> &onFailure) :
         _peerConnection(std::move(peerConnection)), _onSuccess(onSuccess), _onFailure(onFailure) {}
 
     void OnSuccess(webrtc::SessionDescriptionInterface *) override;
@@ -28,7 +28,7 @@ namespace python_webrtc {
     // the connection may be gone by the time the description is created
     std::weak_ptr<RTCPeerConnection> _peerConnection;
     std::function<void(RTCSessionDescription)> _onSuccess = nullptr;
-    std::function<void(CallbackPythonWebRTCException)> _onFailure = nullptr;
+    std::function<void(RTCCallbackException)> _onFailure = nullptr;
   };
 
 } // namespace python_webrtc

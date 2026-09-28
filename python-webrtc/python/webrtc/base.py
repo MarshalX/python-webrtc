@@ -26,11 +26,16 @@ class WebRTCObject(metaclass=ABCMeta):
 
     @classmethod
     def _wrap(cls, item) -> 'WebRTCObject':
-        return cls(item)
+        obj = cls(item)
+        # an object that emits events delivers them to the loop that has it (see EventTarget._attach)
+        attach = getattr(obj, '_attach', None)
+        if attach is not None:
+            attach()
+        return obj
 
     @classmethod
     def _wrap_many(cls, items) -> List['WebRTCObject']:
-        return [cls(item) for item in items]
+        return [cls._wrap(item) for item in items]
 
     def __repr__(self):
         return f'<webrtc.{self.__class__.__name__} object at {hex(id(self))}'

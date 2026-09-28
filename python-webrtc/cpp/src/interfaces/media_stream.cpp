@@ -14,7 +14,46 @@ namespace python_webrtc {
 
   MediaStream::MediaStream(
       std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::MediaStreamInterface> stream)
-      : _factory(std::move(factory)), _stream(std::move(stream)) {}
+      : _factory(std::move(factory)), _stream(std::move(stream)) {
+    for (const auto &track: tracks()) {
+      _known.insert(track.get());
+    }
+    // Posted, not blocking: wrappers are created under locks that the signaling thread may wait for.
+    // The destructor unregisters with a call to the signaling thread, which runs after this.
+    _factory->_signalingThread->PostTask(_alive.Guard([this]() { _stream->RegisterObserver(this); }));
+  }
+
+  MediaStream::~MediaStream() {
+    gil_release_if_held release;
+    _factory->_signalingThread->BlockingCall([this]() { _stream->UnregisterObserver(this); });
+    DropListeners();
+  }
+
+  void MediaStream::OnChanged() {
+    std::vector<webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>> added, removed;
+    {
+      std::lock_guard<std::mutex> lock(_tracksMutex);
+      std::set<webrtc::MediaStreamTrackInterface *> current;
+      for (const auto &track: tracks()) {
+        current.insert(track.get());
+        if (!_known.count(track.get())) {
+          added.push_back(track);
+        }
+      }
+      for (auto track: _known) {
+        if (!current.count(track)) {
+          removed.push_back(webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>(track));
+        }
+      }
+      _known = std::move(current);
+    }
+    for (const auto &track: removed) {
+      Emit("removetrack", MediaStreamTrack::holder().GetOrCreate(_factory, track));
+    }
+    for (const auto &track: added) {
+      Emit("addtrack", MediaStreamTrack::holder().GetOrCreate(_factory, track));
+    }
+  }
 
   std::vector<webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>> MediaStream::tracks() {
     auto tracks = std::vector<webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>>();
@@ -30,9 +69,11 @@ namespace python_webrtc {
   std::vector<std::shared_ptr<MediaStreamTrack>> MediaStream::SyncTracks() {
     auto tracks = std::vector<std::shared_ptr<MediaStreamTrack>>();
     decltype(_tracks) current;
+    // read before locking: they're calls to the signaling thread, where OnChanged takes the lock
+    auto streamTracks = this->tracks();
     {
       std::lock_guard<std::mutex> lock(_tracksMutex);
-      for (auto const &track: this->tracks()) {
+      for (auto const &track: streamTracks) {
         auto it = _tracks.find(track.get());
         auto wrapper = it != _tracks.end() ? it->second : MediaStreamTrack::holder().GetOrCreate(_factory, track);
         current[track.get()] = wrapper;
@@ -62,7 +103,10 @@ namespace python_webrtc {
   }
 
   void MediaStream::Init(pybind11::module &m) {
-    pybind11::class_<MediaStream, std::shared_ptr<MediaStream>>(m, "MediaStream")
+    pybind11::class_<MediaStream, std::shared_ptr<MediaStream>> cls(
+        m, "MediaStream", Listeners::TypeSetup<MediaStream>());
+    Listeners::Bind(cls);
+    cls
         .def_property_readonly("id", nogil_fn(&MediaStream::GetId))
         .def_property_readonly("active", nogil_fn(&MediaStream::GetActive))
         .def("getAudioTracks", &MediaStream::GetAudioTracks, nogil())
@@ -71,7 +115,8 @@ namespace python_webrtc {
         .def("getTrackById", &MediaStream::GetTrackById, nogil())
         .def("addTrack", &MediaStream::AddTrack, nogil())
         .def("removeTrack", &MediaStream::RemoveTrack, nogil())
-        .def("clone", &MediaStream::Clone, nogil());
+        .def("clone", &MediaStream::Clone, nogil())
+        .def_static("create", &MediaStream::Create, nogil());
   }
 
   std::string MediaStream::GetId() {
@@ -116,22 +161,23 @@ namespace python_webrtc {
     return SyncTracks();
   }
 
-  std::optional<std::shared_ptr<MediaStreamTrack>> MediaStream::GetTrackById(const std::string &label) {
-    auto audioTrack = _stream->FindAudioTrack(label);
-    if (audioTrack) {
-      return WrapTrack(audioTrack);
+  std::optional<std::shared_ptr<MediaStreamTrack>> MediaStream::GetTrackById(const std::string &id) {
+    // by the id Python sees, which differs from the libwebrtc one for remote tracks
+    for (const auto &track: GetTracks()) {
+      if (track->GetId() == id) {
+        return track;
+      }
     }
-
-    auto videoTrack = _stream->FindVideoTrack(label);
-    if (videoTrack) {
-      return WrapTrack(videoTrack);
-    }
-
     return {};
   }
 
   void MediaStream::AddTrack(const std::shared_ptr<MediaStreamTrack> &mediaStreamTrack) {
     auto track = mediaStreamTrack->track();
+    {
+      // changes made by Python fire no events
+      std::lock_guard<std::mutex> lock(_tracksMutex);
+      _known.insert(track.get());
+    }
 
     if (track->kind() == track->kAudioKind) {
       _stream->AddTrack(webrtc::scoped_refptr<webrtc::AudioTrackInterface>(dynamic_cast<webrtc::AudioTrackInterface *>(track.get())));
@@ -145,6 +191,11 @@ namespace python_webrtc {
 
   void MediaStream::RemoveTrack(MediaStreamTrack &mediaStreamTrack) {
     auto track = mediaStreamTrack.track();
+    {
+      // changes made by Python fire no events
+      std::lock_guard<std::mutex> lock(_tracksMutex);
+      _known.erase(track.get());
+    }
 
     if (track->kind() == track->kAudioKind) {
       _stream->RemoveTrack(webrtc::scoped_refptr<webrtc::AudioTrackInterface>(dynamic_cast<webrtc::AudioTrackInterface *>(track.get())));
@@ -181,6 +232,16 @@ namespace python_webrtc {
     }
 
     return MediaStream::holder().GetOrCreate(_factory, clonedStream);
+  }
+
+  std::shared_ptr<MediaStream> MediaStream::Create(const std::vector<std::shared_ptr<MediaStreamTrack>> &tracks) {
+    auto factory = PeerConnectionFactory::GetOrCreateDefault();
+    auto stream = MediaStream::holder().GetOrCreate(
+        factory, factory->factory()->CreateLocalMediaStream(webrtc::CreateRandomUuid()));
+    for (const auto &track: tracks) {
+      stream->AddTrack(track);
+    }
+    return stream;
   }
 
   InstanceHolder<MediaStream, webrtc::MediaStreamInterface> &MediaStream::holder() {

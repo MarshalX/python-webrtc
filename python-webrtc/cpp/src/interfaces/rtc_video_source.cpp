@@ -1,0 +1,76 @@
+//
+// Copyright 2026 Ilya (Marshal) <https://github.com/MarshalX>. All rights reserved.
+//
+// Use of this source code is governed by a BSD-style license
+// that can be found in the LICENSE.md file in the root of the project.
+//
+
+#include "rtc_video_source.h"
+
+#include <api/video/i420_buffer.h>
+#include <rtc_base/crypto_random.h>
+#include <rtc_base/time_utils.h>
+
+#include <pybind11/stl.h>
+
+#include "../exceptions.h"
+#include "../utils/gil.h"
+
+namespace python_webrtc {
+
+  RTCVideoSource::RTCVideoSource(bool isScreencast, std::optional<bool> needsDenoising)
+      : _factory(PeerConnectionFactory::GetOrCreateDefault()),
+        _source(webrtc::make_ref_counted<RTCVideoTrackSource>(isScreencast, needsDenoising)) {}
+
+  void RTCVideoSource::Init(pybind11::module &m) {
+    pybind11::class_<RTCVideoSource, std::shared_ptr<RTCVideoSource>>(m, "RTCVideoSource")
+        .def(pybind11::init<bool, std::optional<bool>>(), nogil())
+        .def_property_readonly("isScreencast", [](RTCVideoSource &self) { return self._source->is_screencast(); })
+        .def_property_readonly("needsDenoising", [](RTCVideoSource &self) { return self._source->needs_denoising(); })
+        .def("createTrack", &RTCVideoSource::CreateTrack, nogil())
+        .def("onFrame", &RTCVideoSource::OnFrame, nogil());
+  }
+
+  std::shared_ptr<MediaStreamTrack> RTCVideoSource::CreateTrack() {
+    auto track = _factory->factory()->CreateVideoTrack(_source, webrtc::CreateRandomUuid());
+    return MediaStreamTrack::holder().GetOrCreate(_factory, track);
+  }
+
+  void RTCVideoSource::OnFrame(int width, int height, const std::string &i420, int rotation,
+                               std::optional<int64_t> timestampUs) {
+    if (width <= 0 || height <= 0) {
+      throw RTCException(webrtc::RTCErrorType::INVALID_RANGE, "The frame must have a positive width and height");
+    }
+    int chromaWidth = (width + 1) / 2;
+    int chromaHeight = (height + 1) / 2;
+    size_t size = static_cast<size_t>(width) * height + 2 * static_cast<size_t>(chromaWidth) * chromaHeight;
+    if (i420.size() != size) {
+      throw RTCException(webrtc::RTCErrorType::INVALID_PARAMETER,
+                         "The data of an I420 frame of this size must be " + std::to_string(size) + " bytes");
+    }
+    if (rotation != 0 && rotation != 90 && rotation != 180 && rotation != 270) {
+      throw RTCException(webrtc::RTCErrorType::INVALID_RANGE, "The rotation must be 0, 90, 180 or 270");
+    }
+
+    auto data = reinterpret_cast<const uint8_t *>(i420.data());
+    auto buffer = webrtc::I420Buffer::Copy(
+        width, height,
+        data, width,
+        data + width * height, chromaWidth,
+        data + width * height + chromaWidth * chromaHeight, chromaWidth);
+    _source->PushFrame(webrtc::VideoFrame::Builder()
+                           .set_video_frame_buffer(buffer)
+                           .set_rotation(static_cast<webrtc::VideoRotation>(rotation))
+                           .set_timestamp_us(timestampUs.value_or(webrtc::TimeMicros()))
+                           .build());
+  }
+
+  std::shared_ptr<MediaStreamTrack> RTCVideoSource::CreateCameraTrack(
+      const std::shared_ptr<PeerConnectionFactory> &factory, int width, int height, double frameRate) {
+    auto source = webrtc::make_ref_counted<RTCVideoTrackSource>(false, std::nullopt);
+    source->StartCamera(width, height, frameRate);
+    auto track = factory->factory()->CreateVideoTrack(source, webrtc::CreateRandomUuid());
+    return MediaStreamTrack::holder().GetOrCreate(factory, track);
+  }
+
+} // namespace python_webrtc

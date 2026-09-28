@@ -15,10 +15,12 @@ namespace python_webrtc {
   MediaStreamTrack::MediaStreamTrack(std::shared_ptr<PeerConnectionFactory> factory,
                                      webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track)
       : _factory(std::move(factory)), _track(std::move(track)) {
-    _factory->_signalingThread->BlockingCall([this]() {
+    // Posted, not blocking: wrappers are created under locks that the signaling thread may wait for.
+    // The destructor unregisters with a call to the signaling thread, which runs after this.
+    _factory->_signalingThread->PostTask(_alive.Guard([this]() {
       _track->RegisterObserver(this);
       _observing = true;
-    });
+    }));
   }
 
   MediaStreamTrack::~MediaStreamTrack() {
@@ -32,12 +34,19 @@ namespace python_webrtc {
       }
     });
 
+    DropListeners();
     _track = nullptr;
   }
 
   void MediaStreamTrack::Init(pybind11::module &m) {
-    pybind11::class_<MediaStreamTrack, std::shared_ptr<MediaStreamTrack>>(m, "MediaStreamTrack")
-        .def_property("enabled", nogil_fn(&MediaStreamTrack::GetEnabled), nogil_fn(&MediaStreamTrack::SetEnabled))
+    pybind11::class_<MediaStreamTrack, std::shared_ptr<MediaStreamTrack>> cls(
+        m, "MediaStreamTrack", Listeners::TypeSetup<MediaStreamTrack>());
+    Listeners::Bind(cls);
+    cls.def("_surface", &MediaStreamTrack::SurfaceMuted, nogil());
+    cls.def("_surfaceEnded", &MediaStreamTrack::SurfaceEnded, nogil());
+    cls.def_property_readonly("label", nogil_fn(&MediaStreamTrack::GetLabel));
+    cls.def_property_readonly("_nativeId", nogil_fn([](MediaStreamTrack &self) { return self.track()->id(); }));
+    cls.def_property("enabled", nogil_fn(&MediaStreamTrack::GetEnabled), nogil_fn(&MediaStreamTrack::SetEnabled))
         .def_property_readonly("id", nogil_fn(&MediaStreamTrack::GetId))
         .def_property_readonly("kind", nogil_fn(&MediaStreamTrack::GetKind))
         .def_property_readonly("readyState", nogil_fn(&MediaStreamTrack::GetReadyState))
@@ -47,6 +56,8 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrack::Stop() {
+    _stopped = true;
+    _surfacedEnded.Reset();
     _factory->_signalingThread->BlockingCall([this]() { StopOnSignalingThread(); });
   }
 
@@ -60,13 +71,77 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrack::OnChanged() {
-    if (_track->state() == webrtc::MediaStreamTrackInterface::TrackState::kEnded) {
+    if (_track->state() == webrtc::MediaStreamTrackInterface::TrackState::kEnded && !_ended) {
+      // ended by the remote peer or by renegotiation, rather than by stop()
+      bool emit = !_stopped;
+      if (emit) {
+        // the track is live until its ended event, as in a browser
+        _surfacedEnded.Changed(Tracked(), false);
+      }
       StopOnSignalingThread();
+      if (emit) {
+        std::lock_guard<std::mutex> lock(_endedMutex);
+        if (_holdingEnded) {
+          _endedHeld = true;
+        } else {
+          Emit("ended");
+        }
+      }
     }
   }
 
   void MediaStreamTrack::OnPeerConnectionClosed() {
+    // a closed connection fires no events of its tracks
+    Mute();
+    _surfacedMuted.Reset();
+    _surfacedEnded.Reset();
     Stop();
+  }
+
+  void MediaStreamTrack::MarkRemote() {
+    _muted = true;
+    {
+      // a remote track has its own id, rather than the one in the description, which every receiver of it shares
+      std::lock_guard<std::mutex> lock(_idMutex);
+      _id = webrtc::CreateRandomUuid();
+      _label = _track->kind() == webrtc::MediaStreamTrackInterface::kAudioKind ? "remote audio" : "remote video";
+    }
+    // its events (like ended) are kept until Python has the track
+    Hold();
+  }
+
+  void MediaStreamTrack::SetMuted(bool muted) {
+    if (_ended) {
+      // an ended track stays as it was
+      return;
+    }
+    bool previous = _muted.exchange(muted);
+    if (previous != muted) {
+      _surfacedMuted.Changed(HasListeners(), previous);
+      Emit(muted ? "mute" : "unmute", muted);
+    }
+  }
+
+  void MediaStreamTrack::SurfaceMuted(bool muted) {
+    _surfacedMuted.Surface(muted);
+  }
+
+  void MediaStreamTrack::HoldEnded() {
+    std::lock_guard<std::mutex> lock(_endedMutex);
+    _holdingEnded = true;
+  }
+
+  void MediaStreamTrack::ReleaseEnded() {
+    std::lock_guard<std::mutex> lock(_endedMutex);
+    _holdingEnded = false;
+    if (_endedHeld) {
+      _endedHeld = false;
+      Emit("ended");
+    }
+  }
+
+  void MediaStreamTrack::SurfaceEnded() {
+    _surfacedEnded.Reset();
   }
 
   bool MediaStreamTrack::GetEnabled() {
@@ -82,7 +157,13 @@ namespace python_webrtc {
   }
 
   std::string MediaStreamTrack::GetId() {
-    return _track->id();
+    std::lock_guard<std::mutex> lock(_idMutex);
+    return _id ? *_id : _track->id();
+  }
+
+  std::string MediaStreamTrack::GetLabel() {
+    std::lock_guard<std::mutex> lock(_idMutex);
+    return _label;
   }
 
   webrtc::MediaType MediaStreamTrack::GetKind() {
@@ -96,14 +177,15 @@ namespace python_webrtc {
   }
 
   webrtc::MediaStreamTrackInterface::TrackState MediaStreamTrack::GetReadyState() {
-    auto state = _ended
-                 ? webrtc::MediaStreamTrackInterface::TrackState::kEnded
-                 : _track->state();
-    return state;
+    bool ended = _ended || _track->state() == webrtc::MediaStreamTrackInterface::TrackState::kEnded;
+    // without listeners (outside of an event loop), no event is going to surface it
+    return (HasListeners() ? _surfacedEnded.Get(ended) : ended)
+           ? webrtc::MediaStreamTrackInterface::TrackState::kEnded
+           : webrtc::MediaStreamTrackInterface::TrackState::kLive;
   }
 
   bool MediaStreamTrack::GetMuted() {
-    return false;
+    return _surfacedMuted.Get(_muted);
   }
 
   std::shared_ptr<MediaStreamTrack> MediaStreamTrack::Clone() {
@@ -119,6 +201,10 @@ namespace python_webrtc {
     }
 
     auto clonedMediaStreamTrack = holder().GetOrCreate(_factory, clonedTrack);
+    {
+      std::lock_guard<std::mutex> lock(clonedMediaStreamTrack->_idMutex);
+      clonedMediaStreamTrack->_label = GetLabel();
+    }
     if (_ended) {
       clonedMediaStreamTrack->Stop();
     }

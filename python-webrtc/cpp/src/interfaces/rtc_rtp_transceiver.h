@@ -45,8 +45,18 @@ namespace python_webrtc {
 
     void Stop();
 
-    // TODO bind webrtc::RtpCodecCapability
-    //  void SetCodecPreferences();
+    // whether its connection is closed, where stop() fails
+    void SetConnectionClosed(std::function<bool()> connectionClosed);
+
+    void SetCodecPreferences(const std::vector<webrtc::RtpCodecCapability> &codecs);
+
+    std::vector<webrtc::RtpCodecCapability> GetCodecPreferences();
+
+    std::vector<webrtc::RtpHeaderExtensionCapability> GetHeaderExtensionsToNegotiate();
+
+    void SetHeaderExtensionsToNegotiate(const std::vector<webrtc::RtpHeaderExtensionCapability> &extensions);
+
+    std::vector<webrtc::RtpHeaderExtensionCapability> GetNegotiatedHeaderExtensions();
 
   private:
     std::shared_ptr<PeerConnectionFactory> _factory;
@@ -55,6 +65,9 @@ namespace python_webrtc {
     // a transceiver pairs the same sender and receiver for its whole life
     std::shared_ptr<RTCRtpSender> _sender;
     std::shared_ptr<RTCRtpReceiver> _receiver;
+
+    std::mutex _mutex;
+    std::function<bool()> _connectionClosed;
   };
 
 } // namespace python_webrtc

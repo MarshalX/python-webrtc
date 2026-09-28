@@ -10,10 +10,11 @@
 #include <api/sctp_transport_interface.h>
 
 #include "rtc_dtls_transport.h"
+#include "../utils/listeners.h"
 
 namespace python_webrtc {
 
-  class RTCSctpTransport : public webrtc::SctpTransportObserverInterface {
+  class RTCSctpTransport : public webrtc::SctpTransportObserverInterface, public Listeners, public SingleObserverSlot {
   public:
     explicit RTCSctpTransport(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::SctpTransportInterface>);
 
@@ -31,12 +32,24 @@ namespace python_webrtc {
 
     webrtc::SctpTransportState GetState();
 
+    void SurfaceState(int state);
+
     std::optional<double> GetMaxMessageSize();
+
+    // what the connection computes from its descriptions, until the transport knows it
+    void SetMaxMessageSizeGetter(std::function<std::optional<double>()> getter);
 
     std::optional<int> GetMaxChannels();
 
   protected:
     void Stop();
+
+  public:
+    // a closed connection fires no events of its transports, which show their current state
+    void OnPeerConnectionClosed() {
+      Mute();
+      _surfacedState.Reset();
+    }
 
   private:
     webrtc::SctpTransportInformation Information();
@@ -48,6 +61,13 @@ namespace python_webrtc {
 
     // accessed on the network thread only
     bool _observing = false;
+
+    // on the network thread
+    webrtc::SctpTransportState _lastState = webrtc::SctpTransportState::kNew;
+    Surfaced<webrtc::SctpTransportState> _surfacedState;
+
+    std::mutex _getterMutex;
+    std::function<std::optional<double>()> _maxMessageSizeGetter;
   };
 
 } // namespace python_webrtc

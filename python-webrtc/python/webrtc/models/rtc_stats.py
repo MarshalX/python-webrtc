@@ -1,0 +1,95 @@
+#
+#  Copyright 2026 Ilya (Marshal) <https://github.com/MarshalX>. All rights reserved.
+#
+#  Use of this source code is governed by a BSD-style license
+#  that can be found in the LICENSE.md file in the root of the project.
+#
+
+import json
+import re
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Iterator, Mapping
+
+if TYPE_CHECKING:
+    import webrtc
+
+_CAMEL = re.compile(r'_([a-z0-9])')
+
+
+class RTCStats(Dict[str, Any]):
+    """Stats of one object, like an outbound RTP stream: a :obj:`dict` of the members of the stats dictionary
+    of the WebRTC Statistics specification, by their names there (like ``'bytesSent'``).
+
+    Members can also be read as attributes with snake_case names::
+
+        stats['bytesSent'] == stats.bytes_sent
+
+    ``id``, ``type`` and ``timestamp`` (milliseconds since the epoch) are always present.
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        key = _CAMEL.sub(lambda match: match.group(1).upper(), name)
+        try:
+            return self[key]
+        except KeyError:
+            raise AttributeError(f'{type(self).__name__} of type {self.get("type")!r} has no {name!r}') from None
+
+    @property
+    def id(self) -> str:
+        """:obj:`str`: Identifies the stats in its report."""
+        return self['id']
+
+    @property
+    def type(self) -> str:
+        """:obj:`str`: The type of the stats, like ``'outbound-rtp'``."""
+        return self['type']
+
+    @property
+    def timestamp(self) -> float:
+        """:obj:`float`: When the stats were collected, in milliseconds since the epoch."""
+        return self['timestamp']
+
+
+class RTCStatsReport(Mapping[str, RTCStats]):
+    """The stats of a connection, or of a sender or a receiver: a read-only mapping of their ids to
+    :obj:`webrtc.RTCStats`."""
+
+    def __init__(self, stats: Mapping[str, RTCStats]):
+        self._stats = dict(stats)
+
+    @classmethod
+    def _from_json(cls, report: str, receivers: Iterable['webrtc.RTCRtpReceiver'] = ()) -> 'RTCStatsReport':
+        # remote tracks have their own ids, rather than the libwebrtc ones in the stats
+        track_ids = {receiver.track._native_obj._nativeId: receiver.track.id for receiver in receivers}
+        stats = [RTCStats(entry) for entry in json.loads(report or '[]')]
+        for entry in stats:
+            # libwebrtc serializes microseconds
+            entry['timestamp'] = entry['timestamp'] / 1000
+            if entry.get('type') == 'inbound-rtp' and entry.get('trackIdentifier') in track_ids:
+                entry['trackIdentifier'] = track_ids[entry['trackIdentifier']]
+            # libwebrtc leaves the addresses of candidates it doesn't expose (like peer-reflexive ones) empty
+            if entry.get('type') in ('local-candidate', 'remote-candidate') and entry.get('address') == '':
+                entry['address'] = None
+        return cls({entry['id']: entry for entry in stats})
+
+    def __getitem__(self, stats_id: str) -> RTCStats:
+        return self._stats[stats_id]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._stats)
+
+    def __len__(self) -> int:
+        return len(self._stats)
+
+    def of_type(self, stats_type: str) -> 'list[RTCStats]':
+        """Returns the stats of a type.
+
+        Args:
+            stats_type (:obj:`str`): The type, like ``'inbound-rtp'``.
+
+        Returns:
+            :obj:`list` of :obj:`webrtc.RTCStats`: The stats of the type.
+        """
+        return [stats for stats in self._stats.values() if stats['type'] == stats_type]
+
+    def __repr__(self):
+        return f'RTCStatsReport({len(self)} stats)'

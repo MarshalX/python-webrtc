@@ -8,6 +8,7 @@
 import asyncio
 
 from .convert_exceptions import convert_from_callback_exception_to_exception
+from .task_queue import TaskQueue
 
 
 class _ThreadSafeEvent(asyncio.Event):
@@ -16,7 +17,8 @@ class _ThreadSafeEvent(asyncio.Event):
         super().__init__()
 
     def set(self):
-        self.loop.call_soon_threadsafe(super().set)
+        # in order with the events libwebrtc emitted before completing the operation
+        TaskQueue.of(self.loop).post(super().set, resumes=True, after_ready=True)
 
 
 class _AsyncWrapper:

@@ -12,8 +12,8 @@ namespace python_webrtc {
 
   void RTCIceComponent_::Init(pybind11::module &m) {
     pybind11::enum_<RTCIceComponent>(m, "RTCIceComponent")
-        .value("RTP", RTCIceComponent::kRtp)
-        .value("RTCP", RTCIceComponent::kRtcp)
+        .value("rtp", RTCIceComponent::kRtp)
+        .value("rtcp", RTCIceComponent::kRtcp)
         .export_values();
   }
 

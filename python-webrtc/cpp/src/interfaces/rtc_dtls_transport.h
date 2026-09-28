@@ -14,10 +14,12 @@
 
 #include "peer_connection_factory.h"
 #include "rtc_ice_transport.h"
+#include "../exceptions.h"
+#include "../utils/listeners.h"
 
 namespace python_webrtc {
 
-  class RTCDtlsTransport : public webrtc::DtlsTransportObserverInterface {
+  class RTCDtlsTransport : public webrtc::DtlsTransportObserverInterface, public Listeners, public SingleObserverSlot {
   public:
     explicit RTCDtlsTransport(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::DtlsTransportInterface>);
 
@@ -37,8 +39,17 @@ namespace python_webrtc {
 
     webrtc::DtlsTransportState GetState();
 
+    void SurfaceState(int state);
+
   protected:
     void Stop();
+
+  public:
+    // a closed connection fires no events of its transports, which show their current state
+    void OnPeerConnectionClosed() {
+      Mute();
+      _surfacedState.Reset();
+    }
 
   private:
     std::shared_ptr<PeerConnectionFactory> _factory;
@@ -51,6 +62,7 @@ namespace python_webrtc {
 
     std::mutex _mutex;
     webrtc::DtlsTransportState _state;
+    Surfaced<webrtc::DtlsTransportState> _surfacedState;
     std::vector<webrtc::Buffer> _certificates;
   };
 

@@ -43,10 +43,12 @@ async def test_peers_connect_and_send_audio(caller, callee):
     offer = await set_local_and_gather(caller, await caller.create_offer())
     assert offer.type == webrtc.RTCSdpType.offer
     assert 'a=candidate:' in offer.sdp, 'Expect gathered candidates in local description'
+    assert 'a=end-of-candidates' in offer.sdp, 'Expect the end of candidates once gathering is complete'
     assert caller.signaling_state == webrtc.RTCSignalingState.have_local_offer
 
     await callee.set_remote_description(offer)
-    assert callee.remote_description.sdp == offer.sdp
+    # libwebrtc drops a=end-of-candidates when it serializes a remote description
+    assert callee.remote_description.sdp == offer.sdp.replace('a=end-of-candidates\r\n', '')
     answer = await set_local_and_gather(callee, await callee.create_answer())
     await caller.set_remote_description(answer)
 

@@ -64,11 +64,24 @@ namespace python_webrtc {
 
     _iceTransport = nullptr;
     _transport = nullptr;
+    DropListeners();
   }
 
   void RTCDtlsTransport::Init(pybind11::module &m) {
-    pybind11::class_<RTCDtlsTransport, std::shared_ptr<RTCDtlsTransport>>(m, "RTCDtlsTransport")
-        .def_property_readonly("iceTransport", nogil_fn(&RTCDtlsTransport::GetIceTransport))
+    pybind11::class_<RTCDtlsTransport, std::shared_ptr<RTCDtlsTransport>> cls(
+        m, "RTCDtlsTransport", Listeners::TypeSetup<RTCDtlsTransport>());
+    Listeners::Bind(cls);
+    cls.def("_surface", &RTCDtlsTransport::SurfaceState, nogil());
+    // the DER certificates of the remote peer
+    cls.def("getRemoteCertificates", [](RTCDtlsTransport &self) {
+      pybind11::list certificates;
+      std::lock_guard<std::mutex> lock(self._mutex);
+      for (const auto &certificate: self._certificates) {
+        certificates.append(pybind11::bytes(reinterpret_cast<const char *>(certificate.data()), certificate.size()));
+      }
+      return certificates;
+    });
+    cls.def_property_readonly("iceTransport", nogil_fn(&RTCDtlsTransport::GetIceTransport))
         .def_property_readonly("state", nogil_fn(&RTCDtlsTransport::GetState));
   }
 
@@ -79,13 +92,26 @@ namespace python_webrtc {
   }
 
   void RTCDtlsTransport::OnStateChange(webrtc::DtlsTransportInformation information) {
+    bool changed;
+    webrtc::DtlsTransportState previous;
     {
       std::lock_guard<std::mutex> lock(_mutex);
+      previous = _state;
+      changed = _state != information.state();
       _state = information.state();
       _certificates = copyCertificates(information);
     }
 
-    // TODO call callback
+    if (changed) {
+      if (information.state() == webrtc::DtlsTransportState::kFailed) {
+        // libwebrtc tells no more than that the handshake failed
+        webrtc::RTCError error(webrtc::RTCErrorType::OPERATION_ERROR_WITH_DATA, "The DTLS transport failed");
+        error.set_error_detail(webrtc::RTCErrorDetailType::DTLS_FAILURE);
+        Emit("error", RTCCallbackException(std::move(error)));
+      }
+      _surfacedState.Changed(Tracked(), previous);
+      Emit("statechange", static_cast<int>(information.state()));
+    }
 
     if (information.state() == webrtc::DtlsTransportState::kClosed) {
       Stop();
@@ -93,7 +119,7 @@ namespace python_webrtc {
   }
 
   void RTCDtlsTransport::OnError(webrtc::RTCError rtcError) {
-    // TODO call callback
+    Emit("error", RTCCallbackException(std::move(rtcError)));
   }
 
   void RTCDtlsTransport::Stop() {
@@ -109,8 +135,16 @@ namespace python_webrtc {
   }
 
   webrtc::DtlsTransportState RTCDtlsTransport::GetState() {
-    std::lock_guard<std::mutex> lock(_mutex);
-    return _state;
+    webrtc::DtlsTransportState state;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      state = _state;
+    }
+    return _surfacedState.Get(state);
+  }
+
+  void RTCDtlsTransport::SurfaceState(int state) {
+    _surfacedState.Surface(static_cast<webrtc::DtlsTransportState>(state));
   }
 
 } // namespace python_webrtc

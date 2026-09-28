@@ -26,7 +26,17 @@ namespace python_webrtc {
         .def_property_readonly("stopped", nogil_fn(&RTCRtpTransceiver::GetStopped))
         .def_property("direction", nogil_fn(&RTCRtpTransceiver::GetDirection), nogil_fn(&RTCRtpTransceiver::SetDirection))
         .def_property_readonly("currentDirection", nogil_fn(&RTCRtpTransceiver::GetCurrentDirection))
-            // set codec pref
+        .def_property_readonly("stopping", nogil_fn([](RTCRtpTransceiver &self) {
+          return self._transceiver->stopping();
+        }))
+        .def_property_readonly("kind", nogil_fn([](RTCRtpTransceiver &self) {
+          return self._transceiver->media_type();
+        }))
+        .def("setCodecPreferences", &RTCRtpTransceiver::SetCodecPreferences, nogil())
+        .def("getCodecPreferences", &RTCRtpTransceiver::GetCodecPreferences, nogil())
+        .def("getHeaderExtensionsToNegotiate", &RTCRtpTransceiver::GetHeaderExtensionsToNegotiate, nogil())
+        .def("setHeaderExtensionsToNegotiate", &RTCRtpTransceiver::SetHeaderExtensionsToNegotiate, nogil())
+        .def("getNegotiatedHeaderExtensions", &RTCRtpTransceiver::GetNegotiatedHeaderExtensions, nogil())
         .def("stop", &RTCRtpTransceiver::Stop, nogil());
   }
 
@@ -76,11 +86,52 @@ namespace python_webrtc {
     return {};
   }
 
+  void RTCRtpTransceiver::SetConnectionClosed(std::function<bool()> connectionClosed) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _connectionClosed = std::move(connectionClosed);
+  }
+
   void RTCRtpTransceiver::Stop() {
+    std::function<bool()> connectionClosed;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      connectionClosed = _connectionClosed;
+    }
+    if (connectionClosed && connectionClosed()) {
+      throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "The RTCPeerConnection is closed");
+    }
     auto result = _transceiver->StopStandard();
     if (!result.ok()) {
       throw wrapRTCError(result);
     }
+  }
+
+  void RTCRtpTransceiver::SetCodecPreferences(const std::vector<webrtc::RtpCodecCapability> &codecs) {
+    auto preferences = codecs;
+    auto result = _transceiver->SetCodecPreferences(preferences);
+    if (!result.ok()) {
+      throw wrapRTCError(result);
+    }
+  }
+
+  std::vector<webrtc::RtpCodecCapability> RTCRtpTransceiver::GetCodecPreferences() {
+    return _transceiver->codec_preferences();
+  }
+
+  std::vector<webrtc::RtpHeaderExtensionCapability> RTCRtpTransceiver::GetHeaderExtensionsToNegotiate() {
+    return _transceiver->GetHeaderExtensionsToNegotiate();
+  }
+
+  void RTCRtpTransceiver::SetHeaderExtensionsToNegotiate(
+      const std::vector<webrtc::RtpHeaderExtensionCapability> &extensions) {
+    auto result = _transceiver->SetHeaderExtensionsToNegotiate(extensions);
+    if (!result.ok()) {
+      throw wrapRTCError(result);
+    }
+  }
+
+  std::vector<webrtc::RtpHeaderExtensionCapability> RTCRtpTransceiver::GetNegotiatedHeaderExtensions() {
+    return _transceiver->GetNegotiatedHeaderExtensions();
   }
 
 } // namespace python_webrtc
