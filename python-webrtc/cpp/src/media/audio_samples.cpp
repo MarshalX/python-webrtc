@@ -8,6 +8,7 @@
 #include "audio_samples.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <string_view>
@@ -92,7 +93,12 @@ namespace python_webrtc {
       case SampleType::S32:
         return Load<int32_t>(data);
       default: {
-        const double scaled = std::clamp(static_cast<double>(Load<float>(data)), -1.0, 1.0) * kS32Scale;
+        const double sample = Load<float>(data);
+        // NaN is silence: clamping keeps it, and converting it to an integer is undefined
+        if (std::isnan(sample)) {
+          return 0;
+        }
+        const double scaled = std::clamp(sample, -1.0, 1.0) * kS32Scale;
         return static_cast<int32_t>(std::clamp(scaled, -kS32Scale, kS32Scale - 1));
       }
       }

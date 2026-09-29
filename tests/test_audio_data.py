@@ -162,6 +162,18 @@ def test_sample_conversions(source, destination):
     audio.close()
 
 
+@pytest.mark.parametrize('destination', ['u8', 's16', 's32'])
+def test_non_finite_f32_samples_convert(destination):
+    """NaN is silence and infinities are the extremes; converting NaN was undefined behavior (found by fuzzing)"""
+    values = [float('nan'), float('inf'), float('-inf')]
+    audio = audio_data(format='f32', channels=1, frames=3, data=array.array('f', values).tobytes())
+    silence, maximum, minimum = VALUES[destination][0][3], VALUES[destination][0][1], VALUES[destination][0][0]
+    out = array.array(VALUES[destination][1], [1] * 3)
+    audio.copy_to(memoryview(out).cast('B'), {'plane_index': 0, 'format': destination})
+    assert out.tolist() == [silence, maximum, minimum]
+    audio.close()
+
+
 def test_s16_bytes_are_little_endian():
     """s16 samples are little endian, scaled by 1/32768 to f32"""
     audio = audio_data(format='s16', channels=1, frames=2, data=struct.pack('<2h', 1, -1))

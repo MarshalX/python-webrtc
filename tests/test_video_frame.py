@@ -8,6 +8,7 @@
 """VideoFrame of WebCodecs: construction, copies, conversions and lifetime."""
 
 import gc
+import math
 import struct
 
 import pytest
@@ -230,6 +231,16 @@ def test_rotation_and_flip():
     assert (again.rotation, again.flip) == (90, True)
     for f in (frame, flipped, again):
         f.close()
+
+
+@pytest.mark.parametrize('rotation', [math.inf, -math.inf, math.nan])
+def test_rotation_must_be_finite(rotation):
+    """A rotation is a WebIDL double: non-finite values raise TypeError, they raised OverflowError (found by fuzzing)"""
+    with pytest.raises(TypeError):
+        webrtc.VideoFrame(bytes(32), format='RGBX', coded_width=4, coded_height=2, timestamp=0, rotation=rotation)
+    with webrtc.VideoFrame(bytes(32), format='RGBX', coded_width=4, coded_height=2, timestamp=0) as frame:
+        with pytest.raises(TypeError):
+            webrtc.VideoFrame(frame, rotation=rotation)
 
 
 @pytest.mark.asyncio
