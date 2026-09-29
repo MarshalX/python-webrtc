@@ -110,7 +110,9 @@ faulthandler_timeout = 60
 [tool.ruff]
 line-length = 120
 target-version = "py39"
-include = ["python-webrtc/python/webrtc/**/*.py", "tests/**/*.py", "examples/**/*.py", "cmake/**/*.py"]
+include = [
+    "python-webrtc/python/webrtc/**/*.py", "tests/**/*.py", "examples/**/*.py", "benchmarks/**/*.py", "cmake/**/*.py",
+]
 extend-exclude = ["*.pyi"]
 
 [tool.ruff.format]
@@ -124,4 +126,4 @@ ignore = ["UP006", "UP007", "UP035", "UP045", "B024"]
 "__init__.py" = ["I001", "E402"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["webrtc", "wrtc", "tests"]
+known-first-party = ["webrtc", "wrtc", "tests", "benchmarks"]

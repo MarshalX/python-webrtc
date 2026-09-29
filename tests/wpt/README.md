@@ -11,7 +11,7 @@ The suite expects a WPT checkout in `wpt/` at the root of the repository. Only a
 ```sh
 git clone --depth 1 --filter=blob:none --sparse --branch epochs/daily https://github.com/web-platform-tests/wpt.git
 git -C wpt sparse-checkout set --no-cone '/webrtc*/' '/resources/' '/common/' '/interfaces/' \
-    '/mediacapture-streams/permission-helper.js'
+    '/mediacapture-streams/permission-helper.js' '/mediacapture-insertable-streams/' '/webcodecs/'
 uv sync --group wpt
 ```
 

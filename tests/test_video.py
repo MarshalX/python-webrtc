@@ -58,23 +58,6 @@ def test_media_stream_constructor(audio_stream, video_stream):
     assert webrtc.MediaStream().get_tracks() == []
 
 
-def test_video_source_frames():
-    """A video source takes I420 frames of the size they claim, rotated by a multiple of 90 degrees"""
-    source = webrtc.RTCVideoSource(is_screencast=True)
-    assert source.is_screencast and source.needs_denoising is None
-    track = source.create_track()
-    assert track.kind == webrtc.MediaType.video
-
-    width, height = 5, 3
-    size = width * height + 2 * 3 * 2
-    source.on_frame(webrtc.RTCVideoFrame(width, height, bytes(size)))
-    with pytest.raises(webrtc.InvalidAccessError):
-        source.on_frame(webrtc.RTCVideoFrame(width, height, bytes(size - 1)))
-    with pytest.raises(webrtc.InvalidRangeError):
-        source.on_frame(webrtc.RTCVideoFrame(width, height, bytes(size), rotation=45))
-    track.stop()
-
-
 @pytest.mark.asyncio
 async def test_remote_video_track(caller, callee, video_stream):
     """The remote end of a video track has its kind and stream"""

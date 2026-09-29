@@ -12,6 +12,8 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <tuple>
+#include <vector>
 
 #include <api/media_stream_interface.h>
 #include <api/scoped_refptr.h>
@@ -19,6 +21,8 @@
 #include <pybind11/pybind11.h>
 
 #include "peer_connection_factory.h"
+#include "../media/source_control.h"
+#include "../media/track_monitor.h"
 #include "../utils/alive_guard.h"
 #include "../utils/held_events.h"
 #include "../utils/instance_holder.h"
@@ -27,6 +31,14 @@
 #include "../enums/enums.h"
 
 namespace python_webrtc {
+
+  // Told once when a track ends, by stop() or otherwise
+  class TrackEndObserver {
+  public:
+    virtual ~TrackEndObserver() = default;
+
+    virtual void OnTrackEnded() = 0;
+  };
 
   class MediaStreamTrack : public webrtc::ObserverInterface, public Listeners {
   public:
@@ -83,6 +95,30 @@ namespace python_webrtc {
 
     std::shared_ptr<MediaStreamTrack> Clone();
 
+    // what the track carries (width, height, frame_rate, sample_rate, channel_count, sample_size) and its device
+    // ("camera", "microphone"), as far as they're known
+    pybind11::dict GetSettings();
+
+    // the size and frame rate of the synthetic camera of the track, if it has one
+    std::optional<std::tuple<int, int, double>> GetCamera();
+
+    // changes the size and frame rate of the synthetic camera of the track; false if it has none
+    bool ReconfigureCamera(int width, int height, double frameRate);
+
+    // the constraints applied last, kept by the track as its wrappers come and go
+    pybind11::object GetConstraints();
+
+    void SetConstraints(pybind11::object constraints);
+
+    std::string GetContentHint();
+
+    void SetContentHint(const std::string &hint);
+
+    // told right away if the track has ended already
+    void AddEndObserver(const std::shared_ptr<TrackEndObserver> &observer);
+
+    bool ended() { return _ended; }
+
     bool active() { return !_ended && _track->state() == webrtc::MediaStreamTrackInterface::TrackState::kLive; }
 
     const std::shared_ptr<PeerConnectionFactory> &factory() { return _factory; }
@@ -96,6 +132,13 @@ namespace python_webrtc {
   private:
     // must be called on the signaling thread, where the track notifies its observers
     void StopOnSignalingThread();
+
+    void NotifyEnded();
+
+    // the monitor sees what the track carries, for its settings; on the signaling thread
+    void AttachMonitor();
+
+    void DetachMonitor();
 
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> _track;
@@ -115,6 +158,18 @@ namespace python_webrtc {
     std::string _label;
     // stop() ends a track without an ended event
     std::atomic<bool> _stopped = false;
+
+    std::shared_ptr<SourceControl> _source;
+    TrackMonitor _monitor;
+    // accessed on the signaling thread only
+    bool _monitoring = false;
+    pybind11::object _constraints;
+    // audio tracks keep their hint: libwebrtc has none for them
+    std::mutex _contentHintMutex;
+    std::string _audioContentHint;
+
+    std::mutex _endObserversMutex;
+    std::vector<std::weak_ptr<TrackEndObserver>> _endObservers;
 
     // see AliveGuard
     AliveGuard _alive;

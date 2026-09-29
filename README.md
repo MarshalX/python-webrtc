@@ -22,7 +22,7 @@
 
 > Let's use the native WebRTC with strict compatibility and fully implemented stuff!
 
-This project follows the [W3C specification](https://w3c.github.io/webrtc-pc/) with some modifications and additions to make it work better with Python applications, with useful APIs like programmatic audio and video.
+This project follows the [W3C specification](https://w3c.github.io/webrtc-pc/) with some modifications and additions to make it work better with Python applications. Audio and video are read from tracks and written to them with the APIs of browsers: `MediaStreamTrackProcessor`, `VideoTrackGenerator` and `MediaStreamTrackGenerator`, with the `VideoFrame` and `AudioData` of WebCodecs.
 
 ## DISCLAIMER
 
@@ -44,9 +44,8 @@ async def main():
     for track in stream.get_tracks():
         pc.add_track(track, stream)
 
-    audio_source = webrtc.RTCAudioSource()
-    track = audio_source.create_track()
-    pc.add_track(track)
+    generator = webrtc.MediaStreamTrackGenerator('audio')
+    pc.add_track(generator)
 
     local_sdp = await pc.create_offer()
     print(local_sdp.sdp)

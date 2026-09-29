@@ -114,4 +114,26 @@
     if (Array.isArray(value)) return value.map(structuredClone);
     return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, structuredClone(v)]));
   };
+
+  // the geometry of the visible rect of a VideoFrame
+  globalThis.DOMRectReadOnly ??= class DOMRectReadOnly {
+    #x;
+    #y;
+    #width;
+    #height;
+
+    constructor(x = 0, y = 0, width = 0, height = 0) {
+      [this.#x, this.#y, this.#width, this.#height] = [x, y, width, height].map(Number);
+    }
+
+    get x() { return this.#x; }
+    get y() { return this.#y; }
+    get width() { return this.#width; }
+    get height() { return this.#height; }
+    get top() { return Math.min(this.#y, this.#y + this.#height); }
+    get right() { return Math.max(this.#x, this.#x + this.#width); }
+    get bottom() { return Math.max(this.#y, this.#y + this.#height); }
+    get left() { return Math.min(this.#x, this.#x + this.#width); }
+    toJSON() { return {x: this.x, y: this.y, width: this.width, height: this.height}; }
+  };
 })();

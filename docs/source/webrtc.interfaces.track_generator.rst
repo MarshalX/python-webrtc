@@ -1,7 +1,7 @@
-webrtc.models.rtc\_on\_data\_event
+webrtc.interfaces.track\_generator
 ==================================
 
-.. automodule:: webrtc.models.rtc_on_data_event
+.. automodule:: webrtc.interfaces.track_generator
    :members:
    :undoc-members:
    :show-inheritance:

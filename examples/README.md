@@ -6,4 +6,12 @@ without worrying about copyrights.
 
 ### [telegram_group_calls.py](telegram_group_calls.py)
 
-**An example of using programmatic audio source.** The example of connection establishing with Telegram Group Calls and streaming audio from .RAW file.
+**Sending audio with MediaStreamTrackGenerator.** The example of connection establishing with Telegram Group Calls and streaming audio from .RAW file.
+
+### [recorder.py](recorder.py)
+
+**Recording received media with MediaStreamTrackProcessor.** Writes the video and audio a peer receives to raw I420 and PCM files.
+
+### [echo.py](echo.py)
+
+**Transforming video with a processor, a TransformStream and a VideoTrackGenerator.** Sends the received video back in grayscale.

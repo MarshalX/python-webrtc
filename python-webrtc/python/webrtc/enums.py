@@ -254,3 +254,93 @@ class RTCErrorDetailType(_StrEnum):
     sdp_syntax_error = 'sdp-syntax-error'
     hardware_encoder_not_available = 'hardware-encoder-not-available'
     hardware_encoder_error = 'hardware-encoder-error'
+
+
+class BinaryType(_StrEnum):
+    """What the binary messages of a :obj:`webrtc.RTCDataChannel` are delivered as."""
+
+    #: :obj:`bytes`
+    arraybuffer = 'arraybuffer'
+    #: :obj:`webrtc.Blob`
+    blob = 'blob'
+
+
+class VideoPixelFormat(_StrEnum):
+    """The layout of the pixels of a :obj:`webrtc.VideoFrame`: Y, U, V (and alpha) planes of 8-bit samples, or of
+    10- and 12-bit samples stored in 16 bits (``P10``, ``P12``), NV12 with interleaved U and V, or 4 bytes per RGB
+    pixel."""
+
+    I420 = 'I420'
+    I420P10 = 'I420P10'
+    I420P12 = 'I420P12'
+    I420A = 'I420A'
+    I420AP10 = 'I420AP10'
+    I420AP12 = 'I420AP12'
+    I422 = 'I422'
+    I422P10 = 'I422P10'
+    I422P12 = 'I422P12'
+    I422A = 'I422A'
+    I422AP10 = 'I422AP10'
+    I422AP12 = 'I422AP12'
+    I444 = 'I444'
+    I444P10 = 'I444P10'
+    I444P12 = 'I444P12'
+    I444A = 'I444A'
+    I444AP10 = 'I444AP10'
+    I444AP12 = 'I444AP12'
+    NV12 = 'NV12'
+    RGBA = 'RGBA'
+    RGBX = 'RGBX'
+    BGRA = 'BGRA'
+    BGRX = 'BGRX'
+
+
+class VideoColorPrimaries(_StrEnum):
+    """The color primaries of a :obj:`webrtc.VideoColorSpace`."""
+
+    bt709 = 'bt709'
+    bt470bg = 'bt470bg'
+    smpte170m = 'smpte170m'
+    bt2020 = 'bt2020'
+    smpte432 = 'smpte432'
+
+
+class VideoTransferCharacteristics(_StrEnum):
+    """The transfer characteristics of a :obj:`webrtc.VideoColorSpace`."""
+
+    bt709 = 'bt709'
+    smpte170m = 'smpte170m'
+    iec61966_2_1 = 'iec61966-2-1'
+    linear = 'linear'
+    pq = 'pq'
+    hlg = 'hlg'
+
+
+class VideoMatrixCoefficients(_StrEnum):
+    """The matrix coefficients of a :obj:`webrtc.VideoColorSpace`."""
+
+    rgb = 'rgb'
+    bt709 = 'bt709'
+    bt470bg = 'bt470bg'
+    smpte170m = 'smpte170m'
+    bt2020_ncl = 'bt2020-ncl'
+
+
+class AlphaOption(_StrEnum):
+    """Whether a :obj:`webrtc.VideoFrame` created from another one keeps its alpha channel."""
+
+    keep = 'keep'
+    discard = 'discard'
+
+
+class AudioSampleFormat(_StrEnum):
+    """The type of the samples of an :obj:`webrtc.AudioData`, interleaved or in a plane per channel."""
+
+    u8 = 'u8'
+    s16 = 's16'
+    s32 = 's32'
+    f32 = 'f32'
+    u8_planar = 'u8-planar'
+    s16_planar = 's16-planar'
+    s32_planar = 's32-planar'
+    f32_planar = 'f32-planar'

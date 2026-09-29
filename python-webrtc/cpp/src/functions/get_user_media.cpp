@@ -9,25 +9,45 @@
 
 #include <rtc_base/crypto_random.h>
 
-#include "../interfaces/rtc_video_source.h"
 #include "../interfaces/rtc_audio_track_source.h"
+#include "../interfaces/rtc_video_track_source.h"
+#include "../media/source_control.h"
 
 namespace python_webrtc {
+
+  namespace {
+
+    // a synthetic microphone, as the audio device of the factory records nothing
+    webrtc::scoped_refptr<webrtc::AudioTrackInterface> CreateMicrophoneTrack(
+        const std::shared_ptr<PeerConnectionFactory> &factory) {
+      auto source = webrtc::make_ref_counted<RTCAudioTrackSource>();
+      source->StartMicrophone();
+      auto track = factory->factory()->CreateAudioTrack(webrtc::CreateRandomUuid(), source.get());
+      SourceControl::Register(track.get(), track->id(), source->control());
+      return track;
+    }
+
+    webrtc::scoped_refptr<webrtc::VideoTrackInterface> CreateCameraTrack(
+        const std::shared_ptr<PeerConnectionFactory> &factory, int width, int height, double frameRate) {
+      auto source = webrtc::make_ref_counted<RTCVideoTrackSource>(false, std::nullopt);
+      source->StartCamera(width, height, frameRate);
+      auto track = factory->factory()->CreateVideoTrack(source, webrtc::CreateRandomUuid());
+      SourceControl::Register(track.get(), track->id(), source->control());
+      return track;
+    }
+
+  } // namespace
 
   std::shared_ptr<MediaStream> GetUserMedia(bool audio, bool video, int width, int height, double frameRate) {
     auto factory = PeerConnectionFactory::GetOrCreateDefault();
     auto stream = factory->factory()->CreateLocalMediaStream(webrtc::CreateRandomUuid());
 
     if (audio) {
-      // a synthetic microphone, as the audio device of the factory is a dummy one
-      auto source = webrtc::make_ref_counted<RTCAudioTrackSource>();
-      source->StartMicrophone();
-      auto track = factory->factory()->CreateAudioTrack(webrtc::CreateRandomUuid(), source.get());
-      stream->AddTrack(track);
+      stream->AddTrack(CreateMicrophoneTrack(factory));
     }
 
     if (video) {
-      stream->AddTrack(RTCVideoSource::CreateCameraTrack(factory, width, height, frameRate));
+      stream->AddTrack(CreateCameraTrack(factory, width, height, frameRate));
     }
 
     return MediaStream::holder().GetOrCreate(factory, stream);

@@ -74,6 +74,7 @@ namespace python_webrtc {
         .def_property_readonly("bufferedAmount", nogil_fn(&RTCDataChannel::GetBufferedAmount))
         .def_property("bufferedAmountLowThreshold", nogil_fn(&RTCDataChannel::GetBufferedAmountLowThreshold),
                       nogil_fn(&RTCDataChannel::SetBufferedAmountLowThreshold))
+        .def_property("binaryType", nogil_fn(&RTCDataChannel::GetBinaryType), nogil_fn(&RTCDataChannel::SetBinaryType))
         .def("send", &RTCDataChannel::Send, nogil(), pybind11::arg("data"), pybind11::arg("binary"))
         .def("close", &RTCDataChannel::Close, nogil())
         .def("_surfaceState", &RTCDataChannel::SurfaceState, nogil(), pybind11::arg("state"))
@@ -218,6 +219,17 @@ namespace python_webrtc {
 
   uint64_t RTCDataChannel::GetBufferedAmount() {
     return _bufferedAmount;
+  }
+
+  std::string RTCDataChannel::GetBinaryType() {
+    return _binaryTypeBlob ? "blob" : "arraybuffer";
+  }
+
+  void RTCDataChannel::SetBinaryType(const std::string &binaryType) {
+    // an enum attribute ignores values it doesn't have
+    if (binaryType == "blob" || binaryType == "arraybuffer") {
+      _binaryTypeBlob = binaryType == "blob";
+    }
   }
 
   uint64_t RTCDataChannel::GetBufferedAmountLowThreshold() {

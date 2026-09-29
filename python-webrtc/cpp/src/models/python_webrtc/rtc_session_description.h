@@ -13,8 +13,7 @@ namespace python_webrtc {
 
   class RTCSessionDescription {
   public:
-    // TODO rtcSessionDescriptionInit should be optional
-    // https://github.com/MarshalX/python-webrtc/issues/171
+    // the init is required, as in the specification: its sdp is empty by default
     explicit RTCSessionDescription(const RTCSessionDescriptionInit &rtcSessionDescriptionInit);
 
     static void Init(pybind11::module &m);

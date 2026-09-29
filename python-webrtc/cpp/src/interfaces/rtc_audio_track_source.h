@@ -7,12 +7,15 @@
 
 #pragma once
 
+#include <atomic>
+#include <memory>
 #include <mutex>
+#include <vector>
 
 #include <api/media_stream_interface.h>
 #include <api/notifier.h>
 
-#include "../models/python_webrtc/rtc_on_data_event.h"
+#include "../media/source_control.h"
 #include "../utils/paced_thread.h"
 
 namespace python_webrtc {
@@ -24,22 +27,28 @@ namespace python_webrtc {
     // Starts a synthetic microphone: quiet noise, in 10 ms frames of 48 kHz mono
     void StartMicrophone();
 
+    // what reaches the microphone from its tracks, once started
+    std::shared_ptr<SourceControl> control() { return _control; }
+
     SourceState state() const override;
 
     bool remote() const override;
 
-    void PushData(RTCOnDataEvent &);
+    void PushSamples(const void *samples, int bitsPerSample, int sampleRate, size_t channels, size_t frames);
+
+    // ends the tracks of the source; must be called on the signaling thread, where they observe it
+    void End();
 
     void AddSink(webrtc::AudioTrackSinkInterface *) override;
 
     void RemoveSink(webrtc::AudioTrackSinkInterface *) override;
 
   private:
-    void PushSamples(const void *samples, int bitsPerSample, int sampleRate, size_t channels, size_t frames);
-
-    // guards the sink, which is removed (and may be destroyed) on another thread than the one pushing data
+    // guards the sinks (the sender, processors), removed (and maybe destroyed) on other threads than the one pushing
     std::mutex _sinkMutex;
-    webrtc::AudioTrackSinkInterface *_sink = nullptr;
+    std::vector<webrtc::AudioTrackSinkInterface *> _sinks;
+    std::atomic<bool> _ended{false};
+    std::shared_ptr<SourceControl> _control;
 
     // last, to be stopped before the rest is destroyed
     PacedThread _microphone;

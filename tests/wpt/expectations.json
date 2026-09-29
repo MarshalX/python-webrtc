@@ -1,5 +1,27 @@
 {
   "skip": {
+    "mediacapture-insertable-streams/MediaStreamTrackProcessor-with-window-tracks.https.html": "runs in a Worker, which a Python library has no counterpart of",
+    "mediacapture-insertable-streams/VideoTrackGenerator-with-window-tracks.https.html": "runs in a Worker, which a Python library has no counterpart of",
+    "mediacapture-insertable-streams/idlharness.any.js": "checks the shape of JS interfaces, which shim.js defines rather than the library",
+    "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-in-service-worker.https.html": "needs a service worker",
+    "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-in-shared-worker.https.html": "runs in a Worker, which a Python library has no counterpart of",
+    "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-in-worker.https.html": "runs in a Worker, which a Python library has no counterpart of",
+    "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-pipes-data-in-worker.https.html": "runs in a Worker, which a Python library has no counterpart of",
+    "mediacapture-insertable-streams/legacy/MediaStreamTrackProcessor-backpressure.https.html": "draws frames with canvas, ImageBitmap or WebGL, which a Python library has no counterpart of",
+    "webcodecs/audio-data-serialization.any.js": "transfers frames with postMessage or structured clone, which a Python library has no counterpart of",
+    "webcodecs/video-frame-serialization.any.js": "transfers frames with postMessage or structured clone, which a Python library has no counterpart of",
+    "webcodecs/videoFrame-alpha.any.js": "draws frames with canvas, ImageBitmap or WebGL, which a Python library has no counterpart of",
+    "webcodecs/videoFrame-canvasImageSource.html": "needs DOM elements (video, canvas or iframes)",
+    "webcodecs/videoFrame-construction.crossOriginSource.sub.html": "needs DOM elements (video, canvas or iframes)",
+    "webcodecs/videoFrame-copyTo-canvas.window.js": "draws frames with canvas, ImageBitmap or WebGL, which a Python library has no counterpart of",
+    "webcodecs/videoFrame-createImageBitmap.any.js": "draws frames with canvas, ImageBitmap or WebGL, which a Python library has no counterpart of",
+    "webcodecs/videoFrame-createImageBitmap.https.any.js": "draws frames with canvas, ImageBitmap or WebGL, which a Python library has no counterpart of",
+    "webcodecs/videoFrame-drawImage-hbd.any.js": "draws frames with canvas, ImageBitmap or WebGL, which a Python library has no counterpart of",
+    "webcodecs/videoFrame-drawImage.any.js": "draws frames with canvas, ImageBitmap or WebGL, which a Python library has no counterpart of",
+    "webcodecs/videoFrame-serialization.crossAgentCluster.helper.html": "a helper page of another test, not a test",
+    "webcodecs/videoFrame-serialization.crossAgentCluster.https.html": "transfers frames with postMessage or structured clone, which a Python library has no counterpart of",
+    "webcodecs/videoFrame-serialization.https.html": "transfers frames with postMessage or structured clone, which a Python library has no counterpart of",
+    "webcodecs/videoFrame-texImage.any.js": "draws frames with canvas, ImageBitmap or WebGL, which a Python library has no counterpart of",
     "webrtc-encoded-transform/RTCRtpScriptTransform-bad-chunk.https.html": "runs in a Worker, which a Python library has no counterpart of",
     "webrtc-encoded-transform/RTCRtpScriptTransform-encoded-transform.https.html": "runs in a Worker, which a Python library has no counterpart of",
     "webrtc-encoded-transform/RTCRtpScriptTransform-padding.https.html": "runs in a Worker, which a Python library has no counterpart of",
@@ -51,6 +73,135 @@
     "webrtc/transfer-datachannel.html": "runs in a Worker, which a Python library has no counterpart of"
   },
   "results": {
+    "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-audio.https.html": {
+      "Tests that audio actually flows to a connected audio element": "FAIL"
+    },
+    "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-video.https.html": {
+      "Mismatched frame and generator kind throws on write.": "FAIL",
+      "Tests that VideoFrames are destroyed on write.": "FAIL",
+      "Tests that creating a Video MediaStreamTrackGenerator works as expected": "FAIL",
+      "Tests that frames are actually rendered correctly in a stream sent over a peer connection.": "FAIL",
+      "Tests that frames are actually rendered correctly in a stream used for a video element.": "FAIL",
+      "Tests that frames are sent correctly with RTCRtpEncodingParameters.scaleResolutionDownBy.": "FAIL"
+    },
+    "mediacapture-insertable-streams/legacy/MediaStreamTrackProcessor-video.https.html": {
+      "Tests that multiple read requests are eventually settled": "FAIL",
+      "Tests that the reader of a video MediaStreamTrackProcessor produces VideoFrame objects and is closed on track stop while running on a worker": "FAIL"
+    },
+    "mediacapture-insertable-streams/tentative/MediaStreamTrackProcessor-audio.https.html": {
+      "Tests that the reader of an audio MediaStreamTrackProcessor produces AudioData objects and is closed on track stop while running on a worker": "FAIL"
+    },
+    "mediacapture-insertable-streams/tentative/VideoTrackGenerator.https.html": {
+      "Mismatched frame and generator kind throws on write.": "FAIL",
+      "Tests that VideoFrames are destroyed on write.": "FAIL",
+      "Tests that VideoTrackGenerator forwards frames only when unmuted": "FAIL",
+      "Tests that creating a VideoTrackGenerator works as expected": "FAIL",
+      "Tests that frames are actually rendered correctly in a stream sent over a peer connection.": "FAIL",
+      "Tests that frames are actually rendered correctly in a stream used for a video element.": "FAIL",
+      "Tests that frames are sent correctly with RTCRtpEncodingParameters.scaleResolutionDownBy.": "FAIL"
+    },
+    "webcodecs/audio-data.crossOriginIsolated.https.any.js": {
+      "Test construction and copyTo() using a SharedArrayBuffer": "FAIL",
+      "Test construction and copyTo() using a Uint8Array(SharedArrayBuffer)": "FAIL"
+    },
+    "webcodecs/videoFrame-construction.any.js": {
+      "Test VideoFrame constructed VideoFrame": "FAIL",
+      "Test a VideoFrame constructed from canvas can drop the alpha channel.": "FAIL",
+      "Test closed VideoFrame.": "FAIL",
+      "Test constructing w/ unusable image argument throws: closed ImageBitmap.": "FAIL",
+      "Test constructing w/ unusable image argument throws: closed VideoFrame.": "FAIL",
+      "Test constructing w/ unusable image argument throws: emtpy Canvas.": "FAIL",
+      "Test display size metadata override": "FAIL",
+      "Test invalid CanvasImageSource constructed VideoFrames": "FAIL",
+      "Test that timestamp is required when constructing VideoFrame from ImageBitmap": "FAIL",
+      "Test that timestamp is required when constructing VideoFrame from OffscreenCanvas": "FAIL",
+      "Test visibleRect + display size metadata override": "FAIL",
+      "Test we can construct a VideoFrame from an offscreen canvas.": "FAIL",
+      "Test we can construct a VideoFrame with a negative timestamp.": "FAIL",
+      "Test we can construct a VideoFrame.": "FAIL",
+      "Test we can construct an odd-sized VideoFrame.": "FAIL"
+    },
+    "webcodecs/videoFrame-construction.crossOriginIsolated.https.any.js": {
+      "Test SharedArrayBuffer constructed I420 VideoFrame": "FAIL",
+      "Test Uint8Array(SharedArrayBuffer) constructed I420 VideoFrame": "FAIL"
+    },
+    "webcodecs/videoFrame-construction.window.js": {
+      "Test that timeamp is required when constructing VideoFrame from HTMLCanvasElement": "FAIL",
+      "Test that timestamp is required when constructing VideoFrame from HTMLImageElement": "FAIL",
+      "Test that timestamp is required when constructing VideoFrame from SVGImageElement": "FAIL"
+    },
+    "webcodecs/videoFrame-copyTo-opaque-swizzle.https.any.js": {
+      "Decoded frame opaque-to-alpha copyTo writes all rows": "FAIL"
+    },
+    "webcodecs/videoFrame-copyTo-rgb.any.js": {
+      "Convert 4-color canvas frame to BGRA / display-p3": "FAIL",
+      "Convert 4-color canvas frame to BGRA / srgb": "FAIL",
+      "Convert 4-color canvas frame to BGRX / display-p3": "FAIL",
+      "Convert 4-color canvas frame to BGRX / srgb": "FAIL",
+      "Convert 4-color canvas frame to RGBA / display-p3": "FAIL",
+      "Convert 4-color canvas frame to RGBA / srgb": "FAIL",
+      "Convert 4-color canvas frame to RGBX / display-p3": "FAIL",
+      "Convert 4-color canvas frame to RGBX / srgb": "FAIL",
+      "Convert 4x4 bt709 I420 frames to BGRA / display-p3": "FAIL",
+      "Convert 4x4 bt709 I420 frames to BGRA / srgb": "FAIL",
+      "Convert 4x4 bt709 I420 frames to BGRX / display-p3": "FAIL",
+      "Convert 4x4 bt709 I420 frames to BGRX / srgb": "FAIL",
+      "Convert 4x4 bt709 I420 frames to RGBA / display-p3": "FAIL",
+      "Convert 4x4 bt709 I420 frames to RGBA / srgb": "FAIL",
+      "Convert 4x4 bt709 I420 frames to RGBX / display-p3": "FAIL",
+      "Convert 4x4 bt709 I420 frames to RGBX / srgb": "FAIL",
+      "Convert 4x4 bt709 RGBX frames to BGRA / display-p3": "FAIL",
+      "Convert 4x4 bt709 RGBX frames to BGRA / srgb": "FAIL",
+      "Convert 4x4 bt709 RGBX frames to BGRX / display-p3": "FAIL",
+      "Convert 4x4 bt709 RGBX frames to BGRX / srgb": "FAIL",
+      "Convert 4x4 bt709 RGBX frames to RGBA / display-p3": "FAIL",
+      "Convert 4x4 bt709 RGBX frames to RGBA / srgb": "FAIL",
+      "Convert 4x4 bt709 RGBX frames to RGBX / display-p3": "FAIL",
+      "Convert 4x4 bt709 RGBX frames to RGBX / srgb": "FAIL",
+      "Convert 4x4 null I420 frames to BGRA / display-p3": "FAIL",
+      "Convert 4x4 null I420 frames to BGRA / srgb": "FAIL",
+      "Convert 4x4 null I420 frames to BGRX / display-p3": "FAIL",
+      "Convert 4x4 null I420 frames to BGRX / srgb": "FAIL",
+      "Convert 4x4 null I420 frames to RGBA / display-p3": "FAIL",
+      "Convert 4x4 null I420 frames to RGBA / srgb": "FAIL",
+      "Convert 4x4 null I420 frames to RGBX / display-p3": "FAIL",
+      "Convert 4x4 null I420 frames to RGBX / srgb": "FAIL",
+      "Convert 4x4 null RGBX frames to BGRA / display-p3": "FAIL",
+      "Convert 4x4 null RGBX frames to BGRA / srgb": "FAIL",
+      "Convert 4x4 null RGBX frames to BGRX / display-p3": "FAIL",
+      "Convert 4x4 null RGBX frames to BGRX / srgb": "FAIL",
+      "Convert 4x4 null RGBX frames to RGBA / display-p3": "FAIL",
+      "Convert 4x4 null RGBX frames to RGBA / srgb": "FAIL",
+      "Convert 4x4 null RGBX frames to RGBX / display-p3": "FAIL",
+      "Convert 4x4 null RGBX frames to RGBX / srgb": "FAIL",
+      "Convert 4x4 smpte170m I420 frames to BGRA / display-p3": "FAIL",
+      "Convert 4x4 smpte170m I420 frames to BGRA / srgb": "FAIL",
+      "Convert 4x4 smpte170m I420 frames to BGRX / display-p3": "FAIL",
+      "Convert 4x4 smpte170m I420 frames to BGRX / srgb": "FAIL",
+      "Convert 4x4 smpte170m I420 frames to RGBA / display-p3": "FAIL",
+      "Convert 4x4 smpte170m I420 frames to RGBA / srgb": "FAIL",
+      "Convert 4x4 smpte170m I420 frames to RGBX / display-p3": "FAIL",
+      "Convert 4x4 smpte170m I420 frames to RGBX / srgb": "FAIL",
+      "Convert 4x4 smpte170m RGBX frames to BGRA / display-p3": "FAIL",
+      "Convert 4x4 smpte170m RGBX frames to BGRA / srgb": "FAIL",
+      "Convert 4x4 smpte170m RGBX frames to BGRX / display-p3": "FAIL",
+      "Convert 4x4 smpte170m RGBX frames to BGRX / srgb": "FAIL",
+      "Convert 4x4 smpte170m RGBX frames to RGBA / display-p3": "FAIL",
+      "Convert 4x4 smpte170m RGBX frames to RGBA / srgb": "FAIL",
+      "Convert 4x4 smpte170m RGBX frames to RGBX / display-p3": "FAIL",
+      "Convert 4x4 smpte170m RGBX frames to RGBX / srgb": "FAIL"
+    },
+    "webcodecs/videoFrame-copyTo.any.js": {
+      "Test texture-backed RGBA copyTo does not modify destination stride/offset padding bytes.": "FAIL"
+    },
+    "webcodecs/videoFrame-copyTo.crossOriginIsolated.https.any.js": {
+      "Test copying I420 frame to SharedArrayBuffer.": "FAIL",
+      "Test copying I420 frame to shared ArrayBufferView.": "FAIL"
+    },
+    "webcodecs/videoFrame-orientation.any.js": {
+      "Test orientation of wrapped VideoFrame": "FAIL",
+      "Test oriented VideoFrame from ArrayBuffer": "FAIL"
+    },
     "webrtc-encoded-transform/RTCEncodedFrame-copy-construction.https.html": {
       "RTCEncodedAudioFrame cannot be serialized for storage on main thread.": "FAIL",
       "RTCEncodedAudioFrame copy c'tor using transferred frame throws DataCloneError on main thread.": "FAIL",
@@ -178,7 +329,6 @@
       "setConfiguration(config) - with turns server, credential type and credential from spec should not throw": "FAIL"
     },
     "webrtc-extensions/RTCRtpCorruptionDetection-headerExtensionControl.html": {
-      "Corruption metrics must not exists for audio.": "TIMEOUT",
       "[harness]": "ERROR"
     },
     "webrtc-identity/RTCPeerConnection-constructor.html": {

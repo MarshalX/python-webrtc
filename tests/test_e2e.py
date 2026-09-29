@@ -25,8 +25,7 @@ async def set_local_and_gather(pc, description):
 @pytest.mark.asyncio
 async def test_peers_connect_and_send_audio(caller, callee):
     """Two peer connections negotiate, connect over ICE/DTLS and stream audio."""
-    source = webrtc.RTCAudioSource()
-    track = source.create_track()
+    track = webrtc.MediaStreamTrackGenerator('audio')
     caller.add_track(track)
 
     assert caller.local_description is None
@@ -59,12 +58,18 @@ async def test_peers_connect_and_send_audio(caller, callee):
     assert receivers[0].track.kind == webrtc.MediaType.audio
 
     # 100 ms of 16-bit mono silence at 48 kHz, in 10 ms frames
-    frame = webrtc.RTCOnDataEvent(bytes(480 * 2), 480)
-    frame.sample_rate = 48000
-    frame.channel_count = 1
-    frame.bits_per_sample = 16
-    for _ in range(10):
-        source.on_data(frame)
+    writer = track.writable.get_writer()
+    for i in range(10):
+        await writer.write(
+            webrtc.AudioData(
+                format='s16',
+                sample_rate=48000,
+                number_of_frames=480,
+                number_of_channels=1,
+                timestamp=i * 10_000,
+                data=bytes(480 * 2),
+            )
+        )
         await asyncio.sleep(0.01)
 
     caller.close()

@@ -8,7 +8,6 @@
 #include "models.h"
 
 #include "python_webrtc/rtc_session_description.h"
-#include "python_webrtc/rtc_on_data_event.h"
 #include "python_webrtc/rtc_ice_candidate.h"
 #include "python_webrtc/rtc_configuration.h"
 #include "python_webrtc/rtc_certificate.h"
@@ -21,7 +20,6 @@ namespace python_webrtc {
   void Models::Init(pybind11::module &m) {
     RTCSessionDescriptionInit::Init(m);
     RTCSessionDescription::Init(m);
-    RTCOnDataEvent::Init(m);
     RTCIceCandidate::Init(m);
     RTCCertificate::Init(m);
     ConfigurationInit::Init(m);
