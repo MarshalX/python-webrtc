@@ -11,6 +11,7 @@
 
 #include "rtc_video_track_source.h"
 #include "../utils/gil.h"
+#include "../utils/libwebrtc_thread.h"
 
 namespace python_webrtc {
 
@@ -28,7 +29,7 @@ namespace python_webrtc {
   }
 
   MediaStreamTrack::~MediaStreamTrack() {
-    gil_release_if_held release;
+    BlockingDestructor release("MediaStreamTrack");
 
     // after this the track can't notify us anymore: it notifies on the same thread
     _factory->_signalingThread->BlockingCall([this]() {

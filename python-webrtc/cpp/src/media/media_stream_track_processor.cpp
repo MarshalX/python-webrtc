@@ -13,6 +13,7 @@
 #include <rtc_base/time_utils.h>
 
 #include "../utils/gil.h"
+#include "../utils/libwebrtc_thread.h"
 
 namespace python_webrtc {
 
@@ -24,7 +25,7 @@ namespace python_webrtc {
   std::shared_ptr<MediaStreamTrackProcessor> MediaStreamTrackProcessor::Create(std::shared_ptr<MediaStreamTrack> track,
                                                                                size_t maxBufferSize) {
     std::shared_ptr<MediaStreamTrackProcessor> processor(
-        new MediaStreamTrackProcessor(std::move(track), maxBufferSize));
+        new MediaStreamTrackProcessor(std::move(track), maxBufferSize), DeleteOffLibwebrtcThread());
     processor->Attach();
     // after the sink is attached: an end meanwhile detaches it
     processor->_track->AddEndObserver(processor);
@@ -32,7 +33,7 @@ namespace python_webrtc {
   }
 
   MediaStreamTrackProcessor::~MediaStreamTrackProcessor() {
-    gil_release_if_held release;
+    BlockingDestructor release("MediaStreamTrackProcessor");
     Detach();
     DropListeners();
   }

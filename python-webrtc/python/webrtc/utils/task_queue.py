@@ -29,7 +29,6 @@ class TaskQueue:
     MAX_BATCH = 100
 
     _queues: 'weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, TaskQueue]' = weakref.WeakKeyDictionary()
-    _queues_lock = threading.Lock()
 
     def __init__(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
@@ -49,11 +48,11 @@ class TaskQueue:
         Returns:
             :obj:`TaskQueue`: Its queue, created on first use.
         """
-        with cls._queues_lock:
-            queue = cls._queues.get(loop)
-            if queue is None:
-                queue = cls._queues[loop] = cls(loop)
-            return queue
+        # No lock: an allocation under it may run the garbage collector, setdefault is atomic
+        queue = cls._queues.get(loop)
+        if queue is None:
+            queue = cls._queues.setdefault(loop, cls(loop))
+        return queue
 
     @classmethod
     def post_to_running(cls, callback: Callable, *args, **kwargs) -> bool:

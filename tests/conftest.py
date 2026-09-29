@@ -5,9 +5,31 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
+import gc
+import threading
+
 import pytest
 
 import webrtc
+from webrtc.utils import events
+
+
+def pytest_addoption(parser):
+    parser.addoption('--gc-on-emit', action='store_true', help='collect garbage on events of libwebrtc threads')
+
+
+def pytest_configure(config):
+    if not config.getoption('--gc-on-emit'):
+        return
+    # the collector runs on libwebrtc threads, as it may whenever they emit: whatever it releases must not block them
+    emit = events._Listeners.__call__
+
+    def collecting_emit(self, name, *args):
+        if threading.current_thread() is not threading.main_thread():
+            gc.collect()
+        emit(self, name, *args)
+
+    events._Listeners.__call__ = collecting_emit
 
 
 @pytest.fixture

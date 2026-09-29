@@ -23,6 +23,7 @@
 
 #include "../exceptions.h"
 #include "../utils/gil.h"
+#include "../utils/libwebrtc_thread.h"
 
 namespace python_webrtc {
 
@@ -79,7 +80,7 @@ namespace python_webrtc {
   }
 
   RTCIceTransport::~RTCIceTransport() {
-    gil_release_if_held release;
+    BlockingDestructor release("RTCIceTransport");
 
     // callbacks run on the network thread, so after this none of them can be running or start again
     _factory->_workerThread->BlockingCall([this]() {

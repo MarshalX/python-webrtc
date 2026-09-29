@@ -23,6 +23,7 @@
 #include "stats_collector_callback.h"
 #include "../models/python_webrtc/rtc_ice_candidate.h"
 #include "../utils/gil.h"
+#include "../utils/libwebrtc_thread.h"
 
 namespace python_webrtc {
 
@@ -104,7 +105,7 @@ namespace python_webrtc {
 
   RTCPeerConnection::~RTCPeerConnection() {
     // destroying the peer connection blocks on the signaling thread, which may be waiting for the GIL
-    gil_release_if_held release;
+    BlockingDestructor release("RTCPeerConnection");
 
     // closing stops the connection from calling this observer
     Close();
@@ -121,7 +122,9 @@ namespace python_webrtc {
 
   void RTCPeerConnection::Init(pybind11::module &m) {
     Listeners::BindClass<RTCPeerConnection>(m, "RTCPeerConnection")
-        .def(pybind11::init<const std::optional<ConfigurationInit> &>(), nogil())
+        .def(pybind11::init([](const std::optional<ConfigurationInit> &configuration) {
+          return std::shared_ptr<RTCPeerConnection>(new RTCPeerConnection(configuration), DeleteOffLibwebrtcThread());
+        }), nogil())
         .def("createOffer", &RTCPeerConnection::CreateOffer, nogil(),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("iceRestart"),
              pybind11::arg("voiceActivityDetection"))

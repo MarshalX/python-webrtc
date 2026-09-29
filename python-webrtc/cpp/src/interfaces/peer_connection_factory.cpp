@@ -8,6 +8,7 @@
 #include "peer_connection_factory.h"
 #include "../media/playout_audio_device.h"
 #include "../utils/gil.h"
+#include "../utils/libwebrtc_thread.h"
 
 #include <api/create_peerconnection_factory.h>
 #include <api/make_ref_counted.h>
@@ -65,8 +66,10 @@ namespace python_webrtc {
     assert(result);
 
     _workerThread->BlockingCall([this]() {
+      onLibwebrtcThread = true;
       _audioDeviceModule = webrtc::make_ref_counted<PlayoutAudioDevice>();
     });
+    _signalingThread->BlockingCall([]() { onLibwebrtcThread = true; });
 
     _factory = webrtc::CreatePeerConnectionFactory(
         _workerThread.get(),
@@ -88,7 +91,7 @@ namespace python_webrtc {
 
   PeerConnectionFactory::~PeerConnectionFactory() {
     // stopping the threads waits for their tasks, which may be waiting for the GIL
-    gil_release_if_held release;
+    BlockingDestructor release("PeerConnectionFactory");
 
     _factory = nullptr;
 
