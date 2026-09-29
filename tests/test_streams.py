@@ -8,6 +8,8 @@
 """The streams media processing uses: readable, writable and transform streams of objects."""
 
 import asyncio
+import gc
+import weakref
 
 import pytest
 
@@ -220,3 +222,63 @@ def test_streams_need_a_loop():
     """Readers and writers use futures of the running loop"""
     with pytest.raises(RuntimeError):
         webrtc.ReadableStream(Chunks([])).get_reader()
+
+
+@pytest.mark.asyncio
+async def test_pipe_goes_on_when_nothing_references_it():
+    """A pipe nobody references goes on: a collected one errored its streams with GeneratorExit"""
+    # what the source waits for, known only weakly, like a native object waking it
+    waiting = weakref.WeakSet()
+
+    class Woken:
+        def __init__(self):
+            self.next = 0
+
+        def pull(self, controller):
+            # kept by the source, as a processor keeps its pending read
+            woken = self.woken = asyncio.get_running_loop().create_future()
+            waiting.add(woken)
+            woken.add_done_callback(lambda _: self.deliver(controller))
+            return woken
+
+        def deliver(self, controller):
+            if self.next == 50:
+                controller.close()
+            else:
+                controller.enqueue(self.next)
+                self.next += 1
+
+    written = []
+
+    class Sink:
+        def write(self, chunk, controller):
+            written.append(chunk)
+
+    def start():
+        # only the last pipe is referenced
+        source = webrtc.ReadableStream(Woken(), high_water_mark=0)
+        return source.pipe_through(webrtc.TransformStream()).pipe_to(webrtc.WritableStream(Sink()))
+
+    done = start()
+    deadline = asyncio.get_running_loop().time() + 5
+    while not done.done() and asyncio.get_running_loop().time() < deadline:
+        gc.collect()
+        for woken in list(waiting):
+            if not woken.done():
+                woken.set_result(None)
+        await asyncio.sleep(0.005)
+    await asyncio.wait_for(done, 1)
+    assert written == list(range(50))
+
+
+@pytest.mark.asyncio
+async def test_sources_sinks_and_transformers_as_dictionaries():
+    """As in browsers, methods may be members of a dictionary: they were ignored, a transform changed nothing"""
+    written = []
+    source = webrtc.ReadableStream({'pull': lambda controller: controller.enqueue(2)})
+    transform = webrtc.TransformStream({'transform': lambda chunk, controller: controller.enqueue(chunk * 10)})
+    sink = webrtc.WritableStream({'write': lambda chunk, controller: written.append(chunk)})
+    pipe = source.pipe_through(transform).pipe_to(sink)
+    await wait_until(lambda: len(written) >= 3, 'chunks written')
+    pipe.cancel()
+    assert written[:3] == [20, 20, 20]

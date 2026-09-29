@@ -6,6 +6,7 @@
 //
 
 #include "rtc_rtp_sender.h"
+#include "../utils/python_callback.h"
 
 #include <pybind11/functional.h>
 #include <pybind11/stl.h>
@@ -27,12 +28,12 @@ namespace python_webrtc {
         .def_property_readonly("kind", nogil_fn(&RTCRtpSender::GetKind))
         .def_property_readonly("dtmf", nogil_fn(&RTCRtpSender::GetDtmf))
         .def("getParameters", &RTCRtpSender::GetParameters, nogil())
-        .def("setParameters", &RTCRtpSender::SetParameters, nogil(),
+        .def("setParameters", WithCallbacks(&RTCRtpSender::SetParameters),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("parameters"))
         .def("replaceTrack", &RTCRtpSender::ReplaceTrack, nogil(), pybind11::arg("track"))
         .def("setStreams", &RTCRtpSender::SetStreams, nogil(), pybind11::arg("streamIds"))
         .def("getStreamIds", &RTCRtpSender::GetStreamIds, nogil())
-        .def("getStats", &RTCRtpSender::GetStats, nogil(), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
+        .def("getStats", WithCallbacks(&RTCRtpSender::GetStats), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
         .def_static("getCapabilities", &RTCRtpSender::GetCapabilities, nogil(), pybind11::arg("kind"))
         .def("_transceiverStopped", &RTCRtpSender::IsTransceiverStopped, nogil())
         .def("_lastParameters", &RTCRtpSender::GetLastParameters, nogil())
@@ -68,12 +69,14 @@ namespace python_webrtc {
 
   std::optional<std::shared_ptr<MediaStreamTrack>> RTCRtpSender::GetTrack() {
     auto track = _sender->track();
+    // wrapped out of the lock: wrapping may wait for the signaling thread
+    auto wrapper = MediaStreamTrack::holder().GetOrCreate(_factory, track);
 
     std::shared_ptr<MediaStreamTrack> previous;
     std::lock_guard<std::mutex> lock(_mutex);
     if (!_track || _track->track() != track) {
       previous = std::move(_track);
-      _track = MediaStreamTrack::holder().GetOrCreate(_factory, track);
+      _track = std::move(wrapper);
     }
 
     if (_track) {
@@ -84,12 +87,14 @@ namespace python_webrtc {
 
   std::optional<std::shared_ptr<RTCDtlsTransport>> RTCRtpSender::GetTransport() {
     auto transport = _sender->dtls_transport();
+    // see GetTrack
+    auto wrapper = RTCDtlsTransport::holder().GetOrCreate(_factory, transport);
 
     std::shared_ptr<RTCDtlsTransport> previous;
     std::lock_guard<std::mutex> lock(_mutex);
     if (!_transport || _transport->transport() != transport) {
       previous = std::move(_transport);
-      _transport = RTCDtlsTransport::holder().GetOrCreate(_factory, transport);
+      _transport = std::move(wrapper);
     }
 
     if (_transport) {
@@ -104,9 +109,11 @@ namespace python_webrtc {
 
   std::shared_ptr<RTCDTMFSender> RTCRtpSender::GetDtmf() {
     auto dtmf = _sender->GetDtmfSender();
+    // see GetTrack
+    auto wrapper = RTCDTMFSender::holder().GetOrCreate(_factory, dtmf);
     std::lock_guard<std::mutex> lock(_mutex);
-    if (dtmf && (!_dtmf || _dtmf.get() != RTCDTMFSender::holder().Find(dtmf.get()).get())) {
-      _dtmf = RTCDTMFSender::holder().GetOrCreate(_factory, dtmf);
+    if (wrapper && _dtmf != wrapper) {
+      _dtmf = std::move(wrapper);
       _dtmf->SetTransceiver(TransceiverGetter());
     }
     return dtmf ? _dtmf : nullptr;

@@ -22,6 +22,7 @@
 
 #include <pybind11/pybind11.h>
 
+#include "../utils/alive_count.h"
 #include "video_frame_buffer.h"
 #include "wakeup.h"
 #include "../interfaces/media_stream_track.h"
@@ -76,7 +77,8 @@ namespace python_webrtc {
     void OnTrackEnded() override;
 
   private:
-    MediaStreamTrackProcessor(std::shared_ptr<MediaStreamTrack> track, size_t maxBufferSize);
+    MediaStreamTrackProcessor(std::shared_ptr<PeerConnectionFactory> factory,
+                              webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track, size_t maxBufferSize);
 
     void Attach();
 
@@ -106,7 +108,10 @@ namespace python_webrtc {
     // wakes Python, unless a wakeup is pending
     void WakeLocked();
 
-    std::shared_ptr<MediaStreamTrack> _track;
+    AliveCount<MediaStreamTrackProcessor> _counted;
+    // the threads of the factory run the proxy of the track
+    std::shared_ptr<PeerConnectionFactory> _factory;
+    webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> _track;
     const bool _video;
     const size_t _maxBufferSize;
 

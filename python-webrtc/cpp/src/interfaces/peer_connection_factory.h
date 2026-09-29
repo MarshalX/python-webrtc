@@ -49,6 +49,9 @@ namespace python_webrtc {
     std::unique_ptr<webrtc::Thread> _workerThread;
 
   private:
+    // of the process the factory was created in (see forks)
+    const int _generation;
+
     static void Destroy(PeerConnectionFactory *);
 
     static std::weak_ptr<PeerConnectionFactory> _default;

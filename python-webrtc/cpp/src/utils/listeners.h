@@ -42,9 +42,12 @@ namespace python_webrtc {
     void SetListeners(pybind11::object listeners) {
       _listeners = listeners.is_none() ? pybind11::object() : std::move(listeners);
       _active = static_cast<bool>(_listeners);
-      // events held until Python had the object are delivered now
-      if (_active && IsHeld()) {
-        Release();
+      if (_active) {
+        // held events are delivered now, without the GIL: a thread releasing them holds their lock waiting for it
+        gil_release release;
+        if (IsHeld()) {
+          Release();
+        }
       }
     }
 
@@ -88,7 +91,8 @@ namespace python_webrtc {
     // their libwebrtc objects are released, rather than leaving it to ~Listeners, which runs after the members.
     void DropListeners() {
       _active = false;
-      if (!PythonAlive()) {
+      PythonEntry entry;
+      if (!entry) {
         // the interpreter is gone, and so are the objects
         (void) _listeners.release();
         return;
@@ -141,7 +145,8 @@ namespace python_webrtc {
 
     template<typename... Args>
     void EmitNow(const char *name, Args... args) {
-      if (!_active || !PythonAlive()) {
+      PythonEntry entry;
+      if (!_active || !entry) {
         return;
       }
 

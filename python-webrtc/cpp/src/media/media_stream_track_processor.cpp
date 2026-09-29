@@ -17,18 +17,24 @@
 
 namespace python_webrtc {
 
-  MediaStreamTrackProcessor::MediaStreamTrackProcessor(std::shared_ptr<MediaStreamTrack> track, size_t maxBufferSize)
-      : _track(std::move(track)),
-        _video(_track->track()->kind() == webrtc::MediaStreamTrackInterface::kVideoKind),
+  MediaStreamTrackProcessor::MediaStreamTrackProcessor(
+      std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track,
+      size_t maxBufferSize)
+      : _factory(std::move(factory)),
+        _track(std::move(track)),
+        _video(_track->kind() == webrtc::MediaStreamTrackInterface::kVideoKind),
         _maxBufferSize(std::max<size_t>(1, maxBufferSize)) {}
 
   std::shared_ptr<MediaStreamTrackProcessor> MediaStreamTrackProcessor::Create(std::shared_ptr<MediaStreamTrack> track,
                                                                                size_t maxBufferSize) {
+    // Python keeps the track's wrapper, so the collector sees handlers of the track referencing the processor
     std::shared_ptr<MediaStreamTrackProcessor> processor(
-        new MediaStreamTrackProcessor(std::move(track), maxBufferSize), DeleteOffLibwebrtcThread());
-    processor->Attach();
+        new MediaStreamTrackProcessor(track->factory(), track->track(), maxBufferSize), DeleteOffLibwebrtcThread());
+    if (!track->ended()) {
+      processor->Attach();
+    }
     // after the sink is attached: an end meanwhile detaches it
-    processor->_track->AddEndObserver(processor);
+    track->AddEndObserver(processor);
     return processor;
   }
 
@@ -40,7 +46,7 @@ namespace python_webrtc {
 
   void MediaStreamTrackProcessor::Init(pybind11::module &m) {
     Listeners::BindClass<MediaStreamTrackProcessor>(m, "MediaStreamTrackProcessor")
-        .def(pybind11::init(&MediaStreamTrackProcessor::Create), nogil(), pybind11::arg("track"),
+        .def(pybind11::init(nogil_factory(&MediaStreamTrackProcessor::Create)), pybind11::arg("track"),
              pybind11::arg("maxBufferSize"))
         .def("read", &MediaStreamTrackProcessor::Read)
         .def("cancel", &MediaStreamTrackProcessor::Cancel, nogil())
@@ -52,14 +58,13 @@ namespace python_webrtc {
 
   void MediaStreamTrackProcessor::Attach() {
     std::lock_guard<std::mutex> lock(_attachMutex);
-    if (_attached || _track->ended()) {
+    if (_attached) {
       return;
     }
     if (_video) {
-      static_cast<webrtc::scoped_refptr<webrtc::VideoTrackInterface>>(*_track)->AddOrUpdateSink(
-          this, webrtc::VideoSinkWants());
+      dynamic_cast<webrtc::VideoTrackInterface *>(_track.get())->AddOrUpdateSink(this, webrtc::VideoSinkWants());
     } else {
-      static_cast<webrtc::scoped_refptr<webrtc::AudioTrackInterface>>(*_track)->AddSink(this);
+      dynamic_cast<webrtc::AudioTrackInterface *>(_track.get())->AddSink(this);
     }
     _attached = true;
   }
@@ -71,9 +76,9 @@ namespace python_webrtc {
     }
     // once removed, the track doesn't call the sink anymore
     if (_video) {
-      static_cast<webrtc::scoped_refptr<webrtc::VideoTrackInterface>>(*_track)->RemoveSink(this);
+      dynamic_cast<webrtc::VideoTrackInterface *>(_track.get())->RemoveSink(this);
     } else {
-      static_cast<webrtc::scoped_refptr<webrtc::AudioTrackInterface>>(*_track)->RemoveSink(this);
+      dynamic_cast<webrtc::AudioTrackInterface *>(_track.get())->RemoveSink(this);
     }
     _attached = false;
   }
@@ -156,7 +161,7 @@ namespace python_webrtc {
     std::optional<Item> item;
     bool ended;
     {
-      pybind11::gil_scoped_release release;
+      gil_release release;
       std::lock_guard<std::mutex> lock(_mutex);
       if (!_queue.empty()) {
         item = std::move(_queue.front());
@@ -166,7 +171,7 @@ namespace python_webrtc {
     }
     if (ended && !item) {
       // the sink is detached here rather than on the thread that ended the track
-      pybind11::gil_scoped_release release;
+      gil_release release;
       Detach();
     }
     if (!item) {
@@ -175,7 +180,7 @@ namespace python_webrtc {
     if (auto video = std::get_if<VideoItem>(&*item)) {
       std::shared_ptr<VideoFrameBuffer> buffer;
       {
-        pybind11::gil_scoped_release release;
+        gil_release release;
         buffer = VideoFrameBuffer::FromWebrtc(video->buffer);
       }
       return pybind11::make_tuple(buffer, video->timestampUs, video->rotation, video->rtpTimestamp);

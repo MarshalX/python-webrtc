@@ -7,6 +7,7 @@
 
 """AudioData of WebCodecs (https://developer.mozilla.org/en-US/docs/Web/API/AudioData) and its dictionaries."""
 
+import math
 import warnings
 from dataclasses import dataclass
 from typing import Any, NamedTuple, Optional, Union
@@ -146,8 +147,8 @@ class AudioData:
 
         format = _sample_format(init.format)
         sample_rate = init.sample_rate
-        if isinstance(sample_rate, bool) or not isinstance(sample_rate, (int, float)) or not sample_rate > 0:
-            raise TypeError('sample_rate must be positive')
+        if isinstance(sample_rate, bool) or not isinstance(sample_rate, (int, float)) or not 0 < sample_rate < math.inf:
+            raise TypeError('sample_rate must be positive and finite')
         frames = _unsigned(init.number_of_frames, 'number_of_frames')
         channels = _unsigned(init.number_of_channels, 'number_of_channels')
         if frames == 0 or channels == 0:

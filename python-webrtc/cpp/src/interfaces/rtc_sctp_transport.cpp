@@ -18,6 +18,7 @@ namespace python_webrtc {
     _factory->_workerThread->BlockingCall([this, &dtlsTransport]() {
       dtlsTransport = _transport->dtls_transport();
       _transport->RegisterObserver(this);
+      holder().SetObserver(_transport.get(), this);
       _observing = true;
       _lastState = _transport->Information().state();
 
@@ -32,15 +33,8 @@ namespace python_webrtc {
   RTCSctpTransport::~RTCSctpTransport() {
     BlockingDestructor release("RTCSctpTransport");
 
-    // the transport has a single observer slot, a newer wrapper of it may have taken it over already
-    auto replaced = holder().HasLive(_transport.get());
     // callbacks run on the network thread, so after this none of them can be running or start again
-    _factory->_workerThread->BlockingCall([this, replaced]() {
-      if (_observing && !replaced) {
-        _transport->UnregisterObserver();
-      }
-      _observing = false;
-    });
+    _factory->_workerThread->BlockingCall([this]() { Stop(); });
 
     _dtlsTransport = nullptr;
     _transport = nullptr;
@@ -63,10 +57,11 @@ namespace python_webrtc {
   }
 
   void RTCSctpTransport::Stop() {
-    if (_observing) {
+    // a newer wrapper of the transport may have taken its single observer slot
+    if (_observing && holder().TakeObserver(_transport.get(), this)) {
       _transport->UnregisterObserver();
-      _observing = false;
     }
+    _observing = false;
   }
 
   void RTCSctpTransport::OnStateChange(webrtc::SctpTransportInformation info) {

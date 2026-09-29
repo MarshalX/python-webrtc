@@ -7,8 +7,8 @@
 
 from typing import TYPE_CHECKING, Dict, Optional, Union
 
-from webrtc import MediaStream, MediaTrackConstraints, wrtc
-from webrtc.interfaces.media_stream_track import _selected
+from webrtc import MediaStream, MediaTrackConstraints, MediaTrackSettings, OverconstrainedError, wrtc
+from webrtc.interfaces.media_stream_track import _CAMERA_CAPABILITIES, _check_numbers, _selected, _unsatisfied
 
 if TYPE_CHECKING:
     import webrtc
@@ -44,16 +44,25 @@ def get_user_media(
         :obj:`webrtc.MediaStream`: The stream.
 
     Raises:
-        :obj:`TypeError`: If neither audio nor video is requested.
-        :obj:`ValueError`: If the size or the frame rate of the video isn't positive.
+        :obj:`TypeError`: If neither audio nor video is requested, or a value isn't a finite number (negative for
+            the size).
+        :obj:`webrtc.OverconstrainedError`: If a required value (``exact``, ``min``, ``max``) is beyond what the
+            camera can do: 1 to 4096 pixels wide and high, 1 to 120 frames per second. Other values are brought
+            within that.
     """
     if not audio and not video:
         raise TypeError('audio or video must be requested')
     constraints = MediaTrackConstraints(width=width, height=height, frame_rate=frame_rate)
-    # the defaults of a camera, within the range of a constraint that has neither an exact nor an ideal value
-    width, height, frame_rate = _selected(width, 640), _selected(height, 480), _selected(frame_rate, 30.0)
-    if video and (width <= 0 or height <= 0 or frame_rate <= 0):
-        raise ValueError('the size and the frame rate of the video must be positive')
+    _check_numbers(constraints)
+    if video:
+        failed = _unsatisfied(constraints, _CAMERA_CAPABILITIES, MediaTrackSettings())
+        if failed is not None:
+            raise OverconstrainedError(failed, f"The constraint {failed} can't be satisfied")
+    # the camera's defaults, within the constraints and the camera's capabilities
+    capabilities = _CAMERA_CAPABILITIES
+    width = _selected(width, 640, capabilities.width)
+    height = _selected(height, 480, capabilities.height)
+    frame_rate = _selected(frame_rate, 30.0, capabilities.frame_rate)
     stream = MediaStream._wrap(wrtc.getUserMedia(bool(audio), bool(video), width, height, float(frame_rate)))
     for track in stream.get_video_tracks():
         track._native_obj._constraints = constraints

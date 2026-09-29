@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -40,9 +41,15 @@ namespace python_webrtc {
     bool _previous;
   };
 
-  // Runs a release right away, or on a thread of its own on a libwebrtc thread
+  // Forks, counted in the child: objects from before one are never released there, their threads are gone
+  inline std::atomic<int> forks{0};
+
+  // Runs a release right away, or on a thread of its own on a libwebrtc thread; leaks while the interpreter finalizes
   template<typename F>
-  void ReleaseOffLibwebrtcThread(F &&release) {
+  void ReleaseOffLibwebrtcThread(F &&release, int generation = forks.load()) {
+    if (!PythonAlive() || generation != forks.load()) {
+      return;
+    }
     if (onLibwebrtcThread) {
       std::thread(std::forward<F>(release)).detach();
     } else {
@@ -52,9 +59,18 @@ namespace python_webrtc {
 
   // Deletes wrappers whose destructors block on libwebrtc threads off those threads
   struct DeleteOffLibwebrtcThread {
+    // of the process the wrapper was created in (see forks)
+    int generation = forks.load();
+
     template<typename T>
     void operator()(T *dying) const {
-      ReleaseOffLibwebrtcThread([dying]() { delete dying; });
+      ReleaseOffLibwebrtcThread(
+          [dying]() {
+            // members too are released without it, like proxies destroyed on their thread
+            gil_release_if_held release;
+            delete dying;
+          },
+          generation);
     }
   };
 

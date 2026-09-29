@@ -29,6 +29,7 @@ namespace python_webrtc {
       }
       // messages received meanwhile are delivered to the observer once it's registered, and are held too
       _channel->RegisterObserver(this);
+      holder().SetObserver(_channel.get(), this);
       // a channel announced by the remote peer is open already, but its open event follows the datachannel one
       if (_lastState == DataState::kOpen) {
         Emit("open", _lastState);
@@ -39,11 +40,10 @@ namespace python_webrtc {
   RTCDataChannel::~RTCDataChannel() {
     BlockingDestructor release("RTCDataChannel");
 
-    // the channel has a single observer slot, a newer wrapper of it may have taken it over already
-    auto replaced = holder().HasLive(_channel.get());
     // callbacks run on the signaling thread, so after this none of them can be running or start again
-    _factory->_signalingThread->BlockingCall([this, replaced]() {
-      if (!replaced) {
+    _factory->_signalingThread->BlockingCall([this]() {
+      // a newer wrapper of the channel may have taken its single observer slot
+      if (holder().TakeObserver(_channel.get(), this)) {
         _channel->UnregisterObserver();
       }
     });
@@ -80,7 +80,7 @@ namespace python_webrtc {
         .def("close", &RTCDataChannel::Close, nogil())
         .def("_surfaceState", &RTCDataChannel::SurfaceState, nogil(), pybind11::arg("state"))
         .def("_decreaseBufferedAmount", &RTCDataChannel::DecreaseBufferedAmount, nogil(), pybind11::arg("sent"))
-        .def("_release", &RTCDataChannel::Release);
+        .def("_release", &RTCDataChannel::Release, nogil());
   }
 
   InstanceHolder<RTCDataChannel, webrtc::DataChannelInterface> &RTCDataChannel::holder() {

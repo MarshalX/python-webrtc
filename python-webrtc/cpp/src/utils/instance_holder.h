@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <type_traits>
@@ -23,8 +23,11 @@ namespace python_webrtc {
 
   class PeerConnectionFactory;
 
-  // A wrapper of a libwebrtc object that takes a single observer: a new wrapper of the object must not register
-  // before the dying one has unregistered. Wrappers of objects that take any number of observers don't wait.
+  // Runs a function on the signaling thread of a factory (defined with the factory)
+  void RunOnSignalingThread(PeerConnectionFactory &factory, const std::function<void()> &function);
+
+  // A wrapper of a libwebrtc object that takes a single observer: the holder tells which wrapper is registered, so a
+  // dying one doesn't unregister a newer one (both done on the observer's thread)
   struct SingleObserverSlot {};
 
   // At most one wrapper T per libwebrtc object U, so Python always sees the same object for it. Entries are weak:
@@ -36,14 +39,19 @@ namespace python_webrtc {
       if (!object) {
         return nullptr;
       }
+      if (auto instance = Find(object.get())) {
+        return instance;
+      }
+      if (!onLibwebrtcThread) {
+        // created on the signaling thread: constructors call it, which may be wrapping objects under the same locks
+        std::shared_ptr<T> instance;
+        RunOnSignalingThread(*factory, [&]() { instance = GetOrCreate(factory, object); });
+        return instance;
+      }
 
       // wrappers may create nested wrappers (sctp -> dtls -> ice) while holding the lock
       std::unique_lock<std::recursive_mutex> lock(_mutex);
       auto key = object.get();
-      // a wrapper of the object being destroyed first unregisters from it, the new one registers after
-      if constexpr (std::is_base_of_v<SingleObserverSlot, T>) {
-        _destroyed.wait(lock, [&]() { return _destroying.count(key) == 0; });
-      }
       auto it = _store.find(key);
       if (it != _store.end()) {
         if (auto instance = it->second.lock()) {
@@ -51,8 +59,13 @@ namespace python_webrtc {
         }
       }
 
-      std::shared_ptr<T> instance(new T(factory, std::move(object)), [this, key](T *dying) {
-        // marked right away, so a new wrapper waits for this one even when it's destroyed elsewhere
+      std::shared_ptr<T> instance(new T(factory, std::move(object)), [this, key, generation = forks.load()](T *dying) {
+        // left to the exit of the process (see ReleaseOffLibwebrtcThread): the lock may be held by a hung thread
+        if (!PythonAlive() || generation != forks.load()) {
+          return;
+        }
+        // the lock's holder may wait for a libwebrtc thread waiting for the GIL
+        gil_release_if_held release;
         StartDestroying(key);
         ReleaseOffLibwebrtcThread([this, key, dying]() { Destroy(key, dying); });
       });
@@ -67,13 +80,31 @@ namespace python_webrtc {
       return it != _store.end() ? it->second.lock() : nullptr;
     }
 
-    // Whether another wrapper of the same libwebrtc object is alive. Only meaningful in a destructor of the wrapper,
-    // where it tells that the object was re-wrapped meanwhile and the new wrapper has taken over its observer slot.
-    bool HasLive(const U *object) {
-      // called from the destructor of the dying wrapper, which Destroy runs without holding the lock
+    // wrappers alive or being destroyed, for tests (wrtc._alive)
+    int Alive() {
       std::lock_guard<std::recursive_mutex> lock(_mutex);
-      auto it = _store.find(const_cast<U *>(object));
-      return it != _store.end() && !it->second.expired();
+      int alive = static_cast<int>(_destroying.size());
+      for (const auto &entry: _store) {
+        alive += entry.second.expired() ? 0 : 1;
+      }
+      return alive;
+    }
+
+    // A wrapper registered as the observer of its object, on the observer's thread
+    void SetObserver(const U *object, const T *wrapper) {
+      std::lock_guard<std::mutex> lock(_observersMutex);
+      _observers[object] = wrapper;
+    }
+
+    // Whether a wrapper is still the observer of its object, which it no longer is then, on the observer's thread
+    bool TakeObserver(const U *object, const T *wrapper) {
+      std::lock_guard<std::mutex> lock(_observersMutex);
+      auto it = _observers.find(object);
+      if (it == _observers.end() || it->second != wrapper) {
+        return false;
+      }
+      _observers.erase(it);
+      return true;
     }
 
   private:
@@ -89,21 +120,18 @@ namespace python_webrtc {
     void Destroy(U *key, T *dying) {
       gil_release_if_held release;
 
-      // Out of the lock: destructors block on libwebrtc threads (to unregister observers), which may be waiting
-      // for this lock themselves (a callback wrapping an object). A replacement waits for this to finish.
+      // out of the lock: destructors block on libwebrtc threads, which may be waiting for it (wrapping an object)
       delete dying;
-      {
-        std::lock_guard<std::recursive_mutex> lock(_mutex);
-        _destroying.erase(_destroying.find(key));
-      }
-      _destroyed.notify_all();
+      std::lock_guard<std::recursive_mutex> lock(_mutex);
+      _destroying.erase(_destroying.find(key));
     }
 
     std::recursive_mutex _mutex;
-    std::condition_variable_any _destroyed;
     std::unordered_map<U *, std::weak_ptr<T>> _store;
     // objects whose wrapper is being destroyed
     std::unordered_multiset<U *> _destroying;
+    std::mutex _observersMutex;
+    std::unordered_map<const U *, const T *> _observers;
   };
 
 } // namespace python_webrtc

@@ -235,3 +235,37 @@ async def test_synchronization_sources(caller, callee, video_stream):
     assert 0 <= source.rtp_timestamp < 2**32
     assert source.audio_level is None
     assert receiver.get_contributing_sources() == []
+
+
+@pytest.mark.parametrize(
+    'encoding',
+    [
+        {'max_bitrate': -1},
+        {'max_bitrate': 2**32},
+        {'max_bitrate': 1.5},
+        {'max_framerate': float('inf')},
+        {'scale_resolution_down_by': float('nan')},
+    ],
+)
+def test_encodings_have_their_webidl_types(pc, encoding):
+    """An [EnforceRange] unsigned long and restricted doubles: other values are a TypeError, not sent to libwebrtc"""
+    with pytest.raises(TypeError):
+        pc.add_transceiver(
+            webrtc.MediaType.video,
+            webrtc.RtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(**encoding)]),
+        )
+
+
+def test_encoding_bitrate_beyond_an_int_is_no_limit(pc):
+    init = webrtc.RtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(max_bitrate=2**32 - 1)])
+    sender = pc.add_transceiver(webrtc.MediaType.video, init).sender
+    assert sender.get_parameters().encodings[0].max_bitrate == 2**31 - 1
+
+
+def test_transceiver_init_as_a_dictionary(pc):
+    """As in browsers, with camelCase or snake_case names, the encodings too; unknown members are ignored"""
+    init = {'direction': 'sendonly', 'sendEncodings': [{'rid': 'a', 'maxBitrate': 100000}, {'rid': 'b'}], 'x': 1}
+    transceiver = pc.add_transceiver(webrtc.MediaType.video, init)
+    assert transceiver.direction == webrtc.TransceiverDirection.sendonly
+    encodings = transceiver.sender.get_parameters().encodings
+    assert [(e.rid, e.max_bitrate) for e in encodings] == [('a', 100000), ('b', None)]

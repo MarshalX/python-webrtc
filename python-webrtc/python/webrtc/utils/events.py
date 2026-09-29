@@ -51,7 +51,13 @@ class _Listeners:
         if registrations is None:
             # the garbage collector cleared this object (in a cycle with its target) before the native one let go
             return
-        loops = [self.primary_loop] if self.primary_loop else []
+        primary_loop = self.primary_loop
+        if primary_loop is not None and primary_loop.is_closed():
+            # used from another loop since (like another asyncio.run): a handler's open loop takes over, on copies
+            primary_loop = self.primary_loop = next(
+                (r.loop for regs in list(registrations.values()) for r in list(regs) if not r.loop.is_closed()), None
+            )
+        loops = [primary_loop] if primary_loop else []
         for registration in registrations.get(name, ()):
             if registration.loop not in loops:
                 loops.append(registration.loop)
@@ -62,7 +68,7 @@ class _Listeners:
     def ensure_primary_loop(self) -> Optional[asyncio.AbstractEventLoop]:
         """Makes the running loop the primary one if there's none yet. Returns the running loop, if any."""
         loop = _running_loop()
-        if loop is not None and self.primary_loop is None:
+        if loop is not None and (self.primary_loop is None or self.primary_loop.is_closed()):
             self.primary_loop = loop
         return loop
 

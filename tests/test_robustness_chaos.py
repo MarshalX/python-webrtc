@@ -1,0 +1,39 @@
+#
+#  Copyright 2026 Ilya (Marshal) <https://github.com/MarshalX>. All rights reserved.
+#
+#  Use of this source code is governed by a BSD-style license
+#  that can be found in the LICENSE.md file in the root of the project.
+#
+
+"""Random sequences of API calls (tests/chaos.py) in processes of their own: no crash, no deadlock. A failure
+prints the seed and the steps, replayed with ``python -m tests.chaos --seed <seed> --steps <steps>``."""
+
+import subprocess
+import sys
+
+import pytest
+
+from tests.helpers import ROOT
+
+
+def run_chaos(seed, steps, timeout):
+    command = [sys.executable, '-m', 'tests.chaos', '--seed', str(seed), '--steps', str(steps)]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, cwd=ROOT)
+    except subprocess.TimeoutExpired as e:
+        pytest.fail(f'seed {seed} is stuck after:\n{(e.stdout or b"")[-3000:]}')
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, f'seed {seed}, exit code {result.returncode}:\n{output[-5000:]}'
+    assert 'done' in result.stdout, output[-3000:]
+
+
+@pytest.mark.parametrize('seed', range(2))
+def test_chaos(seed):
+    run_chaos(seed, steps=150, timeout=120)
+
+
+@pytest.mark.stress
+@pytest.mark.timeout(900)
+@pytest.mark.parametrize('seed', range(100, 120))
+def test_chaos_long(seed):
+    run_chaos(seed, steps=1000, timeout=600)

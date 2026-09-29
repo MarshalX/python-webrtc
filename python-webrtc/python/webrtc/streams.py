@@ -13,7 +13,7 @@ import asyncio
 import collections
 import inspect
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Callable, Deque, Optional, Tuple
+from typing import Any, AsyncIterator, Callable, Deque, Optional, Set, Tuple
 
 __all__ = [
     'ReadableStream',
@@ -43,6 +43,10 @@ def _resolved(value: Any = None) -> asyncio.Future:
     future = _pending()
     future.set_result(value)
     return future
+
+
+# pipes running, see ReadableStream.pipe_to
+_running_pipes: Set[asyncio.Future] = set()
 
 
 def _rejected(error: BaseException) -> asyncio.Future:
@@ -82,9 +86,16 @@ def _reason_error(reason: Any) -> BaseException:
     return reason if isinstance(reason, BaseException) else TypeError(str(reason))
 
 
+def _member(obj: Any, name: str) -> Any:
+    """A method of an underlying source, sink or transformer: an object, or a dictionary as in browsers"""
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None) if obj is not None else None
+
+
 def _call(obj: Any, name: str, *args) -> Any:
     """Calls a method of an underlying source, sink or transformer, if it has one."""
-    method = getattr(obj, name, None) if obj is not None else None
+    method = _member(obj, name)
     return method(*args) if method is not None else None
 
 
@@ -246,7 +257,7 @@ class ReadableStream:
 
     Args:
         underlying_source (optional): An object with optional ``start(controller)``, ``pull(controller)`` and
-            ``cancel(reason)`` methods, which may be coroutine functions.
+            ``cancel(reason)`` methods (or a :obj:`dict` of them), which may be coroutine functions.
         high_water_mark (:obj:`float`, optional): How many chunks are queued ahead of reads, 1 by default.
     """
 
@@ -302,7 +313,11 @@ class ReadableStream:
             return _rejected(TypeError('A stream is locked'))
         reader = self.get_reader()
         writer = destination.get_writer()
-        return asyncio.ensure_future(self._pipe(reader, writer, prevent_close, prevent_abort, prevent_cancel))
+        pipe = asyncio.ensure_future(self._pipe(reader, writer, prevent_close, prevent_abort, prevent_cancel))
+        # kept until done, as in browsers: asyncio keeps tasks weakly
+        _running_pipes.add(pipe)
+        pipe.add_done_callback(_running_pipes.discard)
+        return pipe
 
     @staticmethod
     async def _pipe(
@@ -322,6 +337,9 @@ class ReadableStream:
                     return
                 # writes aren't awaited, like in the specification
                 _handled(writer.write(result.value))
+        except GeneratorExit:
+            # closed, at exit: nothing can be awaited anymore
+            raise
         except BaseException as e:
             if writer._stream._state in ('erroring', 'errored'):
                 if not prevent_cancel:
@@ -581,7 +599,7 @@ class WritableStream:
 
     Args:
         underlying_sink (optional): An object with optional ``start(controller)``, ``write(chunk, controller)``,
-            ``close()`` and ``abort(reason)`` methods, which may be coroutine functions.
+            ``close()`` and ``abort(reason)`` methods (or a :obj:`dict` of them), which may be coroutine functions.
         high_water_mark (:obj:`float`, optional): How many chunks are queued until writers see backpressure,
             1 by default.
     """
@@ -824,8 +842,8 @@ class TransformStream:
 
     Args:
         transformer (optional): An object with optional ``start(controller)``, ``transform(chunk, controller)`` and
-            ``flush(controller)`` methods, which may be coroutine functions. Chunks pass unchanged without
-            ``transform``.
+            ``flush(controller)`` methods (or a :obj:`dict` of them), which may be coroutine functions. Chunks pass
+            unchanged without ``transform``.
     """
 
     def __init__(self, transformer: Any = None):
@@ -863,7 +881,7 @@ class _TransformSink:
         ):
             stream._pull_waiter = _pending()
             await stream._pull_waiter
-        transform = getattr(stream._transformer, 'transform', None)
+        transform = _member(stream._transformer, 'transform')
         if transform is None:
             stream._controller.enqueue(chunk)
         else:

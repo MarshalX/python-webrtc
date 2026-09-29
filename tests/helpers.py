@@ -12,8 +12,12 @@ import inspect
 import os
 import subprocess
 import sys
+import textwrap
+
+import pytest
 
 import webrtc
+import wrtc
 
 
 async def exchange_offer(caller, callee):
@@ -167,6 +171,10 @@ async def writing(write, *args, **kwargs):
         await asyncio.wait_for(task, 10)
 
 
+# the memory of sanitizers (ASan quarantine, TSan shadow) hides leaks from resident memory
+skip_if_sanitized = pytest.mark.skipif(wrtc._sanitized, reason='resident memory says nothing under sanitizers')
+
+
 def rss_bytes():
     """The resident memory of the process, in bytes"""
     if sys.platform.startswith('linux'):
@@ -196,3 +204,23 @@ def rss_bytes():
         return counters.WorkingSetSize
     # macOS and other BSDs
     return int(subprocess.check_output(['ps', '-o', 'rss=', '-p', str(os.getpid())])) * 1024
+
+
+#: The root of the project, which has the tests package (pytest may run from elsewhere, like cibuildwheel)
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def run_isolated(script, timeout=60):
+    """Runs a script in its own process, so a crash or a deadlock fails the test only; returns its output"""
+    # a crash tells where: the Python stacks of every thread, and glibc's fatal errors, written to a tty otherwise
+    env = {**os.environ, 'PYTHONFAULTHANDLER': '1', 'LIBC_FATAL_STDERR_': '1'}
+    result = subprocess.run(
+        [sys.executable, '-c', textwrap.dedent(script)],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=ROOT,
+        env=env,
+    )
+    assert result.returncode == 0, f'exit code {result.returncode}:\n{result.stderr[-6000:]}'
+    return result.stdout

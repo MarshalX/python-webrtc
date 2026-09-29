@@ -15,7 +15,8 @@ import weakref
 import pytest
 
 import webrtc
-from tests.helpers import connect_track, rss_bytes, wait_until, write_video, writing
+import wrtc
+from tests.helpers import connect_track, rss_bytes, skip_if_sanitized, wait_until, write_video, writing
 from webrtc.utils.task_queue import TaskQueue
 
 TIMEOUT = 20
@@ -51,16 +52,20 @@ async def test_stop_track_while_reading(video_stream, audio_stream):
     """Tracks stopped while tasks read them close their streams"""
     tracks = [*video_stream.get_tracks(), *audio_stream.get_tracks()]
 
+    read = []
+
     async def read_all(track):
         count = 0
         async for media in webrtc.MediaStreamTrackProcessor(track).readable:
             media.close()
             count += 1
+            if count == 1:
+                read.append(track)
         return count
 
     tasks = [asyncio.ensure_future(read_all(track)) for track in tracks for _ in range(3)]
-    # let every task read some media
-    await asyncio.sleep(0.3)
+    # every task reads some media first (a fixed wait was too short on slow machines)
+    await wait_until(lambda: len(read) == len(tasks), 'every task to read media', TIMEOUT)
     for track in tracks:
         track.stop()
     assert all(count > 0 for count in await asyncio.wait_for(asyncio.gather(*tasks), TIMEOUT))
@@ -154,9 +159,10 @@ async def test_create_and_destroy_cycles_do_not_leak():
     # callbacks still queued on the loop hold the last objects
     await wait_until(lambda: collected(refs), 'every cycle to be collected')
     growth = rss_bytes() - before
-    assert growth < 20 * 1024 * 1024, f'{growth / 1e6:.1f} MB more after 1000 cycles'
+    assert wrtc._sanitized or growth < 20 * 1024 * 1024, f'{growth / 1e6:.1f} MB more after 1000 cycles'
 
 
+@skip_if_sanitized
 @pytest.mark.asyncio
 async def test_unread_frames_do_not_grow_memory(video_stream):
     """A processor nobody reads keeps at most its buffer: memory stays flat while frames keep coming"""

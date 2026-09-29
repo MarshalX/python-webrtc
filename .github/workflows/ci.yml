@@ -84,14 +84,28 @@ jobs:
     name: sanitizers (ASan + UBSan)
     runs-on: ubuntu-latest
     container: quay.io/pypa/manylinux_2_28_x86_64
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - run: .github/scripts/sanitizers.sh
+      # the collector running on libwebrtc threads, whenever they emit (see tests/conftest.py)
+      - run: .github/scripts/sanitizers.sh --gc-on-emit
+      # long random sequences of calls (tests/chaos.py)
+      - run: .github/scripts/sanitizers.sh --stress -k "stress or chaos"
+
+  sanitizers-macos:
+    name: sanitizers (ASan + UBSan, macOS)
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: .github/scripts/sanitizers-macos.sh
+      - run: .github/scripts/sanitizers-macos.sh --gc-on-emit
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [lint, sdist, wheels, sanitizers]
+    needs: [lint, sdist, wheels, sanitizers, sanitizers-macos]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

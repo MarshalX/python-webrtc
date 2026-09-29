@@ -103,7 +103,7 @@ namespace python_webrtc {
   void RTCIceTransport::Init(pybind11::module &m) {
     Listeners::BindClass<RTCIceTransport>(m, "RTCIceTransport")
         // a transport of its own
-        .def(pybind11::init([]() { return CreateStandalone(PeerConnectionFactory::GetOrCreateDefault()); }), nogil())
+        .def(pybind11::init(nogil_factory(+[]() { return CreateStandalone(PeerConnectionFactory::GetOrCreateDefault()); })))
         .def_property_readonly("component", nogil_fn(&RTCIceTransport::GetComponent))
         .def_property_readonly("gatheringState", nogil_fn(&RTCIceTransport::GetGatheringState))
         .def_property_readonly("role", nogil_fn(&RTCIceTransport::GetRole))

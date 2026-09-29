@@ -8,7 +8,9 @@
 """Order of the callbacks of TaskQueue, which delivers events and results of operations."""
 
 import asyncio
+import gc
 import threading
+import weakref
 
 import pytest
 
@@ -92,3 +94,24 @@ async def test_resumed_code_runs_before_the_next_callback_only():
     loop.call_later(0, timer.set_result, None)
     await timer
     assert order[-1] == 'later'
+
+
+def test_loops_are_collected_with_what_they_had_queued():
+    """A closed loop is collected with what was still queued for it"""
+
+    class Held:
+        pass
+
+    refs = []
+    for _ in range(5):
+        loop = asyncio.new_event_loop()
+        held = Held()
+        held.loop = loop
+        # never run: the loop closes first
+        TaskQueue.of(loop).post(lambda held=held: None)
+        loop.close()
+        refs.append((weakref.ref(loop), weakref.ref(held)))
+        del loop, held
+    gc.collect()
+
+    assert [ref for pair in refs for ref in pair if ref() is not None] == []

@@ -6,6 +6,7 @@
 //
 
 #include "rtc_peer_connection.h"
+#include "../utils/python_callback.h"
 
 #include <algorithm>
 #include <limits>
@@ -122,19 +123,19 @@ namespace python_webrtc {
 
   void RTCPeerConnection::Init(pybind11::module &m) {
     Listeners::BindClass<RTCPeerConnection>(m, "RTCPeerConnection")
-        .def(pybind11::init([](const std::optional<ConfigurationInit> &configuration) {
+        .def(pybind11::init(nogil_factory(+[](const std::optional<ConfigurationInit> &configuration) {
           return std::shared_ptr<RTCPeerConnection>(new RTCPeerConnection(configuration), DeleteOffLibwebrtcThread());
-        }), nogil())
-        .def("createOffer", &RTCPeerConnection::CreateOffer, nogil(),
+        })))
+        .def("createOffer", WithCallbacks(&RTCPeerConnection::CreateOffer),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("iceRestart"),
              pybind11::arg("voiceActivityDetection"))
-        .def("createAnswer", &RTCPeerConnection::CreateAnswer, nogil(),
+        .def("createAnswer", WithCallbacks(&RTCPeerConnection::CreateAnswer),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("voiceActivityDetection"))
-        .def("setLocalDescription", &RTCPeerConnection::SetLocalDescription, nogil(),
+        .def("setLocalDescription", WithCallbacks(&RTCPeerConnection::SetLocalDescription),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("description"))
-        .def("setRemoteDescription", &RTCPeerConnection::SetRemoteDescription, nogil(),
+        .def("setRemoteDescription", WithCallbacks(&RTCPeerConnection::SetRemoteDescription),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("description"))
-        .def("addIceCandidate", &RTCPeerConnection::AddIceCandidate, nogil(),
+        .def("addIceCandidate", WithCallbacks(&RTCPeerConnection::AddIceCandidate),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("candidate"),
              pybind11::arg("sdpMid"), pybind11::arg("sdpMLineIndex"), pybind11::arg("usernameFragment"))
         .def("addTrack",
@@ -157,7 +158,7 @@ namespace python_webrtc {
              pybind11::arg("label"), pybind11::arg("ordered"), pybind11::arg("maxPacketLifeTime"),
              pybind11::arg("maxRetransmits"), pybind11::arg("protocol"), pybind11::arg("negotiated"),
              pybind11::arg("id"), pybind11::arg("priority"))
-        .def("getStats", &RTCPeerConnection::GetStats, nogil(), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
+        .def("getStats", WithCallbacks(&RTCPeerConnection::GetStats), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
         .def("restartIce", &RTCPeerConnection::RestartIce, nogil())
         .def("getConfiguration", &RTCPeerConnection::GetConfiguration, nogil())
         .def("setConfiguration", &RTCPeerConnection::SetConfiguration, nogil(), pybind11::arg("configuration"))
@@ -219,6 +220,11 @@ namespace python_webrtc {
 
   template<typename T, typename U>
   std::shared_ptr<T> RTCPeerConnection::Wrap(Wrappers<T, U> &wrappers, webrtc::scoped_refptr<U> object) {
+    if (!onLibwebrtcThread) {
+      // on the signaling thread, which wraps objects too: the lock isn't held while waiting for it
+      gil_release_if_held release;
+      return _factory->_signalingThread->BlockingCall([&]() { return Wrap(wrappers, std::move(object)); });
+    }
     std::shared_ptr<T> wrapper;
     {
       std::lock_guard<std::mutex> lock(_wrappersMutex);
@@ -237,6 +243,11 @@ namespace python_webrtc {
   template<typename T, typename U>
   std::vector<std::shared_ptr<T>> RTCPeerConnection::Sync(
       Wrappers<T, U> &wrappers, const std::vector<webrtc::scoped_refptr<U>> &objects) {
+    if (!onLibwebrtcThread) {
+      // see Wrap
+      gil_release_if_held release;
+      return _factory->_signalingThread->BlockingCall([&]() { return Sync(wrappers, objects); });
+    }
     std::vector<std::shared_ptr<T>> result;
     Wrappers<T, U> current;
     {
@@ -1112,6 +1123,11 @@ namespace python_webrtc {
   }
 
   std::optional<std::shared_ptr<RTCSctpTransport>> RTCPeerConnection::GetSctp() {
+    if (!onLibwebrtcThread) {
+      // see Wrap
+      gil_release_if_held release;
+      return _factory->_signalingThread->BlockingCall([this]() { return GetSctp(); });
+    }
     auto pc = connection();
     auto transport = pc ? pc->GetSctpTransport() : nullptr;
     if (!transport) {

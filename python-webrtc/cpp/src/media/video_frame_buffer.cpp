@@ -8,6 +8,7 @@
 #include "video_frame_buffer.h"
 
 #include <cstring>
+#include <string>
 #include <stdexcept>
 
 #include <api/video/i420_buffer.h>
@@ -20,9 +21,15 @@
 
 #include <pybind11/stl.h>
 
+#include "utils/buffer.h"
+#include "utils/gil.h"
+
 namespace python_webrtc {
 
   namespace {
+
+    // keeps the sizes of planes and rows in ints
+    constexpr int kMaxDimension = 1 << 24;
 
     using Layout = PixelFormat::Layout;
 
@@ -147,14 +154,14 @@ namespace python_webrtc {
                                                                const std::vector<SourceLayout> &layout) {
     const auto &format = PixelFormat::Parse(formatName);
     auto planes = format.Planes();
-    if (width <= 0 || height <= 0) {
-      throw pybind11::value_error("The frame must have a positive size");
+    if (width <= 0 || height <= 0 || width > kMaxDimension || height > kMaxDimension) {
+      throw pybind11::value_error("The frame must have a positive size of at most " + std::to_string(kMaxDimension));
     }
     if (layout.size() != planes.size()) {
       throw pybind11::value_error("The layout must have one entry per plane");
     }
 
-    auto info = data.request();
+    auto info = ContiguousBuffer(data);
     auto source = static_cast<const uint8_t *>(info.ptr);
     auto sourceSize = static_cast<size_t>(info.size * info.itemsize);
 
@@ -168,7 +175,7 @@ namespace python_webrtc {
       rows[i] = planes[i].Rows(height);
       auto [offset, stride] = layout[i];
       if (stride < static_cast<size_t>(result->_stride[i]) ||
-          offset + stride * (rows[i] - 1) + result->_stride[i] > sourceSize) {
+          !RowsFit(offset, stride, rows[i], result->_stride[i], sourceSize)) {
         throw pybind11::value_error("The layout doesn't fit in the data");
       }
       total += static_cast<size_t>(result->_stride[i]) * rows[i];
@@ -176,7 +183,7 @@ namespace python_webrtc {
     result->_owned = std::make_shared<std::vector<uint8_t>>(total);
 
     {
-      pybind11::gil_scoped_release release;
+      gil_release release;
       for (size_t i = 0; i < planes.size(); ++i) {
         auto [offset, stride] = layout[i];
         size_t rowBytes = result->_stride[i];
@@ -212,7 +219,7 @@ namespace python_webrtc {
   }
 
   void VideoFrameBuffer::CopyPlanes(const pybind11::buffer &destination, const std::vector<PlaneCopy> &copies) const {
-    auto info = destination.request(true);
+    auto info = ContiguousBuffer(destination, true);
     auto size = static_cast<size_t>(info.size * info.itemsize);
     auto target = static_cast<uint8_t *>(info.ptr);
     auto planes = _format->Planes();
@@ -224,13 +231,13 @@ namespace python_webrtc {
       size_t planeRows = planes[i].Rows(_height);
       size_t planeRowBytes = static_cast<size_t>(planes[i].Columns(_width)) * planes[i].sampleBytes;
       if (rows > 0 && rowBytes > 0 &&
-          (top + rows > planeRows || leftBytes + rowBytes > planeRowBytes || stride < rowBytes ||
-           offset + stride * (rows - 1) + rowBytes > size)) {
+          (top > planeRows || rows > planeRows - top || leftBytes > planeRowBytes ||
+           rowBytes > planeRowBytes - leftBytes || stride < rowBytes || !RowsFit(offset, stride, rows, rowBytes, size))) {
         throw pybind11::value_error("The copy is out of the bounds of the frame or of the destination");
       }
     }
 
-    pybind11::gil_scoped_release release;
+    gil_release release;
     for (size_t i = 0; i < planes.size(); ++i) {
       auto [leftBytes, top, rowBytes, rows, offset, stride] = copies[i];
       for (size_t row = 0; row < rows && rowBytes > 0; ++row) {
@@ -273,12 +280,12 @@ namespace python_webrtc {
     if (format.layout != Layout::RGB) {
       throw pybind11::value_error("Frames are converted to RGB formats only");
     }
-    if (x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > _width || y + height > _height) {
+    if (x < 0 || y < 0 || width <= 0 || height <= 0 || x > _width - width || y > _height - height) {
       throw pybind11::value_error("The rect is out of the bounds of the frame");
     }
-    auto info = destination.request(true);
+    auto info = ContiguousBuffer(destination, true);
     auto size = static_cast<size_t>(info.size * info.itemsize);
-    if (stride < static_cast<size_t>(width) * 4 || offset + stride * (height - 1) + width * 4 > size) {
+    if (stride < static_cast<size_t>(width) * 4 || !RowsFit(offset, stride, height, static_cast<size_t>(width) * 4, size)) {
       throw pybind11::value_error("The destination is too small");
     }
     auto dst = static_cast<uint8_t *>(info.ptr) + offset;
@@ -299,7 +306,7 @@ namespace python_webrtc {
     }
     auto constants = rgbOrder ? yvu : yuv;
 
-    pybind11::gil_scoped_release release;
+    gil_release release;
     auto planes = _format->Planes();
     auto source = ToEightBit();
     auto plane = [&](int i) {

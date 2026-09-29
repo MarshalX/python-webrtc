@@ -42,11 +42,14 @@ namespace python_webrtc {
 
     _track = nullptr;
     // released as the listeners are (see DropListeners)
-    if (!PythonAlive()) {
-      (void) _constraints.release();
-    } else if (_constraints) {
-      pybind11::gil_scoped_acquire gil;
-      pybind11::object dropped = std::move(_constraints);
+    {
+      PythonEntry entry;
+      if (!entry) {
+        (void) _constraints.release();
+      } else if (_constraints) {
+        pybind11::gil_scoped_acquire gil;
+        pybind11::object dropped = std::move(_constraints);
+      }
     }
     DropListeners();
   }
@@ -257,7 +260,7 @@ namespace python_webrtc {
     std::optional<std::tuple<int, int, double>> camera;
     bool microphone = false;
     {
-      pybind11::gil_scoped_release release;
+      gil_release release;
       video = _monitor.video();
       audio = _monitor.audio();
       camera = GetCamera();

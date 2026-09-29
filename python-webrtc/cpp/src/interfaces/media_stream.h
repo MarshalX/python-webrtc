@@ -78,13 +78,11 @@ namespace python_webrtc {
     // wrappers of the current tracks of the stream; the stream owns them, so their state outlives Python references
     std::vector<std::shared_ptr<MediaStreamTrack>> SyncTracks();
 
-    std::shared_ptr<MediaStreamTrack> WrapTrack(webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>);
 
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::MediaStreamInterface> _stream;
 
     std::mutex _tracksMutex;
-    std::unordered_map<webrtc::MediaStreamTrackInterface *, std::shared_ptr<MediaStreamTrack>> _tracks;
     // the tracks the stream had when last notified, or as Python changed them, guarded by _tracksMutex
     std::set<webrtc::MediaStreamTrackInterface *> _known;
 

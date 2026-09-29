@@ -8,6 +8,7 @@
 """RTP parameters and capabilities of senders, receivers and transceivers."""
 
 import dataclasses
+import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -225,8 +226,18 @@ class RTCRtpEncodingParameters:
 
     def _apply(self, native: 'wrtc.RtpEncodingParameters') -> 'wrtc.RtpEncodingParameters':
         """:meth:`_to_native` into an existing native encoding: sets the members that can be changed."""
+        # the WebIDL types: an [EnforceRange] unsigned long and restricted doubles
+        bitrate = self.max_bitrate
+        if bitrate is not None and (
+            isinstance(bitrate, bool) or not isinstance(bitrate, int) or not 0 <= bitrate < 2**32
+        ):
+            raise TypeError(f'max_bitrate must be an unsigned 32-bit integer, not {bitrate!r}')
+        for name in ('max_framerate', 'scale_resolution_down_by'):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, (int, float)) or not math.isfinite(value)):
+                raise TypeError(f'{name} must be a finite number, not {value!r}')
         native.active = bool(self.active)
-        native.maxBitrate = self.max_bitrate
+        native.maxBitrate = min(bitrate, 2**31 - 1) if bitrate is not None else None
         native.maxFramerate = self.max_framerate
         native.scaleResolutionDownBy = self.scale_resolution_down_by
         native.bitratePriority = _BITRATE_PRIORITY[RTCPriorityType(self.priority)]

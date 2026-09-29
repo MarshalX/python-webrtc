@@ -68,35 +68,12 @@ namespace python_webrtc {
   }
 
   std::vector<std::shared_ptr<MediaStreamTrack>> MediaStream::SyncTracks() {
-    auto tracks = std::vector<std::shared_ptr<MediaStreamTrack>>();
-    decltype(_tracks) current;
-    // read before locking: they're calls to the signaling thread, where OnChanged takes the lock
-    auto streamTracks = this->tracks();
-    {
-      std::lock_guard<std::mutex> lock(_tracksMutex);
-      for (auto const &track: streamTracks) {
-        auto it = _tracks.find(track.get());
-        auto wrapper = it != _tracks.end() ? it->second : MediaStreamTrack::holder().GetOrCreate(_factory, track);
-        current[track.get()] = wrapper;
-        tracks.push_back(std::move(wrapper));
-      }
-      std::swap(_tracks, current);
+    // Python keeps the wrappers, the holder finds them
+    std::vector<std::shared_ptr<MediaStreamTrack>> tracks;
+    for (auto const &track: this->tracks()) {
+      tracks.push_back(MediaStreamTrack::holder().GetOrCreate(_factory, track));
     }
-    // wrappers of removed tracks are released here, out of the lock
     return tracks;
-  }
-
-  std::shared_ptr<MediaStreamTrack> MediaStream::WrapTrack(
-      webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track) {
-    std::lock_guard<std::mutex> lock(_tracksMutex);
-    auto it = _tracks.find(track.get());
-    if (it != _tracks.end()) {
-      return it->second;
-    }
-
-    auto wrapper = MediaStreamTrack::holder().GetOrCreate(_factory, track);
-    _tracks[track.get()] = wrapper;
-    return wrapper;
   }
 
   webrtc::scoped_refptr<webrtc::MediaStreamInterface> MediaStream::stream() {
@@ -182,9 +159,6 @@ namespace python_webrtc {
     } else {
       _stream->AddTrack(static_cast<webrtc::scoped_refptr<webrtc::VideoTrackInterface>>(*mediaStreamTrack));
     }
-
-    std::lock_guard<std::mutex> lock(_tracksMutex);
-    _tracks[track.get()] = mediaStreamTrack;
   }
 
   void MediaStream::RemoveTrack(MediaStreamTrack &mediaStreamTrack) {
@@ -199,16 +173,6 @@ namespace python_webrtc {
       _stream->RemoveTrack(static_cast<webrtc::scoped_refptr<webrtc::AudioTrackInterface>>(mediaStreamTrack));
     } else {
       _stream->RemoveTrack(static_cast<webrtc::scoped_refptr<webrtc::VideoTrackInterface>>(mediaStreamTrack));
-    }
-
-    std::shared_ptr<MediaStreamTrack> removed;
-    {
-      std::lock_guard<std::mutex> lock(_tracksMutex);
-      auto it = _tracks.find(track.get());
-      if (it != _tracks.end()) {
-        removed = std::move(it->second);
-        _tracks.erase(it);
-      }
     }
   }
 

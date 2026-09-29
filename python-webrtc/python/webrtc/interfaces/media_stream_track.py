@@ -6,6 +6,7 @@
 #
 
 import asyncio
+import math
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from webrtc import (
@@ -97,21 +98,47 @@ def _satisfied(value: Any, capability: Any, current: Any) -> bool:
     return high is None or current <= high
 
 
-def _selected(value: Any, current: float) -> float:
-    """The value a constraint selects: the exact or ideal one, otherwise the current one within the range"""
+def _selected(value: Any, current: float, capability: Any = None) -> float:
+    """The value a constraint selects (exact, ideal or current), the nearest within its range and the capability"""
+    low, high = float('-inf'), float('inf')
+    if isinstance(capability, (ULongRange, DoubleRange)):
+        low = capability.min if capability.min is not None else low
+        high = capability.max if capability.max is not None else high
     if value is None:
-        return current
-    if not isinstance(value, dict):
-        return value
-    if value.get('exact') is not None:
-        return value['exact']
-    if value.get('ideal') is not None:
-        return value['ideal']
-    if value.get('max') is not None:
-        current = min(current, value['max'])
-    if value.get('min') is not None:
-        current = max(current, value['min'])
-    return current
+        selected = current
+    elif not isinstance(value, dict):
+        selected = value
+    elif value.get('exact') is not None:
+        selected = value['exact']
+    else:
+        low = max(low, value['min']) if value.get('min') is not None else low
+        high = min(high, value['max']) if value.get('max') is not None else high
+        selected = value['ideal'] if value.get('ideal') is not None else current
+    return min(max(selected, low), high)
+
+
+# the members of constraints that are numbers: unsigned longs, and restricted doubles
+_ULONG_CONSTRAINTS = ('width', 'height', 'sample_rate', 'sample_size', 'channel_count')
+_DOUBLE_CONSTRAINTS = ('aspect_ratio', 'frame_rate')
+
+
+def _check_numbers(constraint_set: MediaTrackConstraints) -> None:
+    """The WebIDL types of the numbers of a constraint set: finite, and not negative for unsigned longs"""
+    for name in _ULONG_CONSTRAINTS + _DOUBLE_CONSTRAINTS:
+        value = getattr(constraint_set, name)
+        members = [value.get(key) for key in ('exact', 'ideal', 'min', 'max')] if isinstance(value, dict) else [value]
+        for member in members:
+            if member is None:
+                continue
+            unsigned = name in _ULONG_CONSTRAINTS
+            if (
+                isinstance(member, bool)
+                or not isinstance(member, (int, float))
+                or not math.isfinite(member)
+                or (unsigned and member < 0)
+            ):
+                kind = 'a finite number that is not negative' if unsigned else 'a finite number'
+                raise TypeError(f'{name} must be {kind}, not {member!r}')
 
 
 def _unsatisfied(
@@ -266,6 +293,9 @@ class MediaStreamTrack(WebRTCObject, EventTarget):
         return future
 
     def _apply_constraints(self, constraints: MediaTrackConstraints) -> None:
+        advanced = [MediaTrackConstraints._parse(constraint_set) for constraint_set in constraints.advanced or ()]
+        for constraint_set in [constraints, *advanced]:
+            _check_numbers(constraint_set)
         if self.ready_state == 'ended':
             return
         capabilities = self.get_capabilities()
@@ -277,13 +307,12 @@ class MediaStreamTrack(WebRTCObject, EventTarget):
         camera = self._native_obj._camera()
         if camera is not None:
             width, height, frame_rate = camera
-            advanced = [MediaTrackConstraints._parse(constraint_set) for constraint_set in constraints.advanced or ()]
             # the advanced sets that can be satisfied apply in order after the basic one
             satisfiable = [c for c in advanced if _unsatisfied(c, capabilities, settings) is None]
             for constraint_set in [constraints, *satisfiable]:
-                width = _selected(constraint_set.width, width)
-                height = _selected(constraint_set.height, height)
-                frame_rate = _selected(constraint_set.frame_rate, frame_rate)
+                width = _selected(constraint_set.width, width, capabilities.width)
+                height = _selected(constraint_set.height, height, capabilities.height)
+                frame_rate = _selected(constraint_set.frame_rate, frame_rate, capabilities.frame_rate)
             if (width, height, frame_rate) != camera:
                 self._native_obj._reconfigureCamera(int(width), int(height), float(frame_rate))
         self._native_obj._constraints = constraints
