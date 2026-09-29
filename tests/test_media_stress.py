@@ -52,16 +52,20 @@ async def test_stop_track_while_reading(video_stream, audio_stream):
     """Tracks stopped while tasks read them close their streams"""
     tracks = [*video_stream.get_tracks(), *audio_stream.get_tracks()]
 
+    read = []
+
     async def read_all(track):
         count = 0
         async for media in webrtc.MediaStreamTrackProcessor(track).readable:
             media.close()
             count += 1
+            if count == 1:
+                read.append(track)
         return count
 
     tasks = [asyncio.ensure_future(read_all(track)) for track in tracks for _ in range(3)]
-    # let every task read some media
-    await asyncio.sleep(0.3)
+    # every task reads some media first (a fixed wait was too short on slow machines)
+    await wait_until(lambda: len(read) == len(tasks), 'every task to read media', TIMEOUT)
     for track in tracks:
         track.stop()
     assert all(count > 0 for count in await asyncio.wait_for(asyncio.gather(*tasks), TIMEOUT))

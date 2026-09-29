@@ -212,8 +212,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def run_isolated(script, timeout=60):
     """Runs a script in its own process, so a crash or a deadlock fails the test only; returns its output"""
+    # a crash tells where: the Python stacks of every thread, and glibc's fatal errors, written to a tty otherwise
+    env = {**os.environ, 'PYTHONFAULTHANDLER': '1', 'LIBC_FATAL_STDERR_': '1'}
     result = subprocess.run(
-        [sys.executable, '-c', textwrap.dedent(script)], capture_output=True, text=True, timeout=timeout, cwd=ROOT
+        [sys.executable, '-c', textwrap.dedent(script)],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=ROOT,
+        env=env,
     )
-    assert result.returncode == 0, f'exit code {result.returncode}:\n{result.stderr[-3000:]}'
+    assert result.returncode == 0, f'exit code {result.returncode}:\n{result.stderr[-6000:]}'
     return result.stdout

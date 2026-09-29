@@ -13,6 +13,7 @@
 #include <string_view>
 
 #include "utils/buffer.h"
+#include "utils/gil.h"
 
 namespace python_webrtc {
 
@@ -158,7 +159,7 @@ namespace python_webrtc {
 
     auto from = static_cast<const uint8_t *>(sourceInfo.ptr);
     auto to = static_cast<uint8_t *>(destinationInfo.ptr);
-    pybind11::gil_scoped_release release;
+    gil_release release;
     for (size_t frame = 0; frame < frameCount; ++frame) {
       for (size_t c = 0; c < copiedChannels; ++c) {
         size_t channel = destinationFormat.planar ? planeIndex : c;

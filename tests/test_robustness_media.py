@@ -109,7 +109,8 @@ def test_generator_rejects_audio_libwebrtc_cannot_send():
             caller.add_track(generator)
             await connect(caller, callee)
             writer = generator.writable.get_writer()
-            frames = max(1, int(rate) // 100)
+            # 10 ms, a few at most: the rate alone is rejected, a 2**40 Hz buffer would be 22 GB
+            frames = max(1, min(int(rate) // 100, 4800))
             try:
                 for i in range(10):
                     data = webrtc.AudioData(format='s16', sample_rate=rate, number_of_frames=frames,

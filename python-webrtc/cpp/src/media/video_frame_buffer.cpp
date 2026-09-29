@@ -22,6 +22,7 @@
 #include <pybind11/stl.h>
 
 #include "utils/buffer.h"
+#include "utils/gil.h"
 
 namespace python_webrtc {
 
@@ -182,7 +183,7 @@ namespace python_webrtc {
     result->_owned = std::make_shared<std::vector<uint8_t>>(total);
 
     {
-      pybind11::gil_scoped_release release;
+      gil_release release;
       for (size_t i = 0; i < planes.size(); ++i) {
         auto [offset, stride] = layout[i];
         size_t rowBytes = result->_stride[i];
@@ -236,7 +237,7 @@ namespace python_webrtc {
       }
     }
 
-    pybind11::gil_scoped_release release;
+    gil_release release;
     for (size_t i = 0; i < planes.size(); ++i) {
       auto [leftBytes, top, rowBytes, rows, offset, stride] = copies[i];
       for (size_t row = 0; row < rows && rowBytes > 0; ++row) {
@@ -305,7 +306,7 @@ namespace python_webrtc {
     }
     auto constants = rgbOrder ? yvu : yuv;
 
-    pybind11::gil_scoped_release release;
+    gil_release release;
     auto planes = _format->Planes();
     auto source = ToEightBit();
     auto plane = [&](int i) {

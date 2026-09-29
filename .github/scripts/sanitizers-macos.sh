@@ -43,8 +43,9 @@ if [ "$SANITIZE" = thread ]; then
 else
     DYLD_INSERT_LIBRARIES="$(clang -print-runtime-dir)/libclang_rt.asan_osx_dynamic.dylib"
     export PYTHONMALLOC=malloc
-    # LeakSanitizer isn't supported on macOS; strip_env=0 keeps the runtime in subprocesses of the tests
-    export ASAN_OPTIONS="detect_leaks=0:halt_on_error=1:abort_on_error=0:strict_init_order=1:strip_env=0"
+    # LeakSanitizer isn't supported on macOS; strip_env=0 keeps the runtime in subprocesses of the tests;
+    # container annotations can't match libwebrtc's libc++, whose code the linker may fold with ours
+    export ASAN_OPTIONS="detect_leaks=0:detect_container_overflow=0:halt_on_error=1:abort_on_error=0:strict_init_order=1:strip_env=0"
     export UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
 fi
 export DYLD_INSERT_LIBRARIES

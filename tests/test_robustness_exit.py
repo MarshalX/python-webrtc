@@ -51,6 +51,32 @@ def test_exit_while_objects_are_busy(attempt):
     assert 'exiting' in run_isolated(BUSY_AT_EXIT, timeout=30)
 
 
+PENDING_AT_EXIT = '''
+    import threading
+    import time
+    import webrtc
+
+    pc = webrtc.RTCPeerConnection()
+    pc.add_transceiver('audio')
+
+    def spin():
+        while True:
+            pc._native_obj.getStats(lambda report: None, lambda error: None)
+            time.sleep(0)
+
+    for _ in range(4):
+        threading.Thread(target=spin, daemon=True).start()
+    time.sleep(0.3)
+    print('exiting')
+'''
+
+
+@pytest.mark.parametrize('attempt', range(5))
+def test_exit_while_operations_are_pending(attempt):
+    """Callbacks of operations completing at exit are dropped, not run by a libwebrtc thread taking the GIL"""
+    assert 'exiting' in run_isolated(PENDING_AT_EXIT, timeout=30)
+
+
 @pytest.mark.skipif(not hasattr(os, 'fork'), reason='no fork')
 def test_forked_child_leaves_the_objects_of_its_parent_alone():
     """The child of a fork doesn't block on its parent's threads; new objects work (raise on macOS)"""

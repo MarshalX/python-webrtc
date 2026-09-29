@@ -149,7 +149,7 @@ namespace python_webrtc {
     if (frames > data.size() || data.size() != frames * channels * sizeof(int16_t)) {
       throw pybind11::value_error("The samples don't have the given number of frames");
     }
-    pybind11::gil_scoped_release release;
+    gil_release release;
     if (!GetLive() || _muted) {
       return;
     }

@@ -8,6 +8,7 @@
 #include <pybind11/pybind11.h>
 
 #include "config.h"
+#include "utils/gil.h"
 #include "exceptions.h"
 #include "models/models.h"
 #include "interfaces/interfaces.h"
@@ -41,6 +42,7 @@ PYBIND11_MODULE(wrtc, m) {
   }
 
   m.def("ping", &ping);
+  py::module_::import("atexit").attr("register")(py::cpp_function(&python_webrtc::StopEnteringPython));
   // the memory of ASan (its quarantine) and TSan (its shadow) makes resident memory say nothing about leaks
 #ifdef WRTC_SANITIZED
   m.attr("_sanitized") = true;

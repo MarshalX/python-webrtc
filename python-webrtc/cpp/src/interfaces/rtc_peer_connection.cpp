@@ -6,6 +6,7 @@
 //
 
 #include "rtc_peer_connection.h"
+#include "../utils/python_callback.h"
 
 #include <algorithm>
 #include <limits>
@@ -125,16 +126,16 @@ namespace python_webrtc {
         .def(pybind11::init(nogil_factory(+[](const std::optional<ConfigurationInit> &configuration) {
           return std::shared_ptr<RTCPeerConnection>(new RTCPeerConnection(configuration), DeleteOffLibwebrtcThread());
         })))
-        .def("createOffer", &RTCPeerConnection::CreateOffer, nogil(),
+        .def("createOffer", WithCallbacks(&RTCPeerConnection::CreateOffer),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("iceRestart"),
              pybind11::arg("voiceActivityDetection"))
-        .def("createAnswer", &RTCPeerConnection::CreateAnswer, nogil(),
+        .def("createAnswer", WithCallbacks(&RTCPeerConnection::CreateAnswer),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("voiceActivityDetection"))
-        .def("setLocalDescription", &RTCPeerConnection::SetLocalDescription, nogil(),
+        .def("setLocalDescription", WithCallbacks(&RTCPeerConnection::SetLocalDescription),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("description"))
-        .def("setRemoteDescription", &RTCPeerConnection::SetRemoteDescription, nogil(),
+        .def("setRemoteDescription", WithCallbacks(&RTCPeerConnection::SetRemoteDescription),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("description"))
-        .def("addIceCandidate", &RTCPeerConnection::AddIceCandidate, nogil(),
+        .def("addIceCandidate", WithCallbacks(&RTCPeerConnection::AddIceCandidate),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("candidate"),
              pybind11::arg("sdpMid"), pybind11::arg("sdpMLineIndex"), pybind11::arg("usernameFragment"))
         .def("addTrack",
@@ -157,7 +158,7 @@ namespace python_webrtc {
              pybind11::arg("label"), pybind11::arg("ordered"), pybind11::arg("maxPacketLifeTime"),
              pybind11::arg("maxRetransmits"), pybind11::arg("protocol"), pybind11::arg("negotiated"),
              pybind11::arg("id"), pybind11::arg("priority"))
-        .def("getStats", &RTCPeerConnection::GetStats, nogil(), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
+        .def("getStats", WithCallbacks(&RTCPeerConnection::GetStats), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
         .def("restartIce", &RTCPeerConnection::RestartIce, nogil())
         .def("getConfiguration", &RTCPeerConnection::GetConfiguration, nogil())
         .def("setConfiguration", &RTCPeerConnection::SetConfiguration, nogil(), pybind11::arg("configuration"))

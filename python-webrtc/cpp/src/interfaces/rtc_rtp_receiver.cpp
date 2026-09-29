@@ -6,6 +6,7 @@
 //
 
 #include "rtc_rtp_receiver.h"
+#include "../utils/python_callback.h"
 
 #include <rtc_base/time_utils.h>
 
@@ -59,7 +60,7 @@ namespace python_webrtc {
         .def_property("jitterBufferTarget", nogil_fn(&RTCRtpReceiver::GetJitterBufferTarget),
                       nogil_fn(&RTCRtpReceiver::SetJitterBufferTarget))
         .def("getParameters", &RTCRtpReceiver::GetParameters, nogil())
-        .def("getStats", &RTCRtpReceiver::GetStats, nogil(), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
+        .def("getStats", WithCallbacks(&RTCRtpReceiver::GetStats), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
         .def_static("getCapabilities", &RTCRtpReceiver::GetCapabilities, nogil(), pybind11::arg("kind"))
         .def("_getSources", &RTCRtpReceiver::GetSources, nogil());
   }

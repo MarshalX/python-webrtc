@@ -6,6 +6,7 @@
 //
 
 #include "rtc_rtp_sender.h"
+#include "../utils/python_callback.h"
 
 #include <pybind11/functional.h>
 #include <pybind11/stl.h>
@@ -27,12 +28,12 @@ namespace python_webrtc {
         .def_property_readonly("kind", nogil_fn(&RTCRtpSender::GetKind))
         .def_property_readonly("dtmf", nogil_fn(&RTCRtpSender::GetDtmf))
         .def("getParameters", &RTCRtpSender::GetParameters, nogil())
-        .def("setParameters", &RTCRtpSender::SetParameters, nogil(),
+        .def("setParameters", WithCallbacks(&RTCRtpSender::SetParameters),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("parameters"))
         .def("replaceTrack", &RTCRtpSender::ReplaceTrack, nogil(), pybind11::arg("track"))
         .def("setStreams", &RTCRtpSender::SetStreams, nogil(), pybind11::arg("streamIds"))
         .def("getStreamIds", &RTCRtpSender::GetStreamIds, nogil())
-        .def("getStats", &RTCRtpSender::GetStats, nogil(), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
+        .def("getStats", WithCallbacks(&RTCRtpSender::GetStats), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
         .def_static("getCapabilities", &RTCRtpSender::GetCapabilities, nogil(), pybind11::arg("kind"))
         .def("_transceiverStopped", &RTCRtpSender::IsTransceiverStopped, nogil())
         .def("_lastParameters", &RTCRtpSender::GetLastParameters, nogil())

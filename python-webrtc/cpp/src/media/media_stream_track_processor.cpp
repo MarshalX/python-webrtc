@@ -161,7 +161,7 @@ namespace python_webrtc {
     std::optional<Item> item;
     bool ended;
     {
-      pybind11::gil_scoped_release release;
+      gil_release release;
       std::lock_guard<std::mutex> lock(_mutex);
       if (!_queue.empty()) {
         item = std::move(_queue.front());
@@ -171,7 +171,7 @@ namespace python_webrtc {
     }
     if (ended && !item) {
       // the sink is detached here rather than on the thread that ended the track
-      pybind11::gil_scoped_release release;
+      gil_release release;
       Detach();
     }
     if (!item) {
@@ -180,7 +180,7 @@ namespace python_webrtc {
     if (auto video = std::get_if<VideoItem>(&*item)) {
       std::shared_ptr<VideoFrameBuffer> buffer;
       {
-        pybind11::gil_scoped_release release;
+        gil_release release;
         buffer = VideoFrameBuffer::FromWebrtc(video->buffer);
       }
       return pybind11::make_tuple(buffer, video->timestampUs, video->rotation, video->rtpTimestamp);
