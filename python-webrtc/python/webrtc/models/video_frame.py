@@ -346,6 +346,8 @@ def _layout(value: Any) -> Optional[List[PlaneLayout]]:
 
 def _rotation(value: float) -> int:
     """The nearest multiple of 90, ties rounded up, from 0 to 270"""
+    if not math.isfinite(value):
+        raise TypeError(f'The rotation must be finite, not {value!r}')
     return int(math.floor(value / 90 + 0.5) * 90) % 360
 
 

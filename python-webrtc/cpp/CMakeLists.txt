@@ -27,7 +27,10 @@ if(WRTC_SANITIZE)
       -fsanitize=${WRTC_SANITIZE} -fno-sanitize=vptr -fno-sanitize-recover=all -fno-omit-frame-pointer)
   target_link_options(${MODULE} PRIVATE -fsanitize=${WRTC_SANITIZE} -fno-sanitize=vptr)
   if(WRTC_SANITIZE MATCHES "address")
-    target_link_options(${MODULE} PRIVATE -shared-libasan)
+    # Atheris preloads its own runtime with libFuzzer (asan_with_fuzzer.so), which must provide the symbols
+    if(NOT WRTC_SANITIZE MATCHES "fuzzer")
+      target_link_options(${MODULE} PRIVATE -shared-libasan)
+    endif()
     # The libc++ inside libwebrtc isn't instrumented (no _LIBCPP_INSTRUMENTED_WITH_ASAN): containers it touches
     # aren't annotated, so annotating them in our code alone reports false container-overflows.
     target_compile_definitions(${MODULE} PRIVATE __SANITIZER_DISABLE_CONTAINER_OVERFLOW__)

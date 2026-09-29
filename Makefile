@@ -1,4 +1,4 @@
-.PHONY: dev test asan tsan lint format format-check tidy stub wheels doc clean
+.PHONY: dev test asan tsan fuzz lint format format-check tidy stub wheels doc clean
 
 # pinned to the clang-tidy of .github/scripts/tidy.sh
 CLANG_FORMAT := uvx clang-format==22.1.8
@@ -19,6 +19,12 @@ asan:
 
 tsan:
 	SANITIZE=thread .github/scripts/sanitizers-macos.sh $(O)
+
+# a target of tests/fuzz with Atheris in the Linux image, the build kept in build/fuzz: make fuzz T=video_frame O=-max_total_time=600
+fuzz:
+	docker run --rm -it --platform linux/amd64 -v "$(CURDIR):/src" -v "$(CURDIR)/build/fuzz:/tmp/wrtc-fuzz" \
+		-e WRTC_CACHE_DIR=/tmp/wrtc-fuzz/cache -w /src \
+		quay.io/pypa/manylinux_2_28_x86_64 .github/scripts/fuzz.sh $(T) $(O)
 
 lint: format-check
 	uvx ruff check
