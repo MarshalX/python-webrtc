@@ -23,7 +23,17 @@ import webrtc.enums
 LOOP = None
 
 # Python objects without a native object, exposed to JS as interfaces
-_PLAIN_INTERFACES = (webrtc.RTCIceCandidate,)
+_PLAIN_INTERFACES = (
+    webrtc.RTCIceCandidate,
+    webrtc.VideoFrame,
+    webrtc.AudioData,
+    webrtc.ReadableStream,
+    webrtc.ReadableStreamDefaultReader,
+    webrtc.WritableStream,
+    webrtc.WritableStreamDefaultWriter,
+    webrtc.VideoTrackGenerator,
+    webrtc.VideoColorSpace,
+)
 
 
 def _camel_case(name):
@@ -35,6 +45,10 @@ def to_js(value):
     if isinstance(value, enum.Enum):
         # the values of the enums are the WebIDL ones
         return value.value
+    if isinstance(value, webrtc.DOMRectReadOnly):
+        return {'__rect': [value.x, value.y, value.width, value.height]}
+    if isinstance(value, webrtc.Blob):
+        return {'__blob': bytearray(bytes(value)), 'type': value.type}
     if isinstance(value, webrtc.RTCSessionDescriptionInit):
         # a dictionary in WebIDL, but a WebRTCObject (it holds a native one) here, not a dataclass
         return value.to_json()
@@ -108,6 +122,8 @@ def _error(exc):
     else:
         kind = 'Error'
     error = {'kind': kind, 'message': str(exc)}
+    if isinstance(exc, webrtc.OverconstrainedError):
+        error['constraint'] = exc.constraint
     if isinstance(exc, webrtc.RTCError):
         error['init'] = {
             'errorDetail': exc.error_detail.value,
@@ -159,6 +175,40 @@ def call_async_method(obj, name, args, kwargs=None):
     return asyncio.ensure_future(coroutine, loop=LOOP)
 
 
+async def _await_attr(obj, name):
+    try:
+        return {'ok': to_js(await getattr(obj, name))}
+    except Exception as e:
+        return _error(e)
+
+
+def await_attr(obj, name):
+    """An attribute that is a future (like the closed promise of a reader), awaited"""
+    return asyncio.ensure_future(_await_attr(obj, name), loop=LOOP)
+
+
+def video_frame_copy_to(frame, destination, options):
+    """Copies a frame into the bytes of a JS buffer, which the shim writes back"""
+
+    def copy():
+        data = bytearray(destination)
+        layout = frame._copy_to(data, from_js(options))
+        return {'layout': layout, 'data': bytes(data)}
+
+    return _guard(copy)
+
+
+def audio_data_copy_to(audio, destination, options):
+    """Copies samples into the bytes of a JS buffer, which the shim writes back"""
+
+    def copy():
+        data = bytearray(destination)
+        audio.copy_to(data, from_js(options))
+        return bytes(data)
+
+    return _guard(copy)
+
+
 def construct(name, kwargs):
     return _guard(lambda: getattr(webrtc, name)(**from_js(dict(kwargs))))
 
@@ -203,6 +253,9 @@ EXPORTS = {
         call_static,
         call_async_static,
         construct,
+        await_attr,
+        video_frame_copy_to,
+        audio_data_copy_to,
         get_user_media,
         now,
         subscribe,

@@ -14,7 +14,7 @@ Submodules
 
    webrtc.interfaces.media_stream
    webrtc.interfaces.media_stream_track
-   webrtc.interfaces.rtc_audio_source
+   webrtc.interfaces.media_stream_track_processor
    webrtc.interfaces.rtc_data_channel
    webrtc.interfaces.rtc_dtls_transport
    webrtc.interfaces.rtc_dtmf_sender
@@ -24,4 +24,4 @@ Submodules
    webrtc.interfaces.rtc_rtp_sender
    webrtc.interfaces.rtc_rtp_transceiver
    webrtc.interfaces.rtc_sctp_transport
-   webrtc.interfaces.rtc_video_source
+   webrtc.interfaces.track_generator

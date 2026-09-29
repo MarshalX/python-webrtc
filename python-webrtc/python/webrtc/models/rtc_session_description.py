@@ -31,9 +31,14 @@ class RTCSessionDescription(WebRTCObject):
         :obj:`webrtc.RTCSessionDescription` isn't necessary.
 
     Args:
-        type (:obj:`webrtc.RTCSdpType`): The type of the description. An :obj:`webrtc.RTCSessionDescriptionInit`
-            or its JSON form (a :obj:`dict` with ``type`` and ``sdp`` keys) is accepted too.
-        sdp (:obj:`str`, optional): The SDP of the description. It's parsed when the description is set.
+        type (:obj:`webrtc.RTCSdpType`): The type of the description, required as in the specification.
+            An :obj:`webrtc.RTCSessionDescriptionInit` or its JSON form (a :obj:`dict` with a ``type`` key and an
+            optional ``sdp`` one) is accepted too.
+        sdp (:obj:`str`, optional): The SDP of the description, empty by default. It's parsed when the description
+            is set.
+
+    Raises:
+        :obj:`TypeError`: If the type is missing, or the SDP is :obj:`None`.
     """
 
     _class = wrtc.RTCSessionDescription
@@ -44,7 +49,11 @@ class RTCSessionDescription(WebRTCObject):
         sdp: str = '',
     ):
         if isinstance(type, dict):
-            type, sdp = type['type'], type.get('sdp') or ''
+            if type.get('type') is None:
+                raise TypeError('RTCSessionDescriptionInit requires a type')
+            type, sdp = type['type'], type.get('sdp', '')
+        if sdp is None:
+            raise TypeError('The SDP of a description may not be None')
         init = type if isinstance(type, RTCSessionDescriptionInit) else RTCSessionDescriptionInit(type, sdp)
         super().__init__(self._class(init._native_obj))
 

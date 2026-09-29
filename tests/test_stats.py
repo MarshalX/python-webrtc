@@ -74,3 +74,16 @@ async def test_closed_connection_has_stats(caller, callee, audio_stream):
     await send_audio(caller, callee, audio_stream)
     caller.close()
     assert (await caller.get_stats()).of_type('peer-connection')
+
+
+@pytest.mark.asyncio
+async def test_remote_audio_is_played_out(caller, callee, audio_stream):
+    """The audio device pulls playout, so received audio is decoded like in a browser playing it"""
+    await send_audio(caller, callee, audio_stream)
+    receiver = callee.get_receivers()[0]
+
+    async def decoded():
+        inbound = (await receiver.get_stats()).of_type('inbound-rtp')
+        return inbound and inbound[0].get('totalSamplesReceived', 0) > 0
+
+    await wait_until(decoded, 'decoded remote audio')

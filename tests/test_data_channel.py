@@ -185,3 +185,41 @@ async def test_max_channels_once_connected(caller, callee):
     await connect(caller, callee)
     await wait_until(lambda: callee.sctp.state == webrtc.SctpTransportState.connected, 'SCTP to connect')
     assert callee.sctp.max_channels > 0
+
+
+@pytest.mark.asyncio
+async def test_binary_type(caller, callee):
+    """Binary messages arrive as bytes, or as a Blob once binary_type is 'blob'; a Blob is sent as binary"""
+    channel, remote = await open_pair(caller, callee)
+    assert remote.binary_type == webrtc.BinaryType.arraybuffer == remote.binaryType
+
+    first = wait_for_event(remote, 'message')
+    channel.send(b'\x01\x02')
+    assert (await first).data == b'\x01\x02'
+
+    remote.binary_type = 'blob'
+    assert remote.binaryType == webrtc.BinaryType.blob
+    second = wait_for_event(remote, 'message')
+    channel.send(webrtc.Blob([b'\x03', 'a', webrtc.Blob([b'\x04'])]))
+    blob = (await second).data
+    assert isinstance(blob, webrtc.Blob)
+    assert blob.size == 3 and await blob.array_buffer() == b'\x03a\x04'
+
+    text = wait_for_event(remote, 'message')
+    channel.send('text')
+    assert (await text).data == 'text'
+
+    with pytest.raises(ValueError):
+        remote.binary_type = 'buffer'
+    assert remote.binary_type == webrtc.BinaryType.blob
+
+
+@pytest.mark.asyncio
+async def test_blob():
+    """A Blob is immutable bytes with a type, sliced like a sequence"""
+    blob = webrtc.Blob(['héllo', b' ', bytearray(b'world')], type='Text/Plain')
+    assert blob.size == len(bytes(blob)) == 12 and blob.type == 'text/plain'
+    assert await blob.text() == 'héllo world'
+    assert await blob.slice(-5).bytes() == b'world'
+    assert await blob.slice(1, 3).array_buffer() == b'\xc3\xa9'
+    assert webrtc.Blob(type='é').type == ''

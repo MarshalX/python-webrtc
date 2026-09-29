@@ -91,6 +91,11 @@ namespace python_webrtc {
 
     void SetBufferedAmountLowThreshold(uint64_t threshold);
 
+    // what binary messages are delivered as: "arraybuffer" or "blob"
+    std::string GetBinaryType();
+
+    void SetBinaryType(const std::string &binaryType);
+
     // whether bufferedAmount dropped to the threshold
     bool DecreaseBufferedAmount(uint64_t sent);
 
@@ -103,6 +108,8 @@ namespace python_webrtc {
     webrtc::scoped_refptr<webrtc::DataChannelInterface> _channel;
 
     std::atomic<uint64_t> _bufferedAmountLowThreshold{0};
+    // binaryType is "blob" rather than "arraybuffer"
+    std::atomic<bool> _binaryTypeBlob{false};
     // bytes passed to send() and not reported sent yet, as Python sees it: it grows in send()
     // and drops when the event of sent bytes is delivered (see DecreaseBufferedAmount)
     std::atomic<uint64_t> _bufferedAmount{0};

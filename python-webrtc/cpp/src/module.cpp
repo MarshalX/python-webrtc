@@ -12,6 +12,7 @@
 #include "models/models.h"
 #include "interfaces/interfaces.h"
 #include "functions/functions.h"
+#include "media/media.h"
 
 namespace py = pybind11;
 
@@ -37,4 +38,5 @@ PYBIND11_MODULE(wrtc, m) {
   python_webrtc::Models::Init(m);
   python_webrtc::Interfaces::Init(m);
   python_webrtc::Functions::Init(m);
+  python_webrtc::Media::Init(m);
 }

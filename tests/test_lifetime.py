@@ -81,16 +81,15 @@ def test_factories_return_to_baseline_when_everything_is_gone():
 
     pc = webrtc.RTCPeerConnection()
     stream = webrtc.get_user_media()
-    source = webrtc.RTCAudioSource()
-    track = source.create_track()
+    generator = webrtc.MediaStreamTrackGenerator('audio')
     pc.add_track(stream.get_tracks()[0])
-    pc.add_track(track)
+    pc.add_track(generator)
 
     # one factory for everything
     assert alive_factories() == (baseline or 1)
 
     pc.close()
-    del pc, stream, source, track
+    del pc, stream, generator
     collect()
 
     assert alive_factories() == baseline
@@ -99,8 +98,7 @@ def test_factories_return_to_baseline_when_everything_is_gone():
 def test_everything_alive_shares_one_factory():
     """New connections use the factory of the media alive"""
     stream = webrtc.get_user_media()
-    source = webrtc.RTCAudioSource()
-    source_track = source.create_track()
+    source_track = webrtc.MediaStreamTrackGenerator('audio')
     before = alive_factories()
 
     connections = [webrtc.RTCPeerConnection() for _ in range(5)]

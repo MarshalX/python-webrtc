@@ -33,6 +33,8 @@
       return wrappersById.get(value.__id) ?? new cls(INTERNAL, value);
     }
     if ('__bytes' in value) return Uint8Array.from(value.__bytes).buffer;
+    if ('__blob' in value) return new Blob([Uint8Array.from(value.__blob)], {type: value.type});
+    if ('__rect' in value) return new DOMRectReadOnly(...value.__rect);
     if ('__error' in value) return toJsError(value.__error);
     if ('__statsReport' in value) {
       return new RTCStatsReport(INTERNAL, Array.from(value.__statsReport, ([id, stats]) => [id, fromPy(stats)]));
@@ -110,8 +112,9 @@
     OverflowError: TypeError,
   };
 
-  function toJsError({kind, message, init}) {
+  function toJsError({kind, message, init, constraint}) {
     if (kind === 'RTCError') return new RTCError(INTERNAL, {init, message});
+    if (kind === 'OverconstrainedError') return new OverconstrainedError(constraint, message);
     if (kind in JS_ERROR_BY_CLASS) return new JS_ERROR_BY_CLASS[kind](message);
     if (kind in DOM_EXCEPTION_BY_CLASS) return new DOMException(message, DOM_EXCEPTION_BY_CLASS[kind]);
     // PythonWebRTCException has no error type, so there's no DOMException name to give it
@@ -138,6 +141,15 @@
   const callAsyncMethodWithKeywords = async (self, name, args, kwargs) =>
     unwrap(await bridge.call_async_method(pyObjects.get(self), name, args.map(toPy), kwargs));
   const callStatic = (className, name, ...args) => unwrap(bridge.call_static(className, name, args.map(toPy)));
+  // an attribute that is a promise, like the closed one of a reader
+  const awaitAttr = async (self, name) => unwrap(await bridge.await_attr(pyObjects.get(self), name));
+
+  // the bytes of a BufferSource, sharing its memory
+  function bytesOf(source, name) {
+    if (source instanceof ArrayBuffer) return new Uint8Array(source);
+    if (ArrayBuffer.isView(source)) return new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
+    throw new TypeError(`${name} is not a BufferSource`);
+  }
 
   // Members the library doesn't support are reported rather than silently dropped
   function convertDictionary(dict, dictName, members) {
@@ -218,12 +230,7 @@
     if (subscriptions.has(type)) return;
     subscriptions.add(type);
     const result = bridge.subscribe(pyObjects.get(target), type, (pyEvent) => {
-      const event = fromPy(pyEvent);
-      // a binary message is converted to the binaryType of the channel: Blob is a JS type the library doesn't know
-      if (target instanceof RTCDataChannel && event.data instanceof ArrayBuffer && target.binaryType === 'blob') {
-        event.data = new Blob([event.data]);
-      }
-      target.dispatchEvent(event);
+      target.dispatchEvent(fromPy(pyEvent));
     });
     if (result.error) unsupported(`${target.constructor.name} event ${type}`);
   }
@@ -298,6 +305,12 @@
   class MediaStreamTrack extends Interface {
     stop() { callMethod(this, 'stop'); }
     clone() { return callMethod(this, 'clone'); }
+    getSettings() { return callMethod(this, 'get_settings'); }
+    getCapabilities() { return callMethod(this, 'get_capabilities'); }
+    getConstraints() { return callMethod(this, 'get_constraints'); }
+    applyConstraints(constraints) {
+      return callAsyncMethod(this, 'apply_constraints', requireDictionary(constraints, 'MediaTrackConstraints'));
+    }
   }
   defineAttributes(MediaStreamTrack, [
     ['id', 'id'],
@@ -306,6 +319,7 @@
     ['enabled', 'enabled', Boolean],
     ['muted', 'muted'],
     ['readyState', 'ready_state'],
+    ['contentHint', 'content_hint', String],
   ]);
   defineEventHandlers(MediaStreamTrack, ['mute', 'unmute', 'ended']);
 
@@ -615,14 +629,11 @@
     ['currentDirection', 'current_direction'],
   ]);
 
-  const binaryTypes = new WeakMap();
-
   class RTCDataChannel extends Interface {
-    // kept here: it only chooses the JS type of received binary messages (see subscribe)
-    get binaryType() { return binaryTypes.get(this) ?? 'arraybuffer'; }
+    get binaryType() { return getAttr(this, 'binary_type'); }
     // an enum attribute ignores values it doesn't have
     set binaryType(value) {
-      if (value === 'arraybuffer' || value === 'blob') binaryTypes.set(this, value);
+      if (value === 'arraybuffer' || value === 'blob') setAttr(this, 'binary_type', value);
     }
 
     send(data) {
@@ -901,6 +912,229 @@
     MessageEvent: defineEvent('MessageEvent', [], {data: null, origin: '', lastEventId: '', source: null, ports: []}),
   };
 
+  // Streams, frames, processors and generators of python-webrtc. Streams are the Python ones: scripts read and
+  // write them, but can't construct them with a JS underlying source.
+  class ReadableStream extends Interface {
+    getReader(options) {
+      if (options?.mode !== undefined) throw new TypeError('ReadableStream.getReader: only default readers exist');
+      return callMethod(this, 'get_reader');
+    }
+
+    cancel() { return callAsyncMethod(this, 'cancel'); }
+
+    pipeTo(destination, options = {}) {
+      requireInterface(destination, WritableStream, 'ReadableStream.pipeTo');
+      return callAsyncMethodWithKeywords(this, 'pipe_to', [destination], {
+        prevent_close: Boolean(options.preventClose),
+        prevent_abort: Boolean(options.preventAbort),
+        prevent_cancel: Boolean(options.preventCancel),
+      });
+    }
+
+    async* [Symbol.asyncIterator]() {
+      const reader = this.getReader();
+      try {
+        while (true) {
+          const {value, done} = await reader.read();
+          if (done) return;
+          yield value;
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+  }
+  defineAttributes(ReadableStream, [['locked', 'locked']]);
+
+  class ReadableStreamDefaultReader extends Interface {
+    read() { return callAsyncMethod(this, 'read'); }
+    cancel() { return callAsyncMethod(this, 'cancel'); }
+    releaseLock() { callMethod(this, 'release_lock'); }
+    get closed() { return awaitAttr(this, 'closed').then(() => undefined); }
+  }
+
+  class WritableStream extends Interface {
+    getWriter() { return callMethod(this, 'get_writer'); }
+    close() { return callAsyncMethod(this, 'close'); }
+    abort() { return callAsyncMethod(this, 'abort'); }
+  }
+  defineAttributes(WritableStream, [['locked', 'locked']]);
+
+  class WritableStreamDefaultWriter extends Interface {
+    write(chunk) { return callAsyncMethod(this, 'write', chunk).then(() => undefined); }
+    close() { return callAsyncMethod(this, 'close').then(() => undefined); }
+    abort() { return callAsyncMethod(this, 'abort').then(() => undefined); }
+    releaseLock() { callMethod(this, 'release_lock'); }
+    get ready() { return awaitAttr(this, 'ready').then(() => undefined); }
+    get closed() { return awaitAttr(this, 'closed').then(() => undefined); }
+  }
+  defineAttributes(WritableStreamDefaultWriter, [['desiredSize', 'desired_size']]);
+
+  // members of the WebIDL dictionaries the library takes, the others are left out as WebIDL does
+  const pick = (dict, members) =>
+    Object.fromEntries(members.filter((m) => dict[m] !== undefined).map((m) => [m, dict[m]]));
+  // a DOMRectInit, read from any object with its members (like a DOMRectReadOnly, whose members are getters)
+  const toRectInit = (rect) => (rect == null ? rect : pick(rect, ['x', 'y', 'width', 'height']));
+  const withRect = (dict, name) => (dict[name] === undefined ? dict : {...dict, [name]: toRectInit(dict[name])});
+  const VIDEO_FRAME_BUFFER_INIT = [
+    'format', 'codedWidth', 'codedHeight', 'timestamp', 'duration', 'layout', 'visibleRect', 'rotation', 'flip',
+    'displayWidth', 'displayHeight', 'colorSpace',
+  ];
+  const VIDEO_FRAME_INIT = [
+    'duration', 'timestamp', 'alpha', 'visibleRect', 'rotation', 'flip', 'displayWidth', 'displayHeight',
+  ];
+  const copyToOptions = (options) => withRect(requireDictionary(options, 'VideoFrameCopyToOptions'), 'rect');
+
+  class VideoFrame extends Interface {
+    constructor(...args) {
+      super(INTERNAL, pyObjectOf(args, (image, init) => {
+        requireArguments(args, 1, 'VideoFrame');
+        const dict = requireDictionary(init, 'VideoFrameInit');
+        if (image instanceof VideoFrame) {
+          const init = withRect(pick(dict, VIDEO_FRAME_INIT), 'visibleRect');
+          return construct('VideoFrame', {source: toPy(image), init});
+        }
+        if (image instanceof ArrayBuffer || ArrayBuffer.isView(image)) {
+          const init = withRect(pick(dict, VIDEO_FRAME_BUFFER_INIT), 'visibleRect');
+          return construct('VideoFrame', {source: bytesOf(image), init});
+        }
+        // images, canvases and video elements are the browser's
+        throw new TypeError('VideoFrame: the source is not a VideoFrame nor a BufferSource');
+      }));
+    }
+
+    allocationSize(options) { return callMethod(this, 'allocation_size', copyToOptions(options)); }
+
+    async copyTo(destination, options) {
+      const bytes = bytesOf(destination, 'destination');
+      const {layout, data} = unwrap(bridge.video_frame_copy_to(pyObjects.get(this), bytes, copyToOptions(options)));
+      bytes.set(new Uint8Array(data));
+      return layout;
+    }
+
+    clone() { return callMethod(this, 'clone'); }
+    close() { callMethod(this, 'close'); }
+    metadata() { return callMethod(this, 'metadata'); }
+  }
+  defineAttributes(VideoFrame, [
+    ['format', 'format'],
+    ['codedWidth', 'coded_width'],
+    ['codedHeight', 'coded_height'],
+    ['codedRect', 'coded_rect'],
+    ['visibleRect', 'visible_rect'],
+    ['rotation', 'rotation'],
+    ['flip', 'flip'],
+    ['displayWidth', 'display_width'],
+    ['displayHeight', 'display_height'],
+    ['duration', 'duration'],
+    ['timestamp', 'timestamp'],
+    ['colorSpace', 'color_space'],
+  ]);
+
+  class VideoColorSpace extends Interface {
+    constructor(...args) {
+      super(INTERNAL, pyObjectOf(args, (init) => {
+        const dict = requireDictionary(init, 'VideoColorSpaceInit');
+        const kwargs = {};
+        if (dict.primaries != null) kwargs.primaries = pyEnum('VideoColorPrimaries', dict.primaries);
+        if (dict.transfer != null) kwargs.transfer = pyEnum('VideoTransferCharacteristics', dict.transfer);
+        if (dict.matrix != null) kwargs.matrix = pyEnum('VideoMatrixCoefficients', dict.matrix);
+        if (dict.fullRange != null) kwargs.full_range = Boolean(dict.fullRange);
+        return construct('VideoColorSpace', kwargs);
+      }));
+    }
+
+    toJSON() { return callMethod(this, 'to_json'); }
+  }
+  defineAttributes(VideoColorSpace, [
+    ['primaries', 'primaries'],
+    ['transfer', 'transfer'],
+    ['matrix', 'matrix'],
+    ['fullRange', 'full_range'],
+  ]);
+
+  const AUDIO_DATA_INIT = ['format', 'sampleRate', 'numberOfFrames', 'numberOfChannels', 'timestamp', 'data'];
+
+  class AudioData extends Interface {
+    constructor(...args) {
+      super(INTERNAL, pyObjectOf(args, (init) => {
+        requireArguments(args, 1, 'AudioData');
+        const dict = pick(requireDictionary(init, 'AudioDataInit'), AUDIO_DATA_INIT);
+        if (dict.data !== undefined) dict.data = bytesOf(dict.data, 'AudioDataInit.data');
+        return construct('AudioData', {init: dict});
+      }));
+    }
+
+    allocationSize(options) { return callMethod(this, 'allocation_size', requireDictionary(options, 'options')); }
+
+    copyTo(destination, options) {
+      const bytes = bytesOf(destination, 'destination');
+      const data = unwrap(bridge.audio_data_copy_to(pyObjects.get(this), bytes, requireDictionary(options, 'options')));
+      bytes.set(new Uint8Array(data));
+    }
+
+    clone() { return callMethod(this, 'clone'); }
+    close() { callMethod(this, 'close'); }
+  }
+  defineAttributes(AudioData, [
+    ['format', 'format'],
+    ['sampleRate', 'sample_rate'],
+    ['numberOfFrames', 'number_of_frames'],
+    ['numberOfChannels', 'number_of_channels'],
+    ['duration', 'duration'],
+    ['timestamp', 'timestamp'],
+  ]);
+
+  class MediaStreamTrackProcessor extends Interface {
+    constructor(...args) {
+      super(INTERNAL, pyObjectOf(args, (init) => {
+        requireArguments(args, 1, 'MediaStreamTrackProcessor');
+        // Chrome also takes the track itself
+        const dict = init instanceof MediaStreamTrack
+          ? {track: init}
+          : requireDictionary(init, 'MediaStreamTrackProcessorInit');
+        requireInterface(dict.track, MediaStreamTrack, 'MediaStreamTrackProcessor');
+        const kwargs = {track: toPy(dict.track)};
+        if (dict.maxBufferSize !== undefined) kwargs.max_buffer_size = enforceRange(dict.maxBufferSize, 0, 65535);
+        return construct('MediaStreamTrackProcessor', kwargs);
+      }));
+    }
+  }
+  defineAttributes(MediaStreamTrackProcessor, [
+    ['readable', 'readable'],
+    ['discardedFrames', 'discarded_frames'],
+    ['totalFrames', 'total_frames'],
+  ]);
+
+  class VideoTrackGenerator extends Interface {
+    constructor(...args) {
+      super(INTERNAL, pyObjectOf(args, () => construct('VideoTrackGenerator')));
+    }
+  }
+  defineAttributes(VideoTrackGenerator, [
+    ['writable', 'writable'],
+    ['track', 'track'],
+    ['muted', 'muted', Boolean],
+  ]);
+
+  class MediaStreamTrackGenerator extends MediaStreamTrack {
+    constructor(...args) {
+      super(INTERNAL, pyObjectOf(args, (init) => {
+        requireArguments(args, 1, 'MediaStreamTrackGenerator');
+        const kind = typeof init === 'string' ? init : requireDictionary(init, 'MediaStreamTrackGeneratorInit').kind;
+        return construct('MediaStreamTrackGenerator', {kind: String(kind)});
+      }));
+    }
+  }
+  defineAttributes(MediaStreamTrackGenerator, [['writable', 'writable']]);
+
+  class OverconstrainedError extends DOMException {
+    constructor(constraint, message = '') {
+      super(message, 'OverconstrainedError');
+      this.constraint = String(constraint);
+    }
+  }
+
   const interfaces = {
     RTCCertificate,
     RTCDTMFSender,
@@ -916,8 +1150,18 @@
     RTCRtpReceiver,
     RTCRtpTransceiver,
     RTCPeerConnection,
+    ReadableStream,
+    ReadableStreamDefaultReader,
+    WritableStream,
+    WritableStreamDefaultWriter,
+    VideoFrame,
+    VideoColorSpace,
+    AudioData,
+    MediaStreamTrackProcessor,
+    VideoTrackGenerator,
+    MediaStreamTrackGenerator,
   };
-  Object.assign(globalThis, interfaces);
+  Object.assign(globalThis, interfaces, {OverconstrainedError});
   const {Event: _, ...eventInterfaces} = events;
   Object.assign(globalThis, eventInterfaces, {RTCError, RTCStatsReport});
 

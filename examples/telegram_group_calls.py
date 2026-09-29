@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import threading
 import time
 
 # pip install pytgcalls[pyrogram]==3.0.0.dev21
@@ -94,42 +93,35 @@ async def group_call_update_callback(update):
     remote_sdp = build_answer(json.loads(data))
 
 
-def send_audio_data(audio_source, input_filename):
-    def get_ms_time():
-        return round(time.time() * 1000)
+async def send_audio_data(generator, input_filename):
+    """Writes raw 48 kHz stereo 16-bit audio to the track, 10 ms at a time, at the pace of real time"""
+    writer = generator.writable.get_writer()
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    chunks = 0
 
-    last_read_ms = 0
-
-    length = int(480 * 16 / 8 * 2)  # 2 channels with 16 bits per sample in 48khz
-
-    f = open(input_filename, 'rb')
-
-    while True:
-        start_time = get_ms_time()
-
-        if last_read_ms == 0 or start_time - last_read_ms >= 10:
-            data = f.read(length)
-            if not data:  # eof
-                f.close()
-                break
-
-            event_data = webrtc.RTCOnDataEvent(data, length // 4)  # 2 channels
-            event_data.channel_count = 2
-            audio_source.on_data(event_data)
-
-            last_read_ms = start_time
-
-        delta_time = get_ms_time() - start_time
-        if delta_time < 10:
-            time.sleep((10 - delta_time) / 1000)
+    with open(input_filename, 'rb') as f:
+        while data := f.read(480 * 4):  # 480 frames of 2 channels of 16 bits
+            frames = len(data) // 4
+            await writer.write(
+                webrtc.AudioData(
+                    format='s16',
+                    sample_rate=48000,
+                    number_of_frames=frames,
+                    number_of_channels=2,
+                    timestamp=chunks * 10_000,
+                    data=data[: frames * 4],
+                )
+            )
+            chunks += 1
+            await asyncio.sleep(max(0.0, start + chunks / 100 - loop.time()))
 
 
 async def main(client, input_peer, input_filename):
     pc = webrtc.RTCPeerConnection()
 
-    audio_source = webrtc.RTCAudioSource()
-    track = audio_source.create_track()
-    pc.add_track(track)
+    generator = webrtc.MediaStreamTrackGenerator('audio')
+    pc.add_track(generator)
 
     local_sdp = await pc.create_offer()
     await pc.set_local_description(local_sdp)
@@ -155,11 +147,10 @@ async def main(client, input_peer, input_filename):
         webrtc.RTCSessionDescription(webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, remote_sdp))
     )
 
-    thread = threading.Thread(target=send_audio_data, args=(audio_source, input_filename))
-    thread.daemon = True
-    thread.start()
+    sending = asyncio.ensure_future(send_audio_data(generator, input_filename))
 
     await pyrogram.idle()
+    sending.cancel()
 
 
 if __name__ == '__main__':

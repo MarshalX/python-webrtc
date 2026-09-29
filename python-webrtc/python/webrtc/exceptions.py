@@ -57,6 +57,19 @@ class InvalidCharacterError(RTCException, ValueError):
     """A string has a character that isn't allowed, like a DTMF tone that doesn't exist."""
 
 
+class OverconstrainedError(RTCException):
+    """A required constraint of a track can't be satisfied.
+
+    Args:
+        constraint (:obj:`str`): The constraint, like ``'width'``.
+        message (:obj:`str`, optional): A description of the error.
+    """
+
+    def __init__(self, constraint: str, message: str = ''):
+        super().__init__(message or f'The constraint {constraint} can\'t be satisfied')
+        self.constraint = constraint
+
+
 class RTCError(OperationError):
     """An error carrying WebRTC-specific information.
 

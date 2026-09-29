@@ -6,7 +6,12 @@
 #
 
 import asyncio
+import contextlib
+import ctypes
 import inspect
+import os
+import subprocess
+import sys
 
 import webrtc
 
@@ -128,3 +133,66 @@ async def wait_until_unmuted(track, timeout=10):
     """Waits until media arrives on a remote track, which may take longer than connecting"""
     if track.muted:
         await wait_for_event(track, 'unmute', timeout)
+
+
+async def connect_track(caller, callee, track, timeout=10):
+    """Sends a track from the caller, connects, and returns the remote track of the callee"""
+    caller.add_track(track)
+    track_event = wait_for_event(callee, 'track', timeout)
+    await connect(caller, callee, timeout)
+    return (await track_event).track
+
+
+async def write_video(generator, data, width, height, stop, interval=1 / 30):
+    """Writes I420 frames of the data to a generator, one an interval, until stopped"""
+    writer = generator.writable.get_writer()
+    timestamp = 0
+    while not stop.is_set():
+        await writer.write(
+            webrtc.VideoFrame(data, format='I420', coded_width=width, coded_height=height, timestamp=timestamp)
+        )
+        timestamp += round(interval * 1_000_000)
+        await asyncio.sleep(interval)
+
+
+@contextlib.asynccontextmanager
+async def writing(write, *args, **kwargs):
+    """Runs write(*args, stop=stop, **kwargs) in a task for the block, then stops it"""
+    stop = asyncio.Event()
+    task = asyncio.ensure_future(write(*args, stop=stop, **kwargs))
+    try:
+        yield
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, 10)
+
+
+def rss_bytes():
+    """The resident memory of the process, in bytes"""
+    if sys.platform.startswith('linux'):
+        with open('/proc/self/statm') as statm:
+            return int(statm.read().split()[1]) * os.sysconf('SC_PAGE_SIZE')
+    if sys.platform == 'win32':
+
+        class Counters(ctypes.Structure):
+            _fields_ = [('cb', ctypes.c_ulong), ('PageFaultCount', ctypes.c_ulong)] + [
+                (name, ctypes.c_size_t)
+                for name in (
+                    'PeakWorkingSetSize',
+                    'WorkingSetSize',
+                    'QuotaPeakPagedPoolUsage',
+                    'QuotaPagedPoolUsage',
+                    'QuotaPeakNonPagedPoolUsage',
+                    'QuotaNonPagedPoolUsage',
+                    'PagefileUsage',
+                    'PeakPagefileUsage',
+                )
+            ]
+
+        counters = Counters()
+        counters.cb = ctypes.sizeof(counters)
+        process = ctypes.windll.kernel32.GetCurrentProcess()
+        ctypes.windll.psapi.GetProcessMemoryInfo(process, ctypes.byref(counters), counters.cb)
+        return counters.WorkingSetSize
+    # macOS and other BSDs
+    return int(subprocess.check_output(['ps', '-o', 'rss=', '-p', str(os.getpid())])) * 1024

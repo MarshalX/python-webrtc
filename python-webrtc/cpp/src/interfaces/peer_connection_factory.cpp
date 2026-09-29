@@ -6,11 +6,11 @@
 //
 
 #include "peer_connection_factory.h"
+#include "../media/playout_audio_device.h"
 #include "../utils/gil.h"
 
-#include <api/audio/create_audio_device_module.h>
 #include <api/create_peerconnection_factory.h>
-#include <api/environment/environment_factory.h>
+#include <api/make_ref_counted.h>
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
 #include <api/video_codecs/video_decoder_factory_template.h>
@@ -65,8 +65,7 @@ namespace python_webrtc {
     assert(result);
 
     _workerThread->BlockingCall([this]() {
-      _audioDeviceModule = webrtc::CreateAudioDeviceModule(
-          webrtc::CreateEnvironment(), webrtc::AudioDeviceModule::AudioLayer::kDummyAudio);
+      _audioDeviceModule = webrtc::make_ref_counted<PlayoutAudioDevice>();
     });
 
     _factory = webrtc::CreatePeerConnectionFactory(

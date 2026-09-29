@@ -19,12 +19,41 @@ namespace python_webrtc {
   RTCVideoTrackSource::RTCVideoTrackSource(bool isScreencast, std::optional<bool> needsDenoising)
       : _isScreencast(isScreencast), _needsDenoising(needsDenoising) {}
 
+  RTCVideoTrackSource::~RTCVideoTrackSource() {
+    if (_control) {
+      std::lock_guard<std::mutex> lock(_control->mutex);
+      _control->camera = nullptr;
+    }
+  }
+
   void RTCVideoTrackSource::StartCamera(int width, int height, double frameRate) {
+    if (!_control) {
+      _control = std::make_shared<SourceControl>();
+      _control->camera = this;
+    }
     auto interval = std::chrono::microseconds(static_cast<int64_t>(1000000 / frameRate));
+    std::lock_guard<std::mutex> lock(_cameraMutex);
+    // the previous camera stops first: one thread draws at a time
+    _camera = nullptr;
+    _cameraWidth = width;
+    _cameraHeight = height;
+    _cameraFrameRate = frameRate;
+    _camera = std::make_unique<PacedThread>();
     // the thread never holds a reference to the source, so the source isn't destroyed on it
-    _camera.Start(interval, [this, width, height, frame = uint32_t(0)]() mutable {
+    _camera->Start(interval, [this, width, height, frame = uint32_t(0)]() mutable {
       DrawFrame(width, height, frame++);
     });
+  }
+
+  bool RTCVideoTrackSource::IsCamera(int *width, int *height, double *frameRate) {
+    std::lock_guard<std::mutex> lock(_cameraMutex);
+    if (!_camera) {
+      return false;
+    }
+    *width = _cameraWidth;
+    *height = _cameraHeight;
+    *frameRate = _cameraFrameRate;
+    return true;
   }
 
   void RTCVideoTrackSource::DrawFrame(int width, int height, uint32_t frame) {
@@ -54,6 +83,12 @@ namespace python_webrtc {
     _width = frame.width();
     _height = frame.height();
     _broadcaster.OnFrame(frame);
+  }
+
+  void RTCVideoTrackSource::End() {
+    if (!_ended.exchange(true)) {
+      FireOnChanged();
+    }
   }
 
   bool RTCVideoTrackSource::GetStats(Stats *stats) {

@@ -26,3 +26,4 @@ Submodules
    webrtc.base
    webrtc.enums
    webrtc.exceptions
+   webrtc.streams

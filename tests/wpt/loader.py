@@ -20,6 +20,7 @@ WPT_ROOT = Path(__file__).resolve().parents[2] / 'wpt'
 POLYFILLS = Path(__file__).with_name('polyfills.js')
 SHIM = Path(__file__).with_name('shim.js')
 
+# Directories of tests, or glob patterns of test files in a directory
 TEST_DIRS = (
     'webrtc',
     'webrtc-encoded-transform',
@@ -28,6 +29,12 @@ TEST_DIRS = (
     'webrtc-identity',
     'webrtc-priority',
     'webrtc-stats',
+    'mediacapture-insertable-streams',
+    # the frames of WebCodecs, which media processing reads and writes, not its codecs
+    'webcodecs/audio-data*',
+    'webcodecs/videoFrame-*',
+    'webcodecs/video-frame-*',
+    'webcodecs/videoColorSpace*',
 )
 
 # Directories holding helpers rather than tests, as in the WPT manifest
@@ -146,7 +153,8 @@ def discover() -> list[str]:
     """Returns every test case as a path relative to the WPT root, followed by its variant, if any."""
     cases = []
     for test_dir in TEST_DIRS:
-        for path in sorted((WPT_ROOT / test_dir).rglob('*')):
+        paths = WPT_ROOT.glob(test_dir) if '*' in test_dir else (WPT_ROOT / test_dir).rglob('*')
+        for path in sorted(paths):
             if path.is_file() and _is_test(path):
                 cases.extend(case_id(path, variant) for variant in load(path).variants)
     return cases

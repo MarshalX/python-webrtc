@@ -7,6 +7,7 @@
 
 #include "rtc_audio_track_source.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <vector>
@@ -14,7 +15,8 @@
 namespace python_webrtc {
 
   webrtc::MediaSourceInterface::SourceState RTCAudioTrackSource::state() const {
-    return webrtc::MediaSourceInterface::SourceState::kLive;
+    return _ended ? webrtc::MediaSourceInterface::SourceState::kEnded
+                  : webrtc::MediaSourceInterface::SourceState::kLive;
   }
 
   bool RTCAudioTrackSource::remote() const {
@@ -23,26 +25,28 @@ namespace python_webrtc {
 
   void RTCAudioTrackSource::AddSink(webrtc::AudioTrackSinkInterface *sink) {
     std::lock_guard<std::mutex> lock(_sinkMutex);
-    _sink = sink;
+    if (std::find(_sinks.begin(), _sinks.end(), sink) == _sinks.end()) {
+      _sinks.push_back(sink);
+    }
   }
 
   void RTCAudioTrackSource::RemoveSink(webrtc::AudioTrackSinkInterface *sink) {
     std::lock_guard<std::mutex> lock(_sinkMutex);
-    if (_sink == sink) {
-      _sink = nullptr;
+    _sinks.erase(std::remove(_sinks.begin(), _sinks.end(), sink), _sinks.end());
+  }
+
+  void RTCAudioTrackSource::End() {
+    if (!_ended.exchange(true)) {
+      FireOnChanged();
     }
   }
 
   void RTCAudioTrackSource::PushSamples(
       const void *samples, int bitsPerSample, int sampleRate, size_t channels, size_t frames) {
     std::lock_guard<std::mutex> lock(_sinkMutex);
-    if (_sink) {
-      _sink->OnData(samples, bitsPerSample, sampleRate, channels, frames);
+    for (auto sink: _sinks) {
+      sink->OnData(samples, bitsPerSample, sampleRate, channels, frames, std::nullopt);
     }
-  }
-
-  void RTCAudioTrackSource::PushData(RTCOnDataEvent &data) {
-    PushSamples(data.audioData.data(), data.bitsPerSample, data.sampleRate, data.channelCount, data.numberOfFrames);
   }
 
   void RTCAudioTrackSource::StartMicrophone() {
@@ -57,6 +61,8 @@ namespace python_webrtc {
       }
       PushSamples(samples.data(), 16, sampleRate, 1, frames);
     };
+    _control = std::make_shared<SourceControl>();
+    _control->microphone = true;
     _microphone.Start(std::chrono::milliseconds(10), std::move(tick));
   }
 

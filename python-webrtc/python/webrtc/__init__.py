@@ -35,6 +35,13 @@ from .enums import (
     RTCIceTcpCandidateType,
     RTCIceServerTransportProtocol,
     RTCErrorDetailType,
+    BinaryType,
+    VideoPixelFormat,
+    VideoColorPrimaries,
+    VideoTransferCharacteristics,
+    VideoMatrixCoefficients,
+    AlphaOption,
+    AudioSampleFormat,
 )
 from .base import WebRTCObject
 from .exceptions import (
@@ -51,6 +58,7 @@ from .exceptions import (
     InvalidSyntaxError,
     InvalidRangeError,
     InvalidCharacterError,
+    OverconstrainedError,
     RTCError,
 )
 from .utils.events import EventTarget
@@ -69,8 +77,36 @@ from .models.events import (
 # the order matters: modules import each other through the package namespace
 from .models.rtc_session_description_init import RTCSessionDescriptionInit
 from .models.rtc_session_description import RTCSessionDescription
-from .models.rtc_on_data_event import RTCOnDataEvent
-from .models.rtc_video_frame import RTCVideoFrame
+from .models.media_track_constraints import (
+    ULongRange,
+    DoubleRange,
+    MediaTrackSettings,
+    MediaTrackCapabilities,
+    MediaTrackConstraints,
+)
+from .models.blob import Blob
+from .models.video_frame import (
+    DOMRectReadOnly,
+    PlaneLayout,
+    VideoColorSpace,
+    VideoFrameMetadata,
+    VideoFrameBufferInit,
+    VideoFrameInit,
+    VideoFrameCopyToOptions,
+    VideoFrame,
+)
+from .models.audio_data import AudioDataInit, AudioDataCopyToOptions, AudioData
+from .streams import (
+    ReadableStream,
+    ReadableStreamDefaultReader,
+    ReadableStreamDefaultController,
+    ReadableStreamReadResult,
+    WritableStream,
+    WritableStreamDefaultWriter,
+    WritableStreamDefaultController,
+    TransformStream,
+    TransformStreamDefaultController,
+)
 from .models.rtp_parameters import (
     RTCRtpCodec,
     RTCRtpCodecParameters,
@@ -106,9 +142,13 @@ from .interfaces.rtc_rtp_transceiver import RTCRtpTransceiver
 from .interfaces.rtc_ice_transport import RTCIceTransport
 from .interfaces.rtc_dtls_transport import RTCDtlsTransport
 from .interfaces.rtc_sctp_transport import RTCSctpTransport
-from .interfaces.rtc_audio_source import RTCAudioSource
-from .interfaces.rtc_video_source import RTCVideoSource
 from .interfaces.rtc_data_channel import RTCDataChannel
+from .interfaces.media_stream_track_processor import MediaStreamTrackProcessorInit, MediaStreamTrackProcessor
+from .interfaces.track_generator import (
+    VideoTrackGenerator,
+    MediaStreamTrackGeneratorInit,
+    MediaStreamTrackGenerator,
+)
 from .interfaces.rtc_dtmf_sender import RTCDTMFSender
 
 from .functions.get_user_media import getUserMedia, get_user_media
@@ -130,6 +170,7 @@ __all__ = [
     'InvalidSyntaxError',
     'InvalidRangeError',
     'InvalidCharacterError',
+    'OverconstrainedError',
     'RTCError',
     'RTCPeerConnectionState',
     'RTCSignalingState',
@@ -147,6 +188,13 @@ __all__ = [
     'SctpTransportState',
     'MediaType',
     'RTCErrorDetailType',
+    'BinaryType',
+    'VideoPixelFormat',
+    'VideoColorPrimaries',
+    'VideoTransferCharacteristics',
+    'VideoMatrixCoefficients',
+    'AlphaOption',
+    'AudioSampleFormat',
     'RTCIceCandidateType',
     'RTCIceProtocol',
     'RTCIceTcpCandidateType',
@@ -178,16 +226,43 @@ __all__ = [
     'RTCIceTransport',
     'RTCDtlsTransport',
     'RTCSctpTransport',
-    'RTCAudioSource',
-    'RTCVideoSource',
     'RTCDataChannel',
+    'MediaStreamTrackProcessorInit',
+    'MediaStreamTrackProcessor',
+    'VideoTrackGenerator',
+    'MediaStreamTrackGeneratorInit',
+    'MediaStreamTrackGenerator',
     'RTCDTMFSender',
     'getUserMedia',
     'get_user_media',
     'RTCSessionDescriptionInit',
     'RTCSessionDescription',
-    'RTCOnDataEvent',
-    'RTCVideoFrame',
+    'ULongRange',
+    'DoubleRange',
+    'MediaTrackSettings',
+    'MediaTrackCapabilities',
+    'MediaTrackConstraints',
+    'Blob',
+    'DOMRectReadOnly',
+    'PlaneLayout',
+    'VideoColorSpace',
+    'VideoFrameMetadata',
+    'VideoFrameBufferInit',
+    'VideoFrameInit',
+    'VideoFrameCopyToOptions',
+    'VideoFrame',
+    'AudioDataInit',
+    'AudioDataCopyToOptions',
+    'AudioData',
+    'ReadableStream',
+    'ReadableStreamDefaultReader',
+    'ReadableStreamDefaultController',
+    'ReadableStreamReadResult',
+    'WritableStream',
+    'WritableStreamDefaultWriter',
+    'WritableStreamDefaultController',
+    'TransformStream',
+    'TransformStreamDefaultController',
     'RtpEncodingParameters',
     'RTCRtpCodec',
     'RTCRtpCodecParameters',

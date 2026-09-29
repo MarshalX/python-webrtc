@@ -7,7 +7,7 @@
 
 from typing import TYPE_CHECKING, Optional, Union
 
-from webrtc import MessageEvent, RTCDataChannelState, RTCErrorEvent, WebRTCObject, wrtc
+from webrtc import BinaryType, Blob, MessageEvent, RTCDataChannelState, RTCErrorEvent, WebRTCObject, wrtc
 from webrtc.utils.events import EventTarget
 
 if TYPE_CHECKING:
@@ -20,7 +20,8 @@ class RTCDataChannel(WebRTCObject, EventTarget):
 
     Events (see :meth:`on`):
         ``open`` (:obj:`webrtc.Event`): The channel can be used to send messages.
-        ``message`` (:obj:`webrtc.MessageEvent`): A message arrived, its ``data`` is :obj:`str` or :obj:`bytes`.
+        ``message`` (:obj:`webrtc.MessageEvent`): A message arrived, its ``data`` is :obj:`str`, or :obj:`bytes`
+        or :obj:`webrtc.Blob` (see :attr:`binary_type`).
         ``bufferedamountlow`` (:obj:`webrtc.Event`): :attr:`buffered_amount` dropped to
         :attr:`buffered_amount_low_threshold`.
         ``error`` (:obj:`webrtc.RTCErrorEvent`): The channel failed, it's closed right after.
@@ -48,7 +49,11 @@ class RTCDataChannel(WebRTCObject, EventTarget):
             return None
         if name == 'message':
             (message,) = args
-            return MessageEvent(name, message.data, target=self)
+            data = message.data
+            # binary_type as of delivery, per the specification
+            if isinstance(data, bytes) and self._native_obj.binaryType == BinaryType.blob:
+                data = Blob([data])
+            return MessageEvent(name, data, target=self)
         if name == 'error':
             (error,) = args
             return RTCErrorEvent(name, error.toPython(), target=self)
@@ -115,28 +120,40 @@ class RTCDataChannel(WebRTCObject, EventTarget):
             raise ValueError(f'buffered_amount_low_threshold must be from 0 to 2**64-1, not {value}')
         self._native_obj.bufferedAmountLowThreshold = value
 
-    def send(self, data: Union[str, bytes, bytearray, memoryview]) -> None:
+    @property
+    def binary_type(self) -> BinaryType:
+        """:obj:`webrtc.BinaryType`: What binary messages are delivered as: :obj:`bytes` (``arraybuffer``, the
+        default) or :obj:`webrtc.Blob` (``blob``)."""
+        return BinaryType(self._native_obj.binaryType)
+
+    @binary_type.setter
+    def binary_type(self, value: Union[BinaryType, str]):
+        self._native_obj.binaryType = BinaryType(value).value
+
+    def send(self, data: Union[str, bytes, bytearray, memoryview, Blob]) -> None:
         """Sends a message to the remote peer.
 
         Args:
-            data (:obj:`str` or bytes-like): A text message, or a binary one.
+            data (:obj:`str`, bytes-like or :obj:`webrtc.Blob`): A text message, or a binary one.
 
         Raises:
-            :obj:`TypeError`: If the data is neither text nor bytes.
+            :obj:`TypeError`: If the data is neither text, bytes nor a :obj:`webrtc.Blob`.
             :obj:`webrtc.InvalidStateError`: If the channel isn't open.
             :obj:`webrtc.OperationError`: If the message can't be queued, like when the queue is full.
         """
         if isinstance(data, str):
             self._native_obj.send(data.encode(), False)
-        elif isinstance(data, (bytes, bytearray, memoryview)):
+        elif isinstance(data, (bytes, bytearray, memoryview, Blob)):
             self._native_obj.send(bytes(data), True)
         else:
-            raise TypeError(f'data must be str or bytes-like, not {type(data).__name__}')
+            raise TypeError(f'data must be str, bytes-like or Blob, not {type(data).__name__}')
 
     def close(self) -> None:
         """Closes the channel. Messages queued before are still sent."""
         self._native_obj.close()
 
+    #: Alias for :attr:`binary_type`
+    binaryType = binary_type
     #: Alias for :attr:`max_packet_life_time`
     maxPacketLifeTime = max_packet_life_time
     #: Alias for :attr:`max_retransmits`
