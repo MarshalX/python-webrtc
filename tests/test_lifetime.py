@@ -386,13 +386,16 @@ def test_process_exits_after_connecting():
         '''
         import asyncio
         import webrtc
-        from tests.helpers import connect
+        from tests.helpers import connect, wait_for_event
 
         async def main():
             for _ in range(3):
                 caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
                 channel = caller.create_data_channel('exit')
+                # the channel opens after the connection connects
+                opened = wait_for_event(channel, 'open')
                 await connect(caller, callee)
+                await opened
                 caller.sctp.transport.ice_transport.on('selectedcandidatepairchange', lambda event: None)
                 channel.send('bye')
             print('connected')
