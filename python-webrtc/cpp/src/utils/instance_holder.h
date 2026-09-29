@@ -17,6 +17,7 @@
 #include <api/scoped_refptr.h>
 
 #include "gil.h"
+#include "libwebrtc_thread.h"
 
 namespace python_webrtc {
 
@@ -50,7 +51,11 @@ namespace python_webrtc {
         }
       }
 
-      std::shared_ptr<T> instance(new T(factory, std::move(object)), [this, key](T *dying) { Destroy(key, dying); });
+      std::shared_ptr<T> instance(new T(factory, std::move(object)), [this, key](T *dying) {
+        // marked right away, so a new wrapper waits for this one even when it's destroyed elsewhere
+        StartDestroying(key);
+        ReleaseOffLibwebrtcThread([this, key, dying]() { Destroy(key, dying); });
+      });
       _store[key] = instance;
       return instance;
     }
@@ -72,17 +77,18 @@ namespace python_webrtc {
     }
 
   private:
+    void StartDestroying(U *key) {
+      std::lock_guard<std::recursive_mutex> lock(_mutex);
+      auto it = _store.find(key);
+      if (it != _store.end() && it->second.expired()) {
+        _store.erase(it);
+      }
+      _destroying.insert(key);
+    }
+
     void Destroy(U *key, T *dying) {
       gil_release_if_held release;
 
-      {
-        std::lock_guard<std::recursive_mutex> lock(_mutex);
-        auto it = _store.find(key);
-        if (it != _store.end() && it->second.expired()) {
-          _store.erase(it);
-        }
-        _destroying.insert(key);
-      }
       // Out of the lock: destructors block on libwebrtc threads (to unregister observers), which may be waiting
       // for this lock themselves (a callback wrapping an object). A replacement waits for this to finish.
       delete dying;

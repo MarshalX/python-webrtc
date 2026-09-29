@@ -83,7 +83,8 @@ build-frontend = "build[uv]"
 # dev builds stay per file to catch missing includes
 config-settings = { "cmake.define.CMAKE_UNITY_BUILD" = "ON" }
 test-groups = ["test"]
-test-command = "pytest {project}/tests"
+# again with the garbage collector on libwebrtc threads (see DeleteOffLibwebrtcThread)
+test-command = "pytest {project}/tests && pytest {project}/tests --gc-on-emit"
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64"]

@@ -10,6 +10,7 @@
 #include <rtc_base/crypto_random.h>
 
 #include "../utils/gil.h"
+#include "../utils/libwebrtc_thread.h"
 
 namespace python_webrtc {
 
@@ -24,7 +25,7 @@ namespace python_webrtc {
   }
 
   MediaStream::~MediaStream() {
-    gil_release_if_held release;
+    BlockingDestructor release("MediaStream");
     _factory->_signalingThread->BlockingCall([this]() { _stream->UnregisterObserver(this); });
     DropListeners();
   }

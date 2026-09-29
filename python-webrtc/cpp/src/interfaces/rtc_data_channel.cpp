@@ -11,6 +11,7 @@
 
 #include "../exceptions.h"
 #include "../utils/gil.h"
+#include "../utils/libwebrtc_thread.h"
 
 namespace python_webrtc {
 
@@ -36,7 +37,7 @@ namespace python_webrtc {
   }
 
   RTCDataChannel::~RTCDataChannel() {
-    gil_release_if_held release;
+    BlockingDestructor release("RTCDataChannel");
 
     // the channel has a single observer slot, a newer wrapper of it may have taken it over already
     auto replaced = holder().HasLive(_channel.get());

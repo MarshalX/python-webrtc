@@ -435,3 +435,44 @@ async def test_stream_tracks_read_while_they_change(caller, callee, audio_stream
         stop.set()
         reader.join(5)
     assert not reader.is_alive()
+
+
+def test_collected_on_libwebrtc_thread():
+    """The garbage collector running on a libwebrtc thread (to emit an event) releases a connection elsewhere"""
+    script = textwrap.dedent(
+        '''
+        import asyncio
+        import gc
+        import threading
+        import webrtc
+        from webrtc.utils import events
+
+        async def main():
+            gc.disable()
+            # garbage: a connection in a cycle with its handlers, left for the collector
+            pc = webrtc.RTCPeerConnection()
+            pc.add_transceiver(webrtc.MediaType.audio)
+            pc.on('connectionstatechange', lambda event, pc=pc: None)
+            del pc
+
+            emit = events._Listeners.__call__
+            def collecting(self, name, *args):
+                if threading.current_thread() is not threading.main_thread():
+                    gc.collect()
+                emit(self, name, *args)
+            events._Listeners.__call__ = collecting
+
+            transport = webrtc.RTCIceTransport()
+            done = asyncio.get_running_loop().create_future()
+            transport.on('icecandidate', lambda event: event.candidate or done.done() or done.set_result(None))
+            transport.gather()
+            await asyncio.wait_for(done, 10)
+            transport.stop()
+            print('collected')
+
+        asyncio.run(main())
+        '''
+    )
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=60, cwd=root)
+    assert 'collected' in result.stdout, result.stderr[-2000:]

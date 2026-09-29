@@ -15,6 +15,7 @@
 
 #include "gil.h"
 #include "held_events.h"
+#include "libwebrtc_thread.h"
 
 namespace python_webrtc {
 
@@ -144,6 +145,8 @@ namespace python_webrtc {
         return;
       }
 
+      // whatever the handlers release here is destroyed elsewhere
+      LibwebrtcThreadScope scope;
       pybind11::gil_scoped_acquire gil;
       if (!_listeners) {
         return;
