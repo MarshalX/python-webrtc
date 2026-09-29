@@ -21,7 +21,7 @@ namespace python_webrtc {
 
   RTCVideoTrackSource::~RTCVideoTrackSource() {
     if (_control) {
-      std::lock_guard<std::mutex> lock(_control->mutex);
+      const std::scoped_lock lock(_control->mutex);
       _control->camera = nullptr;
     }
   }
@@ -31,8 +31,9 @@ namespace python_webrtc {
       _control = std::make_shared<SourceControl>();
       _control->camera = this;
     }
-    auto interval = std::chrono::microseconds(static_cast<int64_t>(1000000 / frameRate));
-    std::lock_guard<std::mutex> lock(_cameraMutex);
+    constexpr double usPerSecond = 1e6;
+    auto interval = std::chrono::microseconds(static_cast<int64_t>(usPerSecond / frameRate));
+    const std::scoped_lock lock(_cameraMutex);
     // the previous camera stops first: one thread draws at a time
     _camera = nullptr;
     _cameraWidth = width;
@@ -40,13 +41,12 @@ namespace python_webrtc {
     _cameraFrameRate = frameRate;
     _camera = std::make_unique<PacedThread>();
     // the thread never holds a reference to the source, so the source isn't destroyed on it
-    _camera->Start(interval, [this, width, height, frame = uint32_t(0)]() mutable {
-      DrawFrame(width, height, frame++);
-    });
+    _camera->Start(interval,
+                   [this, width, height, frame = uint32_t{0}]() mutable { DrawFrame(width, height, frame++); });
   }
 
   bool RTCVideoTrackSource::IsCamera(int *width, int *height, double *frameRate) {
-    std::lock_guard<std::mutex> lock(_cameraMutex);
+    const std::scoped_lock lock(_cameraMutex);
     if (!_camera) {
       return false;
     }
@@ -60,23 +60,30 @@ namespace python_webrtc {
     // a gradient moving across the frame, with a moving block, so that encoders have work to do
     auto buffer = webrtc::I420Buffer::Create(width, height);
     for (int y = 0; y < height; ++y) {
-      auto row = buffer->MutableDataY() + y * buffer->StrideY();
+      auto *row = buffer->MutableDataY() + (static_cast<std::ptrdiff_t>(y) * buffer->StrideY());
       for (int x = 0; x < width; ++x) {
-        row[x] = static_cast<uint8_t>(x + y + frame * 4);
+        row[x] = static_cast<uint8_t>(x + y + (frame * 4));
       }
     }
-    std::memset(buffer->MutableDataU(), static_cast<int>(64 + frame % 128), buffer->StrideU() * ((height + 1) / 2));
-    std::memset(buffer->MutableDataV(), static_cast<int>(192 - frame % 128), buffer->StrideV() * ((height + 1) / 2));
-    int block = std::min(width, height) / 4;
-    int left = static_cast<int>((frame * 8) % std::max(1, width - block));
+    // the colors drift through a range of the chroma planes, the block is white
+    constexpr uint32_t chromaRange = 128;
+    constexpr int uBase = 64;
+    constexpr int vBase = 192;
+    constexpr int white = 255;
+    constexpr uint32_t blockSpeed = 8;
+    std::memset(buffer->MutableDataU(), static_cast<int>(uBase + (frame % chromaRange)),
+                static_cast<size_t>(buffer->StrideU()) * ((height + 1) / 2));
+    std::memset(buffer->MutableDataV(), static_cast<int>(vBase - (frame % chromaRange)),
+                static_cast<size_t>(buffer->StrideV()) * ((height + 1) / 2));
+    const int block = std::min(width, height) / 4;
+    const int left = static_cast<int>((frame * blockSpeed) % std::max(1, width - block));
     for (int y = 0; y < block; ++y) {
-      std::memset(buffer->MutableDataY() + (height / 3 + y) * buffer->StrideY() + left, 255, block);
+      std::memset(buffer->MutableDataY() + (static_cast<std::ptrdiff_t>((height / 3) + y) * buffer->StrideY()) + left,
+                  white, block);
     }
 
-    PushFrame(webrtc::VideoFrame::Builder()
-                  .set_video_frame_buffer(buffer)
-                  .set_timestamp_us(webrtc::TimeMicros())
-                  .build());
+    PushFrame(
+        webrtc::VideoFrame::Builder().set_video_frame_buffer(buffer).set_timestamp_us(webrtc::TimeMicros()).build());
   }
 
   void RTCVideoTrackSource::PushFrame(const webrtc::VideoFrame &frame) {

@@ -13,7 +13,7 @@ namespace python_webrtc {
 
   webrtc::PeerConnectionInterface::IceServers toIceServers(const std::vector<IceServerInit> &iceServers) {
     webrtc::PeerConnectionInterface::IceServers servers;
-    for (const auto &server: iceServers) {
+    for (const auto &server : iceServers) {
       webrtc::PeerConnectionInterface::IceServer iceServer;
       iceServer.urls = server.urls;
       iceServer.username = server.username.value_or("");
@@ -23,8 +23,8 @@ namespace python_webrtc {
     return servers;
   }
 
-  webrtc::PeerConnectionInterface::RTCConfiguration ConfigurationInit::Apply(
-      webrtc::PeerConnectionInterface::RTCConfiguration configuration) const {
+  webrtc::PeerConnectionInterface::RTCConfiguration
+  ConfigurationInit::Apply(webrtc::PeerConnectionInterface::RTCConfiguration configuration) const {
     configuration.servers = toIceServers(iceServers);
     configuration.type = iceTransportPolicy;
     configuration.bundle_policy = bundlePolicy;
@@ -34,7 +34,7 @@ namespace python_webrtc {
     configuration.crypto_options.srtp.cryptex_policy = rtpHeaderEncryptionPolicy;
     if (certificates) {
       configuration.certificates.clear();
-      for (const auto &certificate: *certificates) {
+      for (const auto &certificate : *certificates) {
         configuration.certificates.push_back(certificate->certificate());
       }
     }

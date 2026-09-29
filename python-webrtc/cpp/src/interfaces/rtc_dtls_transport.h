@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_RTC_DTLS_TRANSPORT_H_
+#define PYTHON_WEBRTC_INTERFACES_RTC_DTLS_TRANSPORT_H_
 
 #include <memory>
 #include <mutex>
@@ -15,20 +16,24 @@
 
 #include <pybind11/pybind11.h>
 
-#include "peer_connection_factory.h"
-#include "rtc_ice_transport.h"
+#include "../enums/enums.h"
 #include "../utils/instance_holder.h"
 #include "../utils/listeners.h"
 #include "../utils/surfaced.h"
-#include "../enums/enums.h"
+#include "peer_connection_factory.h"
+#include "rtc_ice_transport.h"
 
 namespace python_webrtc {
 
   class RTCDtlsTransport : public webrtc::DtlsTransportObserverInterface, public Listeners, public SingleObserverSlot {
   public:
-    explicit RTCDtlsTransport(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::DtlsTransportInterface>);
+    explicit RTCDtlsTransport(std::shared_ptr<PeerConnectionFactory> factory,
+                              webrtc::scoped_refptr<webrtc::DtlsTransportInterface> transport);
 
     ~RTCDtlsTransport() override;
+
+    RTCDtlsTransport(const RTCDtlsTransport &) = delete;
+    RTCDtlsTransport &operator=(const RTCDtlsTransport &) = delete;
 
     static void Init(pybind11::module &m);
 
@@ -36,9 +41,9 @@ namespace python_webrtc {
 
     webrtc::scoped_refptr<webrtc::DtlsTransportInterface> transport() { return _transport; }
 
-    void OnStateChange(webrtc::DtlsTransportInformation) override;
+    void OnStateChange(webrtc::DtlsTransportInformation info) override;
 
-    void OnError(webrtc::RTCError) override;
+    void OnError(webrtc::RTCError error) override;
 
     // a closed connection fires no events of its transports, which show their current state
     void OnPeerConnectionClosed();
@@ -75,3 +80,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_RTC_DTLS_TRANSPORT_H_

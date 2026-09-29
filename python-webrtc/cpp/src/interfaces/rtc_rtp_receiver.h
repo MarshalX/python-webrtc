@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_RTC_RTP_RECEIVER_H_
+#define PYTHON_WEBRTC_INTERFACES_RTC_RTP_RECEIVER_H_
 
 #include <functional>
 #include <memory>
@@ -18,11 +19,11 @@
 #include <api/rtp_receiver_interface.h>
 #include <api/scoped_refptr.h>
 
-#include "peer_connection_factory.h"
-#include "media_stream_track.h"
-#include "rtc_dtls_transport.h"
 #include "../exceptions.h"
 #include "../utils/alive_guard.h"
+#include "media_stream_track.h"
+#include "peer_connection_factory.h"
+#include "rtc_dtls_transport.h"
 
 namespace python_webrtc {
 
@@ -34,9 +35,13 @@ namespace python_webrtc {
     // audio level in -dBov)
     using Source = std::tuple<bool, uint32_t, double, uint32_t, std::optional<int>>;
 
-    explicit RTCRtpReceiver(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>);
+    explicit RTCRtpReceiver(std::shared_ptr<PeerConnectionFactory> factory,
+                            webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver);
 
     ~RTCRtpReceiver() override;
+
+    RTCRtpReceiver(const RTCRtpReceiver &) = delete;
+    RTCRtpReceiver &operator=(const RTCRtpReceiver &) = delete;
 
     static void Init(pybind11::module &m);
 
@@ -45,9 +50,9 @@ namespace python_webrtc {
     webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver() { return _receiver; }
 
     // RtpReceiverObserverInterface: media arrived, which unmutes the track
-    void OnFirstPacketReceived(webrtc::MediaType) override;
+    void OnFirstPacketReceived(webrtc::MediaType mediaType) override;
 
-    void OnFirstPacketReceivedAfterReceptiveChange(webrtc::MediaType) override;
+    void OnFirstPacketReceivedAfterReceptiveChange(webrtc::MediaType mediaType) override;
 
     // the connection of the receiver, which knows what was negotiated for it; set by the connection
     void SetConnection(std::weak_ptr<RTCPeerConnection> connection);
@@ -63,7 +68,7 @@ namespace python_webrtc {
 
     void SetJitterBufferTarget(std::optional<double> target);
 
-    void GetStats(std::function<void(std::string)> &, std::function<void(RTCCallbackException)> &);
+    void GetStats(std::function<void(std::string)> &onSuccess, std::function<void(RTCCallbackException)> &onFailure);
 
     // the sources of the packets of the last 10 seconds, the most recent first
     std::vector<Source> GetSources();
@@ -89,3 +94,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_RTC_RTP_RECEIVER_H_

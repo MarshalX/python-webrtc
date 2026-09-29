@@ -22,4 +22,4 @@ namespace python_webrtc {
     _onFailure(RTCCallbackException(std::move(error)));
   }
 
-}
+} // namespace python_webrtc

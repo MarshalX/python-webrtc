@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_RTC_AUDIO_TRACK_SOURCE_H_
+#define PYTHON_WEBRTC_INTERFACES_RTC_AUDIO_TRACK_SOURCE_H_
 
 #include <atomic>
 #include <memory>
@@ -39,9 +40,9 @@ namespace python_webrtc {
     // ends the tracks of the source; must be called on the signaling thread, where they observe it
     void End();
 
-    void AddSink(webrtc::AudioTrackSinkInterface *) override;
+    void AddSink(webrtc::AudioTrackSinkInterface * /*unused*/) override;
 
-    void RemoveSink(webrtc::AudioTrackSinkInterface *) override;
+    void RemoveSink(webrtc::AudioTrackSinkInterface * /*unused*/) override;
 
   private:
     // guards the sinks (the sender, processors), removed (and maybe destroyed) on other threads than the one pushing
@@ -55,3 +56,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_RTC_AUDIO_TRACK_SOURCE_H_

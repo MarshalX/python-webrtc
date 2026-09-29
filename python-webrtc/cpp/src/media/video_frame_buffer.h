@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_MEDIA_VIDEO_FRAME_BUFFER_H_
+#define PYTHON_WEBRTC_MEDIA_VIDEO_FRAME_BUFFER_H_
 
 #include <array>
 #include <cstdint>
@@ -25,7 +26,7 @@ namespace python_webrtc {
 
   // A pixel format of VideoFrame (WebCodecs VideoPixelFormat)
   struct PixelFormat {
-    enum class Layout { I420, I422, I444, NV12, RGB };
+    enum class Layout : uint8_t { I420, I422, I444, NV12, RGB };
 
     const char *name;
     Layout layout;
@@ -40,12 +41,12 @@ namespace python_webrtc {
       int subsamplingY;
 
       // samples in a row of the plane of a frame this wide
-      int Columns(int width) const;
+      [[nodiscard]] int Columns(int width) const;
 
-      int Rows(int height) const;
+      [[nodiscard]] int Rows(int height) const;
     };
 
-    std::vector<Plane> Planes() const;
+    [[nodiscard]] std::vector<Plane> Planes() const;
 
     static const PixelFormat &Parse(const std::string &name);
   };
@@ -68,24 +69,24 @@ namespace python_webrtc {
                                                       const pybind11::buffer &data,
                                                       const std::vector<SourceLayout> &layout);
 
-    std::string GetFormat() const { return _format->name; }
+    [[nodiscard]] std::string GetFormat() const { return _format->name; }
 
-    int width() const { return _width; }
+    [[nodiscard]] int width() const { return _width; }
 
-    int height() const { return _height; }
+    [[nodiscard]] int height() const { return _height; }
 
     // the same planes without the alpha one (I420A to I420, RGBA to RGBX...)
-    std::shared_ptr<VideoFrameBuffer> WithoutAlpha() const;
+    [[nodiscard]] std::shared_ptr<VideoFrameBuffer> WithoutAlpha() const;
 
     // copies rows of the planes into the destination, at the given place of each
     void CopyPlanes(const pybind11::buffer &destination, const std::vector<PlaneCopy> &copies) const;
 
     // converts a rect into an RGB format, with the YUV matrix (VideoMatrixCoefficients) and range of the frame
-    void ConvertTo(const pybind11::buffer &destination, const std::string &format, int x, int y, int width,
-                   int height, size_t offset, size_t stride, const std::string &matrix, bool fullRange) const;
+    void ConvertTo(const pybind11::buffer &destination, const std::string &format, int x, int y, int width, int height,
+                   size_t offset, size_t stride, const std::string &matrix, bool fullRange) const;
 
     // the frame as libwebrtc takes it: its planes when they're in a format libwebrtc has, converted to I420 if not
-    webrtc::scoped_refptr<webrtc::VideoFrameBuffer> ToWebrtc() const;
+    [[nodiscard]] webrtc::scoped_refptr<webrtc::VideoFrameBuffer> ToWebrtc() const;
 
   private:
     VideoFrameBuffer(const PixelFormat &format, int width, int height)
@@ -98,7 +99,7 @@ namespace python_webrtc {
       std::vector<uint8_t> storage;
     };
 
-    EightBit ToEightBit() const;
+    [[nodiscard]] EightBit ToEightBit() const;
 
     const PixelFormat *_format;
     int _width;
@@ -113,3 +114,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_MEDIA_VIDEO_FRAME_BUFFER_H_

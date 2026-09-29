@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_MEDIA_MEDIA_H_
+#define PYTHON_WEBRTC_MEDIA_MEDIA_H_
 
 #include <pybind11/pybind11.h>
 
@@ -18,3 +19,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_MEDIA_MEDIA_H_

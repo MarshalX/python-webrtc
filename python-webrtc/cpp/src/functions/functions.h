@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_FUNCTIONS_FUNCTIONS_H_
+#define PYTHON_WEBRTC_FUNCTIONS_FUNCTIONS_H_
 
 #include <pybind11/pybind11.h>
 
@@ -16,4 +17,6 @@ namespace python_webrtc {
     static void Init(pybind11::module &m);
   };
 
-}
+} // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_FUNCTIONS_FUNCTIONS_H_

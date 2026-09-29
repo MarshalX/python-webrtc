@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_MEDIA_MEDIA_STREAM_TRACK_PROCESSOR_H_
+#define PYTHON_WEBRTC_MEDIA_MEDIA_STREAM_TRACK_PROCESSOR_H_
 
 #include <atomic>
 #include <cstdint>
@@ -22,11 +23,11 @@
 
 #include <pybind11/pybind11.h>
 
+#include "../interfaces/media_stream_track.h"
 #include "../utils/alive_count.h"
+#include "../utils/listeners.h"
 #include "video_frame_buffer.h"
 #include "wakeup.h"
-#include "../interfaces/media_stream_track.h"
-#include "../utils/listeners.h"
 
 namespace python_webrtc {
 
@@ -38,10 +39,13 @@ namespace python_webrtc {
                                     public webrtc::AudioTrackSinkInterface,
                                     public std::enable_shared_from_this<MediaStreamTrackProcessor> {
   public:
-    static std::shared_ptr<MediaStreamTrackProcessor> Create(std::shared_ptr<MediaStreamTrack> track,
+    static std::shared_ptr<MediaStreamTrackProcessor> Create(const std::shared_ptr<MediaStreamTrack> &track,
                                                              size_t maxBufferSize);
 
     ~MediaStreamTrackProcessor() override;
+
+    MediaStreamTrackProcessor(const MediaStreamTrackProcessor &) = delete;
+    MediaStreamTrackProcessor &operator=(const MediaStreamTrackProcessor &) = delete;
 
     static void Init(pybind11::module &m);
 
@@ -129,3 +133,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_MEDIA_MEDIA_STREAM_TRACK_PROCESSOR_H_

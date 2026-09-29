@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_UTILS_ABSL_OPTIONAL_H_
+#define PYTHON_WEBRTC_UTILS_ABSL_OPTIONAL_H_
 
 #ifndef ABSL_USES_STD_OPTIONAL
 
@@ -16,8 +17,12 @@
 #include <absl/types/optional.h>
 
 namespace pybind11::detail {
-  template<typename T> struct type_caster<absl::optional<T>>: public optional_caster<absl::optional<T>> {};
-  template<> struct type_caster<absl::nullopt_t> : public void_caster<absl::nullopt_t> {};
+  template <typename T>
+  struct type_caster<absl::optional<T>> : public optional_caster<absl::optional<T>> {};
+  template <>
+  struct type_caster<absl::nullopt_t> : public void_caster<absl::nullopt_t> {};
 } // namespace pybind11::detail
 
 #endif // ABSL_USES_STD_OPTIONAL
+
+#endif // PYTHON_WEBRTC_UTILS_ABSL_OPTIONAL_H_

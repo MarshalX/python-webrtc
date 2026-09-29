@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_UTILS_HELD_EVENTS_H_
+#define PYTHON_WEBRTC_UTILS_HELD_EVENTS_H_
 
 #include <functional>
 #include <mutex>
@@ -19,14 +20,14 @@ namespace python_webrtc {
   class HeldEvents {
   public:
     void Hold() {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       _held = true;
     }
 
     void Release() {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       // emitted under the lock, so that events emitted meanwhile come after these
-      for (auto &emit: _events) {
+      for (auto &emit : _events) {
         emit();
       }
       _events.clear();
@@ -34,15 +35,15 @@ namespace python_webrtc {
     }
 
     bool IsHeld() {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       return _held;
     }
 
     // emits an event now, or on release while held
-    template<typename F>
+    template <typename F>
     void Emit(F &&emit) {
       {
-        std::lock_guard<std::mutex> lock(_mutex);
+        const std::scoped_lock lock(_mutex);
         if (_held) {
           _events.emplace_back(std::forward<F>(emit));
           return;
@@ -58,3 +59,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_UTILS_HELD_EVENTS_H_

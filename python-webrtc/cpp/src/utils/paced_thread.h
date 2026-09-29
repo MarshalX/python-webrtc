@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_UTILS_PACED_THREAD_H_
+#define PYTHON_WEBRTC_UTILS_PACED_THREAD_H_
 
 #include <chrono>
 #include <condition_variable>
@@ -22,7 +23,7 @@ namespace python_webrtc {
   public:
     ~PacedThread() {
       {
-        std::lock_guard<std::mutex> lock(_mutex);
+        const std::scoped_lock lock(_mutex);
         _stopping = true;
       }
       _stop.notify_all();
@@ -30,6 +31,11 @@ namespace python_webrtc {
         _thread.join();
       }
     }
+
+    PacedThread() = default;
+
+    PacedThread(const PacedThread &) = delete;
+    PacedThread &operator=(const PacedThread &) = delete;
 
     // the first call is right away
     void Start(std::chrono::microseconds interval, std::function<void()> tick) {
@@ -56,3 +62,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_UTILS_PACED_THREAD_H_

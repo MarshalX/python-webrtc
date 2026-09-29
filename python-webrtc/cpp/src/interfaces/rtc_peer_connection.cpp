@@ -11,20 +11,22 @@
 #include <algorithm>
 #include <limits>
 #include <set>
+#include <string_view>
 #include <thread>
+#include <utility>
 
 #include <absl/strings/match.h>
 #include <media/base/media_constants.h>
 #include <pc/rtp_media_utils.h>
 #include <pc/session_description.h>
 
-#include "peer_connection_factory.h"
-#include "create_session_description_observer.h"
-#include "set_session_description_observer.h"
-#include "stats_collector_callback.h"
 #include "../models/python_webrtc/rtc_ice_candidate.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
+#include "create_session_description_observer.h"
+#include "peer_connection_factory.h"
+#include "set_session_description_observer.h"
+#include "stats_collector_callback.h"
 
 namespace python_webrtc {
 
@@ -44,13 +46,13 @@ namespace python_webrtc {
         connection->_heldGathering.Hold();
         _connection = connection;
       }
-      for (auto &iceTransport: iceTransports) {
+      for (auto &iceTransport : iceTransports) {
         if (!iceTransport->IsHeld()) {
           iceTransport->Hold();
           _iceTransports.push_back(std::move(iceTransport));
         }
       }
-      for (const auto &transceiver: pc->GetTransceivers()) {
+      for (const auto &transceiver : pc->GetTransceivers()) {
         auto track = MediaStreamTrack::holder().Find(transceiver->receiver()->track().get());
         if (track) {
           track->HoldEnded();
@@ -62,13 +64,16 @@ namespace python_webrtc {
     // also when the operation fails before it starts
     ~HeldOperationEvents() { Release(); }
 
+    HeldOperationEvents(const HeldOperationEvents &) = delete;
+    HeldOperationEvents &operator=(const HeldOperationEvents &) = delete;
+
     void Release() {
-      std::lock_guard<std::mutex> lock(_mutex);
-      for (const auto &track: _tracks) {
+      const std::scoped_lock lock(_mutex);
+      for (const auto &track : _tracks) {
         track->ReleaseEnded();
       }
       _tracks.clear();
-      for (const auto &iceTransport: _iceTransports) {
+      for (const auto &iceTransport : _iceTransports) {
         iceTransport->Release();
       }
       _iceTransports.clear();
@@ -94,8 +99,7 @@ namespace python_webrtc {
 
     webrtc::PeerConnectionDependencies dependencies(this);
 
-    auto result = _factory->factory()->CreatePeerConnectionOrError(
-        configuration, std::move(dependencies));
+    auto result = _factory->factory()->CreatePeerConnectionOrError(configuration, std::move(dependencies));
 
     if (!result.ok()) {
       throw RTCException(result.error());
@@ -106,7 +110,7 @@ namespace python_webrtc {
 
   RTCPeerConnection::~RTCPeerConnection() {
     // destroying the peer connection blocks on the signaling thread, which may be waiting for the GIL
-    BlockingDestructor release("RTCPeerConnection");
+    const BlockingDestructor release("RTCPeerConnection");
 
     // closing stops the connection from calling this observer
     Close();
@@ -114,7 +118,7 @@ namespace python_webrtc {
     // released here, without the GIL, as it blocks on the signaling thread
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> closed;
     {
-      std::lock_guard<std::mutex> lock(_connectionMutex);
+      const std::scoped_lock lock(_connectionMutex);
       closed = std::move(_closedConnection);
     }
     closed = nullptr;
@@ -126,39 +130,44 @@ namespace python_webrtc {
         .def(pybind11::init(nogil_factory(+[](const std::optional<ConfigurationInit> &configuration) {
           return std::shared_ptr<RTCPeerConnection>(new RTCPeerConnection(configuration), DeleteOffLibwebrtcThread());
         })))
-        .def("createOffer", WithCallbacks(&RTCPeerConnection::CreateOffer),
-             pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("iceRestart"),
-             pybind11::arg("voiceActivityDetection"))
-        .def("createAnswer", WithCallbacks(&RTCPeerConnection::CreateAnswer),
-             pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("voiceActivityDetection"))
-        .def("setLocalDescription", WithCallbacks(&RTCPeerConnection::SetLocalDescription),
-             pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("description"))
+        .def("createOffer", WithCallbacks(&RTCPeerConnection::CreateOffer), pybind11::arg("onSuccess"),
+             pybind11::arg("onFailure"), pybind11::arg("iceRestart"), pybind11::arg("voiceActivityDetection"))
+        .def("createAnswer", WithCallbacks(&RTCPeerConnection::CreateAnswer), pybind11::arg("onSuccess"),
+             pybind11::arg("onFailure"), pybind11::arg("voiceActivityDetection"))
+        .def("setLocalDescription", WithCallbacks(&RTCPeerConnection::SetLocalDescription), pybind11::arg("onSuccess"),
+             pybind11::arg("onFailure"), pybind11::arg("description"))
         .def("setRemoteDescription", WithCallbacks(&RTCPeerConnection::SetRemoteDescription),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("description"))
-        .def("addIceCandidate", WithCallbacks(&RTCPeerConnection::AddIceCandidate),
-             pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("candidate"),
-             pybind11::arg("sdpMid"), pybind11::arg("sdpMLineIndex"), pybind11::arg("usernameFragment"))
+        .def("addIceCandidate", WithCallbacks(&RTCPeerConnection::AddIceCandidate), pybind11::arg("onSuccess"),
+             pybind11::arg("onFailure"), pybind11::arg("candidate"), pybind11::arg("sdpMid"),
+             pybind11::arg("sdpMLineIndex"), pybind11::arg("usernameFragment"))
         .def("addTrack",
              pybind11::overload_cast<MediaStreamTrack &, std::optional<std::reference_wrapper<MediaStream>>>(
-                 &RTCPeerConnection::AddTrack), nogil(), pybind11::arg("track"), pybind11::arg("stream"))
+                 &RTCPeerConnection::AddTrack),
+             nogil(), pybind11::arg("track"), pybind11::arg("stream"))
         .def("addTrack",
              pybind11::overload_cast<MediaStreamTrack &, const std::vector<MediaStream *> &>(
-                 &RTCPeerConnection::AddTrack), nogil(), pybind11::arg("track"), pybind11::arg("streams"))
+                 &RTCPeerConnection::AddTrack),
+             nogil(), pybind11::arg("track"), pybind11::arg("streams"))
         .def("removeTrack", &RTCPeerConnection::RemoveTrack, nogil(), pybind11::arg("sender"))
         .def("addTransceiver",
-             pybind11::overload_cast<webrtc::MediaType, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &>(
-                 &RTCPeerConnection::AddTransceiver), nogil(), pybind11::arg("kind"), pybind11::arg("init"))
+             pybind11::overload_cast<webrtc::MediaType,
+                                     std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &>(
+                 &RTCPeerConnection::AddTransceiver),
+             nogil(), pybind11::arg("kind"), pybind11::arg("init"))
         .def("addTransceiver",
-             pybind11::overload_cast<MediaStreamTrack &, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &>(
-                 &RTCPeerConnection::AddTransceiver), nogil(), pybind11::arg("track"), pybind11::arg("init"))
+             pybind11::overload_cast<MediaStreamTrack &,
+                                     std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &>(
+                 &RTCPeerConnection::AddTransceiver),
+             nogil(), pybind11::arg("track"), pybind11::arg("init"))
         .def("getTransceivers", &RTCPeerConnection::GetTransceivers, nogil())
         .def("getSenders", &RTCPeerConnection::GetSenders, nogil())
         .def("getReceivers", &RTCPeerConnection::GetReceivers, nogil())
-        .def("createDataChannel", &RTCPeerConnection::CreateDataChannel, nogil(),
-             pybind11::arg("label"), pybind11::arg("ordered"), pybind11::arg("maxPacketLifeTime"),
-             pybind11::arg("maxRetransmits"), pybind11::arg("protocol"), pybind11::arg("negotiated"),
-             pybind11::arg("id"), pybind11::arg("priority"))
-        .def("getStats", WithCallbacks(&RTCPeerConnection::GetStats), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
+        .def("createDataChannel", &RTCPeerConnection::CreateDataChannel, nogil(), pybind11::arg("label"),
+             pybind11::arg("ordered"), pybind11::arg("maxPacketLifeTime"), pybind11::arg("maxRetransmits"),
+             pybind11::arg("protocol"), pybind11::arg("negotiated"), pybind11::arg("id"), pybind11::arg("priority"))
+        .def("getStats", WithCallbacks(&RTCPeerConnection::GetStats), pybind11::arg("onSuccess"),
+             pybind11::arg("onFailure"))
         .def("restartIce", &RTCPeerConnection::RestartIce, nogil())
         .def("getConfiguration", &RTCPeerConnection::GetConfiguration, nogil())
         .def("setConfiguration", &RTCPeerConnection::SetConfiguration, nogil(), pybind11::arg("configuration"))
@@ -177,14 +186,11 @@ namespace python_webrtc {
         .def_property_readonly("canTrickleIceCandidates", nogil_fn(&RTCPeerConnection::GetCanTrickleIceCandidates))
         .def("_shouldFireNegotiationNeededEvent", &RTCPeerConnection::ShouldFireNegotiationNeededEvent, nogil(),
              pybind11::arg("eventId"))
-        .def("_surfaceSignalingState", &RTCPeerConnection::SurfaceSignalingState, nogil(),
-             pybind11::arg("state"))
+        .def("_surfaceSignalingState", &RTCPeerConnection::SurfaceSignalingState, nogil(), pybind11::arg("state"))
         .def("_surfaceIceConnectionState", &RTCPeerConnection::SurfaceIceConnectionState, nogil(),
              pybind11::arg("state"))
-        .def("_surfaceIceGatheringState", &RTCPeerConnection::SurfaceIceGatheringState, nogil(),
-             pybind11::arg("state"))
-        .def("_surfaceConnectionState", &RTCPeerConnection::SurfaceConnectionState, nogil(),
-             pybind11::arg("state"))
+        .def("_surfaceIceGatheringState", &RTCPeerConnection::SurfaceIceGatheringState, nogil(), pybind11::arg("state"))
+        .def("_surfaceConnectionState", &RTCPeerConnection::SurfaceConnectionState, nogil(), pybind11::arg("state"))
         .def("_refreshDescriptions", &RTCPeerConnection::RefreshDescriptions, nogil())
         .def_static("_connectionOf", &RTCPeerConnection::ConnectionOf, nogil(), pybind11::arg("sender"))
         .def("_applyDescriptions", &RTCPeerConnection::ApplyDescriptions, nogil(),
@@ -205,12 +211,12 @@ namespace python_webrtc {
   }
 
   webrtc::scoped_refptr<webrtc::PeerConnectionInterface> RTCPeerConnection::connection() {
-    std::lock_guard<std::mutex> lock(_connectionMutex);
+    const std::scoped_lock lock(_connectionMutex);
     return _jinglePeerConnection;
   }
 
   webrtc::scoped_refptr<webrtc::PeerConnectionInterface> RTCPeerConnection::closedConnection() {
-    std::lock_guard<std::mutex> lock(_connectionMutex);
+    const std::scoped_lock lock(_connectionMutex);
     return _closedConnection;
   }
 
@@ -218,16 +224,16 @@ namespace python_webrtc {
     return !connection();
   }
 
-  template<typename T, typename U>
+  template <typename T, typename U>
   std::shared_ptr<T> RTCPeerConnection::Wrap(Wrappers<T, U> &wrappers, webrtc::scoped_refptr<U> object) {
-    if (!onLibwebrtcThread) {
+    if (!OnLibwebrtcThread()) {
       // on the signaling thread, which wraps objects too: the lock isn't held while waiting for it
-      gil_release_if_held release;
-      return _factory->_signalingThread->BlockingCall([&]() { return Wrap(wrappers, std::move(object)); });
+      const gil_release_if_held release;
+      return _factory->signalingThread()->BlockingCall([&]() { return Wrap(wrappers, std::move(object)); });
     }
     std::shared_ptr<T> wrapper;
     {
-      std::lock_guard<std::mutex> lock(_wrappersMutex);
+      const std::scoped_lock lock(_wrappersMutex);
       auto it = wrappers.find(object.get());
       if (it != wrappers.end()) {
         return it->second;
@@ -240,19 +246,19 @@ namespace python_webrtc {
     return wrapper;
   }
 
-  template<typename T, typename U>
-  std::vector<std::shared_ptr<T>> RTCPeerConnection::Sync(
-      Wrappers<T, U> &wrappers, const std::vector<webrtc::scoped_refptr<U>> &objects) {
-    if (!onLibwebrtcThread) {
+  template <typename T, typename U>
+  std::vector<std::shared_ptr<T>> RTCPeerConnection::Sync(Wrappers<T, U> &wrappers,
+                                                          const std::vector<webrtc::scoped_refptr<U>> &objects) {
+    if (!OnLibwebrtcThread()) {
       // see Wrap
-      gil_release_if_held release;
-      return _factory->_signalingThread->BlockingCall([&]() { return Sync(wrappers, objects); });
+      const gil_release_if_held release;
+      return _factory->signalingThread()->BlockingCall([&]() { return Sync(wrappers, objects); });
     }
     std::vector<std::shared_ptr<T>> result;
     Wrappers<T, U> current;
     {
-      std::lock_guard<std::mutex> lock(_wrappersMutex);
-      for (const auto &object: objects) {
+      const std::scoped_lock lock(_wrappersMutex);
+      for (const auto &object : objects) {
         auto it = wrappers.find(object.get());
         auto wrapper = it != wrappers.end() ? it->second : T::holder().GetOrCreate(_factory, object);
         current[object.get()] = wrapper;
@@ -260,17 +266,17 @@ namespace python_webrtc {
       }
       std::swap(wrappers, current);
     }
-    for (const auto &wrapper: result) {
+    for (const auto &wrapper : result) {
       Adopt(wrapper);
     }
     // wrappers of the objects that are gone are released here, out of the lock
     return result;
   }
 
-  template<typename T, typename U>
+  template <typename T, typename U>
   std::vector<std::shared_ptr<T>> RTCPeerConnection::Unkept(const std::vector<webrtc::scoped_refptr<U>> &objects) {
     std::vector<std::shared_ptr<T>> result;
-    for (const auto &object: objects) {
+    for (const auto &object : objects) {
       auto wrapper = T::holder().GetOrCreate(_factory, object);
       Adopt(wrapper);
       result.push_back(std::move(wrapper));
@@ -286,7 +292,7 @@ namespace python_webrtc {
     decltype(_channels) channels;
     decltype(_dtlsTransports) dtlsTransports;
     {
-      std::lock_guard<std::mutex> lock(_wrappersMutex);
+      const std::scoped_lock lock(_wrappersMutex);
       std::swap(channels, _channels);
       std::swap(dtlsTransports, _dtlsTransports);
       std::swap(transceivers, _transceivers);
@@ -334,117 +340,121 @@ namespace python_webrtc {
     });
   }
 
-  static webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiverOf(
-      const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
-      const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender) {
-    for (const auto &transceiver: pc->GetTransceivers()) {
-      if (transceiver->sender() == sender) {
-        return transceiver;
+  namespace {
+
+    webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>
+    transceiverOf(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
+                  const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender) {
+      for (const auto &transceiver : pc->GetTransceivers()) {
+        if (transceiver->sender() == sender) {
+          return transceiver;
+        }
       }
+      return nullptr;
     }
-    return nullptr;
-  }
 
-  static webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiverOf(
-      const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
-      const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver) {
-    for (const auto &transceiver: pc->GetTransceivers()) {
-      if (transceiver->receiver() == receiver) {
-        return transceiver;
+    webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>
+    transceiverOf(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
+                  const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver) {
+      for (const auto &transceiver : pc->GetTransceivers()) {
+        if (transceiver->receiver() == receiver) {
+          return transceiver;
+        }
       }
+      return nullptr;
     }
-    return nullptr;
-  }
 
-  // The media section a transceiver negotiated, in the current remote (for the sender) or local (for the receiver)
-  // description; null until it's negotiated, and when it's rejected. On the signaling thread.
-  static const webrtc::MediaContentDescription *negotiatedContent(
-      const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
-      const webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> &transceiver, bool remote) {
-    auto mid = transceiver ? transceiver->mid() : std::nullopt;
-    auto description = remote ? pc->current_remote_description() : pc->current_local_description();
-    auto content = mid && description ? description->description()->GetContentByName(*mid) : nullptr;
-    return content && !content->rejected ? content->media_description() : nullptr;
-  }
+    // The media section a transceiver negotiated, in the current remote (for the sender) or local (for the receiver)
+    // description; null until it's negotiated, and when it's rejected. On the signaling thread.
+    const webrtc::MediaContentDescription *
+    negotiatedContent(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
+                      const webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> &transceiver, bool remote) {
+      auto mid = transceiver ? transceiver->mid() : std::nullopt;
+      const auto *description = remote ? pc->current_remote_description() : pc->current_local_description();
+      const auto *content =
+          mid && (description != nullptr) ? description->description()->GetContentByName(*mid) : nullptr;
+      return (content != nullptr) && !content->rejected ? content->media_description() : nullptr;
+    }
 
-  static bool isSupported(const webrtc::Codec &codec, const webrtc::RtpCapabilities &capabilities,
-                          webrtc::MediaType kind) {
-    return std::any_of(capabilities.codecs.begin(), capabilities.codecs.end(), [&](const auto &capability) {
-      return absl::EqualsIgnoreCase(capability.name, codec.name) &&
-             capability.clock_rate == codec.clockrate &&
-             (kind != webrtc::MediaType::AUDIO || static_cast<size_t>(capability.num_channels.value_or(1)) == codec.channels);
-    });
-  }
+    bool isSupported(const webrtc::Codec &codec, const webrtc::RtpCapabilities &capabilities, webrtc::MediaType kind) {
+      return std::ranges::any_of(capabilities.codecs, [&](const auto &capability) {
+        return absl::EqualsIgnoreCase(capability.name, codec.name) && capability.clock_rate == codec.clockrate &&
+               (kind != webrtc::MediaType::AUDIO ||
+                static_cast<size_t>(capability.num_channels.value_or(1)) == codec.channels);
+      });
+    }
 
-  // the codecs of a media section this side can use (the remote peer may list unknown ones)
-  static std::vector<webrtc::RtpCodecParameters> supportedCodecs(
-      const webrtc::MediaContentDescription &content, const webrtc::RtpCapabilities &capabilities) {
-    std::set<int> kept;
-    for (const auto &codec: content.codecs()) {
-      if (codec.GetResiliencyType() != webrtc::Codec::ResiliencyType::kRtx &&
-          isSupported(codec, capabilities, content.type())) {
-        kept.insert(codec.id);
+    // the codecs of a media section this side can use (the remote peer may list unknown ones)
+    std::vector<webrtc::RtpCodecParameters> supportedCodecs(const webrtc::MediaContentDescription &content,
+                                                            const webrtc::RtpCapabilities &capabilities) {
+      std::set<int> kept;
+      for (const auto &codec : content.codecs()) {
+        if (codec.GetResiliencyType() != webrtc::Codec::ResiliencyType::kRtx &&
+            isSupported(codec, capabilities, content.type())) {
+          kept.insert(codec.id);
+        }
       }
-    }
-    std::vector<webrtc::RtpCodecParameters> codecs;
-    for (const auto &codec: content.codecs()) {
-      // a retransmission codec goes with the codec it retransmits
-      int associated;
-      bool rtx = codec.GetResiliencyType() == webrtc::Codec::ResiliencyType::kRtx;
-      if (rtx ? codec.GetParam(webrtc::kCodecParamAssociatedPayloadType, &associated) && kept.count(associated)
-              : kept.count(codec.id)) {
-        codecs.push_back(codec.ToCodecParameters());
+      std::vector<webrtc::RtpCodecParameters> codecs;
+      for (const auto &codec : content.codecs()) {
+        // a retransmission codec goes with the codec it retransmits
+        int associated = 0;
+        const bool rtx = codec.GetResiliencyType() == webrtc::Codec::ResiliencyType::kRtx;
+        const auto *associatedParam = static_cast<const char *>(webrtc::kCodecParamAssociatedPayloadType);
+        if (rtx ? codec.GetParam(associatedParam, &associated) && kept.contains(associated) : kept.contains(codec.id)) {
+          codecs.push_back(codec.ToCodecParameters());
+        }
       }
+      return codecs;
     }
-    return codecs;
-  }
 
-  webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> RTCPeerConnection::TransceiverOf(
-      const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender) {
+  } // namespace
+
+  webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>
+  RTCPeerConnection::TransceiverOf(const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender) {
     auto pc = connection();
     return pc ? transceiverOf(pc, sender) : nullptr;
   }
 
-  std::vector<webrtc::RtpCodecParameters> RTCPeerConnection::NegotiatedCodecs(
-      const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender) {
+  std::vector<webrtc::RtpCodecParameters>
+  RTCPeerConnection::NegotiatedCodecs(const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender) {
     auto pc = connection();
     if (!pc) {
       return {};
     }
-    return _factory->_signalingThread->BlockingCall([&]() {
-      auto content = negotiatedContent(pc, transceiverOf(pc, sender), true);
+    return _factory->signalingThread()->BlockingCall([&]() {
+      const auto *content = negotiatedContent(pc, transceiverOf(pc, sender), true);
       return content ? supportedCodecs(*content, _factory->factory()->GetRtpSenderCapabilities(content->type()))
                      : std::vector<webrtc::RtpCodecParameters>();
     });
   }
 
-  std::vector<webrtc::RtpCodecParameters> RTCPeerConnection::NegotiatedCodecs(
-      const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver) {
+  std::vector<webrtc::RtpCodecParameters>
+  RTCPeerConnection::NegotiatedCodecs(const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver) {
     auto pc = connection();
     if (!pc) {
       return {};
     }
-    return _factory->_signalingThread->BlockingCall([&]() {
-      auto content = negotiatedContent(pc, transceiverOf(pc, receiver), false);
+    return _factory->signalingThread()->BlockingCall([&]() {
+      const auto *content = negotiatedContent(pc, transceiverOf(pc, receiver), false);
       return content ? supportedCodecs(*content, _factory->factory()->GetRtpReceiverCapabilities(content->type()))
                      : std::vector<webrtc::RtpCodecParameters>();
     });
   }
 
-  std::vector<webrtc::RtpExtension> RTCPeerConnection::NegotiatedHeaderExtensions(
-      const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver) {
+  std::vector<webrtc::RtpExtension>
+  RTCPeerConnection::NegotiatedHeaderExtensions(const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver) {
     auto pc = connection();
     if (!pc) {
       return {};
     }
-    return _factory->_signalingThread->BlockingCall([&]() {
-      auto content = negotiatedContent(pc, transceiverOf(pc, receiver), false);
+    return _factory->signalingThread()->BlockingCall([&]() {
+      const auto *content = negotiatedContent(pc, transceiverOf(pc, receiver), false);
       return content ? content->rtp_header_extensions() : std::vector<webrtc::RtpExtension>();
     });
   }
 
-  webrtc::scoped_refptr<webrtc::PeerConnectionInterface> RTCPeerConnection::StatsConnection(
-      const std::function<void(RTCCallbackException)> &onFailure) {
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface>
+  RTCPeerConnection::StatsConnection(const std::function<void(RTCCallbackException)> &onFailure) {
     auto pc = connection();
     if (!pc) {
       pc = closedConnection();
@@ -488,10 +498,9 @@ namespace python_webrtc {
     pc->GetStats(receiver, webrtc::make_ref_counted<StatsCollectorCallback>(onSuccess, std::move(excluded)));
   }
 
-  void RTCPeerConnection::CreateOffer(
-      std::function<void(RTCSessionDescription)> &onSuccess,
-      std::function<void(RTCCallbackException)> &onFailure,
-      bool iceRestart, bool voiceActivityDetection) {
+  void RTCPeerConnection::CreateOffer(std::function<void(RTCSessionDescription)> &onSuccess,
+                                      std::function<void(RTCCallbackException)> &onFailure, bool iceRestart,
+                                      bool voiceActivityDetection) {
     auto pc = connection();
     auto state = pc ? pc->signaling_state() : SignalingState::kClosed;
     if (state == SignalingState::kClosed) {
@@ -500,107 +509,112 @@ namespace python_webrtc {
     }
     if (state != SignalingState::kStable && state != SignalingState::kHaveLocalOffer) {
       onFailure(RTCCallbackException(webrtc::RTCErrorType::INVALID_STATE,
-          "Failed to execute 'createOffer' on 'RTCPeerConnection': Called in wrong state: " +
-          std::string(webrtc::PeerConnectionInterface::AsString(state))));
+                                     "Failed to execute 'createOffer' on 'RTCPeerConnection': Called in wrong state: " +
+                                         std::string(webrtc::PeerConnectionInterface::AsString(state))));
       return;
     }
 
-    auto observer = new webrtc::RefCountedObject<CreateSessionDescriptionObserver>(weak_from_this(), onSuccess, onFailure);
+    auto observer = webrtc::make_ref_counted<CreateSessionDescriptionObserver>(weak_from_this(), onSuccess, onFailure);
 
     auto options = webrtc::PeerConnectionInterface::RTCOfferAnswerOptions();
     options.ice_restart = iceRestart;
     options.voice_activity_detection = voiceActivityDetection;
 
-    pc->CreateOffer(observer, options);
+    pc->CreateOffer(observer.get(), options);
   }
 
-  void RTCPeerConnection::CreateAnswer(
-      std::function<void(RTCSessionDescription)> &onSuccess,
-      std::function<void(RTCCallbackException)> &onFailure,
-      bool voiceActivityDetection) {
+  void RTCPeerConnection::CreateAnswer(std::function<void(RTCSessionDescription)> &onSuccess,
+                                       std::function<void(RTCCallbackException)> &onFailure,
+                                       bool voiceActivityDetection) {
     auto pc = connection();
     if (!pc || pc->signaling_state() == SignalingState::kClosed) {
       onFailure(RTCCallbackException(closedError("createAnswer")));
       return;
     }
 
-    auto observer = new webrtc::RefCountedObject<CreateSessionDescriptionObserver>(weak_from_this(), onSuccess, onFailure);
+    auto observer = webrtc::make_ref_counted<CreateSessionDescriptionObserver>(weak_from_this(), onSuccess, onFailure);
     auto options = webrtc::PeerConnectionInterface::RTCOfferAnswerOptions();
     options.voice_activity_detection = voiceActivityDetection;
-    pc->CreateAnswer(observer, options);
+    pc->CreateAnswer(observer.get(), options);
   }
 
   void RTCPeerConnection::SaveCreatedDescription(const RTCSessionDescriptionInit &description) {
-    std::lock_guard<std::mutex> lock(_createdMutex);
+    const std::scoped_lock lock(_createdMutex);
     (description.type == webrtc::SdpType::kOffer ? _lastOffer : _lastAnswer) = description.sdp;
   }
 
-  // A remote TCP candidate on a port Fetch blocks is ignored, as the WebRTC specification requires
-  // (https://fetch.spec.whatwg.org/#bad-port)
-  static bool isBlockedCandidate(const webrtc::Candidate &candidate) {
-    static const std::set<int> badPorts = {
-        0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104,
-        109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526,
-        530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045,
-        4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080};
-    return candidate.protocol() == "tcp" && badPorts.count(candidate.address().port()) > 0;
-  }
+  namespace {
 
-  static void removeBlockedCandidates(webrtc::SessionDescriptionInterface &description) {
-    std::vector<std::unique_ptr<webrtc::IceCandidate>> blocked;
-    for (size_t i = 0; i < description.number_of_mediasections(); ++i) {
-      auto candidates = description.candidates(i);
-      for (size_t j = 0; candidates && j < candidates->count(); ++j) {
-        auto candidate = candidates->at(j);
-        if (isBlockedCandidate(candidate->candidate())) {
-          blocked.push_back(webrtc::CreateIceCandidate(
-              candidate->sdp_mid(), candidate->sdp_mline_index(), candidate->candidate()));
+    // A remote TCP candidate on a port Fetch blocks is ignored, as the WebRTC specification requires
+    // (https://fetch.spec.whatwg.org/#bad-port)
+    bool isBlockedCandidate(const webrtc::Candidate &candidate) {
+      static const std::set<int> badPorts = {
+          0,    1,    7,    9,    11,   13,   15,   17,   19,   20,   21,   22,   23,   25,   37,   42,   43,
+          53,   69,   77,   79,   87,   95,   101,  102,  103,  104,  109,  110,  111,  113,  115,  117,  119,
+          123,  135,  137,  139,  143,  161,  179,  389,  427,  465,  512,  513,  514,  515,  526,  530,  531,
+          532,  540,  548,  554,  556,  563,  587,  601,  636,  989,  990,  993,  995,  1719, 1720, 1723, 2049,
+          3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080};
+      return candidate.protocol() == "tcp" && badPorts.contains(candidate.address().port());
+    }
+
+    void removeBlockedCandidates(webrtc::SessionDescriptionInterface &description) {
+      std::vector<std::unique_ptr<webrtc::IceCandidate>> blocked;
+      for (size_t i = 0; i < description.number_of_mediasections(); ++i) {
+        const auto *candidates = description.candidates(i);
+        for (size_t j = 0; (candidates != nullptr) && j < candidates->count(); ++j) {
+          const auto *candidate = candidates->at(j);
+          if (isBlockedCandidate(candidate->candidate())) {
+            blocked.push_back(
+                webrtc::CreateIceCandidate(candidate->sdp_mid(), candidate->sdp_mline_index(), candidate->candidate()));
+          }
         }
       }
+      for (const auto &candidate : blocked) {
+        description.RemoveCandidate(candidate.get());
+      }
     }
-    for (const auto &candidate: blocked) {
-      description.RemoveCandidate(candidate.get());
-    }
-  }
 
-  // the line of an SDP parse error, counting from 1
-  static std::optional<int> lineNumber(const std::string &sdp, const std::string &line) {
-    auto pos = line.empty() ? std::string::npos : sdp.find(line);
-    if (pos == std::string::npos) {
-      return std::nullopt;
+    // the line of an SDP parse error, counting from 1
+    std::optional<int> lineNumber(const std::string &sdp, const std::string &line) {
+      auto pos = line.empty() ? std::string::npos : sdp.find(line);
+      if (pos == std::string::npos) {
+        return std::nullopt;
+      }
+      return 1 + static_cast<int>(std::count(sdp.begin(), sdp.begin() + static_cast<std::ptrdiff_t>(pos), '\n'));
     }
-    return 1 + static_cast<int>(std::count(sdp.begin(), sdp.begin() + static_cast<std::ptrdiff_t>(pos), '\n'));
-  }
 
-  static std::unique_ptr<webrtc::SessionDescriptionInterface> parseDescription(
-      const RTCSessionDescriptionInit &init, std::optional<RTCCallbackException> &error) {
-    webrtc::SdpParseError parseError;
-    auto description = webrtc::CreateSessionDescription(init.type, init.sdp, &parseError);
-    if (!description) {
-      webrtc::RTCError rtcError(webrtc::RTCErrorType::OPERATION_ERROR_WITH_DATA,
-                                "Failed to parse the session description: " + parseError.description +
-                                (parseError.line.empty() ? "" : " (" + parseError.line + ")"));
-      rtcError.set_error_detail(webrtc::RTCErrorDetailType::SDP_SYNTAX_ERROR);
-      error.emplace(std::move(rtcError), lineNumber(init.sdp, parseError.line));
+    std::unique_ptr<webrtc::SessionDescriptionInterface> parseDescription(const RTCSessionDescriptionInit &init,
+                                                                          std::optional<RTCCallbackException> &error) {
+      webrtc::SdpParseError parseError;
+      auto description = webrtc::CreateSessionDescription(init.type, init.sdp, &parseError);
+      if (!description) {
+        webrtc::RTCError rtcError(webrtc::RTCErrorType::OPERATION_ERROR_WITH_DATA,
+                                  "Failed to parse the session description: " + parseError.description +
+                                      (parseError.line.empty() ? "" : " (" + parseError.line + ")"));
+        rtcError.set_error_detail(webrtc::RTCErrorDetailType::SDP_SYNTAX_ERROR);
+        error.emplace(std::move(rtcError), lineNumber(init.sdp, parseError.line));
+      }
+      return description;
     }
-    return description;
-  }
 
-  static bool canSetLocal(webrtc::SdpType type, RTCPeerConnection::SignalingState state) {
-    using SignalingState = RTCPeerConnection::SignalingState;
-    if (type == webrtc::SdpType::kOffer) {
-      return state == SignalingState::kStable || state == SignalingState::kHaveLocalOffer;
+    bool canSetLocal(webrtc::SdpType type, RTCPeerConnection::SignalingState state) {
+      using SignalingState = RTCPeerConnection::SignalingState;
+      if (type == webrtc::SdpType::kOffer) {
+        return state == SignalingState::kStable || state == SignalingState::kHaveLocalOffer;
+      }
+      if (type == webrtc::SdpType::kRollback) {
+        return state == SignalingState::kHaveLocalOffer || state == SignalingState::kHaveLocalPrAnswer;
+      }
+      return state == SignalingState::kHaveRemoteOffer || state == SignalingState::kHaveLocalPrAnswer;
     }
-    if (type == webrtc::SdpType::kRollback) {
-      return state == SignalingState::kHaveLocalOffer || state == SignalingState::kHaveLocalPrAnswer;
-    }
-    return state == SignalingState::kHaveRemoteOffer || state == SignalingState::kHaveLocalPrAnswer;
-  }
 
-  std::function<void(webrtc::RTCError)> RTCPeerConnection::Completion(
-      std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
-      const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, DescriptionKind kind) {
-    bool remote = kind == DescriptionKind::kRemote;
+  } // namespace
+
+  std::function<void(webrtc::RTCError)>
+  RTCPeerConnection::Completion(std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
+                                const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
+                                DescriptionKind kind) {
+    const bool remote = kind == DescriptionKind::kRemote;
     // a local description starts gathering, the candidates come after it
     auto held = std::make_shared<HeldOperationEvents>(pc, IceTransports(), remote ? nullptr : shared_from_this());
     if (remote) {
@@ -622,7 +636,7 @@ namespace python_webrtc {
         }
         onSuccess();
         // their gathering events come after the operation
-        for (const auto &iceTransport: created) {
+        for (const auto &iceTransport : created) {
           iceTransport->CreatedByDescription();
         }
       } else {
@@ -633,10 +647,9 @@ namespace python_webrtc {
     };
   }
 
-  void RTCPeerConnection::SetLocalDescription(
-      std::function<void()> &onSuccess,
-      std::function<void(RTCCallbackException)> &onFailure,
-      const std::optional<RTCSessionDescriptionInit> &init) {
+  void RTCPeerConnection::SetLocalDescription(std::function<void()> &onSuccess,
+                                              std::function<void(RTCCallbackException)> &onFailure,
+                                              const std::optional<RTCSessionDescriptionInit> &init) {
     auto pc = connection();
     auto state = pc ? pc->signaling_state() : SignalingState::kClosed;
     if (state == SignalingState::kClosed) {
@@ -644,7 +657,8 @@ namespace python_webrtc {
       return;
     }
     if (init && !canSetLocal(init->type, state)) {
-      onFailure(RTCCallbackException(webrtc::RTCErrorType::INVALID_STATE,
+      onFailure(RTCCallbackException(
+          webrtc::RTCErrorType::INVALID_STATE,
           "Failed to execute 'setLocalDescription' on 'RTCPeerConnection': The description type doesn't match "
           "the signaling state."));
       return;
@@ -652,10 +666,13 @@ namespace python_webrtc {
 
     if (!init || (init->sdp.empty() && init->type != webrtc::SdpType::kRollback)) {
       // without a type, an answer in the states that wait for one, an offer otherwise
-      bool waitsForAnswer = state == SignalingState::kHaveRemoteOffer || state == SignalingState::kHaveLocalPrAnswer;
-      auto type = init ? init->type : (waitsForAnswer ? webrtc::SdpType::kAnswer : webrtc::SdpType::kOffer);
+      const bool waitsForAnswer =
+          state == SignalingState::kHaveRemoteOffer || state == SignalingState::kHaveLocalPrAnswer;
+      const auto implicitType = waitsForAnswer ? webrtc::SdpType::kAnswer : webrtc::SdpType::kOffer;
+      auto type = init ? init->type : implicitType;
       auto complete = Completion(onSuccess, onFailure, pc, DescriptionKind::kLocal);
-      if (type == webrtc::SdpType::kOffer || (type == webrtc::SdpType::kAnswer && state == SignalingState::kHaveRemoteOffer)) {
+      if (type == webrtc::SdpType::kOffer ||
+          (type == webrtc::SdpType::kAnswer && state == SignalingState::kHaveRemoteOffer)) {
         // libwebrtc creates the offer or the answer the signaling state calls for
         pc->SetLocalDescription(webrtc::make_ref_counted<SetLocalDescriptionObserver>(std::move(complete)));
       } else {
@@ -665,10 +682,11 @@ namespace python_webrtc {
     }
 
     if (init->type != webrtc::SdpType::kRollback) {
-      std::lock_guard<std::mutex> lock(_createdMutex);
+      const std::scoped_lock lock(_createdMutex);
       auto &last = init->type == webrtc::SdpType::kOffer ? _lastOffer : _lastAnswer;
       if (init->sdp != last) {
-        onFailure(RTCCallbackException(webrtc::RTCErrorType::INVALID_MODIFICATION,
+        onFailure(RTCCallbackException(
+            webrtc::RTCErrorType::INVALID_MODIFICATION,
             "Failed to execute 'setLocalDescription' on 'RTCPeerConnection': The SDP does not match the previously "
             "generated SDP for this type"));
         return;
@@ -682,12 +700,12 @@ namespace python_webrtc {
       return;
     }
     pc->SetLocalDescription(std::move(description), webrtc::make_ref_counted<SetLocalDescriptionObserver>(
-        Completion(onSuccess, onFailure, pc, DescriptionKind::kLocal)));
+                                                        Completion(onSuccess, onFailure, pc, DescriptionKind::kLocal)));
   }
 
-  void RTCPeerConnection::SetImplicitAnswer(
-      const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, webrtc::SdpType type,
-      std::function<void(webrtc::RTCError)> complete, const std::function<void(RTCCallbackException)> &onFailure) {
+  void RTCPeerConnection::SetImplicitAnswer(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
+                                            webrtc::SdpType type, std::function<void(webrtc::RTCError)> complete,
+                                            const std::function<void(RTCCallbackException)> &onFailure) {
     auto observer = webrtc::make_ref_counted<SetLocalDescriptionObserver>(std::move(complete));
     auto apply = [pc, observer, type, onFailure](const std::string &sdp) {
       std::optional<RTCCallbackException> error;
@@ -700,25 +718,24 @@ namespace python_webrtc {
     };
     std::string lastAnswer;
     {
-      std::lock_guard<std::mutex> lock(_createdMutex);
+      const std::scoped_lock lock(_createdMutex);
       lastAnswer = _lastAnswer;
     }
     if (!lastAnswer.empty()) {
       apply(lastAnswer);
       return;
     }
-    std::function<void(RTCSessionDescription)> created = [apply](RTCSessionDescription answer) {
+    std::function<void(RTCSessionDescription)> created = [apply](const RTCSessionDescription &answer) {
       apply(answer.init().sdp);
     };
     std::function<void(RTCCallbackException)> failed = onFailure;
-    pc->CreateAnswer(new webrtc::RefCountedObject<CreateSessionDescriptionObserver>(weak_from_this(), created, failed),
-                     webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
+    auto answerObserver = webrtc::make_ref_counted<CreateSessionDescriptionObserver>(weak_from_this(), created, failed);
+    pc->CreateAnswer(answerObserver.get(), webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
   }
 
-  void RTCPeerConnection::SetRemoteDescription(
-      std::function<void()> &onSuccess,
-      std::function<void(RTCCallbackException)> &onFailure,
-      const RTCSessionDescriptionInit &init) {
+  void RTCPeerConnection::SetRemoteDescription(std::function<void()> &onSuccess,
+                                               std::function<void(RTCCallbackException)> &onFailure,
+                                               const RTCSessionDescriptionInit &init) {
     auto pc = connection();
     auto state = pc ? pc->signaling_state() : SignalingState::kClosed;
     if (state == SignalingState::kClosed) {
@@ -727,18 +744,21 @@ namespace python_webrtc {
     }
 
     // the state is checked before the SDP is parsed
-    bool answer = init.type == webrtc::SdpType::kAnswer || init.type == webrtc::SdpType::kPrAnswer;
-    bool rollback = init.type == webrtc::SdpType::kRollback;
+    const bool answer = init.type == webrtc::SdpType::kAnswer || init.type == webrtc::SdpType::kPrAnswer;
+    const bool rollback = init.type == webrtc::SdpType::kRollback;
     if ((answer && state != SignalingState::kHaveLocalOffer && state != SignalingState::kHaveRemotePrAnswer) ||
         (rollback && state != SignalingState::kHaveRemoteOffer && state != SignalingState::kHaveRemotePrAnswer)) {
-      onFailure(RTCCallbackException(webrtc::RTCErrorType::INVALID_STATE,
+      onFailure(RTCCallbackException(
+          webrtc::RTCErrorType::INVALID_STATE,
           "Failed to execute 'setRemoteDescription' on 'RTCPeerConnection': Called in wrong state: " +
-          std::string(webrtc::PeerConnectionInterface::AsString(state))));
+              std::string(webrtc::PeerConnectionInterface::AsString(state))));
       return;
     }
 
-    auto complete = Completion(onSuccess, onFailure, pc, DescriptionKind::kRemote);
-    auto apply = [init, complete, onFailure](webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc) {
+    // shared by the rollback and the application of the description
+    auto complete = std::make_shared<const std::function<void(webrtc::RTCError)>>(
+        Completion(onSuccess, onFailure, pc, DescriptionKind::kRemote));
+    auto apply = [init, complete, onFailure](const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
       std::optional<RTCCallbackException> error;
       auto description = parseDescription(init, error);
       if (error) {
@@ -746,7 +766,9 @@ namespace python_webrtc {
         return;
       }
       removeBlockedCandidates(*description);
-      pc->SetRemoteDescription(std::move(description), webrtc::make_ref_counted<SetRemoteDescriptionObserver>(complete));
+      pc->SetRemoteDescription(std::move(description),
+                               webrtc::make_ref_counted<SetRemoteDescriptionObserver>(
+                                   [complete](webrtc::RTCError error) { (*complete)(std::move(error)); }));
     };
 
     if (init.type == webrtc::SdpType::kOffer && state == SignalingState::kHaveLocalOffer) {
@@ -757,9 +779,9 @@ namespace python_webrtc {
             auto self = weak.lock();
             auto pc = self ? self->connection() : nullptr;
             if (!rollbackError.ok()) {
-              complete(std::move(rollbackError));
+              (*complete)(std::move(rollbackError));
             } else if (!pc) {
-              complete(closedError("setRemoteDescription"));
+              (*complete)(closedError("setRemoteDescription"));
             } else {
               apply(pc);
             }
@@ -772,99 +794,119 @@ namespace python_webrtc {
     apply(pc);
   }
 
-  // End-of-candidates candidates of a local description, one per transport (the first media section of each)
-  static std::vector<IceCandidateInit> endOfCandidates(const webrtc::SessionDescriptionInterface *description) {
-    std::vector<IceCandidateInit> result;
-    if (!description) {
+  namespace {
+
+    // End-of-candidates candidates of a local description, one per transport (the first media section of each)
+    std::vector<IceCandidateInit> endOfCandidates(const webrtc::SessionDescriptionInterface *description) {
+      std::vector<IceCandidateInit> result;
+      if (description == nullptr) {
+        return result;
+      }
+      const auto *session = description->description();
+      const auto *bundle = session->GetGroupByName(static_cast<const char *>(webrtc::GROUP_TYPE_BUNDLE));
+      bool bundleDone = false;
+      int index = 0;
+      for (const auto &content : session->contents()) {
+        auto mid = content.mid();
+        const bool bundled = (bundle != nullptr) && bundle->HasContentName(mid);
+        if (!content.rejected && !(bundled && bundleDone)) {
+          const auto *transport = session->GetTransportInfoByName(mid);
+          std::optional<std::string> ufrag;
+          if ((transport != nullptr) && !transport->description.ice_ufrag.empty()) {
+            ufrag = transport->description.ice_ufrag;
+          }
+          result.emplace_back(mid, index, ufrag);
+          bundleDone = bundleDone || bundled;
+        }
+        ++index;
+      }
       return result;
     }
-    auto session = description->description();
-    auto bundle = session->GetGroupByName(webrtc::GROUP_TYPE_BUNDLE);
-    bool bundleDone = false;
-    int index = 0;
-    for (const auto &content: session->contents()) {
-      auto mid = content.mid();
-      bool bundled = bundle && bundle->HasContentName(mid);
-      if (!content.rejected && !(bundled && bundleDone)) {
-        auto transport = session->GetTransportInfoByName(mid);
-        std::optional<std::string> ufrag;
-        if (transport && !transport->description.ice_ufrag.empty()) {
-          ufrag = transport->description.ice_ufrag;
+
+    constexpr std::string_view kMidPrefix = "a=mid:";
+
+    // Adds a=end-of-candidates to the media sections of a description (of these mids, or all of them)
+    std::string addEndOfCandidates(const std::string &sdp, const std::set<std::string> *mids = nullptr) {
+      std::string result;
+      bool inMedia = false;
+      bool rejected = false;
+      bool ended = false;
+      std::string mid;
+      auto endSection = [&]() {
+        if (inMedia && !rejected && !ended && (!mids || mids->contains(mid))) {
+          result += "a=end-of-candidates\r\n";
         }
-        result.emplace_back(mid, index, ufrag);
-        bundleDone = bundleDone || bundled;
+      };
+      size_t pos = 0;
+      while (pos < sdp.size()) {
+        auto end = sdp.find("\r\n", pos);
+        auto line = sdp.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+        if (line.starts_with("m=")) {
+          endSection();
+          inMedia = true;
+          ended = false;
+          // a rejected media section has port 0
+          auto space = line.find(' ');
+          rejected = space != std::string::npos && line.compare(space + 1, 2, "0 ") == 0;
+          mid.clear();
+        } else if (line == "a=end-of-candidates") {
+          ended = true;
+        } else if (line.starts_with(kMidPrefix)) {
+          mid = line.substr(kMidPrefix.size());
+        }
+        result += line + "\r\n";
+        if (end == std::string::npos) {
+          break;
+        }
+        pos = end + 2;
       }
-      ++index;
+      endSection();
+      return result;
     }
-    return result;
-  }
 
-  // Adds a=end-of-candidates to the media sections of a description (of these mids, or all of them)
-  static std::string addEndOfCandidates(const std::string &sdp, const std::set<std::string> *mids = nullptr) {
-    std::string result;
-    bool inMedia = false, rejected = false, ended = false;
-    std::string mid;
-    auto endSection = [&]() {
-      if (inMedia && !rejected && !ended && (!mids || mids->count(mid))) {
-        result += "a=end-of-candidates\r\n";
-      }
-    };
-    size_t pos = 0;
-    while (pos < sdp.size()) {
-      auto end = sdp.find("\r\n", pos);
-      auto line = sdp.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
-      if (line.rfind("m=", 0) == 0) {
-        endSection();
-        inMedia = true;
-        ended = false;
-        // a rejected media section has port 0
-        auto space = line.find(' ');
-        rejected = space != std::string::npos && line.compare(space + 1, 2, "0 ") == 0;
-        mid.clear();
-      } else if (line == "a=end-of-candidates") {
-        ended = true;
-      } else if (line.rfind("a=mid:", 0) == 0) {
-        mid = line.substr(6);
-      }
-      result += line + "\r\n";
-      if (end == std::string::npos) {
-        break;
-      }
-      pos = end + 2;
+    std::vector<const webrtc::SessionDescriptionInterface *>
+    liveDescriptions(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
+      return {pc->current_local_description(), pc->current_remote_description(), pc->pending_local_description(),
+              pc->pending_remote_description()};
     }
-    endSection();
-    return result;
-  }
 
-  static std::vector<const webrtc::SessionDescriptionInterface *> liveDescriptions(
-      const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
-    return {pc->current_local_description(), pc->current_remote_description(),
-            pc->pending_local_description(), pc->pending_remote_description()};
-  }
+  } // namespace
 
-  RTCPeerConnection::DescriptionView RTCPeerConnection::ReadDescription(
-      const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, DescriptionKind kind) {
+  RTCPeerConnection::DescriptionView
+  RTCPeerConnection::ReadDescription(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
+                                     DescriptionKind kind) {
     DescriptionView view;
     switch (kind) {
-      case DescriptionKind::kLocal: view.description = pc->local_description(); break;
-      case DescriptionKind::kRemote: view.description = pc->remote_description(); break;
-      case DescriptionKind::kCurrentLocal: view.description = pc->current_local_description(); break;
-      case DescriptionKind::kCurrentRemote: view.description = pc->current_remote_description(); break;
-      case DescriptionKind::kPendingLocal: view.description = pc->pending_local_description(); break;
-      case DescriptionKind::kPendingRemote: view.description = pc->pending_remote_description(); break;
+    case DescriptionKind::kLocal:
+      view.description = pc->local_description();
+      break;
+    case DescriptionKind::kRemote:
+      view.description = pc->remote_description();
+      break;
+    case DescriptionKind::kCurrentLocal:
+      view.description = pc->current_local_description();
+      break;
+    case DescriptionKind::kCurrentRemote:
+      view.description = pc->current_remote_description();
+      break;
+    case DescriptionKind::kPendingLocal:
+      view.description = pc->pending_local_description();
+      break;
+    case DescriptionKind::kPendingRemote:
+      view.description = pc->pending_remote_description();
+      break;
     }
-    if (!view.description) {
+    if (view.description == nullptr) {
       return view;
     }
-    auto &init = view.init.emplace(
-        RTCSessionDescriptionInit::Wrap(const_cast<webrtc::SessionDescriptionInterface *>(view.description)));
-    bool local = kind == DescriptionKind::kLocal || kind == DescriptionKind::kCurrentLocal ||
-                 kind == DescriptionKind::kPendingLocal;
+    auto &init = view.init.emplace(RTCSessionDescriptionInit::Wrap(view.description));
+    const bool local = kind == DescriptionKind::kLocal || kind == DescriptionKind::kCurrentLocal ||
+                       kind == DescriptionKind::kPendingLocal;
     if (local && pc->ice_gathering_state() == IceGatheringState::kIceGatheringComplete) {
       init.sdp = addEndOfCandidates(init.sdp);
     } else if (!local && view.description == pc->remote_description()) {
       // the end of remote candidates, from addIceCandidate
-      std::lock_guard<std::mutex> lock(_remoteEndOfCandidatesMutex);
+      const std::scoped_lock lock(_remoteEndOfCandidatesMutex);
       if (_remoteEndOfCandidatesDescription == view.description && !_remoteEndOfCandidates.empty()) {
         init.sdp = addEndOfCandidates(init.sdp, &_remoteEndOfCandidates);
       }
@@ -883,7 +925,7 @@ namespace python_webrtc {
     bool shown = false;
     {
       // the descriptions as the last event that changed them left them, until the next one
-      std::lock_guard<std::mutex> lock(_descriptionsMutex);
+      const std::scoped_lock lock(_descriptionsMutex);
       if (HasListeners() && _shown && _shownGeneration == _descriptionsGeneration) {
         view = _shown->kinds[static_cast<size_t>(kind)];
         live = _shown->live;
@@ -892,36 +934,37 @@ namespace python_webrtc {
     }
     if (!shown) {
       // the description is owned by the peer connection and must be read on the signaling thread
-      _factory->_signalingThread->BlockingCall([&]() {
+      _factory->signalingThread()->BlockingCall([&]() {
         view = ReadDescription(pc, kind);
         live = liveDescriptions(pc);
       });
     }
 
-    std::lock_guard<std::mutex> lock(_descriptionsMutex);
+    const std::scoped_lock lock(_descriptionsMutex);
     // while events are delivered, a description only changes with them; without events it's always current
-    bool refresh = shown || !HasListeners() || _descriptionsCachedGeneration != _descriptionsGeneration;
+    const bool refresh = shown || !HasListeners() || _descriptionsCachedGeneration != _descriptionsGeneration;
     _descriptionsCachedGeneration = _descriptionsGeneration;
     return FindOrCreateDescription(view, live, refresh);
   }
 
   std::shared_ptr<RTCSessionDescription> RTCPeerConnection::FindOrCreateDescription(
-      const DescriptionView &view, const std::vector<const webrtc::SessionDescriptionInterface *> &live,
-      bool refresh) {
+      const DescriptionView &view, const std::vector<const webrtc::SessionDescriptionInterface *> &live, bool refresh) {
     // descriptions that aren't set anymore are forgotten, so a new one at the same address is a new object
     std::vector<std::pair<const webrtc::SessionDescriptionInterface *, std::shared_ptr<RTCSessionDescription>>> kept;
     std::shared_ptr<RTCSessionDescription> result;
-    for (auto &entry: _descriptions) {
-      if (std::find(live.begin(), live.end(), entry.first) == live.end()) {
+    for (auto &entry : _descriptions) {
+      if (std::ranges::find(live, entry.first) == live.end()) {
         continue;
       }
-      auto &init = entry.second->init();
-      if (entry.first == view.description && init.type == view.init->type && (!refresh || init.sdp == view.init->sdp)) {
+      const auto &init = entry.second->init();
+      if (view.init && entry.first == view.description && init.type == view.init->type &&
+          (!refresh || init.sdp == view.init->sdp)) {
         result = entry.second;
       }
       kept.push_back(std::move(entry));
     }
-    if (view.description && !result) {
+    // set with the description
+    if (view.init && !result) {
       result = std::make_shared<RTCSessionDescription>(*view.init);
       kept.emplace_back(view.description, result);
     }
@@ -963,7 +1006,7 @@ namespace python_webrtc {
       snapshot.kinds[kind] = ReadDescription(pc, static_cast<DescriptionKind>(kind));
     }
     snapshot.live = liveDescriptions(pc);
-    std::lock_guard<std::mutex> lock(_descriptionsMutex);
+    const std::scoped_lock lock(_descriptionsMutex);
     auto id = ++_lastSnapshot;
     _snapshots.emplace(id, std::move(snapshot));
     while (_snapshots.size() > kMaxPendingSnapshots) {
@@ -973,7 +1016,7 @@ namespace python_webrtc {
   }
 
   void RTCPeerConnection::ApplyDescriptions(std::optional<uint64_t> snapshot) {
-    std::lock_guard<std::mutex> lock(_descriptionsMutex);
+    const std::scoped_lock lock(_descriptionsMutex);
     auto it = _snapshots.find(snapshot.value_or(_completionSnapshot));
     if (it == _snapshots.end()) {
       return;
@@ -985,7 +1028,7 @@ namespace python_webrtc {
   }
 
   void RTCPeerConnection::RefreshDescriptions() {
-    std::lock_guard<std::mutex> lock(_descriptionsMutex);
+    const std::scoped_lock lock(_descriptionsMutex);
     ++_descriptionsGeneration;
   }
 
@@ -994,8 +1037,8 @@ namespace python_webrtc {
     return pc ? pc->can_trickle_ice_candidates() : std::nullopt;
   }
 
-  std::shared_ptr<RTCRtpSender> RTCPeerConnection::AddTrack(
-      MediaStreamTrack &mediaStreamTrack, const std::vector<MediaStream *> &mediaStreams) {
+  std::shared_ptr<RTCRtpSender> RTCPeerConnection::AddTrack(MediaStreamTrack &mediaStreamTrack,
+                                                            const std::vector<MediaStream *> &mediaStreams) {
     auto pc = connection();
     if (!pc) {
       throw RTCException(closedError("addTrack"));
@@ -1003,7 +1046,7 @@ namespace python_webrtc {
 
     std::vector<std::string> streamIds;
     streamIds.reserve(mediaStreams.size());
-    for (auto const &stream: mediaStreams) {
+    for (const auto &stream : mediaStreams) {
       streamIds.emplace_back(stream->stream()->id());
     }
 
@@ -1016,8 +1059,9 @@ namespace python_webrtc {
     return Wrap(_senders, result.value());
   }
 
-  std::shared_ptr<RTCRtpSender> RTCPeerConnection::AddTrack(
-      MediaStreamTrack &mediaStreamTrack, std::optional<std::reference_wrapper<MediaStream>> mediaStream) {
+  std::shared_ptr<RTCRtpSender>
+  RTCPeerConnection::AddTrack(MediaStreamTrack &mediaStreamTrack,
+                              std::optional<std::reference_wrapper<MediaStream>> mediaStream) {
     std::vector<MediaStream *> mediaStreams;
     if (mediaStream) {
       mediaStreams.push_back(&mediaStream->get());
@@ -1032,8 +1076,9 @@ namespace python_webrtc {
     }
 
     auto senders = pc->GetSenders();
-    if (std::find(senders.begin(), senders.end(), sender.sender()) == senders.end()) {
-      throw RTCException(webrtc::RTCErrorType::INVALID_PARAMETER, "The sender was not created by this RTCPeerConnection");
+    if (std::ranges::find(senders, sender.sender()) == senders.end()) {
+      throw RTCException(webrtc::RTCErrorType::INVALID_PARAMETER,
+                         "The sender was not created by this RTCPeerConnection");
     }
 
     auto error = pc->RemoveTrackOrError(sender.sender());
@@ -1043,8 +1088,9 @@ namespace python_webrtc {
     QueueNegotiationNeeded();
   }
 
-  std::shared_ptr<RTCRtpTransceiver> RTCPeerConnection::AddTransceiver(
-      webrtc::MediaType kind, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &init) {
+  std::shared_ptr<RTCRtpTransceiver>
+  RTCPeerConnection::AddTransceiver(webrtc::MediaType kind,
+                                    std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &init) {
     auto pc = connection();
     if (!pc) {
       throw RTCException(closedError("addTransceiver"));
@@ -1052,8 +1098,9 @@ namespace python_webrtc {
     return AddedTransceiver(init ? pc->AddTransceiver(kind, init->get()) : pc->AddTransceiver(kind));
   }
 
-  std::shared_ptr<RTCRtpTransceiver> RTCPeerConnection::AddTransceiver(
-      MediaStreamTrack &track, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &init) {
+  std::shared_ptr<RTCRtpTransceiver>
+  RTCPeerConnection::AddTransceiver(MediaStreamTrack &track,
+                                    std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &init) {
     auto pc = connection();
     if (!pc) {
       throw RTCException(closedError("addTransceiver"));
@@ -1075,7 +1122,8 @@ namespace python_webrtc {
       return Sync(_transceivers, pc->GetTransceivers());
     }
     auto closed = closedConnection();
-    return closed ? Unkept<RTCRtpTransceiver>(closed->GetTransceivers()) : std::vector<std::shared_ptr<RTCRtpTransceiver>>();
+    return closed ? Unkept<RTCRtpTransceiver>(closed->GetTransceivers())
+                  : std::vector<std::shared_ptr<RTCRtpTransceiver>>();
   }
 
   std::vector<std::shared_ptr<RTCRtpSender>> RTCPeerConnection::GetSenders() {
@@ -1094,9 +1142,10 @@ namespace python_webrtc {
     return {};
   }
 
-  std::shared_ptr<RTCDataChannel> RTCPeerConnection::CreateDataChannel(
-      const std::string &label, bool ordered, std::optional<int> maxPacketLifeTime, std::optional<int> maxRetransmits,
-      const std::string &protocol, bool negotiated, std::optional<int> id, webrtc::Priority priority) {
+  std::shared_ptr<RTCDataChannel>
+  RTCPeerConnection::CreateDataChannel(const std::string &label, bool ordered, std::optional<int> maxPacketLifeTime,
+                                       std::optional<int> maxRetransmits, const std::string &protocol, bool negotiated,
+                                       std::optional<int> id, webrtc::Priority priority) {
     auto pc = connection();
     if (!pc || pc->signaling_state() == SignalingState::kClosed) {
       throw RTCException(closedError("createDataChannel"));
@@ -1116,17 +1165,19 @@ namespace python_webrtc {
       auto error = result.MoveError();
       // an id in use, no id left, or too many channels: the arguments were checked by Python already
       throw RTCException(error.type() == webrtc::RTCErrorType::INVALID_STATE
-                         ? error.type() : webrtc::RTCErrorType::UNSUPPORTED_OPERATION, error.message());
+                             ? error.type()
+                             : webrtc::RTCErrorType::UNSUPPORTED_OPERATION,
+                         error.message());
     }
     QueueNegotiationNeeded();
     return Wrap(_channels, result.MoveValue());
   }
 
   std::optional<std::shared_ptr<RTCSctpTransport>> RTCPeerConnection::GetSctp() {
-    if (!onLibwebrtcThread) {
+    if (!OnLibwebrtcThread()) {
       // see Wrap
-      gil_release_if_held release;
-      return _factory->_signalingThread->BlockingCall([this]() { return GetSctp(); });
+      const gil_release_if_held release;
+      return _factory->signalingThread()->BlockingCall([this]() { return GetSctp(); });
     }
     auto pc = connection();
     auto transport = pc ? pc->GetSctpTransport() : nullptr;
@@ -1135,7 +1186,7 @@ namespace python_webrtc {
     }
 
     std::shared_ptr<RTCSctpTransport> previous;
-    std::lock_guard<std::mutex> lock(_wrappersMutex);
+    const std::scoped_lock lock(_wrappersMutex);
     if (!_sctp || _sctp->transport() != transport) {
       previous = std::move(_sctp);
       _sctp = RTCSctpTransport::holder().GetOrCreate(_factory, transport);
@@ -1151,22 +1202,22 @@ namespace python_webrtc {
     if (!pc) {
       return {};
     }
-    return _factory->_signalingThread->BlockingCall([&pc]() -> std::optional<double> {
+    return _factory->signalingThread()->BlockingCall([&pc]() -> std::optional<double> {
       auto sctpSize = [](const webrtc::SessionDescriptionInterface *description) -> std::optional<int> {
         if (!description) {
           return {};
         }
-        for (const auto &content: description->description()->contents()) {
-          auto *sctp = content.media_description() ? content.media_description()->as_sctp() : nullptr;
+        for (const auto &content : description->description()->contents()) {
+          const auto *sctp = content.media_description() ? content.media_description()->as_sctp() : nullptr;
           if (sctp && !content.rejected) {
             return sctp->max_message_size();
           }
         }
         return {};
       };
-      double canSendSize = sctpSize(pc->current_local_description()).value_or(kLocalMaxMessageSize);
+      const double canSendSize = sctpSize(pc->current_local_description()).value_or(kLocalMaxMessageSize);
       // updated once the description is negotiated, when an answer is set
-      double remoteSize = sctpSize(pc->current_remote_description()).value_or(kDefaultRemoteMaxMessageSize);
+      const double remoteSize = sctpSize(pc->current_remote_description()).value_or(kDefaultRemoteMaxMessageSize);
       if (remoteSize == 0 && canSendSize == 0) {
         return std::numeric_limits<double>::infinity();
       }
@@ -1178,7 +1229,7 @@ namespace python_webrtc {
   }
 
   ConfigurationInit RTCPeerConnection::GetConfiguration() {
-    std::lock_guard<std::mutex> lock(_connectionMutex);
+    const std::scoped_lock lock(_connectionMutex);
     return _configuration;
   }
 
@@ -1189,11 +1240,11 @@ namespace python_webrtc {
     }
 
     {
-      std::lock_guard<std::mutex> lock(_connectionMutex);
+      const std::scoped_lock lock(_connectionMutex);
       if (init.alwaysNegotiateDataChannels != _configuration.alwaysNegotiateDataChannels ||
           init.rtpHeaderEncryptionPolicy != _configuration.rtpHeaderEncryptionPolicy) {
         throw RTCException(webrtc::RTCErrorType::INVALID_MODIFICATION,
-            "alwaysNegotiateDataChannels and rtpHeaderEncryptionPolicy can't be changed");
+                           "alwaysNegotiateDataChannels and rtpHeaderEncryptionPolicy can't be changed");
       }
     }
     auto error = pc->SetConfiguration(init.Apply(pc->GetConfiguration()));
@@ -1201,7 +1252,7 @@ namespace python_webrtc {
       throw RTCException(error);
     }
 
-    std::lock_guard<std::mutex> lock(_connectionMutex);
+    const std::scoped_lock lock(_connectionMutex);
     auto certificates = _configuration.certificates;
     _configuration = init;
     if (!_configuration.certificates) {
@@ -1212,7 +1263,7 @@ namespace python_webrtc {
   void RTCPeerConnection::RestartIce() {
     auto pc = connection();
     // before the first local description, there are no credentials to replace: the first offer has new ones
-    if (pc && pc->local_description()) {
+    if (pc && (pc->local_description() != nullptr)) {
       pc->RestartIce();
       QueueNegotiationNeeded();
     }
@@ -1221,7 +1272,7 @@ namespace python_webrtc {
   void RTCPeerConnection::QueueNegotiationNeeded() {
     // libwebrtc posts the negotiationneeded event of a change to the signaling thread: once the thread ran it,
     // the event is queued during the call
-    _factory->_signalingThread->BlockingCall([]() {});
+    _factory->signalingThread()->BlockingCall([]() {});
   }
 
   bool RTCPeerConnection::ShouldFireNegotiationNeededEvent(uint32_t eventId) {
@@ -1233,8 +1284,8 @@ namespace python_webrtc {
     // closing changes states, but a closed connection fires no events, nor do its channels and transports
     Mute();
     {
-      std::lock_guard<std::mutex> lock(_wrappersMutex);
-      for (auto &channel: _channels) {
+      const std::scoped_lock lock(_wrappersMutex);
+      for (auto &channel : _channels) {
         channel.second->OnPeerConnectionClosed();
       }
     }
@@ -1242,7 +1293,7 @@ namespace python_webrtc {
 
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
     {
-      std::lock_guard<std::mutex> lock(_connectionMutex);
+      const std::scoped_lock lock(_connectionMutex);
       pc = std::move(_jinglePeerConnection);
       if (pc) {
         _closedConnection = pc;
@@ -1251,7 +1302,7 @@ namespace python_webrtc {
 
     if (pc) {
       pc->Close();
-      for (const auto &transceiver: pc->GetTransceivers()) {
+      for (const auto &transceiver : pc->GetTransceivers()) {
         Wrap(_transceivers, transceiver)->GetReceiver()->GetTrack()->OnPeerConnectionClosed();
       }
     }
@@ -1315,7 +1366,7 @@ namespace python_webrtc {
     Emit("signalingstatechange", newState, SnapshotDescriptions());
   }
 
-  void RTCPeerConnection::OnIceConnectionChange(IceConnectionState) {
+  void RTCPeerConnection::OnIceConnectionChange(IceConnectionState /*unused*/) {
     // the legacy state, iceConnectionState is the standardized one
   }
 
@@ -1331,8 +1382,8 @@ namespace python_webrtc {
     Emit("connectionstatechange", newState);
   }
 
-  template<typename... Args>
-  void RTCPeerConnection::EmitGathering(const char *name, Args... args) {
+  template <typename... Args>
+  void RTCPeerConnection::EmitGathering(const char *name, const Args &...args) {
     _heldGathering.Emit([this, name, args...]() { Emit(name, args...); });
   }
 
@@ -1346,12 +1397,12 @@ namespace python_webrtc {
 
     // every transport ends its candidates with an empty one
     auto pc = connection();
-    for (auto &candidate: endOfCandidates(pc ? pc->local_description() : nullptr)) {
+    for (auto &candidate : endOfCandidates(pc ? pc->local_description() : nullptr)) {
       EmitGathering("icecandidate", candidate);
     }
     // then, in a single task, the ICE transports and the connection complete, and the candidates end
     std::vector<std::shared_ptr<RTCIceTransport>> iceTransports;
-    for (const auto &iceTransport: IceTransports()) {
+    for (const auto &iceTransport : IceTransports()) {
       if (iceTransport->IsHeld()) {
         // Python doesn't have it yet: its completion waits along with its other events
         iceTransport->EmitGatheringComplete();
@@ -1364,8 +1415,8 @@ namespace python_webrtc {
 
   void RTCPeerConnection::OnIceCandidate(const webrtc::IceCandidateInterface *candidate) {
     // the candidate is only valid during the call
-    if (candidate) {
-      IceCandidateInit init(*candidate);
+    if (candidate != nullptr) {
+      const IceCandidateInit init(*candidate);
       if (auto iceTransport = IceTransportByMid(candidate->sdp_mid())) {
         iceTransport->AddLocalCandidate(init);
       }
@@ -1378,20 +1429,24 @@ namespace python_webrtc {
     Emit("icecandidateerror", address, port, url, errorCode, errorText);
   }
 
-  // the DTLS transports of the media sections and of the data channels, some of them shared (bundled)
-  static std::vector<webrtc::scoped_refptr<webrtc::DtlsTransportInterface>> dtlsTransports(
-      const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
-    std::vector<webrtc::scoped_refptr<webrtc::DtlsTransportInterface>> transports;
-    for (const auto &transceiver: pc->GetTransceivers()) {
-      transports.push_back(transceiver->sender()->dtls_transport());
-      transports.push_back(transceiver->receiver()->dtls_transport());
+  namespace {
+
+    // the DTLS transports of the media sections and of the data channels, some of them shared (bundled)
+    std::vector<webrtc::scoped_refptr<webrtc::DtlsTransportInterface>>
+    dtlsTransports(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
+      std::vector<webrtc::scoped_refptr<webrtc::DtlsTransportInterface>> transports;
+      for (const auto &transceiver : pc->GetTransceivers()) {
+        transports.push_back(transceiver->sender()->dtls_transport());
+        transports.push_back(transceiver->receiver()->dtls_transport());
+      }
+      if (auto sctp = pc->GetSctpTransport()) {
+        transports.push_back(sctp->dtls_transport());
+      }
+      std::erase(transports, nullptr);
+      return transports;
     }
-    if (auto sctp = pc->GetSctpTransport()) {
-      transports.push_back(sctp->dtls_transport());
-    }
-    transports.erase(std::remove(transports.begin(), transports.end(), nullptr), transports.end());
-    return transports;
-  }
+
+  } // namespace
 
   std::vector<std::shared_ptr<RTCIceTransport>> RTCPeerConnection::IceTransports() {
     std::vector<std::shared_ptr<RTCIceTransport>> iceTransports;
@@ -1399,10 +1454,10 @@ namespace python_webrtc {
     if (!pc) {
       return iceTransports;
     }
-    for (const auto &transport: dtlsTransports(pc)) {
+    for (const auto &transport : dtlsTransports(pc)) {
       auto dtls = RTCDtlsTransport::holder().Find(transport.get());
       auto ice = dtls ? dtls->GetIceTransport() : nullptr;
-      if (ice && std::find(iceTransports.begin(), iceTransports.end(), ice) == iceTransports.end()) {
+      if (ice && std::ranges::find(iceTransports, ice) == iceTransports.end()) {
         iceTransports.push_back(ice);
       }
     }
@@ -1423,8 +1478,8 @@ namespace python_webrtc {
       return created;
     }
     std::vector<std::shared_ptr<RTCDtlsTransport>> wrappers;
-    for (const auto &transport: dtlsTransports(pc)) {
-      bool existed = RTCDtlsTransport::holder().Find(transport.get()) != nullptr;
+    for (const auto &transport : dtlsTransports(pc)) {
+      const bool existed = RTCDtlsTransport::holder().Find(transport.get()) != nullptr;
       auto wrapper = RTCDtlsTransport::holder().GetOrCreate(_factory, transport);
       if (!existed) {
         // Python doesn't have the transports yet, their events wait for it
@@ -1432,7 +1487,7 @@ namespace python_webrtc {
         wrapper->GetIceTransport()->Hold();
         Adopt(wrapper);
       }
-      if (std::find(wrappers.begin(), wrappers.end(), wrapper) == wrappers.end()) {
+      if (std::ranges::find(wrappers, wrapper) == wrappers.end()) {
         if (!existed) {
           created.push_back(wrapper->GetIceTransport());
         }
@@ -1440,7 +1495,7 @@ namespace python_webrtc {
       }
     }
     {
-      std::lock_guard<std::mutex> lock(_wrappersMutex);
+      const std::scoped_lock lock(_wrappersMutex);
       std::swap(_dtlsTransports, wrappers);
     }
     // wrappers of transports that are gone are released here, out of the lock
@@ -1455,7 +1510,7 @@ namespace python_webrtc {
 
     std::vector<webrtc::scoped_refptr<webrtc::DtlsTransportInterface>> transports;
     webrtc::scoped_refptr<webrtc::SctpTransportInterface> sctpTransport;
-    _factory->_signalingThread->BlockingCall([&]() {
+    _factory->signalingThread()->BlockingCall([&]() {
       transports = dtlsTransports(pc);
       sctpTransport = pc->GetSctpTransport();
     });
@@ -1463,7 +1518,7 @@ namespace python_webrtc {
     if (auto sctp = sctpTransport ? RTCSctpTransport::holder().Find(sctpTransport.get()) : nullptr) {
       sctp->OnPeerConnectionClosed();
     }
-    for (const auto &transport: transports) {
+    for (const auto &transport : transports) {
       if (auto dtls = RTCDtlsTransport::holder().Find(transport.get())) {
         dtls->OnPeerConnectionClosed();
         dtls->GetIceTransport()->OnPeerConnectionClosed();
@@ -1479,7 +1534,7 @@ namespace python_webrtc {
     auto state = pc->signaling_state();
     if (state == SignalingState::kStable || state == SignalingState::kHaveLocalPrAnswer ||
         state == SignalingState::kHaveRemotePrAnswer) {
-      for (const auto &iceTransport: IceTransports()) {
+      for (const auto &iceTransport : IceTransports()) {
         iceTransport->SetRoleKnown();
       }
     }
@@ -1490,10 +1545,10 @@ namespace python_webrtc {
     auto pc = connection();
     if (mid.empty() && pc) {
       // signaled by the index of its media section
-      _factory->_signalingThread->BlockingCall([&]() {
-        auto description = pc->remote_description();
-        auto &contents = description ? description->description()->contents()
-                                     : std::vector<webrtc::ContentInfo>();
+      _factory->signalingThread()->BlockingCall([&]() {
+        const auto *description = pc->remote_description();
+        const auto &contents =
+            description ? description->description()->contents() : std::vector<webrtc::ContentInfo>();
         if (candidate.sdpMLineIndex >= 0 && static_cast<size_t>(candidate.sdpMLineIndex) < contents.size()) {
           mid = contents[candidate.sdpMLineIndex].mid();
         }
@@ -1506,37 +1561,37 @@ namespace python_webrtc {
 
   void RTCPeerConnection::RecordRemoteDescriptionCandidates() {
     auto pc = connection();
-    auto description = pc ? pc->remote_description() : nullptr;
-    if (!description) {
+    const auto *description = pc ? pc->remote_description() : nullptr;
+    if (description == nullptr) {
       return;
     }
     const auto &contents = description->description()->contents();
     for (size_t index = 0; index < contents.size(); ++index) {
       auto iceTransport = IceTransportByMid(contents[index].mid());
-      auto candidates = description->candidates(index);
-      if (!iceTransport || !candidates) {
+      const auto *candidates = description->candidates(index);
+      if (!iceTransport || (candidates == nullptr)) {
         continue;
       }
-      for (const auto &candidate: candidates->candidates()) {
+      for (const auto &candidate : candidates->candidates()) {
         iceTransport->AddRemoteCandidate(IceCandidateInit(*candidate));
       }
     }
   }
 
-  std::optional<std::pair<std::string, std::string>> RTCPeerConnection::IceParameters(
-      const webrtc::IceTransportInterface *iceTransport, bool local) {
+  std::optional<std::pair<std::string, std::string>>
+  RTCPeerConnection::IceParameters(const webrtc::IceTransportInterface *iceTransport, bool local) {
     auto pc = connection();
     if (!pc) {
       return {};
     }
-    return _factory->_signalingThread->BlockingCall([&]() -> std::optional<std::pair<std::string, std::string>> {
-      auto description = local ? pc->local_description() : pc->remote_description();
+    return _factory->signalingThread()->BlockingCall([&]() -> std::optional<std::pair<std::string, std::string>> {
+      const auto *description = local ? pc->local_description() : pc->remote_description();
       if (!description) {
         return std::nullopt;
       }
-      for (const auto &content: description->description()->contents()) {
+      for (const auto &content : description->description()->contents()) {
         auto dtls = pc->LookupDtlsTransportByMid(content.mid());
-        auto info = description->description()->GetTransportInfoByName(content.mid());
+        const auto *info = description->description()->GetTransportInfoByName(content.mid());
         if (dtls && dtls->ice_transport().get() == iceTransport && info) {
           return std::make_pair(info->description.ice_ufrag, info->description.ice_pwd);
         }
@@ -1545,57 +1600,74 @@ namespace python_webrtc {
     });
   }
 
-  void RTCPeerConnection::OnIceSelectedCandidatePairChanged(const webrtc::CandidatePairChangeEvent &) {
+  void RTCPeerConnection::OnIceSelectedCandidatePairChanged(const webrtc::CandidatePairChangeEvent & /*unused*/) {
     // the event doesn't tell which transport changed, the ICE transports that Python has check themselves
-    for (const auto &ice: IceTransports()) {
+    for (const auto &ice : IceTransports()) {
       ice->CheckSelectedCandidatePair();
     }
   }
 
-  void RTCPeerConnection::AddIceCandidate(
-      std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
-      const std::string &candidate, const std::optional<std::string> &sdpMid, std::optional<int> sdpMLineIndex,
-      const std::optional<std::string> &usernameFragment) {
+  namespace {
+
+    // The media sections a candidate is for (all of them for a null mid and index), into mids, and whether its ufrag
+    // is known. On the signaling thread.
+    std::optional<RTCCallbackException> candidateSections(const webrtc::SessionDescriptionInterface *remote,
+                                                          const std::optional<std::string> &sdpMid,
+                                                          std::optional<int> sdpMLineIndex,
+                                                          const std::optional<std::string> &usernameFragment,
+                                                          std::set<std::string> &mids) {
+      if (remote == nullptr) {
+        return RTCCallbackException(webrtc::RTCErrorType::INVALID_STATE, "The remote description was null");
+      }
+      const auto *session = remote->description();
+      const auto &contents = session->contents();
+      for (size_t i = 0; i < contents.size(); ++i) {
+        bool matches = true;
+        if (sdpMid) {
+          matches = contents[i].mid() == *sdpMid;
+        } else if (sdpMLineIndex) {
+          matches = std::cmp_equal(i, *sdpMLineIndex);
+        }
+        if (matches && !contents[i].rejected) {
+          mids.insert(contents[i].mid());
+        }
+      }
+      if (mids.empty() && (sdpMid || sdpMLineIndex)) {
+        return RTCCallbackException(webrtc::RTCErrorType::UNSUPPORTED_OPERATION,
+                                    "The media section of the candidate was not found");
+      }
+      if (usernameFragment) {
+        const bool known = std::ranges::any_of(mids, [&](const std::string &mid) {
+          const auto *transport = session->GetTransportInfoByName(mid);
+          return transport != nullptr && transport->description.ice_ufrag == *usernameFragment;
+        });
+        if (!known) {
+          return RTCCallbackException(webrtc::RTCErrorType::UNSUPPORTED_OPERATION,
+                                      "The usernameFragment doesn't match the remote description");
+        }
+      }
+      return std::nullopt;
+    }
+
+  } // namespace
+
+  void RTCPeerConnection::AddIceCandidate(std::function<void()> &onSuccess,
+                                          std::function<void(RTCCallbackException)> &onFailure,
+                                          const std::string &candidate, const std::optional<std::string> &sdpMid,
+                                          std::optional<int> sdpMLineIndex,
+                                          const std::optional<std::string> &usernameFragment) {
     auto pc = connection();
     if (!pc) {
       onFailure(RTCCallbackException(closedError("addIceCandidate")));
       return;
     }
 
-    // the media sections the candidate is for (all of them for a null mid and index), and whether its ufrag is known
     std::optional<RTCCallbackException> error;
     std::set<std::string> mids;
     const webrtc::SessionDescriptionInterface *remote = nullptr;
-    _factory->_signalingThread->BlockingCall([&]() {
+    _factory->signalingThread()->BlockingCall([&]() {
       remote = pc->remote_description();
-      if (!remote) {
-        error.emplace(webrtc::RTCErrorType::INVALID_STATE, "The remote description was null");
-        return;
-      }
-      auto session = remote->description();
-      auto &contents = session->contents();
-      for (size_t i = 0; i < contents.size(); ++i) {
-        bool matches = sdpMid ? contents[i].mid() == *sdpMid
-                              : sdpMLineIndex ? static_cast<int>(i) == *sdpMLineIndex : true;
-        if (matches && !contents[i].rejected) {
-          mids.insert(contents[i].mid());
-        }
-      }
-      if (mids.empty() && (sdpMid || sdpMLineIndex)) {
-        error.emplace(webrtc::RTCErrorType::UNSUPPORTED_OPERATION, "The media section of the candidate was not found");
-        return;
-      }
-      if (usernameFragment) {
-        bool known = false;
-        for (const auto &mid: mids) {
-          auto transport = session->GetTransportInfoByName(mid);
-          known = known || (transport && transport->description.ice_ufrag == *usernameFragment);
-        }
-        if (!known) {
-          error.emplace(webrtc::RTCErrorType::UNSUPPORTED_OPERATION,
-                        "The usernameFragment doesn't match the remote description");
-        }
-      }
+      error = candidateSections(remote, sdpMid, sdpMLineIndex, usernameFragment, mids);
     });
     if (error) {
       onFailure(*error);
@@ -1605,7 +1677,7 @@ namespace python_webrtc {
     if (candidate.empty()) {
       // the end of candidates, which libwebrtc doesn't take: the remote description shows it
       {
-        std::lock_guard<std::mutex> lock(_remoteEndOfCandidatesMutex);
+        const std::scoped_lock lock(_remoteEndOfCandidatesMutex);
         if (_remoteEndOfCandidatesDescription != remote) {
           _remoteEndOfCandidates.clear();
           _remoteEndOfCandidatesDescription = remote;
@@ -1618,11 +1690,11 @@ namespace python_webrtc {
     }
 
     webrtc::SdpParseError parseError;
-    auto iceCandidate = webrtc::IceCandidate::Create(
-        sdpMid.value_or(""), sdpMLineIndex.value_or(0), candidate, &parseError);
+    auto iceCandidate =
+        webrtc::IceCandidate::Create(sdpMid.value_or(""), sdpMLineIndex.value_or(0), candidate, &parseError);
     if (!iceCandidate) {
       onFailure(RTCCallbackException(webrtc::RTCErrorType::UNSUPPORTED_OPERATION,
-          "Failed to parse the ICE candidate: " + parseError.description));
+                                     "Failed to parse the ICE candidate: " + parseError.description));
       return;
     }
 
@@ -1666,27 +1738,28 @@ namespace python_webrtc {
     Emit("datachannel", channel);
   }
 
-  void RTCPeerConnection::OnAddStream(webrtc::scoped_refptr<webrtc::MediaStreamInterface>) {}
+  void RTCPeerConnection::OnAddStream(webrtc::scoped_refptr<webrtc::MediaStreamInterface> /*unused*/) {}
 
-  void RTCPeerConnection::OnRemoveStream(webrtc::scoped_refptr<webrtc::MediaStreamInterface>) {}
+  void RTCPeerConnection::OnRemoveStream(webrtc::scoped_refptr<webrtc::MediaStreamInterface> /*unused*/) {}
 
-  void RTCPeerConnection::OnAddTrack(webrtc::scoped_refptr<webrtc::RtpReceiverInterface>,
-                                     const std::vector<webrtc::scoped_refptr<webrtc::MediaStreamInterface>> &) {}
+  void
+  RTCPeerConnection::OnAddTrack(webrtc::scoped_refptr<webrtc::RtpReceiverInterface> /*unused*/,
+                                const std::vector<webrtc::scoped_refptr<webrtc::MediaStreamInterface>> & /*unused*/) {}
 
   void RTCPeerConnection::OnTrack(webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) {
     // a rejected media section (port 0) negotiates no track, but libwebrtc still reports it
     auto pc = connection();
-    auto description = pc ? pc->remote_description() : nullptr;
+    const auto *description = pc ? pc->remote_description() : nullptr;
     auto mid = transceiver->mid();
-    if (description && mid) {
-      auto content = description->description()->GetContentByName(*mid);
-      if (content && content->rejected) {
+    if ((description != nullptr) && mid) {
+      const auto *content = description->description()->GetContentByName(*mid);
+      if ((content != nullptr) && content->rejected) {
         return;
       }
     }
 
     {
-      std::lock_guard<std::mutex> lock(_remoteStreamsMutex);
+      const std::scoped_lock lock(_remoteStreamsMutex);
       _trackFired.insert(transceiver.get());
     }
     EmitTrack(transceiver);
@@ -1703,49 +1776,53 @@ namespace python_webrtc {
     auto wrapper = Wrap(_transceivers, transceiver);
     auto receiver = Wrap(_receivers, transceiver->receiver());
     std::vector<std::shared_ptr<MediaStream>> streams;
-    for (const auto &stream: transceiver->receiver()->streams()) {
+    for (const auto &stream : transceiver->receiver()->streams()) {
       streams.push_back(MediaStream::holder().GetOrCreate(_factory, stream));
     }
     Emit("track", wrapper, receiver, streams);
   }
 
-  static std::vector<std::string> remoteStreamIds(
-      const webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> &transceiver) {
-    std::vector<std::string> ids;
-    for (const auto &stream: transceiver->receiver()->streams()) {
-      ids.push_back(stream->id());
+  namespace {
+
+    std::vector<std::string>
+    remoteStreamIds(const webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> &transceiver) {
+      std::vector<std::string> ids;
+      for (const auto &stream : transceiver->receiver()->streams()) {
+        ids.push_back(stream->id());
+      }
+      return ids;
     }
-    return ids;
-  }
+
+  } // namespace
 
   void RTCPeerConnection::SnapshotRemoteStreams(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
     std::map<const void *, std::vector<std::string>> before;
-    for (const auto &transceiver: pc->GetTransceivers()) {
+    for (const auto &transceiver : pc->GetTransceivers()) {
       before[transceiver.get()] = remoteStreamIds(transceiver);
     }
-    std::lock_guard<std::mutex> lock(_remoteStreamsMutex);
+    const std::scoped_lock lock(_remoteStreamsMutex);
     _remoteStreamsBefore = std::move(before);
     _trackFired.clear();
   }
 
   void RTCPeerConnection::FireRemoteStreamChanges() {
     auto pc = connection();
-    auto description = pc ? pc->remote_description() : nullptr;
-    if (!description) {
+    const auto *description = pc ? pc->remote_description() : nullptr;
+    if (description == nullptr) {
       return;
     }
     std::map<const void *, std::vector<std::string>> before;
     std::set<const void *> fired;
     {
-      std::lock_guard<std::mutex> lock(_remoteStreamsMutex);
+      const std::scoped_lock lock(_remoteStreamsMutex);
       std::swap(before, _remoteStreamsBefore);
       std::swap(fired, _trackFired);
     }
-    for (const auto &transceiver: pc->GetTransceivers()) {
+    for (const auto &transceiver : pc->GetTransceivers()) {
       auto mid = transceiver->mid();
-      auto content = mid ? description->description()->GetContentByName(*mid) : nullptr;
+      const auto *content = mid ? description->description()->GetContentByName(*mid) : nullptr;
       auto previous = before.find(transceiver.get());
-      if (!content || content->rejected || fired.count(transceiver.get()) || previous == before.end() ||
+      if ((content == nullptr) || content->rejected || fired.contains(transceiver.get()) || previous == before.end() ||
           !webrtc::RtpTransceiverDirectionHasSend(content->media_description()->direction())) {
         continue;
       }

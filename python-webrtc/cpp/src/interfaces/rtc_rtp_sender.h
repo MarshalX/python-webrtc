@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_RTC_RTP_SENDER_H_
+#define PYTHON_WEBRTC_INTERFACES_RTC_RTP_SENDER_H_
 
 #include <functional>
 #include <memory>
@@ -17,12 +18,12 @@
 #include <api/rtp_sender_interface.h>
 #include <api/scoped_refptr.h>
 
-#include "peer_connection_factory.h"
+#include "../enums/enums.h"
+#include "../exceptions.h"
 #include "media_stream_track.h"
+#include "peer_connection_factory.h"
 #include "rtc_dtls_transport.h"
 #include "rtc_dtmf_sender.h"
-#include "../exceptions.h"
-#include "../enums/enums.h"
 
 namespace python_webrtc {
 
@@ -30,7 +31,8 @@ namespace python_webrtc {
 
   class RTCRtpSender {
   public:
-    explicit RTCRtpSender(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::RtpSenderInterface>);
+    explicit RTCRtpSender(std::shared_ptr<PeerConnectionFactory> factory,
+                          webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender);
 
     static void Init(pybind11::module &m);
 
@@ -55,8 +57,8 @@ namespace python_webrtc {
 
     webrtc::RtpParameters GetParameters();
 
-    void SetParameters(std::function<void()> &, std::function<void(RTCCallbackException)> &,
-                       const webrtc::RtpParameters &);
+    void SetParameters(std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
+                       const webrtc::RtpParameters &parameters);
 
     // The parameters getParameters returned last, which setParameters takes until they expire (Python expires them
     // once the task that got them ends, as the specification requires)
@@ -72,7 +74,7 @@ namespace python_webrtc {
 
     std::vector<std::string> GetStreamIds();
 
-    void GetStats(std::function<void(std::string)> &, std::function<void(RTCCallbackException)> &);
+    void GetStats(std::function<void(std::string)> &onSuccess, std::function<void(RTCCallbackException)> &onFailure);
 
     // whether its transceiver is stopping or stopped (or gone), where the sender can't be changed anymore
     bool IsTransceiverStopped();
@@ -96,3 +98,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_RTC_RTP_SENDER_H_

@@ -7,23 +7,23 @@
 
 #include "interfaces.h"
 
-#include "peer_connection_factory.h"
-#include "media_stream_track.h"
-#include "media_stream.h"
-#include "rtc_ice_transport.h"
-#include "rtc_dtls_transport.h"
-#include "rtc_sctp_transport.h"
-#include "rtc_rtp_sender.h"
-#include "rtc_rtp_receiver.h"
-#include "rtc_rtp_transceiver.h"
-#include "rtc_data_channel.h"
-#include "rtc_dtmf_sender.h"
-#include "rtc_peer_connection.h"
 #include "../media/media_stream_track_processor.h"
 #include "../media/track_generator.h"
 #include "../media/video_frame_buffer.h"
 #include "../utils/alive_count.h"
 #include "../utils/gil.h"
+#include "media_stream.h"
+#include "media_stream_track.h"
+#include "peer_connection_factory.h"
+#include "rtc_data_channel.h"
+#include "rtc_dtls_transport.h"
+#include "rtc_dtmf_sender.h"
+#include "rtc_ice_transport.h"
+#include "rtc_peer_connection.h"
+#include "rtc_rtp_receiver.h"
+#include "rtc_rtp_sender.h"
+#include "rtc_rtp_transceiver.h"
+#include "rtc_sctp_transport.h"
 
 #include <map>
 #include <string>
@@ -47,23 +47,26 @@ namespace python_webrtc {
     RTCPeerConnection::Init(m);
 
     // the native objects alive, by type, so tests can check that none leaks
-    m.def("_alive", []() {
-      return std::map<std::string, int>{
-          {"RTCPeerConnection", AliveCount<RTCPeerConnection>::count.load()},
-          {"MediaStreamTrack", MediaStreamTrack::holder().Alive()},
-          {"MediaStream", MediaStream::holder().Alive()},
-          {"RTCRtpTransceiver", RTCRtpTransceiver::holder().Alive()},
-          {"RTCRtpSender", RTCRtpSender::holder().Alive()},
-          {"RTCRtpReceiver", RTCRtpReceiver::holder().Alive()},
-          {"RTCDTMFSender", RTCDTMFSender::holder().Alive()},
-          {"RTCDataChannel", RTCDataChannel::holder().Alive()},
-          {"RTCSctpTransport", RTCSctpTransport::holder().Alive()},
-          {"RTCDtlsTransport", RTCDtlsTransport::holder().Alive()},
-          {"RTCIceTransport", RTCIceTransport::holder().Alive()},
-          {"MediaStreamTrackProcessor", AliveCount<MediaStreamTrackProcessor>::count.load()},
-          {"TrackGenerator", AliveCount<TrackGenerator>::count.load()},
-          {"VideoFrameBuffer", AliveCount<VideoFrameBuffer>::count.load()},
-      };
-    }, nogil());
+    m.def(
+        "_alive",
+        []() {
+          return std::map<std::string, int>{
+              {"RTCPeerConnection", AliveCount<RTCPeerConnection>::count.load()},
+              {"MediaStreamTrack", MediaStreamTrack::holder().Alive()},
+              {"MediaStream", MediaStream::holder().Alive()},
+              {"RTCRtpTransceiver", RTCRtpTransceiver::holder().Alive()},
+              {"RTCRtpSender", RTCRtpSender::holder().Alive()},
+              {"RTCRtpReceiver", RTCRtpReceiver::holder().Alive()},
+              {"RTCDTMFSender", RTCDTMFSender::holder().Alive()},
+              {"RTCDataChannel", RTCDataChannel::holder().Alive()},
+              {"RTCSctpTransport", RTCSctpTransport::holder().Alive()},
+              {"RTCDtlsTransport", RTCDtlsTransport::holder().Alive()},
+              {"RTCIceTransport", RTCIceTransport::holder().Alive()},
+              {"MediaStreamTrackProcessor", AliveCount<MediaStreamTrackProcessor>::count.load()},
+              {"TrackGenerator", AliveCount<TrackGenerator>::count.load()},
+              {"VideoFrameBuffer", AliveCount<VideoFrameBuffer>::count.load()},
+          };
+        },
+        nogil());
   }
-}
+} // namespace python_webrtc

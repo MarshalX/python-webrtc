@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_MEDIA_STREAM_TRACK_H_
+#define PYTHON_WEBRTC_INTERFACES_MEDIA_STREAM_TRACK_H_
 
 #include <atomic>
 #include <memory>
@@ -20,7 +21,7 @@
 
 #include <pybind11/pybind11.h>
 
-#include "peer_connection_factory.h"
+#include "../enums/enums.h"
 #include "../media/source_control.h"
 #include "../media/track_monitor.h"
 #include "../utils/alive_guard.h"
@@ -28,7 +29,7 @@
 #include "../utils/instance_holder.h"
 #include "../utils/listeners.h"
 #include "../utils/surfaced.h"
-#include "../enums/enums.h"
+#include "peer_connection_factory.h"
 
 namespace python_webrtc {
 
@@ -42,10 +43,13 @@ namespace python_webrtc {
 
   class MediaStreamTrack : public webrtc::ObserverInterface, public Listeners {
   public:
-    explicit MediaStreamTrack(
-        std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>);
+    explicit MediaStreamTrack(std::shared_ptr<PeerConnectionFactory> factory,
+                              webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track);
 
     ~MediaStreamTrack() override;
+
+    MediaStreamTrack(const MediaStreamTrack &) = delete;
+    MediaStreamTrack &operator=(const MediaStreamTrack &) = delete;
 
     static void Init(pybind11::module &m);
 
@@ -60,7 +64,7 @@ namespace python_webrtc {
 
     bool GetEnabled();
 
-    void SetEnabled(bool);
+    void SetEnabled(bool enabled);
 
     std::string GetId();
 
@@ -176,3 +180,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_MEDIA_STREAM_TRACK_H_

@@ -11,14 +11,14 @@
 #include <pybind11/functional.h>
 #include <pybind11/stl.h>
 
-#include "rtc_peer_connection.h"
 #include "../enums/enums.h"
 #include "../utils/gil.h"
+#include "rtc_peer_connection.h"
 
 namespace python_webrtc {
 
-  RTCRtpSender::RTCRtpSender(
-      std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender)
+  RTCRtpSender::RTCRtpSender(std::shared_ptr<PeerConnectionFactory> factory,
+                             webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender)
       : _factory(std::move(factory)), _sender(std::move(sender)) {}
 
   void RTCRtpSender::Init(pybind11::module &m) {
@@ -28,8 +28,8 @@ namespace python_webrtc {
         .def_property_readonly("kind", nogil_fn(&RTCRtpSender::GetKind))
         .def_property_readonly("dtmf", nogil_fn(&RTCRtpSender::GetDtmf))
         .def("getParameters", &RTCRtpSender::GetParameters, nogil())
-        .def("setParameters", WithCallbacks(&RTCRtpSender::SetParameters),
-             pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("parameters"))
+        .def("setParameters", WithCallbacks(&RTCRtpSender::SetParameters), pybind11::arg("onSuccess"),
+             pybind11::arg("onFailure"), pybind11::arg("parameters"))
         .def("replaceTrack", &RTCRtpSender::ReplaceTrack, nogil(), pybind11::arg("track"))
         .def("setStreams", &RTCRtpSender::SetStreams, nogil(), pybind11::arg("streamIds"))
         .def("getStreamIds", &RTCRtpSender::GetStreamIds, nogil())
@@ -43,12 +43,12 @@ namespace python_webrtc {
 
   InstanceHolder<RTCRtpSender, webrtc::RtpSenderInterface> &RTCRtpSender::holder() {
     // never destroyed: wrappers may outlive static destructors
-    static auto holder = new InstanceHolder<RTCRtpSender, webrtc::RtpSenderInterface>();
+    static auto *holder = new InstanceHolder<RTCRtpSender, webrtc::RtpSenderInterface>();
     return *holder;
   }
 
   void RTCRtpSender::SetConnection(std::weak_ptr<RTCPeerConnection> connection) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     _connection = std::move(connection);
     if (_dtmf) {
       _dtmf->SetTransceiver(TransceiverGetter());
@@ -56,7 +56,7 @@ namespace python_webrtc {
   }
 
   std::shared_ptr<RTCPeerConnection> RTCRtpSender::GetConnection() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     return _connection.lock();
   }
 
@@ -73,7 +73,7 @@ namespace python_webrtc {
     auto wrapper = MediaStreamTrack::holder().GetOrCreate(_factory, track);
 
     std::shared_ptr<MediaStreamTrack> previous;
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     if (!_track || _track->track() != track) {
       previous = std::move(_track);
       _track = std::move(wrapper);
@@ -91,7 +91,7 @@ namespace python_webrtc {
     auto wrapper = RTCDtlsTransport::holder().GetOrCreate(_factory, transport);
 
     std::shared_ptr<RTCDtlsTransport> previous;
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     if (!_transport || _transport->transport() != transport) {
       previous = std::move(_transport);
       _transport = std::move(wrapper);
@@ -111,7 +111,7 @@ namespace python_webrtc {
     auto dtmf = _sender->GetDtmfSender();
     // see GetTrack
     auto wrapper = RTCDTMFSender::holder().GetOrCreate(_factory, dtmf);
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     if (wrapper && _dtmf != wrapper) {
       _dtmf = std::move(wrapper);
       _dtmf->SetTransceiver(TransceiverGetter());
@@ -122,7 +122,7 @@ namespace python_webrtc {
   webrtc::RtpParameters RTCRtpSender::GetParameters() {
     {
       // the same parameters until they expire
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       if (_lastParameters) {
         return *_lastParameters;
       }
@@ -135,18 +135,18 @@ namespace python_webrtc {
     if (!negotiated.empty()) {
       parameters.codecs = std::move(negotiated);
     }
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     _lastParameters = parameters;
     return parameters;
   }
 
   std::optional<webrtc::RtpParameters> RTCRtpSender::GetLastParameters() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     return _lastParameters;
   }
 
   void RTCRtpSender::ExpireParameters(const std::optional<std::string> &transactionId) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     if (_lastParameters && (!transactionId || _lastParameters->transaction_id == *transactionId)) {
       _lastParameters.reset();
     }
@@ -156,15 +156,15 @@ namespace python_webrtc {
                                    std::function<void(RTCCallbackException)> &onFailure,
                                    const webrtc::RtpParameters &parameters) {
     {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       if (!_lastParameters) {
         onFailure(RTCCallbackException(webrtc::RTCErrorType::INVALID_STATE,
-            "getParameters() must be called before setParameters(), in the same task"));
+                                       "getParameters() must be called before setParameters(), in the same task"));
         return;
       }
       if (_lastParameters->transaction_id != parameters.transaction_id) {
         onFailure(RTCCallbackException(webrtc::RTCErrorType::INVALID_MODIFICATION,
-            "The transactionId doesn't match the one of the last getParameters()"));
+                                       "The transactionId doesn't match the one of the last getParameters()"));
         return;
       }
     }
@@ -177,7 +177,7 @@ namespace python_webrtc {
     }
     if (!sameLayers) {
       onFailure(RTCCallbackException(webrtc::RTCErrorType::INVALID_MODIFICATION,
-          "The encodings of the sender changed since getParameters()"));
+                                     "The encodings of the sender changed since getParameters()"));
       return;
     }
     auto current = parameters;

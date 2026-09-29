@@ -1,4 +1,8 @@
-.PHONY: dev test asan tsan lint format stub wheels doc clean
+.PHONY: dev test asan tsan lint format format-check tidy stub wheels doc clean
+
+# pinned to the clang-tidy of .github/scripts/tidy.sh
+CLANG_FORMAT := uvx clang-format==22.1.8
+CPP_SRC = $(shell find python-webrtc/cpp/src -name '*.cpp' -o -name '*.h')
 
 # editable install; the extension is rebuilt automatically on import after C++ changes
 dev:
@@ -16,13 +20,21 @@ asan:
 tsan:
 	SANITIZE=thread .github/scripts/sanitizers-macos.sh $(O)
 
-lint:
+lint: format-check
 	uvx ruff check
 	uvx ruff format --check
 
 format:
 	uvx ruff check --fix
 	uvx ruff format
+	$(CLANG_FORMAT) -i $(CPP_SRC)
+
+format-check:
+	@$(CLANG_FORMAT) --dry-run --Werror $(CPP_SRC)
+
+# clang-tidy over the extension, see .clang-tidy
+tidy:
+	.github/scripts/tidy.sh $(O)
 
 stub:
 	uv run --no-sync pybind11-stubgen wrtc -o build/stubs

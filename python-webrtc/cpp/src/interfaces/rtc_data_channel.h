@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_RTC_DATA_CHANNEL_H_
+#define PYTHON_WEBRTC_INTERFACES_RTC_DATA_CHANNEL_H_
 
 #include <atomic>
 #include <functional>
@@ -18,13 +19,13 @@
 
 #include <pybind11/pybind11.h>
 
-#include "peer_connection_factory.h"
+#include "../enums/enums.h"
 #include "../utils/alive_guard.h"
 #include "../utils/instance_holder.h"
 #include "../utils/listeners.h"
 #include "../utils/locked_function.h"
 #include "../utils/surfaced.h"
-#include "../enums/enums.h"
+#include "peer_connection_factory.h"
 
 namespace python_webrtc {
 
@@ -39,9 +40,13 @@ namespace python_webrtc {
     using DataState = webrtc::DataChannelInterface::DataState;
 
     // Starts holding its events (see Listeners::Hold), Python releases them once it has the channel
-    RTCDataChannel(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::DataChannelInterface>);
+    RTCDataChannel(std::shared_ptr<PeerConnectionFactory> factory,
+                   webrtc::scoped_refptr<webrtc::DataChannelInterface> channel);
 
     ~RTCDataChannel() override;
+
+    RTCDataChannel(const RTCDataChannel &) = delete;
+    RTCDataChannel &operator=(const RTCDataChannel &) = delete;
 
     static void Init(pybind11::module &m);
 
@@ -129,3 +134,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_RTC_DATA_CHANNEL_H_

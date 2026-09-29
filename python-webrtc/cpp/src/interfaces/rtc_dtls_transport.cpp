@@ -10,37 +10,42 @@
 #include <pybind11/stl.h>
 
 #include "../exceptions.h"
+#include "../utils/buffer.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
 
 namespace python_webrtc {
 
-  static std::vector<webrtc::Buffer> copyCertificates(const webrtc::DtlsTransportInformation& information) {
-    auto certificates = information.remote_ssl_certificates();
-    if (certificates) {
-      auto size = certificates->GetSize();
+  namespace {
 
-      auto derCertificates = std::vector<webrtc::Buffer>();
-      derCertificates.reserve(size);
+    std::vector<webrtc::Buffer> copyCertificates(const webrtc::DtlsTransportInformation &information) {
+      const auto *certificates = information.remote_ssl_certificates();
+      if (certificates != nullptr) {
+        auto size = certificates->GetSize();
 
-      for (unsigned long i = 0; i < size; ++i) {
-        webrtc::Buffer buffer;
-        certificates->Get(i).ToDER(&buffer);
-        derCertificates.emplace_back(std::move(buffer));
+        auto derCertificates = std::vector<webrtc::Buffer>();
+        derCertificates.reserve(size);
+
+        for (unsigned long i = 0; i < size; ++i) {
+          webrtc::Buffer buffer;
+          certificates->Get(i).ToDER(&buffer);
+          derCertificates.emplace_back(std::move(buffer));
+        }
+
+        return derCertificates;
       }
 
-      return derCertificates;
+      return {};
     }
 
-    return {};
-  }
+  } // namespace
 
-  RTCDtlsTransport::RTCDtlsTransport(
-      std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::DtlsTransportInterface> transport
-  ) : _factory(std::move(factory)), _transport(std::move(transport)) {
+  RTCDtlsTransport::RTCDtlsTransport(std::shared_ptr<PeerConnectionFactory> factory,
+                                     webrtc::scoped_refptr<webrtc::DtlsTransportInterface> transport)
+      : _factory(std::move(factory)), _transport(std::move(transport)) {
     _iceTransport = RTCIceTransport::holder().GetOrCreate(_factory, _transport->ice_transport());
 
-    _factory->_workerThread->BlockingCall([this]() {
+    _factory->workerThread()->BlockingCall([this]() {
       _transport->RegisterObserver(this);
       holder().SetObserver(_transport.get(), this);
       _observing = true;
@@ -56,10 +61,10 @@ namespace python_webrtc {
   }
 
   RTCDtlsTransport::~RTCDtlsTransport() {
-    BlockingDestructor release("RTCDtlsTransport");
+    const BlockingDestructor release("RTCDtlsTransport");
 
     // callbacks run on the network thread, so after this none of them can be running or start again
-    _factory->_workerThread->BlockingCall([this]() { Unobserve(); });
+    _factory->workerThread()->BlockingCall([this]() { Unobserve(); });
 
     _iceTransport = nullptr;
     _transport = nullptr;
@@ -70,28 +75,28 @@ namespace python_webrtc {
     Listeners::BindClass<RTCDtlsTransport>(m, "RTCDtlsTransport")
         .def_property_readonly("iceTransport", nogil_fn(&RTCDtlsTransport::GetIceTransport))
         .def_property_readonly("state", nogil_fn(&RTCDtlsTransport::GetState))
-        .def("getRemoteCertificates", [](RTCDtlsTransport &self) {
-          pybind11::list certificates;
-          for (const auto &certificate: self.GetRemoteCertificates()) {
-            auto data = reinterpret_cast<const char *>(certificate.data());
-            certificates.append(pybind11::bytes(data, certificate.size()));
-          }
-          return certificates;
-        })
+        .def("getRemoteCertificates",
+             [](RTCDtlsTransport &self) {
+               pybind11::list certificates;
+               for (const auto &certificate : self.GetRemoteCertificates()) {
+                 certificates.append(Bytes(certificate.data(), certificate.size()));
+               }
+               return certificates;
+             })
         .def("_surfaceState", &RTCDtlsTransport::SurfaceState, nogil(), pybind11::arg("state"));
   }
 
   InstanceHolder<RTCDtlsTransport, webrtc::DtlsTransportInterface> &RTCDtlsTransport::holder() {
     // never destroyed: wrappers may outlive static destructors
-    static auto holder = new InstanceHolder<RTCDtlsTransport, webrtc::DtlsTransportInterface>();
+    static auto *holder = new InstanceHolder<RTCDtlsTransport, webrtc::DtlsTransportInterface>();
     return *holder;
   }
 
   void RTCDtlsTransport::OnStateChange(webrtc::DtlsTransportInformation information) {
-    bool changed;
-    webrtc::DtlsTransportState previous;
+    bool changed = false;
+    webrtc::DtlsTransportState previous{};
     {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       previous = _state;
       changed = _state != information.state();
       _state = information.state();
@@ -141,18 +146,19 @@ namespace python_webrtc {
   }
 
   webrtc::DtlsTransportState RTCDtlsTransport::GetState() {
-    webrtc::DtlsTransportState state;
+    webrtc::DtlsTransportState state{};
     {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       state = _state;
     }
     return _surfacedState.Get(state);
   }
 
   std::vector<webrtc::Buffer> RTCDtlsTransport::GetRemoteCertificates() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     std::vector<webrtc::Buffer> certificates;
-    for (const auto &certificate: _certificates) {
+    certificates.reserve(_certificates.size());
+    for (const auto &certificate : _certificates) {
       certificates.emplace_back(certificate.data(), certificate.size());
     }
     return certificates;

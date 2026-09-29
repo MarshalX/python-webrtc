@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_MEDIA_WAKEUP_H_
+#define PYTHON_WEBRTC_MEDIA_WAKEUP_H_
 
 #include <condition_variable>
 #include <deque>
@@ -32,10 +33,10 @@ namespace python_webrtc {
     static void Post(std::weak_ptr<Wakeable> target) {
       auto &wakeup = Instance();
       {
-        std::lock_guard<std::mutex> lock(wakeup._mutex);
-        if (wakeup._generation != forks.load()) {
+        const std::scoped_lock lock(wakeup._mutex);
+        if (wakeup._generation != Forks().load()) {
           // the child of a fork: the thread is gone, and so are the objects of the parent
-          wakeup._generation = forks.load();
+          wakeup._generation = Forks().load();
           wakeup._targets.clear();
           std::thread([&wakeup]() { wakeup.Run(); }).detach();
         }
@@ -45,18 +46,14 @@ namespace python_webrtc {
     }
 
     // held across a fork, so the child doesn't get it locked by a thread it doesn't have
-    static void LockForFork() {
-      Instance()._mutex.lock();
-    }
+    static void LockForFork() { Instance()._mutex.lock(); }
 
-    static void UnlockAfterFork() {
-      Instance()._mutex.unlock();
-    }
+    static void UnlockAfterFork() { Instance()._mutex.unlock(); }
 
   private:
     static Wakeup &Instance() {
       // never destroyed: its thread may run while the process exits
-      static auto wakeup = new Wakeup();
+      static auto *wakeup = new Wakeup();
       return *wakeup;
     }
 
@@ -82,9 +79,11 @@ namespace python_webrtc {
 
     std::mutex _mutex;
     // of the process the thread runs in (see forks)
-    int _generation = forks.load();
+    int _generation = Forks().load();
     std::condition_variable _posted;
     std::deque<std::weak_ptr<Wakeable>> _targets;
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_MEDIA_WAKEUP_H_

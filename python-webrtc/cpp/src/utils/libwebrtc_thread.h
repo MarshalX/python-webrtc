@@ -5,12 +5,14 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_UTILS_LIBWEBRTC_THREAD_H_
+#define PYTHON_WEBRTC_UTILS_LIBWEBRTC_THREAD_H_
 
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -21,18 +23,17 @@ namespace python_webrtc {
   // Whether this is a libwebrtc thread. Python code runs on them (to emit events), and so does the garbage collector,
   // which may release the last reference to a wrapper, whose destructor blocks on libwebrtc threads that may be
   // blocked on this one.
-  inline thread_local bool onLibwebrtcThread = false;
+  inline bool &OnLibwebrtcThread() {
+    static thread_local bool onLibwebrtcThread = false;
+    return onLibwebrtcThread;
+  }
 
   // Marks the calling thread as a libwebrtc one while it runs Python code
   class LibwebrtcThreadScope {
   public:
-    LibwebrtcThreadScope() : _previous(onLibwebrtcThread) {
-      onLibwebrtcThread = true;
-    }
+    LibwebrtcThreadScope() : _previous(OnLibwebrtcThread()) { OnLibwebrtcThread() = true; }
 
-    ~LibwebrtcThreadScope() {
-      onLibwebrtcThread = _previous;
-    }
+    ~LibwebrtcThreadScope() { OnLibwebrtcThread() = _previous; }
 
     LibwebrtcThreadScope(const LibwebrtcThreadScope &) = delete;
     LibwebrtcThreadScope &operator=(const LibwebrtcThreadScope &) = delete;
@@ -42,15 +43,18 @@ namespace python_webrtc {
   };
 
   // Forks, counted in the child: objects from before one are never released there, their threads are gone
-  inline std::atomic<int> forks{0};
+  inline std::atomic<int> &Forks() {
+    static std::atomic<int> forks{0};
+    return forks;
+  }
 
   // Runs a release right away, or on a thread of its own on a libwebrtc thread; leaks while the interpreter finalizes
-  template<typename F>
-  void ReleaseOffLibwebrtcThread(F &&release, int generation = forks.load()) {
-    if (!PythonAlive() || generation != forks.load()) {
+  template <typename F>
+  void ReleaseOffLibwebrtcThread(F &&release, int generation = Forks().load()) {
+    if (!PythonAlive() || generation != Forks().load()) {
       return;
     }
-    if (onLibwebrtcThread) {
+    if (OnLibwebrtcThread()) {
       std::thread(std::forward<F>(release)).detach();
     } else {
       release();
@@ -60,14 +64,14 @@ namespace python_webrtc {
   // Deletes wrappers whose destructors block on libwebrtc threads off those threads
   struct DeleteOffLibwebrtcThread {
     // of the process the wrapper was created in (see forks)
-    int generation = forks.load();
+    int generation = Forks().load();
 
-    template<typename T>
+    template <typename T>
     void operator()(T *dying) const {
       ReleaseOffLibwebrtcThread(
           [dying]() {
             // members too are released without it, like proxies destroyed on their thread
-            gil_release_if_held release;
+            const gil_release_if_held release;
             delete dying;
           },
           generation);
@@ -79,8 +83,10 @@ namespace python_webrtc {
   class BlockingDestructor {
   public:
     explicit BlockingDestructor(const char *name) {
-      if (onLibwebrtcThread) {
-        std::fprintf(stderr, "python-webrtc: %s destroyed on a libwebrtc thread, see DeleteOffLibwebrtcThread\n", name);
+      if (OnLibwebrtcThread()) {
+        const std::string message =
+            std::string("python-webrtc: ") + name + " destroyed on a libwebrtc thread, see DeleteOffLibwebrtcThread\n";
+        (void)std::fputs(message.c_str(), stderr);
         std::abort();
       }
     }
@@ -90,3 +96,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_UTILS_LIBWEBRTC_THREAD_H_

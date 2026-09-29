@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_MODELS_PYTHON_WEBRTC_RTC_SESSION_DESCRIPTION_INIT_H_
+#define PYTHON_WEBRTC_MODELS_PYTHON_WEBRTC_RTC_SESSION_DESCRIPTION_INIT_H_
 
 #include <string>
 
@@ -24,10 +25,12 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
-    static RTCSessionDescriptionInit Wrap(webrtc::SessionDescriptionInterface *);
+    static RTCSessionDescriptionInit Wrap(const webrtc::SessionDescriptionInterface *description);
 
-    webrtc::SdpType type;
+    webrtc::SdpType type{};
     std::string sdp;
   };
 
-} //namespace python_webrtc
+} // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_MODELS_PYTHON_WEBRTC_RTC_SESSION_DESCRIPTION_INIT_H_

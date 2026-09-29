@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_STATS_COLLECTOR_CALLBACK_H_
+#define PYTHON_WEBRTC_INTERFACES_STATS_COLLECTOR_CALLBACK_H_
 
 #include <functional>
 #include <set>
@@ -29,8 +30,8 @@ namespace python_webrtc {
         return;
       }
       auto filtered = webrtc::RTCStatsReport::Create(report->timestamp());
-      for (const auto &stats: *report) {
-        if (!_excluded.count(stats.type())) {
+      for (const auto &stats : *report) {
+        if (!_excluded.contains(stats.type())) {
           filtered->AddStats(stats.copy());
         }
       }
@@ -43,3 +44,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_STATS_COLLECTOR_CALLBACK_H_

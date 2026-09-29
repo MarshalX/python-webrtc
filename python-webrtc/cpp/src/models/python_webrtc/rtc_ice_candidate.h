@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_MODELS_PYTHON_WEBRTC_RTC_ICE_CANDIDATE_H_
+#define PYTHON_WEBRTC_MODELS_PYTHON_WEBRTC_RTC_ICE_CANDIDATE_H_
 
 #include <optional>
 #include <string>
@@ -37,3 +38,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_MODELS_PYTHON_WEBRTC_RTC_ICE_CANDIDATE_H_

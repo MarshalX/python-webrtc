@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_RTC_ICE_TRANSPORT_H_
+#define PYTHON_WEBRTC_INTERFACES_RTC_ICE_TRANSPORT_H_
 
 #include <functional>
 #include <memory>
@@ -19,7 +20,6 @@
 #include <api/ice_transport_interface.h>
 #include <p2p/base/ice_transport_internal.h>
 
-#include "peer_connection_factory.h"
 #include "../enums/enums.h"
 #include "../models/python_webrtc/rtc_configuration.h"
 #include "../models/python_webrtc/rtc_ice_candidate.h"
@@ -27,6 +27,7 @@
 #include "../utils/listeners.h"
 #include "../utils/locked_function.h"
 #include "../utils/surfaced.h"
+#include "peer_connection_factory.h"
 
 namespace python_webrtc {
 
@@ -35,9 +36,13 @@ namespace python_webrtc {
 
   class RTCIceTransport : public Listeners {
   public:
-    explicit RTCIceTransport(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::IceTransportInterface>);
+    explicit RTCIceTransport(std::shared_ptr<PeerConnectionFactory> factory,
+                             webrtc::scoped_refptr<webrtc::IceTransportInterface> transport);
 
     ~RTCIceTransport() override;
+
+    RTCIceTransport(const RTCIceTransport &) = delete;
+    RTCIceTransport &operator=(const RTCIceTransport &) = delete;
 
     static void Init(pybind11::module &m);
 
@@ -108,7 +113,8 @@ namespace python_webrtc {
 
     bool IsStandalone() { return _standalone != nullptr; }
 
-    void Gather(webrtc::PeerConnectionInterface::IceTransportsType policy, const std::vector<IceServerInit> &iceServers);
+    void Gather(webrtc::PeerConnectionInterface::IceTransportsType policy,
+                const std::vector<IceServerInit> &iceServers);
 
     // the remote parameters (flushing the remote candidates if they changed) and the role
     void Start(const std::string &usernameFragment, const std::string &password, webrtc::IceRole role);
@@ -137,9 +143,9 @@ namespace python_webrtc {
     // reads the states of the transport, on the network thread
     StateChange TakeSnapshot();
 
-    void OnStateChanged(webrtc::IceTransportInternal *);
+    void OnStateChanged(webrtc::IceTransportInternal * /*unused*/);
 
-    void OnGatheringStateChanged(webrtc::IceTransportInternal *);
+    void OnGatheringStateChanged(webrtc::IceTransportInternal * /*unused*/);
 
     std::optional<std::pair<std::string, std::string>> GetParameters(bool local);
 
@@ -183,3 +189,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_RTC_ICE_TRANSPORT_H_

@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_MEDIA_TRACK_MONITOR_H_
+#define PYTHON_WEBRTC_MEDIA_TRACK_MONITOR_H_
 
 #include <algorithm>
 #include <array>
@@ -38,46 +39,49 @@ namespace python_webrtc {
 
     void OnFrame(const webrtc::VideoFrame &frame) override {
       auto now = webrtc::TimeMicros();
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       if (_video && (_video->width != frame.width() || _video->height != frame.height())) {
         // the rate is measured from the new size on, as the source changed
         _count = 0;
       }
-      _video = Video{frame.width(), frame.height(), std::nullopt};
+      _video = Video{.width = frame.width(), .height = frame.height(), .frameRate = std::nullopt};
       _times[_count % _times.size()] = now;
       _count++;
     }
 
-    void OnData(const void *audioData, int bitsPerSample, int sampleRate, size_t channels, size_t frames) override {
-      std::lock_guard<std::mutex> lock(_mutex);
-      _audio = Audio{sampleRate, static_cast<int>(channels), bitsPerSample};
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): libwebrtc's signature
+    void OnData(const void * /*audioData*/, int bitsPerSample, int sampleRate, size_t channels,
+                size_t /*frames*/) override {
+      const std::scoped_lock lock(_mutex);
+      _audio = Audio{.sampleRate = sampleRate, .channels = static_cast<int>(channels), .bitsPerSample = bitsPerSample};
     }
 
     void OnData(const void *audioData, int bitsPerSample, int sampleRate, size_t channels, size_t frames,
-                std::optional<int64_t> absoluteCaptureTimestampMs) override {
+                std::optional<int64_t> /*absoluteCaptureTimestampMs*/) override {
       OnData(audioData, bitsPerSample, sampleRate, channels, frames);
     }
 
     std::optional<Video> video() {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       if (!_video) {
         return std::nullopt;
       }
       auto video = *_video;
-      size_t samples = std::min<size_t>(_count, _times.size());
+      const size_t samples = std::min<size_t>(_count, _times.size());
       if (samples >= 2) {
         auto last = _times[(_count - 1) % _times.size()];
         auto first = _times[(_count - samples) % _times.size()];
         // frames that stopped more than a second ago have no rate anymore
         if (last > first && webrtc::TimeMicros() - last < webrtc::kNumMicrosecsPerSec) {
-          video.frameRate = (samples - 1) * 1e6 / static_cast<double>(last - first);
+          video.frameRate =
+              static_cast<double>((samples - 1) * webrtc::kNumMicrosecsPerSec) / static_cast<double>(last - first);
         }
       }
       return video;
     }
 
     std::optional<Audio> audio() {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       return _audio;
     }
 
@@ -86,8 +90,11 @@ namespace python_webrtc {
     std::optional<Video> _video;
     std::optional<Audio> _audio;
     // arrival times of the last frames, in microseconds
-    std::array<int64_t, 30> _times{};
+    static constexpr size_t kTimedFrames = 30;
+    std::array<int64_t, kTimedFrames> _times{};
     size_t _count = 0;
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_MEDIA_TRACK_MONITOR_H_

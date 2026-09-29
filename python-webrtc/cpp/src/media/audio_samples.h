@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_MEDIA_AUDIO_SAMPLES_H_
+#define PYTHON_WEBRTC_MEDIA_AUDIO_SAMPLES_H_
 
 #include <cstddef>
 #include <string>
@@ -26,3 +27,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_MEDIA_AUDIO_SAMPLES_H_

@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_FUNCTIONS_GET_USER_MEDIA_H_
+#define PYTHON_WEBRTC_FUNCTIONS_GET_USER_MEDIA_H_
 
 #include <memory>
 
@@ -17,4 +18,6 @@ namespace python_webrtc {
   // (https://github.com/MarshalX/python-webrtc/issues/169, https://github.com/MarshalX/python-webrtc/issues/170)
   std::shared_ptr<MediaStream> GetUserMedia(bool audio, bool video, int width, int height, double frameRate);
 
-}
+} // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_FUNCTIONS_GET_USER_MEDIA_H_

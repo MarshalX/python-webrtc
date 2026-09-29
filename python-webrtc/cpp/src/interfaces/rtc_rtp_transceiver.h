@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_RTC_RTP_TRANSCEIVER_H_
+#define PYTHON_WEBRTC_INTERFACES_RTC_RTP_TRANSCEIVER_H_
 
 #include <memory>
 #include <mutex>
@@ -18,10 +19,10 @@
 
 #include <pybind11/pybind11.h>
 
+#include "../enums/enums.h"
 #include "peer_connection_factory.h"
 #include "rtc_rtp_receiver.h"
 #include "rtc_rtp_sender.h"
-#include "../enums/enums.h"
 
 namespace python_webrtc {
 
@@ -29,7 +30,8 @@ namespace python_webrtc {
 
   class RTCRtpTransceiver {
   public:
-    RTCRtpTransceiver(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>);
+    RTCRtpTransceiver(std::shared_ptr<PeerConnectionFactory> factory,
+                      webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver);
 
     static void Init(pybind11::module &m);
 
@@ -52,7 +54,7 @@ namespace python_webrtc {
 
     webrtc::RtpTransceiverDirection GetDirection();
 
-    void SetDirection(webrtc::RtpTransceiverDirection);
+    void SetDirection(webrtc::RtpTransceiverDirection direction);
 
     std::optional<webrtc::RtpTransceiverDirection> GetCurrentDirection();
 
@@ -82,3 +84,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_RTC_RTP_TRANSCEIVER_H_

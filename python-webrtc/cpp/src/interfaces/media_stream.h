@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_MEDIA_STREAM_H_
+#define PYTHON_WEBRTC_INTERFACES_MEDIA_STREAM_H_
 
 #include <memory>
 #include <mutex>
@@ -20,27 +21,23 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "peer_connection_factory.h"
-#include "media_stream_track.h"
 #include "../utils/alive_guard.h"
 #include "../utils/listeners.h"
-
-namespace webrtc {
-
-  class MediaStreamInterface;
-
-  class MediaStreamTrackInterface;
-
-}
+#include "media_stream_track.h"
+#include "peer_connection_factory.h"
 
 namespace python_webrtc {
 
   // Emits addtrack and removetrack when libwebrtc changes the tracks of a remote stream
   class MediaStream : public webrtc::ObserverInterface, public Listeners {
   public:
-    MediaStream(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::MediaStreamInterface>);
+    MediaStream(std::shared_ptr<PeerConnectionFactory> factory,
+                webrtc::scoped_refptr<webrtc::MediaStreamInterface> stream);
 
     ~MediaStream() override;
+
+    MediaStream(const MediaStream &) = delete;
+    MediaStream &operator=(const MediaStream &) = delete;
 
     // ObserverInterface, on the signaling thread
     void OnChanged() override;
@@ -64,11 +61,11 @@ namespace python_webrtc {
 
     std::vector<std::shared_ptr<MediaStreamTrack>> GetTracks();
 
-    std::optional<std::shared_ptr<MediaStreamTrack>> GetTrackById(const std::string &);
+    std::optional<std::shared_ptr<MediaStreamTrack>> GetTrackById(const std::string &id);
 
-    void AddTrack(const std::shared_ptr<MediaStreamTrack> &);
+    void AddTrack(const std::shared_ptr<MediaStreamTrack> &mediaStreamTrack);
 
-    void RemoveTrack(MediaStreamTrack &);
+    void RemoveTrack(MediaStreamTrack &mediaStreamTrack);
 
     std::shared_ptr<MediaStream> Clone();
 
@@ -77,7 +74,6 @@ namespace python_webrtc {
 
     // wrappers of the current tracks of the stream; the stream owns them, so their state outlives Python references
     std::vector<std::shared_ptr<MediaStreamTrack>> SyncTracks();
-
 
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::MediaStreamInterface> _stream;
@@ -91,3 +87,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_MEDIA_STREAM_H_

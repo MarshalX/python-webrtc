@@ -7,15 +7,17 @@
 
 #include "rtc_session_description.h"
 
+#include <utility>
+
 namespace python_webrtc {
 
-  RTCSessionDescription::RTCSessionDescription(const RTCSessionDescriptionInit &init) : _init(init) {}
+  RTCSessionDescription::RTCSessionDescription(RTCSessionDescriptionInit init) : _init(std::move(init)) {}
 
-  webrtc::SdpType RTCSessionDescription::getType() {
+  webrtc::SdpType RTCSessionDescription::getType() const {
     return _init.type;
   }
 
-  std::string RTCSessionDescription::getSdp() {
+  std::string RTCSessionDescription::getSdp() const {
     return _init.sdp;
   }
 

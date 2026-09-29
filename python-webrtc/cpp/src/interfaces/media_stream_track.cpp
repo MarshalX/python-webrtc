@@ -7,21 +7,21 @@
 
 #include "media_stream_track.h"
 
+#include <cmath>
 #include <rtc_base/crypto_random.h>
 
-#include "rtc_video_track_source.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
+#include "rtc_video_track_source.h"
 
 namespace python_webrtc {
 
   MediaStreamTrack::MediaStreamTrack(std::shared_ptr<PeerConnectionFactory> factory,
                                      webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track)
-      : _factory(std::move(factory)),
-        _track(std::move(track)),
+      : _factory(std::move(factory)), _track(std::move(track)),
         _source(SourceControl::Find(_track.get(), _track->id())) {
     // see AliveGuard
-    _factory->_signalingThread->PostTask(_alive.Guard([this]() {
+    _factory->signalingThread()->PostTask(_alive.Guard([this]() {
       _track->RegisterObserver(this);
       _observing = true;
       AttachMonitor();
@@ -29,10 +29,10 @@ namespace python_webrtc {
   }
 
   MediaStreamTrack::~MediaStreamTrack() {
-    BlockingDestructor release("MediaStreamTrack");
+    const BlockingDestructor release("MediaStreamTrack");
 
     // after this the track can't notify us anymore: it notifies on the same thread
-    _factory->_signalingThread->BlockingCall([this]() {
+    _factory->signalingThread()->BlockingCall([this]() {
       DetachMonitor();
       if (_observing) {
         _track->UnregisterObserver(this);
@@ -42,15 +42,7 @@ namespace python_webrtc {
 
     _track = nullptr;
     // released as the listeners are (see DropListeners)
-    {
-      PythonEntry entry;
-      if (!entry) {
-        (void) _constraints.release();
-      } else if (_constraints) {
-        pybind11::gil_scoped_acquire gil;
-        pybind11::object dropped = std::move(_constraints);
-      }
-    }
+    ReleasePythonObject(_constraints);
     DropListeners();
   }
 
@@ -100,7 +92,7 @@ namespace python_webrtc {
   void MediaStreamTrack::Stop() {
     _stopped = true;
     _surfacedEnded.Reset();
-    _factory->_signalingThread->BlockingCall([this]() { StopOnSignalingThread(); });
+    _factory->signalingThread()->BlockingCall([this]() { StopOnSignalingThread(); });
   }
 
   void MediaStreamTrack::StopOnSignalingThread() {
@@ -115,7 +107,7 @@ namespace python_webrtc {
 
   void MediaStreamTrack::AddEndObserver(const std::shared_ptr<TrackEndObserver> &observer) {
     {
-      std::lock_guard<std::mutex> lock(_endObserversMutex);
+      const std::scoped_lock lock(_endObserversMutex);
       if (!_ended) {
         _endObservers.push_back(observer);
         return;
@@ -127,10 +119,10 @@ namespace python_webrtc {
   void MediaStreamTrack::NotifyEnded() {
     std::vector<std::weak_ptr<TrackEndObserver>> observers;
     {
-      std::lock_guard<std::mutex> lock(_endObserversMutex);
+      const std::scoped_lock lock(_endObserversMutex);
       observers.swap(_endObservers);
     }
-    for (auto &observer: observers) {
+    for (auto &observer : observers) {
       if (auto locked = observer.lock()) {
         locked->OnTrackEnded();
       }
@@ -140,7 +132,7 @@ namespace python_webrtc {
   void MediaStreamTrack::OnChanged() {
     if (_track->state() == webrtc::MediaStreamTrackInterface::TrackState::kEnded && !_ended) {
       // ended by the remote peer or by renegotiation, rather than by stop()
-      bool emit = !_stopped;
+      const bool emit = !_stopped;
       if (emit) {
         // the track is live until its ended event (see Surfaced)
         _surfacedEnded.Changed(IsTracked(), false);
@@ -164,7 +156,7 @@ namespace python_webrtc {
     _muted = true;
     {
       // a remote track has its own id, rather than the one in the description, which every receiver of it shares
-      std::lock_guard<std::mutex> lock(_idMutex);
+      const std::scoped_lock lock(_idMutex);
       _id = webrtc::CreateRandomUuid();
       _label = _track->kind() == webrtc::MediaStreamTrackInterface::kAudioKind ? "remote audio" : "remote video";
     }
@@ -177,7 +169,7 @@ namespace python_webrtc {
       // an ended track stays as it was
       return;
     }
-    bool previous = _muted.exchange(muted);
+    const bool previous = _muted.exchange(muted);
     if (previous != muted) {
       // a held remote track keeps showing the previous value until its event is delivered
       _surfacedMuted.Changed(IsTracked(), previous);
@@ -214,7 +206,7 @@ namespace python_webrtc {
   }
 
   std::string MediaStreamTrack::GetId() {
-    std::lock_guard<std::mutex> lock(_idMutex);
+    const std::scoped_lock lock(_idMutex);
     return _id ? *_id : _track->id();
   }
 
@@ -223,19 +215,20 @@ namespace python_webrtc {
   }
 
   std::string MediaStreamTrack::GetLabel() {
-    std::lock_guard<std::mutex> lock(_idMutex);
+    const std::scoped_lock lock(_idMutex);
     return _label;
   }
 
   void MediaStreamTrack::SetLabel(const std::string &label) {
-    std::lock_guard<std::mutex> lock(_idMutex);
+    const std::scoped_lock lock(_idMutex);
     _label = label;
   }
 
   webrtc::MediaType MediaStreamTrack::GetKind() {
     if (_track->kind() == webrtc::MediaStreamTrackInterface::kAudioKind) {
       return webrtc::MediaType::AUDIO;
-    } else if (_track->kind() == webrtc::MediaStreamTrackInterface::kVideoKind) {
+    }
+    if (_track->kind() == webrtc::MediaStreamTrackInterface::kVideoKind) {
       return webrtc::MediaType::VIDEO;
     }
 
@@ -243,11 +236,11 @@ namespace python_webrtc {
   }
 
   webrtc::MediaStreamTrackInterface::TrackState MediaStreamTrack::GetReadyState() {
-    bool ended = _ended || _track->state() == webrtc::MediaStreamTrackInterface::TrackState::kEnded;
+    const bool ended = _ended || _track->state() == webrtc::MediaStreamTrackInterface::TrackState::kEnded;
     // without listeners (outside of an event loop), no event is going to surface it
-    return (HasListeners() ? _surfacedEnded.Get(ended) : ended)
-           ? webrtc::MediaStreamTrackInterface::TrackState::kEnded
-           : webrtc::MediaStreamTrackInterface::TrackState::kLive;
+    const bool surfaced = HasListeners() ? _surfacedEnded.Get(ended) : ended;
+    return surfaced ? webrtc::MediaStreamTrackInterface::TrackState::kEnded
+                    : webrtc::MediaStreamTrackInterface::TrackState::kLive;
   }
 
   bool MediaStreamTrack::GetMuted() {
@@ -260,12 +253,12 @@ namespace python_webrtc {
     std::optional<std::tuple<int, int, double>> camera;
     bool microphone = false;
     {
-      gil_release release;
+      const gil_release release;
       video = _monitor.video();
       audio = _monitor.audio();
       camera = GetCamera();
       if (_source) {
-        std::lock_guard<std::mutex> lock(_source->mutex);
+        const std::scoped_lock lock(_source->mutex);
         microphone = _source->microphone;
       }
     }
@@ -303,10 +296,11 @@ namespace python_webrtc {
     if (!_source) {
       return std::nullopt;
     }
-    std::lock_guard<std::mutex> lock(_source->mutex);
-    int width, height;
-    double frameRate;
-    if (!_source->camera || !_source->camera->IsCamera(&width, &height, &frameRate)) {
+    const std::scoped_lock lock(_source->mutex);
+    int width{};
+    int height{};
+    double frameRate = NAN;
+    if ((_source->camera == nullptr) || !_source->camera->IsCamera(&width, &height, &frameRate)) {
       return std::nullopt;
     }
     return std::make_tuple(width, height, frameRate);
@@ -316,8 +310,8 @@ namespace python_webrtc {
     if (!_source || _ended) {
       return false;
     }
-    std::lock_guard<std::mutex> lock(_source->mutex);
-    if (!_source->camera) {
+    const std::scoped_lock lock(_source->mutex);
+    if (_source->camera == nullptr) {
       return false;
     }
     _source->camera->StartCamera(width, height, frameRate);
@@ -334,14 +328,18 @@ namespace python_webrtc {
 
   std::string MediaStreamTrack::GetContentHint() {
     if (_track->kind() == webrtc::MediaStreamTrackInterface::kAudioKind) {
-      std::lock_guard<std::mutex> lock(_contentHintMutex);
+      const std::scoped_lock lock(_contentHintMutex);
       return _audioContentHint;
     }
     switch (static_cast<webrtc::VideoTrackInterface *>(_track.get())->content_hint()) {
-      case webrtc::VideoTrackInterface::ContentHint::kFluid: return "motion";
-      case webrtc::VideoTrackInterface::ContentHint::kDetailed: return "detail";
-      case webrtc::VideoTrackInterface::ContentHint::kText: return "text";
-      default: return "";
+    case webrtc::VideoTrackInterface::ContentHint::kFluid:
+      return "motion";
+    case webrtc::VideoTrackInterface::ContentHint::kDetailed:
+      return "detail";
+    case webrtc::VideoTrackInterface::ContentHint::kText:
+      return "text";
+    default:
+      return "";
     }
   }
 
@@ -349,13 +347,13 @@ namespace python_webrtc {
     // hints of the other kind, and unknown ones, are ignored
     if (_track->kind() == webrtc::MediaStreamTrackInterface::kAudioKind) {
       if (hint.empty() || hint == "speech" || hint == "speaking" || hint == "music") {
-        std::lock_guard<std::mutex> lock(_contentHintMutex);
+        const std::scoped_lock lock(_contentHintMutex);
         _audioContentHint = hint;
       }
       return;
     }
     using ContentHint = webrtc::VideoTrackInterface::ContentHint;
-    auto track = static_cast<webrtc::VideoTrackInterface *>(_track.get());
+    auto *track = static_cast<webrtc::VideoTrackInterface *>(_track.get());
     if (hint.empty()) {
       track->set_content_hint(ContentHint::kNone);
     } else if (hint == "motion") {
@@ -371,12 +369,13 @@ namespace python_webrtc {
     auto label = webrtc::CreateRandomUuid();
     webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> clonedTrack = nullptr;
 
-    if (_track->kind() == _track->kAudioKind) {
-      auto audioTrack = dynamic_cast<webrtc::AudioTrackInterface *>(_track.get());
+    if (_track->kind() == webrtc::MediaStreamTrackInterface::kAudioKind) {
+      auto *audioTrack = dynamic_cast<webrtc::AudioTrackInterface *>(_track.get());
       clonedTrack = _factory->factory()->CreateAudioTrack(label, audioTrack->GetSource());
     } else {
-      auto videoTrack = dynamic_cast<webrtc::VideoTrackInterface *>(_track.get());
-      clonedTrack = _factory->factory()->CreateVideoTrack(webrtc::scoped_refptr<webrtc::VideoTrackSourceInterface>(videoTrack->GetSource()), label);
+      auto *videoTrack = dynamic_cast<webrtc::VideoTrackInterface *>(_track.get());
+      clonedTrack = _factory->factory()->CreateVideoTrack(
+          webrtc::scoped_refptr<webrtc::VideoTrackSourceInterface>(videoTrack->GetSource()), label);
     }
 
     if (_source) {
@@ -392,16 +391,18 @@ namespace python_webrtc {
   }
 
   MediaStreamTrack::operator webrtc::scoped_refptr<webrtc::AudioTrackInterface>() {
-    return webrtc::scoped_refptr<webrtc::AudioTrackInterface>(dynamic_cast<webrtc::AudioTrackInterface *>(_track.get()));
+    return webrtc::scoped_refptr<webrtc::AudioTrackInterface>(
+        dynamic_cast<webrtc::AudioTrackInterface *>(_track.get()));
   }
 
   MediaStreamTrack::operator webrtc::scoped_refptr<webrtc::VideoTrackInterface>() {
-    return webrtc::scoped_refptr<webrtc::VideoTrackInterface>(dynamic_cast<webrtc::VideoTrackInterface *>(_track.get()));
+    return webrtc::scoped_refptr<webrtc::VideoTrackInterface>(
+        dynamic_cast<webrtc::VideoTrackInterface *>(_track.get()));
   }
 
   InstanceHolder<MediaStreamTrack, webrtc::MediaStreamTrackInterface> &MediaStreamTrack::holder() {
     // never destroyed: wrappers may outlive static destructors
-    static auto holder = new InstanceHolder<MediaStreamTrack, webrtc::MediaStreamTrackInterface>();
+    static auto *holder = new InstanceHolder<MediaStreamTrack, webrtc::MediaStreamTrackInterface>();
     return *holder;
   }
 
