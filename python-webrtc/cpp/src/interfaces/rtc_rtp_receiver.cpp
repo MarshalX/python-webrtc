@@ -26,17 +26,19 @@ namespace python_webrtc {
     // the track of a receiver is a remote one
     _track->MarkRemote();
     // see AliveGuard
-    _factory->_signalingThread->PostTask(_alive.Guard([this]() { _receiver->SetObserver(this); }));
+    _factory->_signalingThread->PostTask(_alive.Guard([this]() {
+      _receiver->SetObserver(this);
+      holder().SetObserver(_receiver.get(), this);
+    }));
   }
 
   RTCRtpReceiver::~RTCRtpReceiver() {
     BlockingDestructor release("RTCRtpReceiver");
 
-    // the receiver has a single observer slot, a newer wrapper of it may have taken it over already
-    auto replaced = holder().HasLive(_receiver.get());
     // callbacks run on the signaling thread, so after this none of them can be running or start again
-    _factory->_signalingThread->BlockingCall([this, replaced]() {
-      if (!replaced) {
+    _factory->_signalingThread->BlockingCall([this]() {
+      // a newer wrapper of the receiver may have taken its single observer slot
+      if (holder().TakeObserver(_receiver.get(), this)) {
         _receiver->SetObserver(nullptr);
       }
     });
@@ -84,12 +86,14 @@ namespace python_webrtc {
 
   std::optional<std::shared_ptr<RTCDtlsTransport>> RTCRtpReceiver::GetTransport() {
     auto transport = _receiver->dtls_transport();
+    // wrapped out of the lock: wrapping may wait for the signaling thread
+    auto wrapper = RTCDtlsTransport::holder().GetOrCreate(_factory, transport);
 
     std::shared_ptr<RTCDtlsTransport> previous;
     std::lock_guard<std::mutex> lock(_mutex);
     if (!_transport || _transport->transport() != transport) {
       previous = std::move(_transport);
-      _transport = RTCDtlsTransport::holder().GetOrCreate(_factory, transport);
+      _transport = std::move(wrapper);
     }
 
     if (_transport) {

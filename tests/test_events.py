@@ -161,3 +161,27 @@ async def test_restart_ice_before_negotiation_needs_nothing(pc):
     pc.restart_ice()
     await asyncio.sleep(QUIET_PERIOD)
     assert events == []
+
+
+def test_objects_used_from_another_loop_see_their_events():
+    """Once its first loop is closed, an object is updated on the loop of its handlers"""
+    objects = {}
+
+    async def first():
+        caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        channel = caller.create_data_channel('loops')
+        opened = wait_for_event(channel, 'open')
+        await connect(caller, callee)
+        await opened
+        objects.update(caller=caller, callee=callee, channel=channel)
+
+    async def second():
+        channel = objects['channel']
+        closed = wait_for_event(channel, 'close')
+        objects['callee'].close()
+        await closed
+        assert channel.ready_state == webrtc.RTCDataChannelState.closed
+        objects['caller'].close()
+
+    asyncio.run(first())
+    asyncio.run(second())

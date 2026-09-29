@@ -42,9 +42,12 @@ namespace python_webrtc {
     void SetListeners(pybind11::object listeners) {
       _listeners = listeners.is_none() ? pybind11::object() : std::move(listeners);
       _active = static_cast<bool>(_listeners);
-      // events held until Python had the object are delivered now
-      if (_active && IsHeld()) {
-        Release();
+      if (_active) {
+        // held events are delivered now, without the GIL: a thread releasing them holds their lock waiting for it
+        pybind11::gil_scoped_release release;
+        if (IsHeld()) {
+          Release();
+        }
       }
     }
 

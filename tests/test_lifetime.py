@@ -476,3 +476,163 @@ def test_collected_on_libwebrtc_thread():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=60, cwd=root)
     assert 'collected' in result.stdout, result.stderr[-2000:]
+
+
+@pytest.mark.asyncio
+async def test_generators_are_collected():
+    """An audio generator is its own track: its handlers mustn't keep it alive"""
+    baseline = alive_factories()
+
+    def create():
+        audio = webrtc.MediaStreamTrackGenerator('audio')
+        video = webrtc.VideoTrackGenerator()
+        audio.on('ended', lambda event: audio.kind)
+        video.track.on('ended', lambda event: video.track)
+        return weakref.ref(audio), weakref.ref(video), weakref.ref(video.track)
+
+    refs = [ref for _ in range(10) for ref in create()]
+    collect()
+
+    assert [ref for ref in refs if ref() is not None] == []
+    assert alive_factories() == baseline
+
+
+def test_generator_track_stays_ended_without_its_wrapper():
+    """A generator whose stopped track is collected keeps dropping what's written"""
+    generator = wrtc.TrackGenerator('video')
+    track = generator.track
+    assert generator.live
+    track.stop()
+    del track
+    collect()
+
+    assert not generator.live
+    assert webrtc.MediaStreamTrack._wrap(generator.track).ready_state == webrtc.MediaStreamTrackState.ended
+
+
+def processor_with_handler_on_its_track():
+    track = webrtc.get_user_media(audio=False, video=True).get_tracks()[0]
+    processor = webrtc.MediaStreamTrackProcessor(track)
+    track.on('ended', lambda event: processor.readable)
+    track.stop()
+    return processor
+
+
+def stream_with_handler_on_its_track():
+    stream = webrtc.get_user_media(audio=True, video=False)
+    stream.get_tracks()[0].on('ended', lambda event: stream.id)
+    return stream
+
+
+def processor_of_generator_with_handler():
+    generator = webrtc.MediaStreamTrackGenerator('video')
+    processor = webrtc.MediaStreamTrackProcessor(generator)
+    generator.on('ended', lambda event: processor.readable)
+    generator.stop()
+    return processor
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'create',
+    [processor_with_handler_on_its_track, stream_with_handler_on_its_track, processor_of_generator_with_handler],
+)
+async def test_handlers_of_owned_tracks_do_not_keep_owners_alive(create):
+    """Handlers of a track referencing its processor or stream don't keep them alive"""
+    baseline = alive_factories()
+    refs = [weakref.ref(create()) for _ in range(5)]
+    await asyncio.sleep(QUIET_PERIOD)
+    collect()
+
+    assert [ref for ref in refs if ref() is not None] == []
+    assert alive_factories() == baseline
+
+
+def test_stream_keeps_the_state_of_its_tracks():
+    """The native stream keeps its tracks weakly, the Python one keeps them: a stopped track stays stopped"""
+    stream = webrtc.MediaStream(webrtc.get_user_media(audio=True, video=True).get_tracks())
+    for track in stream.get_tracks():
+        track.stop()
+    del track
+    collect()
+
+    assert all(track.ready_state == webrtc.MediaStreamTrackState.ended for track in stream.get_tracks())
+    assert len(stream.get_audio_tracks()) == len(stream.get_video_tracks()) == 1
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason='known leak: the native sender and receiver keep the wrappers of their tracks, whose state (like the id of '
+    'a remote track) is theirs, so handlers of the track referencing its sender or receiver are a cycle through C++',
+)
+@pytest.mark.asyncio
+@pytest.mark.parametrize('part', ['sender', 'receiver'])
+async def test_handler_of_a_track_referencing_its_sender_or_receiver(part):
+    baseline = alive_factories()
+
+    def create():
+        pc = webrtc.RTCPeerConnection()
+        if part == 'sender':
+            owner = pc.add_track(webrtc.get_user_media(audio=True, video=False).get_tracks()[0])
+        else:
+            owner = pc.add_transceiver(webrtc.MediaType.audio).receiver
+        owner.track.on('ended', lambda event: owner.track)
+        pc.close()
+        return weakref.ref(owner)
+
+    ref = create()
+    await asyncio.sleep(QUIET_PERIOD)
+    collect()
+
+    assert ref() is None
+    assert alive_factories() == baseline
+
+
+def alive_objects():
+    """The native objects alive by type, once releases on helper threads are done"""
+    collect()
+    alive = wrtc._alive()
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        time.sleep(0.05)
+        collect()
+        current = wrtc._alive()
+        if current == alive:
+            break
+        alive = current
+    return alive
+
+
+@pytest.mark.asyncio
+async def test_a_session_releases_every_native_object():
+    """Connections with media, channels, processors and generators, closed and dropped: nothing native is left"""
+    baseline = alive_objects()
+
+    async def session():
+        caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        stream = webrtc.get_user_media(audio=True, video=True)
+        for track in stream.get_tracks():
+            caller.add_track(track, stream)
+        generator = webrtc.VideoTrackGenerator()
+        caller.add_track(generator.track)
+        channel = caller.create_data_channel('session')
+        received = wait_for_event(callee, 'track')
+        await connect(caller, callee)
+        remote = (await received).track
+        reader = webrtc.MediaStreamTrackProcessor(remote).readable.get_reader()
+        writer = generator.writable.get_writer()
+        await writer.write(
+            webrtc.VideoFrame(bytes(64 * 48 * 4), format='RGBA', coded_width=64, coded_height=48, timestamp=0)
+        )
+        (await asyncio.wait_for(reader.read(), 5)).value.close()
+        await caller.get_stats()
+        channel.send('bye')
+        for track in stream.get_tracks():
+            track.stop()
+        caller.close()
+        callee.close()
+
+    await session()
+    await asyncio.sleep(QUIET_PERIOD)
+
+    assert alive_objects() == baseline

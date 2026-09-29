@@ -1,4 +1,4 @@
-.PHONY: dev test lint format stub wheels doc clean
+.PHONY: dev test asan tsan lint format stub wheels doc clean
 
 # editable install; the extension is rebuilt automatically on import after C++ changes
 dev:
@@ -8,6 +8,13 @@ dev:
 
 test:
 	uv run --no-sync pytest tests $(O)
+
+# the tests against an ASan+UBSan build, natively on macOS (on Linux: .github/scripts/sanitizers.sh)
+asan:
+	.github/scripts/sanitizers-macos.sh $(O)
+
+tsan:
+	SANITIZE=thread .github/scripts/sanitizers-macos.sh $(O)
 
 lint:
 	uvx ruff check

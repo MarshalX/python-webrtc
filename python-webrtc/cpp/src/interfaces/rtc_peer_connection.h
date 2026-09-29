@@ -26,6 +26,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/functional.h>
 
+#include "../utils/alive_count.h"
 #include "../exceptions.h"
 #include "../models/python_webrtc/rtc_configuration.h"
 #include "../models/python_webrtc/rtc_session_description.h"
@@ -367,6 +368,7 @@ namespace python_webrtc {
     void FireRemoteStreamChanges();
 
     // wrappers' destructors use the threads of the factory: declared first, to be destroyed last
+    AliveCount<RTCPeerConnection> _counted;
     std::shared_ptr<PeerConnectionFactory> _factory;
 
     std::mutex _connectionMutex;

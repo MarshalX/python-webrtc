@@ -16,9 +16,20 @@ from webrtc.utils import events
 
 def pytest_addoption(parser):
     parser.addoption('--gc-on-emit', action='store_true', help='collect garbage on events of libwebrtc threads')
+    parser.addoption('--stress', action='store_true', help='run the long stress tests too')
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption('--stress'):
+        return
+    skip = pytest.mark.skip(reason='a long stress test, run with --stress')
+    for item in items:
+        if 'stress' in item.keywords:
+            item.add_marker(skip)
 
 
 def pytest_configure(config):
+    config.addinivalue_line('markers', 'stress: a long stress test, run with --stress')
     if not config.getoption('--gc-on-emit'):
         return
     # the collector runs on libwebrtc threads, as it may whenever they emit: whatever it releases must not block them

@@ -138,6 +138,8 @@ class MediaStreamTrackProcessor(WebRTCObject, EventTarget):
             raise TypeError(f'max_buffer_size must be from 0 to 65535, not {max_buffer_size}')
 
         super().__init__(self._class(track._native_obj, max(1, max_buffer_size)))
+        # the native processor doesn't keep the track, Python does
+        self._track = track
         self._video = video
         self._source = _TrackSource(self)
         self._readable = ReadableStream(self._source, high_water_mark=0)

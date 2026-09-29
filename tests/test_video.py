@@ -29,14 +29,25 @@ def test_get_user_media_needs_audio_or_video():
 
 
 @pytest.mark.parametrize(
-    'constraints',
-    [{'width': {'exact': 0}}, {'height': {'ideal': 0}}, {'frame_rate': {'max': 0}}, {'width': {'min': 0, 'max': -1}}],
-    ids=['exact', 'ideal', 'max', 'min and max'],
+    'constraints, error',
+    [
+        ({'width': {'exact': 0}}, webrtc.OverconstrainedError),
+        ({'frame_rate': {'max': 0}}, webrtc.OverconstrainedError),
+        ({'width': {'min': 0, 'max': -1}}, TypeError),
+    ],
+    ids=['exact', 'max', 'negative'],
 )
-def test_get_user_media_constraint_selects_a_value(constraints):
-    """A constraint selects its exact or ideal value, else the default within its range: here a non-positive one"""
-    with pytest.raises(ValueError):
+def test_get_user_media_constraint_beyond_the_camera(constraints, error):
+    """A required value the camera can't have is overconstrained, a negative size isn't an unsigned long"""
+    with pytest.raises(error):
         webrtc.get_user_media(audio=False, video=True, **constraints)
+
+
+def test_get_user_media_ideal_beyond_the_camera():
+    """An ideal value selects the nearest one the camera can have"""
+    (track,) = webrtc.get_user_media(audio=False, video=True, height={'ideal': 0}).get_tracks()
+    assert track._native_obj._camera() == (640, 1, 30)
+    track.stop()
 
 
 def test_get_user_media_constraints():

@@ -19,6 +19,16 @@
 #include "rtc_data_channel.h"
 #include "rtc_dtmf_sender.h"
 #include "rtc_peer_connection.h"
+#include "../media/media_stream_track_processor.h"
+#include "../media/track_generator.h"
+#include "../media/video_frame_buffer.h"
+#include "../utils/alive_count.h"
+#include "../utils/gil.h"
+
+#include <map>
+#include <string>
+
+#include <pybind11/stl.h>
 
 namespace python_webrtc {
 
@@ -35,5 +45,25 @@ namespace python_webrtc {
     RTCRtpTransceiver::Init(m);
     RTCDataChannel::Init(m);
     RTCPeerConnection::Init(m);
+
+    // the native objects alive, by type, so tests can check that none leaks
+    m.def("_alive", []() {
+      return std::map<std::string, int>{
+          {"RTCPeerConnection", AliveCount<RTCPeerConnection>::count.load()},
+          {"MediaStreamTrack", MediaStreamTrack::holder().Alive()},
+          {"MediaStream", MediaStream::holder().Alive()},
+          {"RTCRtpTransceiver", RTCRtpTransceiver::holder().Alive()},
+          {"RTCRtpSender", RTCRtpSender::holder().Alive()},
+          {"RTCRtpReceiver", RTCRtpReceiver::holder().Alive()},
+          {"RTCDTMFSender", RTCDTMFSender::holder().Alive()},
+          {"RTCDataChannel", RTCDataChannel::holder().Alive()},
+          {"RTCSctpTransport", RTCSctpTransport::holder().Alive()},
+          {"RTCDtlsTransport", RTCDtlsTransport::holder().Alive()},
+          {"RTCIceTransport", RTCIceTransport::holder().Alive()},
+          {"MediaStreamTrackProcessor", AliveCount<MediaStreamTrackProcessor>::count.load()},
+          {"TrackGenerator", AliveCount<TrackGenerator>::count.load()},
+          {"VideoFrameBuffer", AliveCount<VideoFrameBuffer>::count.load()},
+      };
+    }, nogil());
   }
 }

@@ -7,7 +7,9 @@
 
 #include "peer_connection_factory.h"
 #include "../media/playout_audio_device.h"
+#include "../media/wakeup.h"
 #include "../utils/gil.h"
+#include "../utils/instance_holder.h"
 #include "../utils/libwebrtc_thread.h"
 
 #include <api/create_peerconnection_factory.h>
@@ -24,7 +26,12 @@
 #include <api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h>
 #include <rtc_base/ssl_adapter.h>
 
+#include <stdexcept>
 #include <thread>
+
+#ifndef _WIN32
+#include <pthread.h>
+#endif
 
 namespace python_webrtc {
 
@@ -43,7 +50,7 @@ namespace python_webrtc {
   std::mutex PeerConnectionFactory::_mutex{};
   std::atomic<int> PeerConnectionFactory::_alive{0};
 
-  PeerConnectionFactory::PeerConnectionFactory() {
+  PeerConnectionFactory::PeerConnectionFactory() : _generation(forks.load()) {
     _alive++;
 
     _workerThread = webrtc::Thread::CreateWithSocketServer();
@@ -108,7 +115,19 @@ namespace python_webrtc {
     _alive--;
   }
 
+  void RunOnSignalingThread(PeerConnectionFactory &factory, const std::function<void()> &function) {
+    gil_release_if_held release;
+    factory._signalingThread->BlockingCall([&]() { function(); });
+  }
+
   std::shared_ptr<PeerConnectionFactory> PeerConnectionFactory::Create() {
+#ifdef __APPLE__
+    // libwebrtc runs its task queues on libdispatch, which crashes in the child of a fork
+    if (forks.load() > 0) {
+      throw std::runtime_error("python-webrtc can't be used in the child of a fork on macOS (libdispatch doesn't support "
+                               "it): use the spawn start method of multiprocessing");
+    }
+#endif
     return {new PeerConnectionFactory(), &PeerConnectionFactory::Destroy};
   }
 
@@ -123,6 +142,10 @@ namespace python_webrtc {
   }
 
   void PeerConnectionFactory::Destroy(PeerConnectionFactory *factory) {
+    // leaked while the interpreter finalizes or in a forked child: its threads may hang or be gone
+    if (!PythonAlive() || factory->_generation != forks.load()) {
+      return;
+    }
     // the last owner may be released by a task on one of the factory threads, which can't stop itself
     if (factory->_workerThread->IsCurrent() || factory->_signalingThread->IsCurrent()) {
       std::thread([factory]() { delete factory; }).detach();
@@ -140,8 +163,27 @@ namespace python_webrtc {
     [[maybe_unused]] bool result = webrtc::InitializeSSL();
     assert(result);
 
+#ifndef _WIN32
+    // libwebrtc threads don't survive a fork: the child forgets the factories (also runs before exec, keep it minimal)
+    pthread_atfork(
+        []() {
+          _mutex.lock();
+          Wakeup::LockForFork();
+        },
+        []() {
+          Wakeup::UnlockAfterFork();
+          _mutex.unlock();
+        },
+        []() {
+          forks++;
+          _default.reset();
+          Wakeup::UnlockAfterFork();
+          _mutex.unlock();
+        });
+#endif
+
     pybind11::class_<PeerConnectionFactory, std::shared_ptr<PeerConnectionFactory>>(m, "PeerConnectionFactory")
-        .def(pybind11::init(&PeerConnectionFactory::Create), nogil())
+        .def(pybind11::init(nogil_factory(&PeerConnectionFactory::Create)))
         .def_static("getOrCreateDefault", &PeerConnectionFactory::GetOrCreateDefault, nogil())
         .def_static("dispose", &PeerConnectionFactory::Dispose, nogil());
 

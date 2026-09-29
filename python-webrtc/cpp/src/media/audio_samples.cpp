@@ -12,6 +12,8 @@
 #include <cstring>
 #include <string_view>
 
+#include "utils/buffer.h"
+
 namespace python_webrtc {
 
   namespace {
@@ -138,16 +140,18 @@ namespace python_webrtc {
                           size_t frameCount) {
     auto sourceFormat = ParseFormat(sourceFormatName);
     auto destinationFormat = ParseFormat(destinationFormatName);
-    auto sourceInfo = source.request();
-    auto destinationInfo = destination.request(true);
+    auto sourceInfo = ContiguousBuffer(source);
+    auto destinationInfo = ContiguousBuffer(destination, true);
     auto sourceSize = static_cast<size_t>(sourceInfo.size * sourceInfo.itemsize);
     auto destinationSize = static_cast<size_t>(destinationInfo.size * destinationInfo.itemsize);
     size_t sourceSample = Size(sourceFormat.type);
     size_t destinationSample = Size(destinationFormat.type);
     size_t copiedChannels = destinationFormat.planar ? 1 : channels;
 
-    if (frameOffset + frameCount > frames || sourceSize < frames * channels * sourceSample ||
-        destinationSize < frameCount * copiedChannels * destinationSample ||
+    // divided rather than multiplied, which could overflow
+    if (channels == 0 || frameOffset > frames || frameCount > frames - frameOffset ||
+        frames > sourceSize / sourceSample / channels ||
+        frameCount > destinationSize / destinationSample / copiedChannels ||
         (destinationFormat.planar ? planeIndex >= channels : planeIndex != 0)) {
       throw pybind11::value_error("The copy is out of the bounds of the samples or of the destination");
     }

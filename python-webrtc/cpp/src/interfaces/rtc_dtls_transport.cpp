@@ -42,6 +42,7 @@ namespace python_webrtc {
 
     _factory->_workerThread->BlockingCall([this]() {
       _transport->RegisterObserver(this);
+      holder().SetObserver(_transport.get(), this);
       _observing = true;
 
       auto information = _transport->Information();
@@ -57,15 +58,8 @@ namespace python_webrtc {
   RTCDtlsTransport::~RTCDtlsTransport() {
     BlockingDestructor release("RTCDtlsTransport");
 
-    // the transport has a single observer slot, a newer wrapper of it may have taken it over already
-    auto replaced = holder().HasLive(_transport.get());
     // callbacks run on the network thread, so after this none of them can be running or start again
-    _factory->_workerThread->BlockingCall([this, replaced]() {
-      if (_observing && !replaced) {
-        _transport->UnregisterObserver();
-      }
-      _observing = false;
-    });
+    _factory->_workerThread->BlockingCall([this]() { Unobserve(); });
 
     _iceTransport = nullptr;
     _transport = nullptr;
@@ -124,11 +118,16 @@ namespace python_webrtc {
     Emit("error", RTCCallbackException(std::move(rtcError)));
   }
 
-  void RTCDtlsTransport::Stop() {
-    if (_observing) {
+  void RTCDtlsTransport::Unobserve() {
+    // a newer wrapper of the transport may have taken its single observer slot
+    if (_observing && holder().TakeObserver(_transport.get(), this)) {
       _transport->UnregisterObserver();
-      _observing = false;
     }
+    _observing = false;
+  }
+
+  void RTCDtlsTransport::Stop() {
+    Unobserve();
     _iceTransport->OnRTCDtlsTransportStopped();
   }
 

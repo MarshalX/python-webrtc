@@ -19,17 +19,19 @@ namespace python_webrtc {
       std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::DtmfSenderInterface> dtmf)
       : _factory(std::move(factory)), _dtmf(std::move(dtmf)) {
     // see AliveGuard
-    _factory->_signalingThread->PostTask(_alive.Guard([this]() { _dtmf->RegisterObserver(this); }));
+    _factory->_signalingThread->PostTask(_alive.Guard([this]() {
+      _dtmf->RegisterObserver(this);
+      holder().SetObserver(_dtmf.get(), this);
+    }));
   }
 
   RTCDTMFSender::~RTCDTMFSender() {
     BlockingDestructor release("RTCDTMFSender");
 
-    // the sender has a single observer slot, a newer wrapper of it may have taken it over already
-    auto replaced = holder().HasLive(_dtmf.get());
     // callbacks run on the signaling thread, so after this none of them can be running or start again
-    _factory->_signalingThread->BlockingCall([this, replaced]() {
-      if (!replaced) {
+    _factory->_signalingThread->BlockingCall([this]() {
+      // a newer wrapper of the sender may have taken its single observer slot
+      if (holder().TakeObserver(_dtmf.get(), this)) {
         _dtmf->UnregisterObserver();
       }
     });

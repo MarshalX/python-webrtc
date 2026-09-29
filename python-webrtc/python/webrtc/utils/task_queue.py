@@ -28,15 +28,22 @@ class TaskQueue:
     #: How many callbacks run in one iteration of the loop, when they schedule nothing
     MAX_BATCH = 100
 
+    #: The queues of the loops without a ``__dict__`` (like uvloop's), the others keep their own
     _queues: 'weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, TaskQueue]' = weakref.WeakKeyDictionary()
+    _ATTRIBUTE = '_webrtc_task_queue'
 
     def __init__(self, loop: asyncio.AbstractEventLoop):
-        self._loop = loop
+        # weakly: a queue in _queues referencing its loop would keep it forever
+        self._loop_ref = weakref.ref(loop)
         self._items = collections.deque()
         self._lock = threading.Lock()
         self._scheduled = False
         # whether the last callback resumed code (like a coroutine awaiting a result) that runs before the next one
         self._resumed = False
+
+    @property
+    def _loop(self) -> asyncio.AbstractEventLoop:
+        return self._loop_ref()
 
     @classmethod
     def of(cls, loop: asyncio.AbstractEventLoop) -> 'TaskQueue':
@@ -48,9 +55,20 @@ class TaskQueue:
         Returns:
             :obj:`TaskQueue`: Its queue, created on first use.
         """
-        # No lock: an allocation under it may run the garbage collector, setdefault is atomic
+        # kept by the loop, so a closed loop is collected with what's still queued; setdefault is atomic
+        try:
+            attributes = vars(loop)
+        except TypeError:
+            attributes = None
+        if attributes is not None:
+            queue = attributes.get(cls._ATTRIBUTE)
+            return queue if queue is not None else attributes.setdefault(cls._ATTRIBUTE, cls(loop))
         queue = cls._queues.get(loop)
         if queue is None:
+            # the loops closed meanwhile won't run what's queued
+            for other in list(cls._queues):
+                if other.is_closed():
+                    cls._queues.pop(other)._items.clear()
             queue = cls._queues.setdefault(loop, cls(loop))
         return queue
 
@@ -87,10 +105,13 @@ class TaskQueue:
             if self._scheduled:
                 return
             self._scheduled = True
+        loop = self._loop
         try:
-            self._loop.call_soon_threadsafe(self._run)
-        except RuntimeError:  # the loop is closed
-            pass
+            if loop is None:
+                raise RuntimeError('the loop is gone')
+            loop.call_soon_threadsafe(self._run)
+        except RuntimeError:  # the loop is closed: nothing will run what's queued, nor release it
+            self._items.clear()
 
     def _others_ready(self) -> bool:
         """Whether the loop has callbacks ready that are like microtasks: the steps of coroutines and callbacks

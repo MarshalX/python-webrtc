@@ -24,6 +24,15 @@ namespace python_webrtc {
     return pybind11::cpp_function(std::forward<F>(f), nogil());
   }
 
+  // A pybind11::init factory without the GIL: a call guard would also cover registering the instance, which needs it
+  template<typename R, typename... Args>
+  auto nogil_factory(R (*factory)(Args...)) {
+    return [factory](Args... args) {
+      pybind11::gil_scoped_release release;
+      return factory(std::forward<Args>(args)...);
+    };
+  }
+
   // Whether Python code can still run: libwebrtc threads may outlive the interpreter
   inline bool PythonAlive() {
 #if PY_VERSION_HEX >= 0x030D0000

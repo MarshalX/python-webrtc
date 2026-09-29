@@ -57,6 +57,9 @@ namespace python_webrtc {
     // on the network thread
     void Stop();
 
+    // unregisters, unless a newer wrapper took the observer slot (on the network thread)
+    void Unobserve();
+
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::DtlsTransportInterface> _transport;
     // a dtls transport runs over the same ice transport for its whole life

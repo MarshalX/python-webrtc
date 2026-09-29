@@ -18,6 +18,7 @@
 
 #include <pybind11/pybind11.h>
 
+#include "../utils/alive_count.h"
 #include "video_frame_buffer.h"
 #include "../interfaces/media_stream_track.h"
 #include "../interfaces/peer_connection_factory.h"
@@ -31,9 +32,13 @@ namespace python_webrtc {
   public:
     explicit TrackGenerator(const std::string &kind);
 
+    // deleted without the GIL: the track's proxy is destroyed on the signaling thread
+    static std::shared_ptr<TrackGenerator> Create(const std::string &kind);
+
     static void Init(pybind11::module &m);
 
-    std::shared_ptr<MediaStreamTrack> GetTrack() { return _track; }
+    // the wrapper of the track, owned by Python once it has it
+    std::shared_ptr<MediaStreamTrack> GetTrack();
 
     std::string GetKind() { return _video ? "video" : "audio"; }
 
@@ -53,11 +58,26 @@ namespace python_webrtc {
     void Close();
 
   private:
+    // whether the track ended, kept when its wrapper is gone
+    struct EndState : TrackEndObserver {
+      std::atomic<bool> ended = false;
+
+      void OnTrackEnded() override {
+        ended = true;
+      }
+    };
+
+    AliveCount<TrackGenerator> _counted;
     std::shared_ptr<PeerConnectionFactory> _factory;
     const bool _video;
     webrtc::scoped_refptr<RTCVideoTrackSource> _videoSource;
     webrtc::scoped_refptr<RTCAudioTrackSource> _audioSource;
-    std::shared_ptr<MediaStreamTrack> _track;
+    webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> _webrtcTrack;
+    // weak once Python has it: an audio generator is its own track, a strong one hides a cycle from the collector
+    std::mutex _trackMutex;
+    std::shared_ptr<MediaStreamTrack> _initialTrack;
+    std::weak_ptr<MediaStreamTrack> _track;
+    std::shared_ptr<EndState> _endState = std::make_shared<EndState>();
     std::atomic<bool> _muted = false;
 
     // samples short of a 10 ms frame, sent with the next ones of the same format

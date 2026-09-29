@@ -122,9 +122,9 @@ namespace python_webrtc {
 
   void RTCPeerConnection::Init(pybind11::module &m) {
     Listeners::BindClass<RTCPeerConnection>(m, "RTCPeerConnection")
-        .def(pybind11::init([](const std::optional<ConfigurationInit> &configuration) {
+        .def(pybind11::init(nogil_factory(+[](const std::optional<ConfigurationInit> &configuration) {
           return std::shared_ptr<RTCPeerConnection>(new RTCPeerConnection(configuration), DeleteOffLibwebrtcThread());
-        }), nogil())
+        })))
         .def("createOffer", &RTCPeerConnection::CreateOffer, nogil(),
              pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("iceRestart"),
              pybind11::arg("voiceActivityDetection"))
@@ -219,6 +219,11 @@ namespace python_webrtc {
 
   template<typename T, typename U>
   std::shared_ptr<T> RTCPeerConnection::Wrap(Wrappers<T, U> &wrappers, webrtc::scoped_refptr<U> object) {
+    if (!onLibwebrtcThread) {
+      // on the signaling thread, which wraps objects too: the lock isn't held while waiting for it
+      gil_release_if_held release;
+      return _factory->_signalingThread->BlockingCall([&]() { return Wrap(wrappers, std::move(object)); });
+    }
     std::shared_ptr<T> wrapper;
     {
       std::lock_guard<std::mutex> lock(_wrappersMutex);
@@ -237,6 +242,11 @@ namespace python_webrtc {
   template<typename T, typename U>
   std::vector<std::shared_ptr<T>> RTCPeerConnection::Sync(
       Wrappers<T, U> &wrappers, const std::vector<webrtc::scoped_refptr<U>> &objects) {
+    if (!onLibwebrtcThread) {
+      // see Wrap
+      gil_release_if_held release;
+      return _factory->_signalingThread->BlockingCall([&]() { return Sync(wrappers, objects); });
+    }
     std::vector<std::shared_ptr<T>> result;
     Wrappers<T, U> current;
     {
@@ -1112,6 +1122,11 @@ namespace python_webrtc {
   }
 
   std::optional<std::shared_ptr<RTCSctpTransport>> RTCPeerConnection::GetSctp() {
+    if (!onLibwebrtcThread) {
+      // see Wrap
+      gil_release_if_held release;
+      return _factory->_signalingThread->BlockingCall([this]() { return GetSctp(); });
+    }
     auto pc = connection();
     auto transport = pc ? pc->GetSctpTransport() : nullptr;
     if (!transport) {

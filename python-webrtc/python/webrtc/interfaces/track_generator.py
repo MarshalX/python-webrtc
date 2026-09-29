@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Union
 
 from webrtc import AudioData, AudioSampleFormat, MediaStreamTrack, MediaType, VideoFrame, wrtc
+from webrtc.exceptions import NotSupportedError
 from webrtc.streams import WritableStream
 
 
@@ -46,8 +47,14 @@ class _TrackSink:
             samples = bytearray(audio.number_of_frames * audio.number_of_channels * 2)
             audio.copy_to(samples, {'plane_index': 0, 'format': AudioSampleFormat.s16})
             samples = bytes(samples)
-        self._native.writeAudio(samples, int(audio.sample_rate), audio.number_of_channels, audio.number_of_frames)
-        audio.close()
+        # rates beyond an int are unsupported too: the native check rejects them
+        rate = min(int(audio.sample_rate), 2**31 - 1)
+        try:
+            self._native.writeAudio(samples, rate, audio.number_of_channels, audio.number_of_frames)
+        except ValueError as e:
+            raise NotSupportedError(str(e)) from None
+        finally:
+            audio.close()
 
     def close(self) -> None:
         # ends the tracks of the generator
@@ -73,12 +80,14 @@ class VideoTrackGenerator:
 
     def __init__(self):
         self._native = wrtc.TrackGenerator('video')
+        # the native generator doesn't keep the track, Python does
+        self._track = MediaStreamTrack._wrap(self._native.track)
         self._writable = WritableStream(_TrackSink(self._native))
 
     @property
     def track(self) -> MediaStreamTrack:
         """:obj:`webrtc.MediaStreamTrack`: The track of the frames."""
-        return MediaStreamTrack._wrap(self._native.track)
+        return self._track
 
     @property
     def writable(self) -> WritableStream:

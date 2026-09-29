@@ -10,7 +10,7 @@
 import pytest
 
 import webrtc
-from tests.helpers import connect_track, wait_until
+from tests.helpers import connect_track, run_isolated, wait_until
 
 
 @pytest.mark.asyncio
@@ -111,3 +111,73 @@ async def test_constraints_of_an_ended_track(video_stream):
     track = video_stream.get_tracks()[0]
     track.stop()
     await track.apply_constraints({'width': {'exact': 100000}})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'constraints',
+    [{'frame_rate': float('nan')}, {'frame_rate': float('inf')}, {'width': '1'}],
+)
+async def test_constraints_have_their_webidl_types(video_stream, constraints):
+    """Unsigned longs and restricted doubles: other values are a TypeError"""
+    with pytest.raises(TypeError):
+        await video_stream.get_tracks()[0].apply_constraints(constraints)
+    with pytest.raises(TypeError):
+        webrtc.get_user_media(audio=False, video=True, **constraints)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'constraints, expected',
+    [
+        ({'frame_rate': 10**9}, (640, 480, 120)),
+        ({'frame_rate': 0}, (640, 480, 1)),
+        ({'frame_rate': {'ideal': -5}}, (640, 480, 1)),
+    ],
+)
+async def test_camera_stays_within_its_capabilities(video_stream, constraints, expected):
+    """Ideal values beyond the capabilities select the nearest ones"""
+    track = video_stream.get_tracks()[0]
+    await track.apply_constraints(constraints)
+    assert track._native_obj._camera() == expected
+
+    track = webrtc.get_user_media(audio=False, video=True, **constraints).get_tracks()[0]
+    assert track._native_obj._camera() == expected
+    track.stop()
+
+
+def test_get_user_media_rejects_what_the_camera_cannot_do():
+    with pytest.raises(webrtc.OverconstrainedError):
+        webrtc.get_user_media(audio=False, video=True, width={'exact': 5000})
+    with pytest.raises(webrtc.OverconstrainedError):
+        webrtc.get_user_media(audio=False, video=True, frame_rate={'min': 500})
+
+
+def test_camera_of_impossible_sizes():
+    """A camera of no size, a negative one or a huge one aborted the process"""
+    output = run_isolated(
+        """
+        import asyncio
+        import webrtc
+
+        async def main():
+            track = webrtc.get_user_media(audio=False, video=True).get_tracks()[0]
+            for negative in ({'width': -1}, {'height': {'ideal': -5}}):
+                try:
+                    await track.apply_constraints(negative)
+                except TypeError:
+                    print('rejected')
+            await track.apply_constraints({'width': 10**6, 'height': {'ideal': 10**6}})
+            print(track._native_obj._camera())
+            await track.apply_constraints({'width': 0, 'height': 0})
+            print(track._native_obj._camera())
+            track.stop()
+            (track,) = webrtc.get_user_media(audio=False, video=True, width=0, height=0).get_tracks()
+            print(track._native_obj._camera())
+
+        asyncio.run(main())
+        """
+    )
+    assert output.count('rejected') == 2, output
+    assert output.count('(4096, 4096, 30.0)') == 1, output
+    assert output.count('(1, 1, 30.0)') == 2, output

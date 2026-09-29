@@ -6,8 +6,9 @@
 #
 
 import asyncio
+import dataclasses
 import re
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Union
 
 from webrtc import (
     Event,
@@ -22,6 +23,7 @@ from webrtc import (
     RTCPeerConnectionIceErrorEvent,
     RTCPeerConnectionIceEvent,
     RTCRtpCodec,
+    RTCRtpEncodingParameters,
     RTCSdpType,
     RTCSessionDescription,
     RTCSessionDescriptionInit,
@@ -35,6 +37,7 @@ from webrtc import (
 )
 from webrtc.utils.callbacks_to_async import to_async
 from webrtc.utils.events import EventTarget
+from webrtc.utils.names import snake_case
 from webrtc.utils.operations import OperationsChain, later
 from webrtc.utils.task_queue import TaskQueue
 
@@ -411,7 +414,7 @@ class RTCPeerConnection(WebRTCObject, EventTarget):
     def add_transceiver(
         self,
         track_or_kind: Union['webrtc.MediaStreamTrack', 'webrtc.MediaType'],
-        init: Optional['webrtc.RtpTransceiverInit'] = None,
+        init: Optional[Union['webrtc.RtpTransceiverInit', Dict[str, Any]]] = None,
     ) -> 'webrtc.RTCRtpTransceiver':
         """Creates a new :obj:`webrtc.RTCRtpTransceiver` and adds it to the set of transceivers associated with the
         connection. Each transceiver represents a bidirectional stream, with both an :obj:`webrtc.RTCRtpSender` and
@@ -422,8 +425,9 @@ class RTCPeerConnection(WebRTCObject, EventTarget):
                 :obj:`webrtc.MediaStreamTrack` to associate with the transceiver, or :attr:`webrtc.MediaType.audio`
                 or :attr:`webrtc.MediaType.video` (or its value), which is used as the kind of the receiver's track,
                 and by extension of the :obj:`webrtc.RTCRtpReceiver` itself.
-            init (:obj:`webrtc.RtpTransceiverInit`, optional): An object for specifying any options when creating
-                the new transceiver. It isn't changed.
+            init (:obj:`webrtc.RtpTransceiverInit` or :obj:`dict`, optional): An object for specifying any options
+                when creating the new transceiver, or a dictionary of its members (the encodings may be dictionaries
+                too). It isn't changed.
 
         Returns:
             :obj:`webrtc.RTCRtpTransceiver`: The new transceiver.
@@ -440,6 +444,8 @@ class RTCPeerConnection(WebRTCObject, EventTarget):
         if kind not in (MediaType.audio, MediaType.video):
             raise TypeError(f'{kind!r} is not a kind of track')
         native_init = None
+        if isinstance(init, dict):
+            init = _transceiver_init(init)
         if init is not None:
             _check_send_encodings(init.send_encodings, kind)
             # a copy, with the encodings for the kind
@@ -830,6 +836,24 @@ def _description_init(
 
 def _init_of(description: 'wrtc.RTCSessionDescription') -> 'webrtc.RTCSessionDescriptionInit':
     return RTCSessionDescriptionInit(description.type, description.sdp)
+
+
+def _members(value: Dict[str, Any], names: Iterable[str]) -> Dict[str, Any]:
+    """The members of a dictionary, with snake_case or camelCase names: unknown ones are ignored, as in WebIDL"""
+    members = {snake_case(name): member for name, member in value.items()}
+    return {name: member for name, member in members.items() if name in names}
+
+
+def _transceiver_init(init: Dict[str, Any]) -> RtpTransceiverInit:
+    """An init from a dictionary, as in browsers, with its encodings dictionaries too"""
+    members = _members(init, ('direction', 'send_encodings', 'streams'))
+    encodings = members.get('send_encodings')
+    if encodings is not None:
+        names = [field.name for field in dataclasses.fields(RTCRtpEncodingParameters)]
+        members['send_encodings'] = [
+            RTCRtpEncodingParameters(**_members(e, names)) if isinstance(e, dict) else e for e in encodings
+        ]
+    return RtpTransceiverInit(**members)
 
 
 def _check_send_encodings(encodings: List['webrtc.RTCRtpEncodingParameters'], kind: 'webrtc.MediaType') -> None:

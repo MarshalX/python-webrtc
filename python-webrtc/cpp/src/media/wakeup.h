@@ -13,6 +13,8 @@
 #include <mutex>
 #include <thread>
 
+#include "../utils/libwebrtc_thread.h"
+
 namespace python_webrtc {
 
   // What a Wakeup delivers to, on its thread
@@ -31,9 +33,24 @@ namespace python_webrtc {
       auto &wakeup = Instance();
       {
         std::lock_guard<std::mutex> lock(wakeup._mutex);
+        if (wakeup._generation != forks.load()) {
+          // the child of a fork: the thread is gone, and so are the objects of the parent
+          wakeup._generation = forks.load();
+          wakeup._targets.clear();
+          std::thread([&wakeup]() { wakeup.Run(); }).detach();
+        }
         wakeup._targets.push_back(std::move(target));
       }
       wakeup._posted.notify_one();
+    }
+
+    // held across a fork, so the child doesn't get it locked by a thread it doesn't have
+    static void LockForFork() {
+      Instance()._mutex.lock();
+    }
+
+    static void UnlockAfterFork() {
+      Instance()._mutex.unlock();
     }
 
   private:
@@ -64,6 +81,8 @@ namespace python_webrtc {
     }
 
     std::mutex _mutex;
+    // of the process the thread runs in (see forks)
+    int _generation = forks.load();
     std::condition_variable _posted;
     std::deque<std::weak_ptr<Wakeable>> _targets;
   };

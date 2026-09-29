@@ -19,6 +19,8 @@
 
 #include <pybind11/pybind11.h>
 
+#include "../utils/alive_count.h"
+
 namespace python_webrtc {
 
   // A pixel format of VideoFrame (WebCodecs VideoPixelFormat)
@@ -107,6 +109,7 @@ namespace python_webrtc {
     // what the planes point into
     webrtc::scoped_refptr<webrtc::VideoFrameBuffer> _webrtc;
     std::shared_ptr<std::vector<uint8_t>> _owned;
+    AliveCount<VideoFrameBuffer> _counted;
   };
 
 } // namespace python_webrtc

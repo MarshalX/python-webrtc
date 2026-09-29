@@ -8,14 +8,18 @@
 #include "track_generator.h"
 
 #include <cstring>
+#include <string>
 #include <string_view>
 
+#include <api/audio/audio_frame.h>
+#include <api/audio/audio_view.h>
 #include <api/video/video_frame.h>
 #include <rtc_base/crypto_random.h>
 #include <system_wrappers/include/clock.h>
 
 #include "../exceptions.h"
 #include "../utils/gil.h"
+#include "../utils/libwebrtc_thread.h"
 
 namespace python_webrtc {
 
@@ -23,6 +27,9 @@ namespace python_webrtc {
 
     // libwebrtc takes audio in 10 ms frames
     constexpr int kAudioFramesPerSecond = 100;
+    // libwebrtc's native rates: its resampler crashes on much lower ones
+    constexpr int kMinSampleRate = 8000;
+    constexpr int kMaxSampleRate = 384000;
 
   } // namespace
 
@@ -39,13 +46,42 @@ namespace python_webrtc {
       _audioSource = webrtc::make_ref_counted<RTCAudioTrackSource>();
       track = _factory->factory()->CreateAudioTrack(webrtc::CreateRandomUuid(), _audioSource.get());
     }
-    _track = MediaStreamTrack::holder().GetOrCreate(_factory, track);
+    _webrtcTrack = track;
+    _initialTrack = MediaStreamTrack::holder().GetOrCreate(_factory, track);
+    _initialTrack->AddEndObserver(_endState);
+    _track = _initialTrack;
+  }
+
+  std::shared_ptr<MediaStreamTrack> TrackGenerator::GetTrack() {
+    // wrapped out of the lock: wrapping may wait for the signaling thread (the holder finds a live wrapper)
+    auto wrapped = MediaStreamTrack::holder().GetOrCreate(_factory, _webrtcTrack);
+    std::lock_guard<std::mutex> lock(_trackMutex);
+    auto track = _track.lock();
+    if (!track) {
+      track = std::move(wrapped);
+      if (_endState->ended) {
+        // a new wrapper of a track stopped meanwhile
+        track->Stop();
+      } else {
+        track->AddEndObserver(_endState);
+      }
+      if (_muted) {
+        track->SetMuted(true);
+      }
+      _track = track;
+    }
+    _initialTrack = nullptr;
+    return track;
+  }
+
+  std::shared_ptr<TrackGenerator> TrackGenerator::Create(const std::string &kind) {
+    return std::shared_ptr<TrackGenerator>(new TrackGenerator(kind), DeleteOffLibwebrtcThread());
   }
 
   void TrackGenerator::Init(pybind11::module &m) {
     pybind11::class_<TrackGenerator, std::shared_ptr<TrackGenerator>>(m, "TrackGenerator")
-        .def(pybind11::init<const std::string &>(), nogil(), pybind11::arg("kind"))
-        .def_property_readonly("track", &TrackGenerator::GetTrack)
+        .def(pybind11::init(nogil_factory(&TrackGenerator::Create)), pybind11::arg("kind"))
+        .def_property_readonly("track", nogil_fn(&TrackGenerator::GetTrack))
         .def_property_readonly("kind", &TrackGenerator::GetKind)
         .def_property_readonly("live", nogil_fn(&TrackGenerator::GetLive))
         .def_property("muted", nogil_fn(&TrackGenerator::GetMuted), nogil_fn(&TrackGenerator::SetMuted))
@@ -57,7 +93,12 @@ namespace python_webrtc {
   }
 
   bool TrackGenerator::GetLive() {
-    return _track->active();
+    if (_endState->ended) {
+      return false;
+    }
+    auto track = _track.lock();
+    return track ? track->active()
+                 : _webrtcTrack->state() == webrtc::MediaStreamTrackInterface::TrackState::kLive;
   }
 
   bool TrackGenerator::GetMuted() {
@@ -66,7 +107,9 @@ namespace python_webrtc {
 
   void TrackGenerator::SetMuted(bool muted) {
     _muted = muted;
-    _track->SetMuted(muted);
+    if (auto track = _track.lock()) {
+      track->SetMuted(muted);
+    }
   }
 
   void TrackGenerator::WriteVideo(const std::shared_ptr<VideoFrameBuffer> &buffer, int64_t timestampUs,
@@ -91,8 +134,19 @@ namespace python_webrtc {
     if (_video) {
       throw pybind11::type_error("A video generator takes VideoFrame");
     }
+    // beyond what a webrtc::AudioFrame holds, its checks abort
+    if (sampleRate < kMinSampleRate || sampleRate > kMaxSampleRate || channels == 0 ||
+        channels > webrtc::kMaxNumberOfAudioChannels ||
+        static_cast<size_t>(sampleRate / kAudioFramesPerSecond) * channels > webrtc::AudioFrame::kMaxDataSizeSamples) {
+      throw pybind11::value_error("Audio of " + std::to_string(channels) + " channels at " +
+                                  std::to_string(sampleRate) + " Hz isn't supported: up to " +
+                                  std::to_string(webrtc::kMaxNumberOfAudioChannels) + " channels from " +
+                                  std::to_string(kMinSampleRate) + " to " + std::to_string(kMaxSampleRate) +
+                                  " Hz, and " + std::to_string(webrtc::AudioFrame::kMaxDataSizeSamples) +
+                                  " samples every 10 ms");
+    }
     std::string_view data = samples;
-    if (data.size() != frames * channels * sizeof(int16_t)) {
+    if (frames > data.size() || data.size() != frames * channels * sizeof(int16_t)) {
       throw pybind11::value_error("The samples don't have the given number of frames");
     }
     pybind11::gil_scoped_release release;
