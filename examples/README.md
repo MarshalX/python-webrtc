@@ -15,3 +15,11 @@ without worrying about copyrights.
 ### [echo.py](echo.py)
 
 **Transforming video with a processor, a TransformStream and a VideoTrackGenerator.** Sends the received video back in grayscale.
+
+### [openai_live.py](openai_live.py)
+
+**Voice chat with OpenAI GPT-Live.** Talks to the model through your microphone and speakers, with live transcripts in the terminal. No server: just an API key. Dependencies are declared inline, so [uv](https://docs.astral.sh/uv/) runs it with nothing to install:
+
+```
+OPENAI_API_KEY=sk-... uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/openai_live.py
+```
