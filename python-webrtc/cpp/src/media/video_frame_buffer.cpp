@@ -7,9 +7,12 @@
 
 #include "video_frame_buffer.h"
 
+#include <array>
 #include <cstring>
-#include <string>
+#include <memory>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
 #include <api/video/i420_buffer.h>
 #include <api/video/nv12_buffer.h>
@@ -30,26 +33,104 @@ namespace python_webrtc {
 
     // keeps the sizes of planes and rows in ints
     constexpr int kMaxDimension = 1 << 24;
+    // the depth of the formats libwebrtc takes as they are, deeper ones are 16-bit samples
+    constexpr int kEightBit = 8;
+    constexpr uint8_t kOpaque = 255;
 
     using Layout = PixelFormat::Layout;
 
-    const PixelFormat FORMATS[] = {
-        {"I420", Layout::I420, 8, false, false},     {"I420P10", Layout::I420, 10, false, false},
-        {"I420P12", Layout::I420, 12, false, false}, {"I420A", Layout::I420, 8, true, false},
-        {"I420AP10", Layout::I420, 10, true, false}, {"I420AP12", Layout::I420, 12, true, false},
-        {"I422", Layout::I422, 8, false, false},     {"I422P10", Layout::I422, 10, false, false},
-        {"I422P12", Layout::I422, 12, false, false}, {"I422A", Layout::I422, 8, true, false},
-        {"I422AP10", Layout::I422, 10, true, false}, {"I422AP12", Layout::I422, 12, true, false},
-        {"I444", Layout::I444, 8, false, false},     {"I444P10", Layout::I444, 10, false, false},
-        {"I444P12", Layout::I444, 12, false, false}, {"I444A", Layout::I444, 8, true, false},
-        {"I444AP10", Layout::I444, 10, true, false}, {"I444AP12", Layout::I444, 12, true, false},
-        {"NV12", Layout::NV12, 8, false, false},     {"RGBA", Layout::RGB, 8, true, true},
-        {"RGBX", Layout::RGB, 8, false, true},       {"BGRA", Layout::RGB, 8, true, false},
-        {"BGRX", Layout::RGB, 8, false, false},
-    };
+    const auto FORMATS = std::to_array<PixelFormat>({
+        {.name = "I420", .layout = Layout::I420, .bits = 8, .alpha = false, .rgbOrder = false},
+        {.name = "I420P10", .layout = Layout::I420, .bits = 10, .alpha = false, .rgbOrder = false},
+        {.name = "I420P12", .layout = Layout::I420, .bits = 12, .alpha = false, .rgbOrder = false},
+        {.name = "I420A", .layout = Layout::I420, .bits = 8, .alpha = true, .rgbOrder = false},
+        {.name = "I420AP10", .layout = Layout::I420, .bits = 10, .alpha = true, .rgbOrder = false},
+        {.name = "I420AP12", .layout = Layout::I420, .bits = 12, .alpha = true, .rgbOrder = false},
+        {.name = "I422", .layout = Layout::I422, .bits = 8, .alpha = false, .rgbOrder = false},
+        {.name = "I422P10", .layout = Layout::I422, .bits = 10, .alpha = false, .rgbOrder = false},
+        {.name = "I422P12", .layout = Layout::I422, .bits = 12, .alpha = false, .rgbOrder = false},
+        {.name = "I422A", .layout = Layout::I422, .bits = 8, .alpha = true, .rgbOrder = false},
+        {.name = "I422AP10", .layout = Layout::I422, .bits = 10, .alpha = true, .rgbOrder = false},
+        {.name = "I422AP12", .layout = Layout::I422, .bits = 12, .alpha = true, .rgbOrder = false},
+        {.name = "I444", .layout = Layout::I444, .bits = 8, .alpha = false, .rgbOrder = false},
+        {.name = "I444P10", .layout = Layout::I444, .bits = 10, .alpha = false, .rgbOrder = false},
+        {.name = "I444P12", .layout = Layout::I444, .bits = 12, .alpha = false, .rgbOrder = false},
+        {.name = "I444A", .layout = Layout::I444, .bits = 8, .alpha = true, .rgbOrder = false},
+        {.name = "I444AP10", .layout = Layout::I444, .bits = 10, .alpha = true, .rgbOrder = false},
+        {.name = "I444AP12", .layout = Layout::I444, .bits = 12, .alpha = true, .rgbOrder = false},
+        {.name = "NV12", .layout = Layout::NV12, .bits = 8, .alpha = false, .rgbOrder = false},
+        {.name = "RGBA", .layout = Layout::RGB, .bits = 8, .alpha = true, .rgbOrder = true},
+        {.name = "RGBX", .layout = Layout::RGB, .bits = 8, .alpha = false, .rgbOrder = true},
+        {.name = "BGRA", .layout = Layout::RGB, .bits = 8, .alpha = true, .rgbOrder = false},
+        {.name = "BGRX", .layout = Layout::RGB, .bits = 8, .alpha = false, .rgbOrder = false},
+    });
 
     int Divide(int value, int divisor) {
       return (value + divisor - 1) / divisor;
+    }
+
+    // The YUV matrix of a frame. U and V swapped (Yvu) give R and B swapped.
+    const libyuv::YuvConstants *YuvMatrix(const std::string &matrix, bool fullRange, bool swapped) {
+      if (matrix == "bt709") {
+        if (swapped) {
+          return fullRange ? &libyuv::kYvuF709Constants : &libyuv::kYvuH709Constants;
+        }
+        return fullRange ? &libyuv::kYuvF709Constants : &libyuv::kYuvH709Constants;
+      }
+      if (matrix == "bt2020-ncl") {
+        if (swapped) {
+          return fullRange ? &libyuv::kYvuV2020Constants : &libyuv::kYvu2020Constants;
+        }
+        return fullRange ? &libyuv::kYuvV2020Constants : &libyuv::kYuv2020Constants;
+      }
+      if (swapped) {
+        return fullRange ? &libyuv::kYvuJPEGConstants : &libyuv::kYvuI601Constants;
+      }
+      return fullRange ? &libyuv::kYuvJPEGConstants : &libyuv::kYuvI601Constants;
+    }
+
+    // the libyuv conversions of the planar layouts
+    auto AlphaToArgb(Layout layout) {
+      switch (layout) {
+      case Layout::I420:
+        return libyuv::I420AlphaToARGBMatrix;
+      case Layout::I422:
+        return libyuv::I422AlphaToARGBMatrix;
+      default:
+        return libyuv::I444AlphaToARGBMatrix;
+      }
+    }
+
+    auto ToArgb(Layout layout) {
+      switch (layout) {
+      case Layout::I420:
+        return libyuv::I420ToARGBMatrix;
+      case Layout::I422:
+        return libyuv::I422ToARGBMatrix;
+      default:
+        return libyuv::I444ToARGBMatrix;
+      }
+    }
+
+    auto ToI420(Layout layout) {
+      switch (layout) {
+      case Layout::I420:
+        return libyuv::I420Copy;
+      case Layout::I422:
+        return libyuv::I422ToI420;
+      default:
+        return libyuv::I444ToI420;
+      }
+    }
+
+    // opaque alpha in the 4th byte of each pixel
+    void FillOpaque(uint8_t *dst, size_t stride, int width, int height) {
+      for (int row = 0; row < height; ++row) {
+        auto *pixel = dst + (row * stride) + 3;
+        for (int column = 0; column < width; ++column, pixel += 4) {
+          *pixel = kOpaque;
+        }
+      }
     }
 
   } // namespace
@@ -69,7 +150,7 @@ namespace python_webrtc {
   }
 
   const PixelFormat &PixelFormat::Parse(const std::string &name) {
-    for (const auto &format: FORMATS) {
+    for (const auto &format : FORMATS) {
       if (name == format.name) {
         return format;
       }
@@ -79,20 +160,23 @@ namespace python_webrtc {
 
   std::vector<PixelFormat::Plane> PixelFormat::Planes() const {
     switch (layout) {
-      case Layout::NV12:
-        return {{1, 1, 1}, {2, 2, 2}};
-      case Layout::RGB:
-        return {{4, 1, 1}};
-      default: {
-        int bytes = bits > 8 ? 2 : 1;
-        int x = layout == Layout::I444 ? 1 : 2;
-        int y = layout == Layout::I420 ? 2 : 1;
-        std::vector<Plane> planes = {{bytes, 1, 1}, {bytes, x, y}, {bytes, x, y}};
-        if (alpha) {
-          planes.push_back({bytes, 1, 1});
-        }
-        return planes;
+    case Layout::NV12:
+      return {{.sampleBytes = 1, .subsamplingX = 1, .subsamplingY = 1},
+              {.sampleBytes = 2, .subsamplingX = 2, .subsamplingY = 2}};
+    case Layout::RGB:
+      return {{.sampleBytes = 4, .subsamplingX = 1, .subsamplingY = 1}};
+    default: {
+      const int bytes = bits > kEightBit ? 2 : 1;
+      const int x = layout == Layout::I444 ? 1 : 2;
+      const int y = layout == Layout::I420 ? 2 : 1;
+      std::vector<Plane> planes = {{.sampleBytes = bytes, .subsamplingX = 1, .subsamplingY = 1},
+                                   {.sampleBytes = bytes, .subsamplingX = x, .subsamplingY = y},
+                                   {.sampleBytes = bytes, .subsamplingX = x, .subsamplingY = y}};
+      if (alpha) {
+        planes.push_back({.sampleBytes = bytes, .subsamplingX = 1, .subsamplingY = 1});
       }
+      return planes;
+    }
     }
   }
 
@@ -104,8 +188,8 @@ namespace python_webrtc {
     return Divide(height, subsamplingY);
   }
 
-  std::shared_ptr<VideoFrameBuffer> VideoFrameBuffer::FromWebrtc(
-      webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer) {
+  std::shared_ptr<VideoFrameBuffer>
+  VideoFrameBuffer::FromWebrtc(webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer) {
     using Type = webrtc::VideoFrameBuffer::Type;
     std::shared_ptr<VideoFrameBuffer> result;
     auto wrapYuv = [&](const char *name, const webrtc::PlanarYuv8Buffer *planes) {
@@ -114,36 +198,36 @@ namespace python_webrtc {
       result->_stride = {planes->StrideY(), planes->StrideU(), planes->StrideV(), 0};
     };
     switch (buffer->type()) {
-      case Type::kI420A: {
-        auto planes = buffer->GetI420A();
-        wrapYuv("I420A", planes);
-        result->_data[3] = planes->DataA();
-        result->_stride[3] = planes->StrideA();
-        break;
-      }
-      case Type::kI422:
-        wrapYuv("I422", buffer->GetI422());
-        break;
-      case Type::kI444:
-        wrapYuv("I444", buffer->GetI444());
-        break;
-      case Type::kNV12: {
-        auto planes = buffer->GetNV12();
-        result.reset(new VideoFrameBuffer(PixelFormat::Parse("NV12"), buffer->width(), buffer->height()));
-        result->_data = {planes->DataY(), planes->DataUV(), nullptr, nullptr};
-        result->_stride = {planes->StrideY(), planes->StrideUV(), 0, 0};
-        break;
-      }
-      default:
-        if (buffer->type() != Type::kI420) {
-          // native or high bit depth
-          buffer = buffer->ToI420();
-          if (!buffer) {
-            throw std::runtime_error("The frame can't be converted to I420");
-          }
+    case Type::kI420A: {
+      const auto *planes = buffer->GetI420A();
+      wrapYuv("I420A", planes);
+      result->_data[3] = planes->DataA();
+      result->_stride[3] = planes->StrideA();
+      break;
+    }
+    case Type::kI422:
+      wrapYuv("I422", buffer->GetI422());
+      break;
+    case Type::kI444:
+      wrapYuv("I444", buffer->GetI444());
+      break;
+    case Type::kNV12: {
+      const auto *planes = buffer->GetNV12();
+      result.reset(new VideoFrameBuffer(PixelFormat::Parse("NV12"), buffer->width(), buffer->height()));
+      result->_data = {planes->DataY(), planes->DataUV(), nullptr, nullptr};
+      result->_stride = {planes->StrideY(), planes->StrideUV(), 0, 0};
+      break;
+    }
+    default:
+      if (buffer->type() != Type::kI420) {
+        // native or high bit depth
+        buffer = buffer->ToI420();
+        if (!buffer) {
+          throw std::runtime_error("The frame can't be converted to I420");
         }
-        wrapYuv("I420", buffer->GetI420());
-        break;
+      }
+      wrapYuv("I420", buffer->GetI420());
+      break;
     }
     result->_webrtc = std::move(buffer);
     return result;
@@ -162,7 +246,7 @@ namespace python_webrtc {
     }
 
     auto info = ContiguousBuffer(data);
-    auto source = static_cast<const uint8_t *>(info.ptr);
+    const auto *source = static_cast<const uint8_t *>(info.ptr);
     auto sourceSize = static_cast<size_t>(info.size * info.itemsize);
 
     std::shared_ptr<VideoFrameBuffer> result(new VideoFrameBuffer(format, width, height));
@@ -174,7 +258,7 @@ namespace python_webrtc {
       result->_stride[i] = planes[i].Columns(width) * planes[i].sampleBytes;
       rows[i] = planes[i].Rows(height);
       auto [offset, stride] = layout[i];
-      if (stride < static_cast<size_t>(result->_stride[i]) ||
+      if (std::cmp_less(stride, result->_stride[i]) ||
           !RowsFit(offset, stride, rows[i], result->_stride[i], sourceSize)) {
         throw pybind11::value_error("The layout doesn't fit in the data");
       }
@@ -183,12 +267,13 @@ namespace python_webrtc {
     result->_owned = std::make_shared<std::vector<uint8_t>>(total);
 
     {
-      gil_release release;
+      const gil_release release;
       for (size_t i = 0; i < planes.size(); ++i) {
         auto [offset, stride] = layout[i];
-        size_t rowBytes = result->_stride[i];
+        const size_t rowBytes = result->_stride[i];
         for (size_t row = 0; row < rows[i]; ++row) {
-          std::memcpy(result->_owned->data() + offsets[i] + row * rowBytes, source + offset + row * stride, rowBytes);
+          std::memcpy(result->_owned->data() + offsets[i] + (row * rowBytes), source + offset + (row * stride),
+                      rowBytes);
         }
       }
     }
@@ -209,7 +294,7 @@ namespace python_webrtc {
       // I420A, I420AP10...
       name.erase(4, 1);
     }
-    std::shared_ptr<VideoFrameBuffer> result(new VideoFrameBuffer(*this));
+    std::shared_ptr<VideoFrameBuffer> result = std::make_shared<VideoFrameBuffer>(*this);
     result->_format = &PixelFormat::Parse(name);
     if (_format->layout != Layout::RGB) {
       result->_data[3] = nullptr;
@@ -221,34 +306,35 @@ namespace python_webrtc {
   void VideoFrameBuffer::CopyPlanes(const pybind11::buffer &destination, const std::vector<PlaneCopy> &copies) const {
     auto info = ContiguousBuffer(destination, true);
     auto size = static_cast<size_t>(info.size * info.itemsize);
-    auto target = static_cast<uint8_t *>(info.ptr);
+    auto *target = static_cast<uint8_t *>(info.ptr);
     auto planes = _format->Planes();
     if (copies.size() != planes.size()) {
       throw pybind11::value_error("One copy per plane is needed");
     }
     for (size_t i = 0; i < planes.size(); ++i) {
       auto [leftBytes, top, rowBytes, rows, offset, stride] = copies[i];
-      size_t planeRows = planes[i].Rows(_height);
-      size_t planeRowBytes = static_cast<size_t>(planes[i].Columns(_width)) * planes[i].sampleBytes;
+      const size_t planeRows = planes[i].Rows(_height);
+      const size_t planeRowBytes = static_cast<size_t>(planes[i].Columns(_width)) * planes[i].sampleBytes;
       if (rows > 0 && rowBytes > 0 &&
           (top > planeRows || rows > planeRows - top || leftBytes > planeRowBytes ||
-           rowBytes > planeRowBytes - leftBytes || stride < rowBytes || !RowsFit(offset, stride, rows, rowBytes, size))) {
+           rowBytes > planeRowBytes - leftBytes || stride < rowBytes ||
+           !RowsFit(offset, stride, rows, rowBytes, size))) {
         throw pybind11::value_error("The copy is out of the bounds of the frame or of the destination");
       }
     }
 
-    gil_release release;
+    const gil_release release;
     for (size_t i = 0; i < planes.size(); ++i) {
       auto [leftBytes, top, rowBytes, rows, offset, stride] = copies[i];
       for (size_t row = 0; row < rows && rowBytes > 0; ++row) {
-        std::memcpy(target + offset + row * stride, _data[i] + (top + row) * _stride[i] + leftBytes, rowBytes);
+        std::memcpy(target + offset + (row * stride), _data[i] + ((top + row) * _stride[i]) + leftBytes, rowBytes);
       }
     }
   }
 
   VideoFrameBuffer::EightBit VideoFrameBuffer::ToEightBit() const {
     EightBit result;
-    if (_format->bits == 8) {
+    if (_format->bits == kEightBit) {
       result.data = _data;
       result.stride = _stride;
       return result;
@@ -263,11 +349,12 @@ namespace python_webrtc {
     }
     result.storage.resize(total);
     // the samples are in the low bits of 16: scaled down to 8 (x * scale >> 16)
-    int scale = 1 << (24 - _format->bits);
+    const int scale = 1 << (24 - _format->bits);
     for (size_t i = 0; i < planes.size(); ++i) {
-      auto target = result.storage.data() + offsets[i];
-      libyuv::Convert16To8Plane(reinterpret_cast<const uint16_t *>(_data[i]), _stride[i] / 2, target,
-                                result.stride[i], scale, result.stride[i], planes[i].Rows(_height));
+      auto *target = result.storage.data() + offsets[i];
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): deeper samples are 16-bit, stored as bytes
+      libyuv::Convert16To8Plane(reinterpret_cast<const uint16_t *>(_data[i]), _stride[i] / 2, target, result.stride[i],
+                                scale, result.stride[i], planes[i].Rows(_height));
       result.data[i] = target;
     }
     return result;
@@ -285,94 +372,75 @@ namespace python_webrtc {
     }
     auto info = ContiguousBuffer(destination, true);
     auto size = static_cast<size_t>(info.size * info.itemsize);
-    if (stride < static_cast<size_t>(width) * 4 || !RowsFit(offset, stride, height, static_cast<size_t>(width) * 4, size)) {
+    if (stride < static_cast<size_t>(width) * 4 ||
+        !RowsFit(offset, stride, height, static_cast<size_t>(width) * 4, size)) {
       throw pybind11::value_error("The destination is too small");
     }
-    auto dst = static_cast<uint8_t *>(info.ptr) + offset;
+    auto *dst = static_cast<uint8_t *>(info.ptr) + offset;
     auto dstStride = static_cast<int>(stride);
-    bool rgbOrder = format.rgbOrder;
+    const bool rgbOrder = format.rgbOrder;
     // alpha is kept when both the frame and the format have it, opaque otherwise
-    bool alpha = format.alpha && _format->alpha;
+    const bool alpha = format.alpha && _format->alpha;
 
-    // the YUV matrix of the frame: U and V swapped (Yvu) give R and B swapped
-    const libyuv::YuvConstants *yuv = fullRange ? &libyuv::kYuvJPEGConstants : &libyuv::kYuvI601Constants;
-    const libyuv::YuvConstants *yvu = fullRange ? &libyuv::kYvuJPEGConstants : &libyuv::kYvuI601Constants;
-    if (matrix == "bt709") {
-      yuv = fullRange ? &libyuv::kYuvF709Constants : &libyuv::kYuvH709Constants;
-      yvu = fullRange ? &libyuv::kYvuF709Constants : &libyuv::kYvuH709Constants;
-    } else if (matrix == "bt2020-ncl") {
-      yuv = fullRange ? &libyuv::kYuvV2020Constants : &libyuv::kYuv2020Constants;
-      yvu = fullRange ? &libyuv::kYvuV2020Constants : &libyuv::kYvu2020Constants;
-    }
-    auto constants = rgbOrder ? yvu : yuv;
+    const auto *constants = YuvMatrix(matrix, fullRange, rgbOrder);
 
-    gil_release release;
+    const gil_release release;
     auto planes = _format->Planes();
     auto source = ToEightBit();
     auto plane = [&](int i) {
       // high bit depth planes are 8-bit now
-      int sampleBytes = _format->bits == 8 ? planes[i].sampleBytes : 1;
-      return source.data[i] + (y / planes[i].subsamplingY) * source.stride[i] +
-             (x / planes[i].subsamplingX) * sampleBytes;
+      const int sampleBytes = _format->bits == kEightBit ? planes[i].sampleBytes : 1;
+      return source.data[i] + (static_cast<std::ptrdiff_t>(y / planes[i].subsamplingY) * source.stride[i]) +
+             (static_cast<std::ptrdiff_t>(x / planes[i].subsamplingX) * sampleBytes);
     };
     // libyuv writes B, G, R, A (its ARGB): swapping U and V swaps R and B
-    int u = rgbOrder ? 2 : 1;
-    int v = rgbOrder ? 1 : 2;
+    const int u = rgbOrder ? 2 : 1;
+    const int v = rgbOrder ? 1 : 2;
 
     int result = 0;
     switch (_format->layout) {
-      case Layout::I420:
-      case Layout::I422:
-      case Layout::I444: {
-        bool i420 = _format->layout == Layout::I420;
-        bool i422 = _format->layout == Layout::I422;
-        if (alpha) {
-          auto convert = i420   ? libyuv::I420AlphaToARGBMatrix
-                         : i422 ? libyuv::I422AlphaToARGBMatrix
-                                : libyuv::I444AlphaToARGBMatrix;
-          result = convert(plane(0), source.stride[0], plane(u), source.stride[u], plane(v), source.stride[v],
-                           plane(3), source.stride[3], dst, dstStride, constants, width, height, 0);
-        } else {
-          auto convert = i420 ? libyuv::I420ToARGBMatrix : i422 ? libyuv::I422ToARGBMatrix : libyuv::I444ToARGBMatrix;
-          result = convert(plane(0), source.stride[0], plane(u), source.stride[u], plane(v), source.stride[v], dst,
-                           dstStride, constants, width, height);
-        }
-        break;
+    case Layout::I420:
+    case Layout::I422:
+    case Layout::I444: {
+      if (alpha) {
+        result = AlphaToArgb(_format->layout)(plane(0), source.stride[0], plane(u), source.stride[u], plane(v),
+                                              source.stride[v], plane(3), source.stride[3], dst, dstStride, constants,
+                                              width, height, 0);
+      } else {
+        result = ToArgb(_format->layout)(plane(0), source.stride[0], plane(u), source.stride[u], plane(v),
+                                         source.stride[v], dst, dstStride, constants, width, height);
       }
-      case Layout::NV12: {
-        // NV21 is NV12 with U and V swapped
-        auto convert = rgbOrder ? libyuv::NV21ToARGBMatrix : libyuv::NV12ToARGBMatrix;
-        result = convert(plane(0), source.stride[0], plane(1), source.stride[1], dst, dstStride, constants, width,
-                         height);
-        break;
+      break;
+    }
+    case Layout::NV12: {
+      // NV21 is NV12 with U and V swapped
+      auto convert = rgbOrder ? libyuv::NV21ToARGBMatrix : libyuv::NV12ToARGBMatrix;
+      result =
+          convert(plane(0), source.stride[0], plane(1), source.stride[1], dst, dstStride, constants, width, height);
+      break;
+    }
+    case Layout::RGB:
+      if (_format->rgbOrder == rgbOrder) {
+        result = libyuv::ARGBCopy(plane(0), source.stride[0], dst, dstStride, width, height);
+      } else {
+        // swapping R and B is its own inverse
+        result = libyuv::ARGBToABGR(plane(0), source.stride[0], dst, dstStride, width, height);
       }
-      case Layout::RGB:
-        if (_format->rgbOrder == rgbOrder) {
-          result = libyuv::ARGBCopy(plane(0), source.stride[0], dst, dstStride, width, height);
-        } else {
-          // swapping R and B is its own inverse
-          result = libyuv::ARGBToABGR(plane(0), source.stride[0], dst, dstStride, width, height);
-        }
-        break;
+      break;
     }
     if (result != 0) {
       throw std::runtime_error("The frame can't be converted");
     }
     if (!alpha) {
       // opaque, like a conversion from YUV without alpha
-      for (int row = 0; row < height; ++row) {
-        auto pixel = dst + row * stride + 3;
-        for (int column = 0; column < width; ++column, pixel += 4) {
-          *pixel = 255;
-        }
-      }
+      FillOpaque(dst, stride, width, height);
     }
   }
 
   webrtc::scoped_refptr<webrtc::VideoFrameBuffer> VideoFrameBuffer::ToWebrtc() const {
     const auto &format = *_format;
     // a received I420A buffer without its alpha is wrapped again as I420
-    bool alphaDropped = !format.alpha && _webrtc && _webrtc->type() == webrtc::VideoFrameBuffer::Type::kI420A;
+    const bool alphaDropped = !format.alpha && _webrtc && _webrtc->type() == webrtc::VideoFrameBuffer::Type::kI420A;
     if (_webrtc && !alphaDropped) {
       return _webrtc;
     }
@@ -393,38 +461,35 @@ namespace python_webrtc {
               buffer->StrideU(), buffer->MutableDataV(), buffer->StrideV(), _width, _height);
       return buffer;
     }
-    if (format.bits == 8) {
+    if (format.bits == kEightBit) {
       switch (format.layout) {
-        case Layout::I420:
-          if (format.alpha) {
-            return webrtc::WrapI420ABuffer(_width, _height, _data[0], _stride[0], _data[1], _stride[1], _data[2],
-                                           _stride[2], _data[3], _stride[3], keep);
-          }
-          return webrtc::WrapI420Buffer(_width, _height, _data[0], _stride[0], _data[1], _stride[1], _data[2],
+      case Layout::I420:
+        if (format.alpha) {
+          return webrtc::WrapI420ABuffer(_width, _height, _data[0], _stride[0], _data[1], _stride[1], _data[2],
+                                         _stride[2], _data[3], _stride[3], keep);
+        }
+        return webrtc::WrapI420Buffer(_width, _height, _data[0], _stride[0], _data[1], _stride[1], _data[2], _stride[2],
+                                      keep);
+      case Layout::I422:
+        if (!format.alpha) {
+          return webrtc::WrapI422Buffer(_width, _height, _data[0], _stride[0], _data[1], _stride[1], _data[2],
                                         _stride[2], keep);
-        case Layout::I422:
-          if (!format.alpha) {
-            return webrtc::WrapI422Buffer(_width, _height, _data[0], _stride[0], _data[1], _stride[1], _data[2],
-                                          _stride[2], keep);
-          }
-          break;
-        default:
-          if (!format.alpha) {
-            return webrtc::WrapI444Buffer(_width, _height, _data[0], _stride[0], _data[1], _stride[1], _data[2],
-                                          _stride[2], keep);
-          }
-          break;
+        }
+        break;
+      default:
+        if (!format.alpha) {
+          return webrtc::WrapI444Buffer(_width, _height, _data[0], _stride[0], _data[1], _stride[1], _data[2],
+                                        _stride[2], keep);
+        }
+        break;
       }
     }
     // high bit depth, or alpha libwebrtc has no buffer for: 8-bit I420 without alpha
     auto buffer = webrtc::I420Buffer::Create(_width, _height);
     auto source = ToEightBit();
-    auto convert = format.layout == Layout::I420   ? libyuv::I420Copy
-                   : format.layout == Layout::I422 ? libyuv::I422ToI420
-                                                   : libyuv::I444ToI420;
-    convert(source.data[0], source.stride[0], source.data[1], source.stride[1], source.data[2], source.stride[2],
-            buffer->MutableDataY(), buffer->StrideY(), buffer->MutableDataU(), buffer->StrideU(),
-            buffer->MutableDataV(), buffer->StrideV(), _width, _height);
+    ToI420(format.layout)(source.data[0], source.stride[0], source.data[1], source.stride[1], source.data[2],
+                          source.stride[2], buffer->MutableDataY(), buffer->StrideY(), buffer->MutableDataU(),
+                          buffer->StrideU(), buffer->MutableDataV(), buffer->StrideV(), _width, _height);
     return buffer;
   }
 

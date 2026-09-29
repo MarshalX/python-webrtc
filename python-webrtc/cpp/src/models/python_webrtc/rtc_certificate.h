@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_MODELS_PYTHON_WEBRTC_RTC_CERTIFICATE_H_
+#define PYTHON_WEBRTC_MODELS_PYTHON_WEBRTC_RTC_CERTIFICATE_H_
 
 #include <memory>
 #include <optional>
@@ -28,19 +29,21 @@ namespace python_webrtc {
     static void Init(pybind11::module &m);
 
     // "rsa", or ECDSA (P-256) for any other key type; null if the key can't be generated
-    static std::shared_ptr<RTCCertificate> Generate(
-        const std::string &keyType, int modulusLength, int publicExponent, std::optional<uint64_t> expiresMs);
+    static std::shared_ptr<RTCCertificate> Generate(const std::string &keyType, int modulusLength, int publicExponent,
+                                                    std::optional<uint64_t> expiresMs);
 
-    webrtc::scoped_refptr<webrtc::RTCCertificate> certificate() const { return _certificate; }
+    [[nodiscard]] webrtc::scoped_refptr<webrtc::RTCCertificate> certificate() const { return _certificate; }
 
     // milliseconds since the epoch
-    uint64_t Expires() const { return _certificate->Expires(); }
+    [[nodiscard]] uint64_t Expires() const { return _certificate->Expires(); }
 
     // (algorithm, lowercase hex with colons)
-    std::vector<std::pair<std::string, std::string>> Fingerprints() const;
+    [[nodiscard]] std::vector<std::pair<std::string, std::string>> Fingerprints() const;
 
   private:
     webrtc::scoped_refptr<webrtc::RTCCertificate> _certificate;
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_MODELS_PYTHON_WEBRTC_RTC_CERTIFICATE_H_

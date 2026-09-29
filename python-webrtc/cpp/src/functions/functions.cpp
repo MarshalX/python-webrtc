@@ -6,8 +6,8 @@
 //
 
 #include "functions.h"
-#include "get_user_media.h"
 #include "../utils/gil.h"
+#include "get_user_media.h"
 
 namespace python_webrtc {
 
@@ -17,4 +17,4 @@ namespace python_webrtc {
           pybind11::arg("width"), pybind11::arg("height"), pybind11::arg("frameRate"));
   }
 
-}
+} // namespace python_webrtc

@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_H_
+#define PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_H_
 
 #include <array>
 #include <atomic>
@@ -23,23 +24,23 @@
 #include <api/peer_connection_interface.h>
 #include <api/scoped_refptr.h>
 
-#include <pybind11/pybind11.h>
 #include <pybind11/functional.h>
+#include <pybind11/pybind11.h>
 
-#include "../utils/alive_count.h"
 #include "../exceptions.h"
 #include "../models/python_webrtc/rtc_configuration.h"
 #include "../models/python_webrtc/rtc_session_description.h"
+#include "../utils/alive_count.h"
 #include "../utils/held_events.h"
 #include "../utils/listeners.h"
 #include "../utils/surfaced.h"
 
-#include "media_stream_track.h"
 #include "media_stream.h"
+#include "media_stream_track.h"
+#include "rtc_data_channel.h"
 #include "rtc_rtp_sender.h"
 #include "rtc_rtp_transceiver.h"
 #include "rtc_sctp_transport.h"
-#include "rtc_data_channel.h"
 
 namespace webrtc {
   struct PeerConnectionDependencies;
@@ -51,58 +52,61 @@ namespace python_webrtc {
 
   // An operation that completes after close() fails, rather than never settling as in a browser, which would
   // leave a Python caller waiting forever.
-  class RTCPeerConnection
-      : public webrtc::PeerConnectionObserver, public Listeners, public std::enable_shared_from_this<RTCPeerConnection> {
+  class RTCPeerConnection : public webrtc::PeerConnectionObserver,
+                            public Listeners,
+                            public std::enable_shared_from_this<RTCPeerConnection> {
   public:
     using SignalingState = webrtc::PeerConnectionInterface::SignalingState;
     using IceConnectionState = webrtc::PeerConnectionInterface::IceConnectionState;
     using IceGatheringState = webrtc::PeerConnectionInterface::IceGatheringState;
     using PeerConnectionState = webrtc::PeerConnectionInterface::PeerConnectionState;
 
-    explicit RTCPeerConnection(const std::optional<ConfigurationInit> &);
+    explicit RTCPeerConnection(const std::optional<ConfigurationInit> &init);
 
     static void Init(pybind11::module &m);
 
     ~RTCPeerConnection() override;
 
+    RTCPeerConnection(const RTCPeerConnection &) = delete;
+    RTCPeerConnection &operator=(const RTCPeerConnection &) = delete;
+
     // A reference taken in a callback of libwebrtc, released on a thread of its own: the connection can't be
     // destroyed on the signaling thread in the middle of its own callback
     static void ReleaseElsewhere(std::shared_ptr<RTCPeerConnection> &&connection);
 
-    void CreateOffer(
-        std::function<void(RTCSessionDescription)> &, std::function<void(RTCCallbackException)> &,
-        bool iceRestart, bool voiceActivityDetection);
+    void CreateOffer(std::function<void(RTCSessionDescription)> &onSuccess,
+                     std::function<void(RTCCallbackException)> &onFailure, bool iceRestart,
+                     bool voiceActivityDetection);
 
-    void CreateAnswer(
-        std::function<void(RTCSessionDescription)> &, std::function<void(RTCCallbackException)> &,
-        bool voiceActivityDetection);
+    void CreateAnswer(std::function<void(RTCSessionDescription)> &onSuccess,
+                      std::function<void(RTCCallbackException)> &onFailure, bool voiceActivityDetection);
 
     // the last description createOffer or createAnswer made, which are the only ones setLocalDescription takes
     void SaveCreatedDescription(const RTCSessionDescriptionInit &description);
 
-    void SetLocalDescription(
-        std::function<void()> &, std::function<void(RTCCallbackException)> &,
-        const std::optional<RTCSessionDescriptionInit> &);
+    void SetLocalDescription(std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
+                             const std::optional<RTCSessionDescriptionInit> &init);
 
-    void SetRemoteDescription(
-        std::function<void()> &, std::function<void(RTCCallbackException)> &, const RTCSessionDescriptionInit &);
+    void SetRemoteDescription(std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
+                              const RTCSessionDescriptionInit &init);
 
-    void AddIceCandidate(
-        std::function<void()> &, std::function<void(RTCCallbackException)> &, const std::string &candidate,
-        const std::optional<std::string> &sdpMid, std::optional<int> sdpMLineIndex,
-        const std::optional<std::string> &usernameFragment);
+    void AddIceCandidate(std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
+                         const std::string &candidate, const std::optional<std::string> &sdpMid,
+                         std::optional<int> sdpMLineIndex, const std::optional<std::string> &usernameFragment);
 
-    std::shared_ptr<RTCRtpSender> AddTrack(MediaStreamTrack &, std::optional<std::reference_wrapper<MediaStream>>);
+    std::shared_ptr<RTCRtpSender> AddTrack(MediaStreamTrack &mediaStreamTrack,
+                                           std::optional<std::reference_wrapper<MediaStream>> mediaStream);
 
-    std::shared_ptr<RTCRtpSender> AddTrack(MediaStreamTrack &, const std::vector<MediaStream *> &);
+    std::shared_ptr<RTCRtpSender> AddTrack(MediaStreamTrack &mediaStreamTrack,
+                                           const std::vector<MediaStream *> &mediaStreams);
 
-    void RemoveTrack(RTCRtpSender &);
+    void RemoveTrack(RTCRtpSender &sender);
 
-    std::shared_ptr<RTCRtpTransceiver> AddTransceiver(
-        webrtc::MediaType, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &);
+    std::shared_ptr<RTCRtpTransceiver>
+    AddTransceiver(webrtc::MediaType kind, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &init);
 
-    std::shared_ptr<RTCRtpTransceiver> AddTransceiver(
-        MediaStreamTrack &, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &);
+    std::shared_ptr<RTCRtpTransceiver>
+    AddTransceiver(MediaStreamTrack &track, std::optional<std::reference_wrapper<webrtc::RtpTransceiverInit>> &init);
 
     std::vector<std::shared_ptr<RTCRtpTransceiver>> GetTransceivers();
 
@@ -110,19 +114,21 @@ namespace python_webrtc {
 
     std::vector<std::shared_ptr<RTCRtpReceiver>> GetReceivers();
 
-    std::shared_ptr<RTCDataChannel> CreateDataChannel(
-        const std::string &label, bool ordered, std::optional<int> maxPacketLifeTime, std::optional<int> maxRetransmits,
-        const std::string &protocol, bool negotiated, std::optional<int> id, webrtc::Priority priority);
+    std::shared_ptr<RTCDataChannel> CreateDataChannel(const std::string &label, bool ordered,
+                                                      std::optional<int> maxPacketLifeTime,
+                                                      std::optional<int> maxRetransmits, const std::string &protocol,
+                                                      bool negotiated, std::optional<int> id,
+                                                      webrtc::Priority priority);
 
     std::optional<std::shared_ptr<RTCSctpTransport>> GetSctp();
 
-    void GetStats(std::function<void(std::string)> &, std::function<void(RTCCallbackException)> &);
+    void GetStats(std::function<void(std::string)> &onSuccess, std::function<void(RTCCallbackException)> &onFailure);
 
     void RestartIce();
 
     ConfigurationInit GetConfiguration();
 
-    void SetConfiguration(const ConfigurationInit &);
+    void SetConfiguration(const ConfigurationInit &init);
 
     void Close();
 
@@ -176,26 +182,28 @@ namespace python_webrtc {
     bool IsClosed();
 
     // the transceiver of a sender, while it's in the connection
-    webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> TransceiverOf(
-        const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender);
+    webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>
+    TransceiverOf(const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender);
 
     // The negotiated codecs this side can use: libwebrtc reports none for an inactive sender (receiver), and
     // lists remote codecs it doesn't know
-    std::vector<webrtc::RtpCodecParameters> NegotiatedCodecs(
-        const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender);
+    std::vector<webrtc::RtpCodecParameters>
+    NegotiatedCodecs(const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender);
 
-    std::vector<webrtc::RtpCodecParameters> NegotiatedCodecs(
-        const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver);
+    std::vector<webrtc::RtpCodecParameters>
+    NegotiatedCodecs(const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver);
 
     // the header extensions negotiated for a receiver (in the local description)
-    std::vector<webrtc::RtpExtension> NegotiatedHeaderExtensions(
-        const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver);
+    std::vector<webrtc::RtpExtension>
+    NegotiatedHeaderExtensions(const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver);
 
     void CollectStats(const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender,
-                      std::function<void(std::string)> &, std::function<void(RTCCallbackException)> &);
+                      std::function<void(std::string)> &onSuccess,
+                      std::function<void(RTCCallbackException)> &onFailure);
 
     void CollectStats(const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver,
-                      std::function<void(std::string)> &, std::function<void(RTCCallbackException)> &);
+                      std::function<void(std::string)> &onSuccess,
+                      std::function<void(RTCCallbackException)> &onFailure);
 
     // PeerConnectionObserver implementation, on the signaling thread.
     void OnSignalingChange(SignalingState newState) override;
@@ -237,7 +245,14 @@ namespace python_webrtc {
     // until it completes, so that they come after it
     class HeldOperationEvents;
 
-    enum class DescriptionKind { kLocal, kRemote, kCurrentLocal, kCurrentRemote, kPendingLocal, kPendingRemote };
+    enum class DescriptionKind : uint8_t {
+      kLocal,
+      kRemote,
+      kCurrentLocal,
+      kCurrentRemote,
+      kPendingLocal,
+      kPendingRemote
+    };
 
     static constexpr size_t kDescriptionKinds = 6;
 
@@ -253,7 +268,7 @@ namespace python_webrtc {
       std::vector<const webrtc::SessionDescriptionInterface *> live;
     };
 
-    template<typename T, typename U>
+    template <typename T, typename U>
     using Wrappers = std::unordered_map<U *, std::shared_ptr<T>>;
 
     // Python threads may call close() concurrently with other methods (the GIL is released)
@@ -264,35 +279,36 @@ namespace python_webrtc {
 
     // The connection to collect the stats of, even closed, with its stats cache cleared: libwebrtc reuses a report
     // for 50 ms, the stats are the current ones. None fails the request.
-    webrtc::scoped_refptr<webrtc::PeerConnectionInterface> StatsConnection(
-        const std::function<void(RTCCallbackException)> &onFailure);
+    webrtc::scoped_refptr<webrtc::PeerConnectionInterface>
+    StatsConnection(const std::function<void(RTCCallbackException)> &onFailure);
 
     // the wrapper of a libwebrtc object of this connection, which the connection keeps while it's open
-    template<typename T, typename U>
-    std::shared_ptr<T> Wrap(Wrappers<T, U> &, webrtc::scoped_refptr<U>);
+    template <typename T, typename U>
+    std::shared_ptr<T> Wrap(Wrappers<T, U> &wrappers, webrtc::scoped_refptr<U> object);
 
     // wrappers of the current objects of this connection; wrappers of the objects that are gone are released
-    template<typename T, typename U>
-    std::vector<std::shared_ptr<T>> Sync(Wrappers<T, U> &, const std::vector<webrtc::scoped_refptr<U>> &);
+    template <typename T, typename U>
+    std::vector<std::shared_ptr<T>> Sync(Wrappers<T, U> &wrappers,
+                                         const std::vector<webrtc::scoped_refptr<U>> &objects);
 
     // wrappers of the objects of a closed connection, which doesn't keep them (see ReleaseWrappers)
-    template<typename T, typename U>
-    std::vector<std::shared_ptr<T>> Unkept(const std::vector<webrtc::scoped_refptr<U>> &);
+    template <typename T, typename U>
+    std::vector<std::shared_ptr<T>> Unkept(const std::vector<webrtc::scoped_refptr<U>> &objects);
 
     void ReleaseWrappers();
 
     // gives a wrapper what it needs from the connection
-    void Adopt(const std::shared_ptr<RTCRtpSender> &);
+    void Adopt(const std::shared_ptr<RTCRtpSender> &sender);
 
-    void Adopt(const std::shared_ptr<RTCRtpReceiver> &);
+    void Adopt(const std::shared_ptr<RTCRtpReceiver> &receiver);
 
-    void Adopt(const std::shared_ptr<RTCRtpTransceiver> &);
+    void Adopt(const std::shared_ptr<RTCRtpTransceiver> &transceiver);
 
-    void Adopt(const std::shared_ptr<RTCDataChannel> &);
+    void Adopt(const std::shared_ptr<RTCDataChannel> &channel);
 
-    void Adopt(const std::shared_ptr<RTCSctpTransport> &);
+    void Adopt(const std::shared_ptr<RTCSctpTransport> &sctp);
 
-    void Adopt(const std::shared_ptr<RTCDtlsTransport> &);
+    void Adopt(const std::shared_ptr<RTCDtlsTransport> &dtls);
 
     // the maxMessageSize of the SCTP transport, from the descriptions until the transport knows it
     std::optional<double> MaxMessageSize();
@@ -300,31 +316,33 @@ namespace python_webrtc {
     // waits for the negotiationneeded event a change may have caused to be emitted
     void QueueNegotiationNeeded();
 
-    std::shared_ptr<RTCRtpTransceiver> AddedTransceiver(
-        webrtc::RTCErrorOr<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>> result);
+    std::shared_ptr<RTCRtpTransceiver>
+    AddedTransceiver(webrtc::RTCErrorOr<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>> result);
 
     // A provisional answer, or the final one after it, without SDP: the last answer createAnswer made, or a new one
     // (libwebrtc makes only final answers itself, and offers in have-local-pranswer)
-    void SetImplicitAnswer(
-        const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, webrtc::SdpType type,
-        std::function<void(webrtc::RTCError)> complete, const std::function<void(RTCCallbackException)> &onFailure);
+    void SetImplicitAnswer(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, webrtc::SdpType type,
+                           std::function<void(webrtc::RTCError)> complete,
+                           const std::function<void(RTCCallbackException)> &onFailure);
 
     // What completes setLocalDescription (kLocal) or setRemoteDescription (kRemote); created right before the
     // operation starts, as it holds its events
-    std::function<void(webrtc::RTCError)> Completion(
-        std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
-        const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, DescriptionKind kind);
+    std::function<void(webrtc::RTCError)> Completion(std::function<void()> &onSuccess,
+                                                     std::function<void(RTCCallbackException)> &onFailure,
+                                                     const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
+                                                     DescriptionKind kind);
 
-    std::shared_ptr<RTCSessionDescription> GetDescription(DescriptionKind);
+    std::shared_ptr<RTCSessionDescription> GetDescription(DescriptionKind kind);
 
     // on the signaling thread
-    DescriptionView ReadDescription(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &, DescriptionKind);
+    DescriptionView ReadDescription(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
+                                    DescriptionKind kind);
 
     // the wrapper of a description that is set: the same object for as long as it's set, unless its SDP changed
     // meanwhile (refresh), under _descriptionsMutex
-    std::shared_ptr<RTCSessionDescription> FindOrCreateDescription(
-        const DescriptionView &view, const std::vector<const webrtc::SessionDescriptionInterface *> &live,
-        bool refresh);
+    std::shared_ptr<RTCSessionDescription>
+    FindOrCreateDescription(const DescriptionView &view,
+                            const std::vector<const webrtc::SessionDescriptionInterface *> &live, bool refresh);
 
     // The descriptions as an operation or event left them, shown from when Python gets it (see ApplyDescriptions).
     // On the signaling thread.
@@ -352,18 +370,18 @@ namespace python_webrtc {
     void RecordRemoteDescriptionCandidates();
 
     // the username fragment and the password of an ICE transport in the local or the remote description
-    std::optional<std::pair<std::string, std::string>> IceParameters(
-        const webrtc::IceTransportInterface *iceTransport, bool local);
+    std::optional<std::pair<std::string, std::string>> IceParameters(const webrtc::IceTransportInterface *iceTransport,
+                                                                     bool local);
 
     // candidates and gathering state changes wait for the local description that caused them to be set
-    template<typename... Args>
-    void EmitGathering(const char *name, Args... args);
+    template <typename... Args>
+    void EmitGathering(const char *name, const Args &...args);
 
     void EmitTrack(const webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> &transceiver);
 
     // The remote streams of each track before a remote description is set, to fire track events for tracks
     // moved to other streams. On the signaling thread.
-    void SnapshotRemoteStreams(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &);
+    void SnapshotRemoteStreams(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc);
 
     void FireRemoteStreamChanges();
 
@@ -426,4 +444,6 @@ namespace python_webrtc {
     Wrappers<RTCDataChannel, webrtc::DataChannelInterface> _channels;
   };
 
-}
+} // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_H_

@@ -11,34 +11,35 @@
 
 namespace python_webrtc {
 
-  static std::optional<std::string> optionalIfNonEmpty(const std::string &value) {
-    return value.empty() ? std::nullopt : std::optional<std::string>(value);
-  }
+  namespace {
+
+    std::optional<std::string> optionalIfNonEmpty(const std::string &value) {
+      return value.empty() ? std::nullopt : std::optional<std::string>(value);
+    }
+
+  } // namespace
 
   IceCandidateInit::IceCandidateInit(const webrtc::IceCandidate &iceCandidate)
-      : candidate(iceCandidate.ToString()),
-        sdpMid(iceCandidate.sdp_mid()),
+      : candidate(iceCandidate.ToString()), sdpMid(iceCandidate.sdp_mid()),
         sdpMLineIndex(iceCandidate.sdp_mline_index()),
         usernameFragment(optionalIfNonEmpty(iceCandidate.candidate().username())),
         url(optionalIfNonEmpty(iceCandidate.server_url())),
         relayProtocol(optionalIfNonEmpty(iceCandidate.candidate().relay_protocol())) {}
 
-  IceCandidateInit::IceCandidateInit(
-      std::string sdpMid, int sdpMLineIndex, std::optional<std::string> usernameFragment)
+  IceCandidateInit::IceCandidateInit(std::string sdpMid, int sdpMLineIndex, std::optional<std::string> usernameFragment)
       : sdpMid(std::move(sdpMid)), sdpMLineIndex(sdpMLineIndex), usernameFragment(std::move(usernameFragment)) {}
 
   void RTCIceCandidate::Init(pybind11::module &m) {
-    pybind11::class_<IceCandidateInit>(m, "IceCandidateInit")
-        .def("kwargs", [](const IceCandidateInit &init) {
-          pybind11::dict kwargs;
-          kwargs["candidate"] = init.candidate;
-          kwargs["sdp_mid"] = init.sdpMid;
-          kwargs["sdp_m_line_index"] = init.sdpMLineIndex;
-          kwargs["username_fragment"] = init.usernameFragment;
-          kwargs["url"] = init.url;
-          kwargs["relay_protocol"] = init.relayProtocol;
-          return kwargs;
-        });
+    pybind11::class_<IceCandidateInit>(m, "IceCandidateInit").def("kwargs", [](const IceCandidateInit &init) {
+      pybind11::dict kwargs;
+      kwargs["candidate"] = init.candidate;
+      kwargs["sdp_mid"] = init.sdpMid;
+      kwargs["sdp_m_line_index"] = init.sdpMLineIndex;
+      kwargs["username_fragment"] = init.usernameFragment;
+      kwargs["url"] = init.url;
+      kwargs["relay_protocol"] = init.relayProtocol;
+      return kwargs;
+    });
   }
 
 } // namespace python_webrtc

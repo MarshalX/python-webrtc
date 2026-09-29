@@ -24,15 +24,15 @@ namespace python_webrtc {
   }
 
   void RTCAudioTrackSource::AddSink(webrtc::AudioTrackSinkInterface *sink) {
-    std::lock_guard<std::mutex> lock(_sinkMutex);
-    if (std::find(_sinks.begin(), _sinks.end(), sink) == _sinks.end()) {
+    const std::scoped_lock lock(_sinkMutex);
+    if (std::ranges::find(_sinks, sink) == _sinks.end()) {
       _sinks.push_back(sink);
     }
   }
 
   void RTCAudioTrackSource::RemoveSink(webrtc::AudioTrackSinkInterface *sink) {
-    std::lock_guard<std::mutex> lock(_sinkMutex);
-    _sinks.erase(std::remove(_sinks.begin(), _sinks.end(), sink), _sinks.end());
+    const std::scoped_lock lock(_sinkMutex);
+    std::erase(_sinks, sink);
   }
 
   void RTCAudioTrackSource::End() {
@@ -41,29 +41,35 @@ namespace python_webrtc {
     }
   }
 
-  void RTCAudioTrackSource::PushSamples(
-      const void *samples, int bitsPerSample, int sampleRate, size_t channels, size_t frames) {
-    std::lock_guard<std::mutex> lock(_sinkMutex);
-    for (auto sink: _sinks) {
+  void RTCAudioTrackSource::PushSamples(const void *samples, int bitsPerSample, int sampleRate, size_t channels,
+                                        size_t frames) {
+    const std::scoped_lock lock(_sinkMutex);
+    for (auto *sink : _sinks) {
       sink->OnData(samples, bitsPerSample, sampleRate, channels, frames, std::nullopt);
     }
   }
 
   void RTCAudioTrackSource::StartMicrophone() {
     constexpr int sampleRate = 48000;
-    constexpr size_t frames = sampleRate / 100;
+    constexpr auto interval = std::chrono::milliseconds(10);
+    constexpr size_t frames = sampleRate * interval.count() / 1000;
+    constexpr int bitsPerSample = 16;
+    // quiet noise (within 256 of silence), from a linear congruential generator (Numerical Recipes constants)
+    constexpr uint32_t multiplier = 1664525;
+    constexpr uint32_t increment = 1013904223;
+    constexpr int seedShift = 16;
+    constexpr int amplitude = 256;
     // the thread never holds a reference to the source, so the source isn't destroyed on it
-    auto tick = [this, samples = std::vector<int16_t>(frames), seed = uint32_t(1)]() mutable {
-      for (auto &sample: samples) {
-        // quiet noise (within 256 of silence), from a linear congruential generator (Numerical Recipes constants)
-        seed = seed * 1664525 + 1013904223;
-        sample = static_cast<int16_t>(static_cast<int32_t>(seed >> 16) % 512 - 256);
+    auto tick = [this, samples = std::vector<int16_t>(frames), seed = uint32_t{1}]() mutable {
+      for (auto &sample : samples) {
+        seed = (seed * multiplier) + increment;
+        sample = static_cast<int16_t>((static_cast<int32_t>(seed >> seedShift) % (2 * amplitude)) - amplitude);
       }
-      PushSamples(samples.data(), 16, sampleRate, 1, frames);
+      PushSamples(samples.data(), bitsPerSample, sampleRate, 1, frames);
     };
     _control = std::make_shared<SourceControl>();
     _control->microphone = true;
-    _microphone.Start(std::chrono::milliseconds(10), std::move(tick));
+    _microphone.Start(interval, std::move(tick));
   }
 
 } // namespace python_webrtc

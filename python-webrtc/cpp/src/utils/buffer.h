@@ -5,9 +5,11 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_UTILS_BUFFER_H_
+#define PYTHON_WEBRTC_UTILS_BUFFER_H_
 
 #include <cstddef>
+#include <cstdint>
 
 #include <pybind11/pybind11.h>
 
@@ -16,10 +18,16 @@ namespace python_webrtc {
   // A Python buffer used as one block: a strided view (like view[::-1]) would be accessed out of its bounds
   inline pybind11::buffer_info ContiguousBuffer(const pybind11::buffer &buffer, bool writable = false) {
     auto info = buffer.request(writable);
-    if (!PyBuffer_IsContiguous(info.view(), 'C')) {
+    if (PyBuffer_IsContiguous(info.view(), 'C') == 0) {
       throw pybind11::type_error("The buffer must be contiguous");
     }
     return info;
+  }
+
+  // bytes of a buffer of octets
+  inline pybind11::bytes Bytes(const uint8_t *data, size_t size) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): Python bytes are chars, octets alias them
+    return {reinterpret_cast<const char *>(data), size};
   }
 
   // Whether rows of rowBytes, stride apart and starting at offset, fit in size bytes, without overflowing
@@ -34,3 +42,5 @@ namespace python_webrtc {
   }
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_UTILS_BUFFER_H_

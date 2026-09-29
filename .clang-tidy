@@ -1,0 +1,48 @@
+---
+# Every disabled check has a reason; everything else is fixed, or NOLINT(check) with a reason where it can't be.
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -modernize-use-trailing-return-type,
+  -misc-include-cleaner,
+  -misc-multiple-inheritance,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  -cppcoreguidelines-pro-type-static-cast-downcast
+
+# modernize-use-trailing-return-type: libwebrtc and pybind11 APIs, which we override and mirror, use leading returns
+# misc-include-cleaner: pybind11 and libwebrtc are used through umbrella headers the check maps to internal ones
+# misc-multiple-inheritance: libwebrtc observer interfaces (not pure virtual) are implemented next to our bases
+# cppcoreguidelines-owning-memory: libwebrtc takes raw `new` into its refcounting, and there's no GSL owner<>
+# cppcoreguidelines-pro-bounds-*: libwebrtc frames and audio are raw planes with strides, indexed per sample
+# cppcoreguidelines-pro-type-static-cast-downcast: libwebrtc has no RTTI, tracks are downcast by kind() as it does
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/python-webrtc/cpp/src/.*'
+FormatStyle: file
+
+CheckOptions:
+  # running out of memory terminates anyway, and so does calling an empty std::function, a bug
+  bugprone-exception-escape.IgnoredExceptions: 'bad_alloc,bad_array_new_length,length_error,bad_function_call'
+  # pybind11 dataclass-like models (def_readwrite) are plain structs
+  misc-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic: true
+  # `m` for the pybind11 module, `pc` for a peer connection, coordinates and iterators
+  readability-identifier-length.IgnoredVariableNames: '^(m|pc|id|it|x|y|u|v|uv|i|j)$'
+  readability-identifier-length.IgnoredParameterNames: '^(m|pc|id|it|x|y|u|v|uv|i|j)$'
+  readability-identifier-length.IgnoredLoopCounterNames: '^[ijkxy_]$'
+  # a width and a height, in the order everything takes them
+  bugprone-easily-swappable-parameters.IgnoredParameterNames: '"";iterator;Iterator;begin;Begin;end;End;first;First;last;Last;lhs;LHS;rhs;RHS;width;height'
+  cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
+  cppcoreguidelines-special-member-functions.AllowMissingMoveFunctionsWhenCopyIsDeleted: true
+...

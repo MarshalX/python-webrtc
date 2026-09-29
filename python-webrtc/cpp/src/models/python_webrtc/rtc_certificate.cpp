@@ -27,8 +27,8 @@ namespace python_webrtc {
         .def("fingerprints", &RTCCertificate::Fingerprints);
   }
 
-  std::shared_ptr<RTCCertificate> RTCCertificate::Generate(
-      const std::string &keyType, int modulusLength, int publicExponent, std::optional<uint64_t> expiresMs) {
+  std::shared_ptr<RTCCertificate> RTCCertificate::Generate(const std::string &keyType, int modulusLength,
+                                                           int publicExponent, std::optional<uint64_t> expiresMs) {
     auto params = keyType == "rsa" ? webrtc::KeyParams::RSA(modulusLength, publicExponent) : webrtc::KeyParams::ECDSA();
     if (!params.IsValid()) {
       return nullptr;
@@ -42,7 +42,7 @@ namespace python_webrtc {
     auto fingerprint = webrtc::SSLFingerprint::CreateFromCertificate(*_certificate);
     if (fingerprint) {
       auto value = fingerprint->GetRfc4572Fingerprint();
-      std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return std::tolower(c); });
+      std::ranges::transform(value, value.begin(), [](unsigned char character) { return std::tolower(character); });
       fingerprints.emplace_back(fingerprint->algorithm, value);
     }
     return fingerprints;

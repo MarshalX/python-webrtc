@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_MODELS_WEBRTC_RTP_PARAMETERS_H_
+#define PYTHON_WEBRTC_MODELS_WEBRTC_RTP_PARAMETERS_H_
 
 #include <pybind11/pybind11.h>
 
@@ -17,3 +18,5 @@ namespace python_webrtc {
   void bindRtpParameters(pybind11::module &m);
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_MODELS_WEBRTC_RTP_PARAMETERS_H_

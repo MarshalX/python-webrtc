@@ -9,20 +9,22 @@
 
 #include <chrono>
 #include <cstring>
+#include <span>
 #include <vector>
 
 namespace python_webrtc {
 
   namespace {
 
-    int32_t DeviceName(uint16_t index, char name[webrtc::kAdmMaxDeviceNameSize], char guid[webrtc::kAdmMaxGuidSize]) {
+    // the single device, without a guid
+    int32_t DeviceName(uint16_t index, std::span<char, webrtc::kAdmMaxDeviceNameSize> name, char *guid) {
       if (index != 0) {
         return -1;
       }
-      std::strncpy(name, "python-webrtc", webrtc::kAdmMaxDeviceNameSize - 1);
-      name[webrtc::kAdmMaxDeviceNameSize - 1] = '\0';
-      if (guid) {
-        guid[0] = '\0';
+      std::strncpy(name.data(), "python-webrtc", name.size() - 1);
+      name.back() = '\0';
+      if (guid != nullptr) {
+        *guid = '\0';
       }
       return 0;
     }
@@ -30,7 +32,8 @@ namespace python_webrtc {
   } // namespace
 
   PlayoutAudioDevice::~PlayoutAudioDevice() {
-    StopPlayout();
+    // this class's own, as in any destructor
+    PlayoutAudioDevice::StopPlayout();
   }
 
   int32_t PlayoutAudioDevice::ActiveAudioLayer(AudioLayer *audioLayer) const {
@@ -39,13 +42,13 @@ namespace python_webrtc {
   }
 
   int32_t PlayoutAudioDevice::RegisterAudioCallback(webrtc::AudioTransport *audioCallback) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     _transport = audioCallback;
     return 0;
   }
 
   int32_t PlayoutAudioDevice::Init() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     _initialized = true;
     return 0;
   }
@@ -53,24 +56,22 @@ namespace python_webrtc {
   int32_t PlayoutAudioDevice::Terminate() {
     StopPlayout();
     StopRecording();
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     _initialized = false;
     return 0;
   }
 
   bool PlayoutAudioDevice::Initialized() const {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     return _initialized;
   }
 
-  int32_t PlayoutAudioDevice::PlayoutDeviceName(uint16_t index, char name[webrtc::kAdmMaxDeviceNameSize],
-                                                char guid[webrtc::kAdmMaxGuidSize]) {
-    return DeviceName(index, name, guid);
+  int32_t PlayoutAudioDevice::PlayoutDeviceName(uint16_t index, char *name, char *guid) {
+    return DeviceName(index, std::span<char, webrtc::kAdmMaxDeviceNameSize>(name, webrtc::kAdmMaxDeviceNameSize), guid);
   }
 
-  int32_t PlayoutAudioDevice::RecordingDeviceName(uint16_t index, char name[webrtc::kAdmMaxDeviceNameSize],
-                                                  char guid[webrtc::kAdmMaxGuidSize]) {
-    return DeviceName(index, name, guid);
+  int32_t PlayoutAudioDevice::RecordingDeviceName(uint16_t index, char *name, char *guid) {
+    return DeviceName(index, std::span<char, webrtc::kAdmMaxDeviceNameSize>(name, webrtc::kAdmMaxDeviceNameSize), guid);
   }
 
   int32_t PlayoutAudioDevice::PlayoutIsAvailable(bool *available) {
@@ -79,13 +80,13 @@ namespace python_webrtc {
   }
 
   int32_t PlayoutAudioDevice::InitPlayout() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     _playoutInitialized = true;
     return 0;
   }
 
   bool PlayoutAudioDevice::PlayoutIsInitialized() const {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     return _playoutInitialized;
   }
 
@@ -95,25 +96,25 @@ namespace python_webrtc {
   }
 
   int32_t PlayoutAudioDevice::InitRecording() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     _recordingInitialized = true;
     return 0;
   }
 
   bool PlayoutAudioDevice::RecordingIsInitialized() const {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     return _recordingInitialized;
   }
 
   int32_t PlayoutAudioDevice::StartPlayout() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     if (_playout) {
       return 0;
     }
     _playout = std::make_unique<PacedThread>();
     std::vector<int16_t> samples(kFrames * kChannels);
     _playout->Start(std::chrono::milliseconds(kPullIntervalMs), [this, samples = std::move(samples)]() mutable {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       if (!_transport) {
         return;
       }
@@ -129,7 +130,7 @@ namespace python_webrtc {
   int32_t PlayoutAudioDevice::StopPlayout() {
     std::unique_ptr<PacedThread> playout;
     {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       playout = std::move(_playout);
       _playoutInitialized = false;
     }
@@ -139,25 +140,25 @@ namespace python_webrtc {
   }
 
   bool PlayoutAudioDevice::Playing() const {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     return static_cast<bool>(_playout);
   }
 
   int32_t PlayoutAudioDevice::StartRecording() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     _recording = true;
     return 0;
   }
 
   int32_t PlayoutAudioDevice::StopRecording() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     _recording = false;
     _recordingInitialized = false;
     return 0;
   }
 
   bool PlayoutAudioDevice::Recording() const {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     return _recording;
   }
 

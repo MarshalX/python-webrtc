@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_EXCEPTIONS_H_
+#define PYTHON_WEBRTC_EXCEPTIONS_H_
 
 #include <optional>
 #include <string>
@@ -30,11 +31,9 @@ namespace python_webrtc {
   // (see webrtc/exceptions.py).
   class RTCException : public PythonWebRTCException {
   public:
-    explicit RTCException(webrtc::RTCError error)
-        : PythonWebRTCException(error.message()), _error(std::move(error)) {}
+    explicit RTCException(webrtc::RTCError error) : PythonWebRTCException(error.message()), _error(std::move(error)) {}
 
-    RTCException(webrtc::RTCErrorType type, const std::string &msg)
-        : PythonWebRTCException(msg), _error(type, msg) {}
+    RTCException(webrtc::RTCErrorType type, const std::string &msg) : PythonWebRTCException(msg), _error(type, msg) {}
 
     [[nodiscard]] const webrtc::RTCError &error() const { return _error; }
 
@@ -76,3 +75,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_EXCEPTIONS_H_

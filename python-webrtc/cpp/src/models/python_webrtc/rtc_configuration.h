@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_MODELS_PYTHON_WEBRTC_RTC_CONFIGURATION_H_
+#define PYTHON_WEBRTC_MODELS_PYTHON_WEBRTC_RTC_CONFIGURATION_H_
 
 #include <optional>
 #include <string>
@@ -16,8 +17,8 @@
 
 #include <api/peer_connection_interface.h>
 
-#include "rtc_certificate.h"
 #include "../../enums/enums.h"
+#include "rtc_certificate.h"
 
 namespace python_webrtc {
 
@@ -47,8 +48,8 @@ namespace python_webrtc {
     std::optional<std::vector<std::shared_ptr<RTCCertificate>>> certificates;
 
     // the libwebrtc configuration, on top of the one the connection has (for its settings that can't change)
-    [[nodiscard]] webrtc::PeerConnectionInterface::RTCConfiguration Apply(
-        webrtc::PeerConnectionInterface::RTCConfiguration configuration) const;
+    [[nodiscard]] webrtc::PeerConnectionInterface::RTCConfiguration
+    Apply(webrtc::PeerConnectionInterface::RTCConfiguration configuration) const;
 
     static void Init(pybind11::module &m);
   };
@@ -56,3 +57,5 @@ namespace python_webrtc {
   webrtc::PeerConnectionInterface::IceServers toIceServers(const std::vector<IceServerInit> &iceServers);
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_MODELS_PYTHON_WEBRTC_RTC_CONFIGURATION_H_

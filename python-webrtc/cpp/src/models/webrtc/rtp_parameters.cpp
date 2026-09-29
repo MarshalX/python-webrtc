@@ -21,13 +21,14 @@ namespace python_webrtc {
         .def_readwrite("kind", &webrtc::RtpCodec::kind)
         .def_readwrite("clockRate", &webrtc::RtpCodec::clock_rate)
         .def_readwrite("numChannels", &webrtc::RtpCodec::num_channels)
-        .def_property("parameters",
-                      [](const webrtc::RtpCodec &codec) {
-                        return std::map<std::string, std::string>(codec.parameters.begin(), codec.parameters.end());
-                      },
-                      [](webrtc::RtpCodec &codec, const std::map<std::string, std::string> &parameters) {
-                        codec.parameters = webrtc::CodecParameterMap(parameters);
-                      })
+        .def_property(
+            "parameters",
+            [](const webrtc::RtpCodec &codec) {
+              return std::map<std::string, std::string>(codec.parameters.begin(), codec.parameters.end());
+            },
+            [](webrtc::RtpCodec &codec, const std::map<std::string, std::string> &parameters) {
+              codec.parameters = webrtc::CodecParameterMap(parameters);
+            })
         .def_property_readonly("mimeType", &webrtc::RtpCodec::mime_type);
 
     pybind11::class_<webrtc::RtpCodecCapability, webrtc::RtpCodec>(m, "RtpCodecCapability")
@@ -41,28 +42,29 @@ namespace python_webrtc {
     pybind11::class_<webrtc::RtpExtension>(m, "RtpExtension")
         .def(pybind11::init<>())
         .def_readwrite("uri", &webrtc::RtpExtension::uri)
-        .def_property("id",
-                      [](const webrtc::RtpExtension &extension) { return extension.id.value(); },
-                      [](webrtc::RtpExtension &extension, int id) { extension.id = webrtc::RtpHeaderExtensionId(id); })
+        .def_property(
+            "id", [](const webrtc::RtpExtension &extension) { return extension.id.value(); },
+            [](webrtc::RtpExtension &extension, int id) { extension.id = webrtc::RtpHeaderExtensionId(id); })
         .def_readwrite("encrypt", &webrtc::RtpExtension::encrypt);
 
     pybind11::class_<webrtc::RtpHeaderExtensionCapability>(m, "RtpHeaderExtensionCapability")
         .def(pybind11::init<>())
         .def_readwrite("uri", &webrtc::RtpHeaderExtensionCapability::uri)
-        .def_property("preferredId",
-                      [](const webrtc::RtpHeaderExtensionCapability &capability) -> std::optional<int> {
-                        if (!capability.preferred_id) {
-                          return std::nullopt;
-                        }
-                        return capability.preferred_id->value();
-                      },
-                      [](webrtc::RtpHeaderExtensionCapability &capability, std::optional<int> id) {
-                        if (id) {
-                          capability.preferred_id = webrtc::RtpHeaderExtensionId(*id);
-                        } else {
-                          capability.preferred_id.reset();
-                        }
-                      })
+        .def_property(
+            "preferredId",
+            [](const webrtc::RtpHeaderExtensionCapability &capability) -> std::optional<int> {
+              if (!capability.preferred_id) {
+                return std::nullopt;
+              }
+              return capability.preferred_id->value();
+            },
+            [](webrtc::RtpHeaderExtensionCapability &capability, std::optional<int> id) {
+              if (id) {
+                capability.preferred_id = webrtc::RtpHeaderExtensionId(*id);
+              } else {
+                capability.preferred_id.reset();
+              }
+            })
         .def_readwrite("direction", &webrtc::RtpHeaderExtensionCapability::direction);
 
     pybind11::class_<webrtc::RtcpParameters>(m, "RtcpParameters")

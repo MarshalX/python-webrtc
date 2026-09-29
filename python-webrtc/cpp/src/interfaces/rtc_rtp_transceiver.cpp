@@ -7,9 +7,9 @@
 
 #include "rtc_rtp_transceiver.h"
 
-#include "rtc_peer_connection.h"
 #include "../exceptions.h"
 #include "../utils/gil.h"
+#include "rtc_peer_connection.h"
 
 namespace python_webrtc {
 
@@ -28,7 +28,8 @@ namespace python_webrtc {
         .def_property_readonly("stopped", nogil_fn(&RTCRtpTransceiver::GetStopped))
         .def_property_readonly("stopping", nogil_fn(&RTCRtpTransceiver::GetStopping))
         .def_property_readonly("kind", nogil_fn(&RTCRtpTransceiver::GetKind))
-        .def_property("direction", nogil_fn(&RTCRtpTransceiver::GetDirection), nogil_fn(&RTCRtpTransceiver::SetDirection))
+        .def_property("direction", nogil_fn(&RTCRtpTransceiver::GetDirection),
+                      nogil_fn(&RTCRtpTransceiver::SetDirection))
         .def_property_readonly("currentDirection", nogil_fn(&RTCRtpTransceiver::GetCurrentDirection))
         .def("setCodecPreferences", &RTCRtpTransceiver::SetCodecPreferences, nogil(), pybind11::arg("codecs"))
         .def("getCodecPreferences", &RTCRtpTransceiver::GetCodecPreferences, nogil())
@@ -41,21 +42,17 @@ namespace python_webrtc {
 
   InstanceHolder<RTCRtpTransceiver, webrtc::RtpTransceiverInterface> &RTCRtpTransceiver::holder() {
     // never destroyed: wrappers may outlive static destructors
-    static auto holder = new InstanceHolder<RTCRtpTransceiver, webrtc::RtpTransceiverInterface>();
+    static auto *holder = new InstanceHolder<RTCRtpTransceiver, webrtc::RtpTransceiverInterface>();
     return *holder;
   }
 
   void RTCRtpTransceiver::SetConnection(std::weak_ptr<RTCPeerConnection> connection) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     _connection = std::move(connection);
   }
 
   std::optional<std::string> RTCRtpTransceiver::GetMid() {
-    if (_transceiver->mid()) {
-      return _transceiver->mid().value();
-    }
-
-    return {};
+    return _transceiver->mid();
   }
 
   std::shared_ptr<RTCRtpSender> RTCRtpTransceiver::GetSender() {
@@ -90,17 +87,13 @@ namespace python_webrtc {
   }
 
   std::optional<webrtc::RtpTransceiverDirection> RTCRtpTransceiver::GetCurrentDirection() {
-    if (_transceiver->current_direction()) {
-      return _transceiver->current_direction().value();
-    }
-
-    return {};
+    return _transceiver->current_direction();
   }
 
   void RTCRtpTransceiver::Stop() {
     std::shared_ptr<RTCPeerConnection> connection;
     {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       connection = _connection.lock();
     }
     if (!connection || connection->IsClosed()) {

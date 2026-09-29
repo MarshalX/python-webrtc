@@ -11,11 +11,11 @@
 
 namespace python_webrtc {
 
-  RTCSctpTransport::RTCSctpTransport(
-      std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::SctpTransportInterface> transport
-  ) : _factory(std::move(factory)), _transport(std::move(transport)) {
+  RTCSctpTransport::RTCSctpTransport(std::shared_ptr<PeerConnectionFactory> factory,
+                                     webrtc::scoped_refptr<webrtc::SctpTransportInterface> transport)
+      : _factory(std::move(factory)), _transport(std::move(transport)) {
     webrtc::scoped_refptr<webrtc::DtlsTransportInterface> dtlsTransport;
-    _factory->_workerThread->BlockingCall([this, &dtlsTransport]() {
+    _factory->workerThread()->BlockingCall([this, &dtlsTransport]() {
       dtlsTransport = _transport->dtls_transport();
       _transport->RegisterObserver(this);
       holder().SetObserver(_transport.get(), this);
@@ -31,10 +31,10 @@ namespace python_webrtc {
   }
 
   RTCSctpTransport::~RTCSctpTransport() {
-    BlockingDestructor release("RTCSctpTransport");
+    const BlockingDestructor release("RTCSctpTransport");
 
     // callbacks run on the network thread, so after this none of them can be running or start again
-    _factory->_workerThread->BlockingCall([this]() { Stop(); });
+    _factory->workerThread()->BlockingCall([this]() { Stop(); });
 
     _dtlsTransport = nullptr;
     _transport = nullptr;
@@ -52,7 +52,7 @@ namespace python_webrtc {
 
   InstanceHolder<RTCSctpTransport, webrtc::SctpTransportInterface> &RTCSctpTransport::holder() {
     // never destroyed: wrappers may outlive static destructors
-    static auto holder = new InstanceHolder<RTCSctpTransport, webrtc::SctpTransportInterface>();
+    static auto *holder = new InstanceHolder<RTCSctpTransport, webrtc::SctpTransportInterface>();
     return *holder;
   }
 
@@ -87,7 +87,7 @@ namespace python_webrtc {
 
   webrtc::SctpTransportInformation RTCSctpTransport::Information() {
     // the information is owned by the network thread
-    return _factory->_workerThread->BlockingCall([this]() { return _transport->Information(); });
+    return _factory->workerThread()->BlockingCall([this]() { return _transport->Information(); });
   }
 
   webrtc::SctpTransportState RTCSctpTransport::GetState() {

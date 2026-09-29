@@ -20,11 +20,20 @@ permissions:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    env:
+      WRTC_CACHE_DIR: ${{ github.workspace }}/.wrtc-cache
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - run: uvx ruff check
       - run: uvx ruff format --check
+      - run: make format-check
+      # clang-tidy reads the libwebrtc headers, from the cache the wheels use
+      - uses: actions/cache@v6
+        with:
+          path: .wrtc-cache
+          key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/libwebrtc.cmake', 'cmake/libcxx/*.sha256') }}
+      - run: make tidy
 
   sdist:
     runs-on: ubuntu-latest

@@ -15,14 +15,14 @@
 
 namespace python_webrtc {
 
-  RTCDataChannel::RTCDataChannel(
-      std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::DataChannelInterface> channel)
+  RTCDataChannel::RTCDataChannel(std::shared_ptr<PeerConnectionFactory> factory,
+                                 webrtc::scoped_refptr<webrtc::DataChannelInterface> channel)
       : _factory(std::move(factory)), _channel(std::move(channel)) {
     Hold();
     // open only once the open event is delivered
     _surfacedState.Surface(DataState::kConnecting);
     // see AliveGuard
-    _factory->_signalingThread->PostTask(_alive.Guard([this]() {
+    _factory->signalingThread()->PostTask(_alive.Guard([this]() {
       _lastState = _channel->state();
       if (_lastState != DataState::kOpen && _lastState != DataState::kConnecting) {
         _surfacedState.Surface(_lastState);
@@ -38,10 +38,10 @@ namespace python_webrtc {
   }
 
   RTCDataChannel::~RTCDataChannel() {
-    BlockingDestructor release("RTCDataChannel");
+    const BlockingDestructor release("RTCDataChannel");
 
     // callbacks run on the signaling thread, so after this none of them can be running or start again
-    _factory->_signalingThread->BlockingCall([this]() {
+    _factory->signalingThread()->BlockingCall([this]() {
       // a newer wrapper of the channel may have taken its single observer slot
       if (holder().TakeObserver(_channel.get(), this)) {
         _channel->UnregisterObserver();
@@ -85,7 +85,7 @@ namespace python_webrtc {
 
   InstanceHolder<RTCDataChannel, webrtc::DataChannelInterface> &RTCDataChannel::holder() {
     // never destroyed: wrappers may outlive static destructors
-    static auto holder = new InstanceHolder<RTCDataChannel, webrtc::DataChannelInterface>();
+    static auto *holder = new InstanceHolder<RTCDataChannel, webrtc::DataChannelInterface>();
     return *holder;
   }
 
@@ -98,7 +98,7 @@ namespace python_webrtc {
     _lastState = state;
 
     {
-      std::lock_guard<std::mutex> lock(_closeMutex);
+      const std::scoped_lock lock(_closeMutex);
       if (_closeRequested && state == DataState::kClosing) {
         // closing locally has shown the closing state already, and fires no event
         return;
@@ -107,33 +107,34 @@ namespace python_webrtc {
     }
 
     switch (state) {
-      case DataState::kOpen:
-        Emit("open", state);
-        break;
-      case DataState::kClosing:
-        Emit("closing", state);
-        break;
-      case DataState::kClosed: {
-        auto error = _channel->error();
-        // closing locally isn't an error, even if queued messages couldn't be sent
-        bool closedLocally;
-        {
-          std::lock_guard<std::mutex> lock(_closeMutex);
-          closedLocally = _closeRequested;
-        }
-        if (!error.ok() && !closedLocally) {
-          Emit("error", RTCCallbackException(std::move(error)));
-        }
-        Emit("close", state);
-        break;
+    case DataState::kOpen:
+      Emit("open", state);
+      break;
+    case DataState::kClosing:
+      Emit("closing", state);
+      break;
+    case DataState::kClosed: {
+      auto error = _channel->error();
+      // closing locally isn't an error, even if queued messages couldn't be sent
+      bool closedLocally = false;
+      {
+        const std::scoped_lock lock(_closeMutex);
+        closedLocally = _closeRequested;
       }
-      default:
-        break;
+      if (!error.ok() && !closedLocally) {
+        Emit("error", RTCCallbackException(std::move(error)));
+      }
+      Emit("close", state);
+      break;
+    }
+    default:
+      break;
     }
   }
 
   void RTCDataChannel::OnMessage(const webrtc::DataBuffer &buffer) {
-    Emit("message", DataChannelMessage{std::string(buffer.data.cdata<char>(), buffer.size()), buffer.binary});
+    Emit("message",
+         DataChannelMessage{.data = std::string(buffer.data.cdata<char>(), buffer.size()), .binary = buffer.binary});
   }
 
   void RTCDataChannel::OnBufferedAmountChange(uint64_t sentDataSize) {
@@ -142,7 +143,7 @@ namespace python_webrtc {
   }
 
   void RTCDataChannel::OnAnnounced() {
-    std::lock_guard<std::mutex> lock(_closeMutex);
+    const std::scoped_lock lock(_closeMutex);
     // a channel announced by the remote peer is open when its datachannel event fires
     if (_lastState == DataState::kConnecting || _lastState == DataState::kOpen) {
       _surfacedState.Surface(DataState::kOpen);
@@ -192,14 +193,17 @@ namespace python_webrtc {
 
   webrtc::Priority RTCDataChannel::GetPriority() {
     // the ranges Chromium maps priority values to
+    constexpr int veryLowMax = 192;
+    constexpr int lowMax = 384;
+    constexpr int mediumMax = 768;
     auto value = _channel->priority().value();
-    if (value <= 192) {
+    if (value <= veryLowMax) {
       return webrtc::Priority::kVeryLow;
     }
-    if (value <= 384) {
+    if (value <= lowMax) {
       return webrtc::Priority::kLow;
     }
-    if (value <= 768) {
+    if (value <= mediumMax) {
       return webrtc::Priority::kMedium;
     }
     return webrtc::Priority::kHigh;
@@ -210,7 +214,7 @@ namespace python_webrtc {
   }
 
   void RTCDataChannel::SurfaceState(DataState state) {
-    std::lock_guard<std::mutex> lock(_closeMutex);
+    const std::scoped_lock lock(_closeMutex);
     // an open event that was queued before closing locally doesn't reopen the channel
     if (_closeRequested && state == DataState::kOpen) {
       return;
@@ -242,19 +246,24 @@ namespace python_webrtc {
   }
 
   bool RTCDataChannel::DecreaseBufferedAmount(uint64_t sent) {
+    auto decrease = [sent](uint64_t value) { return value > sent ? value - sent : 0; };
     uint64_t amount = _bufferedAmount.load();
-    uint64_t decreased;
-    do {
-      decreased = amount > sent ? amount - sent : 0;
-    } while (!_bufferedAmount.compare_exchange_weak(amount, decreased));
+    uint64_t decreased = decrease(amount);
+    while (!_bufferedAmount.compare_exchange_weak(amount, decreased)) {
+      decreased = decrease(amount);
+    }
 
     auto threshold = _bufferedAmountLowThreshold.load();
     return amount > threshold && decreased <= threshold;
   }
 
-  static RTCException sendQueueFullError() {
-    return {webrtc::RTCErrorType::RESOURCE_EXHAUSTED, "The send queue of the RTCDataChannel is full"};
-  }
+  namespace {
+
+    RTCException sendQueueFullError() {
+      return {webrtc::RTCErrorType::RESOURCE_EXHAUSTED, "The send queue of the RTCDataChannel is full"};
+    }
+
+  } // namespace
 
   void RTCDataChannel::Send(const std::string &data, bool binary) {
     if (GetReadyState() != DataState::kOpen) {
@@ -283,7 +292,7 @@ namespace python_webrtc {
     // read before locking: it's a call to the signaling thread, which takes the lock in OnStateChange
     auto current = _channel->state();
     {
-      std::lock_guard<std::mutex> lock(_closeMutex);
+      const std::scoped_lock lock(_closeMutex);
       auto state = _surfacedState.Get(current);
       if (state == DataState::kClosing || state == DataState::kClosed) {
         return;

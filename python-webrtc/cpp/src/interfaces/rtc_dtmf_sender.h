@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_RTC_DTMF_SENDER_H_
+#define PYTHON_WEBRTC_INTERFACES_RTC_DTMF_SENDER_H_
 
 #include <functional>
 #include <memory>
@@ -18,20 +19,24 @@
 
 #include <pybind11/pybind11.h>
 
-#include "peer_connection_factory.h"
 #include "../utils/alive_guard.h"
 #include "../utils/instance_holder.h"
 #include "../utils/listeners.h"
 #include "../utils/locked_function.h"
+#include "peer_connection_factory.h"
 
 namespace python_webrtc {
 
   // Sends DTMF tones on an audio sender (webrtc.RTCDTMFSender)
   class RTCDTMFSender : public webrtc::DtmfSenderObserverInterface, public Listeners, public SingleObserverSlot {
   public:
-    RTCDTMFSender(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::DtmfSenderInterface>);
+    RTCDTMFSender(std::shared_ptr<PeerConnectionFactory> factory,
+                  webrtc::scoped_refptr<webrtc::DtmfSenderInterface> dtmf);
 
     ~RTCDTMFSender() override;
+
+    RTCDTMFSender(const RTCDTMFSender &) = delete;
+    RTCDTMFSender &operator=(const RTCDTMFSender &) = delete;
 
     static void Init(pybind11::module &m);
 
@@ -67,3 +72,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_RTC_DTMF_SENDER_H_

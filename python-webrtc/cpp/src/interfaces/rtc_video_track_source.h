@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_RTC_VIDEO_TRACK_SOURCE_H_
+#define PYTHON_WEBRTC_INTERFACES_RTC_VIDEO_TRACK_SOURCE_H_
 
 #include <atomic>
 #include <cstdint>
@@ -30,6 +31,9 @@ namespace python_webrtc {
     RTCVideoTrackSource(bool isScreencast, std::optional<bool> needsDenoising);
 
     ~RTCVideoTrackSource() override;
+
+    RTCVideoTrackSource(const RTCVideoTrackSource &) = delete;
+    RTCVideoTrackSource &operator=(const RTCVideoTrackSource &) = delete;
 
     // Starts the synthetic camera, or restarts it with another size and frame rate
     void StartCamera(int width, int height, double frameRate);
@@ -89,3 +93,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_RTC_VIDEO_TRACK_SOURCE_H_

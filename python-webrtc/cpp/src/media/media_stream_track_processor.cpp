@@ -12,21 +12,21 @@
 
 #include <rtc_base/time_utils.h>
 
+#include "../utils/buffer.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
 
 namespace python_webrtc {
 
-  MediaStreamTrackProcessor::MediaStreamTrackProcessor(
-      std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track,
-      size_t maxBufferSize)
-      : _factory(std::move(factory)),
-        _track(std::move(track)),
+  MediaStreamTrackProcessor::MediaStreamTrackProcessor(std::shared_ptr<PeerConnectionFactory> factory,
+                                                       webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track,
+                                                       size_t maxBufferSize)
+      : _factory(std::move(factory)), _track(std::move(track)),
         _video(_track->kind() == webrtc::MediaStreamTrackInterface::kVideoKind),
         _maxBufferSize(std::max<size_t>(1, maxBufferSize)) {}
 
-  std::shared_ptr<MediaStreamTrackProcessor> MediaStreamTrackProcessor::Create(std::shared_ptr<MediaStreamTrack> track,
-                                                                               size_t maxBufferSize) {
+  std::shared_ptr<MediaStreamTrackProcessor>
+  MediaStreamTrackProcessor::Create(const std::shared_ptr<MediaStreamTrack> &track, size_t maxBufferSize) {
     // Python keeps the track's wrapper, so the collector sees handlers of the track referencing the processor
     std::shared_ptr<MediaStreamTrackProcessor> processor(
         new MediaStreamTrackProcessor(track->factory(), track->track(), maxBufferSize), DeleteOffLibwebrtcThread());
@@ -39,7 +39,7 @@ namespace python_webrtc {
   }
 
   MediaStreamTrackProcessor::~MediaStreamTrackProcessor() {
-    BlockingDestructor release("MediaStreamTrackProcessor");
+    const BlockingDestructor release("MediaStreamTrackProcessor");
     Detach();
     DropListeners();
   }
@@ -57,7 +57,7 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrackProcessor::Attach() {
-    std::lock_guard<std::mutex> lock(_attachMutex);
+    const std::scoped_lock lock(_attachMutex);
     if (_attached) {
       return;
     }
@@ -70,7 +70,7 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrackProcessor::Detach() {
-    std::lock_guard<std::mutex> lock(_attachMutex);
+    const std::scoped_lock lock(_attachMutex);
     if (!_attached) {
       return;
     }
@@ -84,7 +84,7 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrackProcessor::Push(Item item) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     if (_ended) {
       return;
     }
@@ -105,8 +105,10 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrackProcessor::OnFrame(const webrtc::VideoFrame &frame) {
-    Push(VideoItem{frame.video_frame_buffer(), frame.timestamp_us(), static_cast<int>(frame.rotation()),
-                   frame.rtp_timestamp()});
+    Push(VideoItem{.buffer = frame.video_frame_buffer(),
+                   .timestampUs = frame.timestamp_us(),
+                   .rotation = static_cast<int>(frame.rotation()),
+                   .rtpTimestamp = frame.rtp_timestamp()});
   }
 
   void MediaStreamTrackProcessor::OnData(const void *audioData, int bitsPerSample, int sampleRate, size_t channels,
@@ -115,11 +117,16 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrackProcessor::OnData(const void *audioData, int bitsPerSample, int sampleRate, size_t channels,
-                                         size_t frames, std::optional<int64_t> absoluteCaptureTimestampMs) {
-    size_t size = frames * channels * (bitsPerSample / 8);
+                                         size_t frames, std::optional<int64_t> /*absoluteCaptureTimestampMs*/) {
+    const size_t size = frames * channels * (bitsPerSample / 8);
     std::vector<uint8_t> data(size);
     std::memcpy(data.data(), audioData, size);
-    Push(AudioItem{std::move(data), bitsPerSample, sampleRate, channels, frames, webrtc::TimeMicros()});
+    Push(AudioItem{.data = std::move(data),
+                   .bitsPerSample = bitsPerSample,
+                   .sampleRate = sampleRate,
+                   .channels = channels,
+                   .frames = frames,
+                   .timestampUs = webrtc::TimeMicros()});
   }
 
   void MediaStreamTrackProcessor::OnWakeup() {
@@ -127,7 +134,7 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrackProcessor::OnTrackEnded() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     if (_ended) {
       return;
     }
@@ -140,7 +147,7 @@ namespace python_webrtc {
 
   void MediaStreamTrackProcessor::Cancel() {
     {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       _ended = true;
       _queue.clear();
     }
@@ -148,21 +155,21 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrackProcessor::AckWakeup() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     _wakePending = false;
   }
 
   bool MediaStreamTrackProcessor::GetEnded() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     return _ended && _queue.empty();
   }
 
   pybind11::object MediaStreamTrackProcessor::Read() {
     std::optional<Item> item;
-    bool ended;
+    bool ended = false;
     {
-      gil_release release;
-      std::lock_guard<std::mutex> lock(_mutex);
+      const gil_release release;
+      const std::scoped_lock lock(_mutex);
       if (!_queue.empty()) {
         item = std::move(_queue.front());
         _queue.pop_front();
@@ -171,22 +178,22 @@ namespace python_webrtc {
     }
     if (ended && !item) {
       // the sink is detached here rather than on the thread that ended the track
-      gil_release release;
+      const gil_release release;
       Detach();
     }
     if (!item) {
       return pybind11::none();
     }
-    if (auto video = std::get_if<VideoItem>(&*item)) {
+    if (auto *video = std::get_if<VideoItem>(&*item)) {
       std::shared_ptr<VideoFrameBuffer> buffer;
       {
-        gil_release release;
+        const gil_release release;
         buffer = VideoFrameBuffer::FromWebrtc(video->buffer);
       }
       return pybind11::make_tuple(buffer, video->timestampUs, video->rotation, video->rtpTimestamp);
     }
     auto &audio = std::get<AudioItem>(*item);
-    pybind11::bytes data(reinterpret_cast<const char *>(audio.data.data()), audio.data.size());
+    const pybind11::bytes data = Bytes(audio.data.data(), audio.data.size());
     return pybind11::make_tuple(data, audio.bitsPerSample, audio.sampleRate, audio.channels, audio.frames,
                                 audio.timestampUs);
   }

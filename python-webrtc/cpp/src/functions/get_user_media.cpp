@@ -18,8 +18,8 @@ namespace python_webrtc {
   namespace {
 
     // a synthetic microphone, as the audio device of the factory records nothing
-    webrtc::scoped_refptr<webrtc::AudioTrackInterface> CreateMicrophoneTrack(
-        const std::shared_ptr<PeerConnectionFactory> &factory) {
+    webrtc::scoped_refptr<webrtc::AudioTrackInterface>
+    CreateMicrophoneTrack(const std::shared_ptr<PeerConnectionFactory> &factory) {
       auto source = webrtc::make_ref_counted<RTCAudioTrackSource>();
       source->StartMicrophone();
       auto track = factory->factory()->CreateAudioTrack(webrtc::CreateRandomUuid(), source.get());
@@ -27,8 +27,8 @@ namespace python_webrtc {
       return track;
     }
 
-    webrtc::scoped_refptr<webrtc::VideoTrackInterface> CreateCameraTrack(
-        const std::shared_ptr<PeerConnectionFactory> &factory, int width, int height, double frameRate) {
+    webrtc::scoped_refptr<webrtc::VideoTrackInterface>
+    CreateCameraTrack(const std::shared_ptr<PeerConnectionFactory> &factory, int width, int height, double frameRate) {
       auto source = webrtc::make_ref_counted<RTCVideoTrackSource>(false, std::nullopt);
       source->StartCamera(width, height, frameRate);
       auto track = factory->factory()->CreateVideoTrack(source, webrtc::CreateRandomUuid());

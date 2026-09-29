@@ -7,13 +7,13 @@
 
 #include "models.h"
 
-#include "python_webrtc/rtc_session_description.h"
-#include "python_webrtc/rtc_ice_candidate.h"
-#include "python_webrtc/rtc_configuration.h"
 #include "python_webrtc/rtc_certificate.h"
+#include "python_webrtc/rtc_configuration.h"
+#include "python_webrtc/rtc_ice_candidate.h"
+#include "python_webrtc/rtc_session_description.h"
 
-#include "webrtc/rtp_transceiver_init.h"
 #include "webrtc/rtp_parameters.h"
+#include "webrtc/rtp_transceiver_init.h"
 
 namespace python_webrtc {
 
@@ -27,4 +27,4 @@ namespace python_webrtc {
     bindRtpParameters(m);
     bindRtpTransceiverInit(m);
   }
-}
+} // namespace python_webrtc

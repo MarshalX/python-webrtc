@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_RTC_SCTP_TRANSPORT_H_
+#define PYTHON_WEBRTC_INTERFACES_RTC_SCTP_TRANSPORT_H_
 
 #include <functional>
 #include <memory>
@@ -13,19 +14,23 @@
 
 #include <api/sctp_transport_interface.h>
 
-#include "rtc_dtls_transport.h"
+#include "../enums/enums.h"
 #include "../utils/listeners.h"
 #include "../utils/locked_function.h"
 #include "../utils/surfaced.h"
-#include "../enums/enums.h"
+#include "rtc_dtls_transport.h"
 
 namespace python_webrtc {
 
   class RTCSctpTransport : public webrtc::SctpTransportObserverInterface, public Listeners, public SingleObserverSlot {
   public:
-    explicit RTCSctpTransport(std::shared_ptr<PeerConnectionFactory>, webrtc::scoped_refptr<webrtc::SctpTransportInterface>);
+    explicit RTCSctpTransport(std::shared_ptr<PeerConnectionFactory> factory,
+                              webrtc::scoped_refptr<webrtc::SctpTransportInterface> transport);
 
     ~RTCSctpTransport() override;
+
+    RTCSctpTransport(const RTCSctpTransport &) = delete;
+    RTCSctpTransport &operator=(const RTCSctpTransport &) = delete;
 
     static void Init(pybind11::module &m);
 
@@ -33,7 +38,7 @@ namespace python_webrtc {
 
     webrtc::scoped_refptr<webrtc::SctpTransportInterface> transport() { return _transport; }
 
-    void OnStateChange(webrtc::SctpTransportInformation) override;
+    void OnStateChange(webrtc::SctpTransportInformation info) override;
 
     // a closed connection fires no events of its transports, which show their current state
     void OnPeerConnectionClosed();
@@ -72,3 +77,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_RTC_SCTP_TRANSPORT_H_

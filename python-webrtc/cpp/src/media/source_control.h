@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_MEDIA_SOURCE_CONTROL_H_
+#define PYTHON_WEBRTC_MEDIA_SOURCE_CONTROL_H_
 
 #include <map>
 #include <memory>
@@ -29,7 +30,7 @@ namespace python_webrtc {
 
     static void Register(const webrtc::MediaStreamTrackInterface *track, const std::string &trackId,
                          const std::shared_ptr<SourceControl> &control) {
-      std::lock_guard<std::mutex> lock(RegistryMutex());
+      const std::scoped_lock lock(RegistryMutex());
       auto &registry = Registry();
       for (auto it = registry.begin(); it != registry.end();) {
         it = it->second.expired() ? registry.erase(it) : std::next(it);
@@ -39,7 +40,7 @@ namespace python_webrtc {
 
     static std::shared_ptr<SourceControl> Find(const webrtc::MediaStreamTrackInterface *track,
                                                const std::string &trackId) {
-      std::lock_guard<std::mutex> lock(RegistryMutex());
+      const std::scoped_lock lock(RegistryMutex());
       auto &registry = Registry();
       auto it = registry.find({track, trackId});
       return it != registry.end() ? it->second.lock() : nullptr;
@@ -52,14 +53,16 @@ namespace python_webrtc {
 
     static Map &Registry() {
       // never destroyed: wrappers may outlive static destructors
-      static auto registry = new Map();
+      static auto *registry = new Map();
       return *registry;
     }
 
     static std::mutex &RegistryMutex() {
-      static auto mutex = new std::mutex();
+      static auto *mutex = new std::mutex();
       return *mutex;
     }
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_MEDIA_SOURCE_CONTROL_H_

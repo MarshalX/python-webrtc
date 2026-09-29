@@ -5,11 +5,14 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_INTERFACES_CREATE_SESSION_DESCRIPTION_OBSERVER_H_
+#define PYTHON_WEBRTC_INTERFACES_CREATE_SESSION_DESCRIPTION_OBSERVER_H_
 
 #include "rtc_peer_connection.h"
 
-namespace webrtc { class RTCError; }
+namespace webrtc {
+  class RTCError;
+}
 
 namespace python_webrtc {
 
@@ -17,12 +20,12 @@ namespace python_webrtc {
   public:
     CreateSessionDescriptionObserver(std::weak_ptr<RTCPeerConnection> peerConnection,
                                      std::function<void(RTCSessionDescription)> &onSuccess,
-                                     std::function<void(RTCCallbackException)> &onFailure) :
-        _peerConnection(std::move(peerConnection)), _onSuccess(onSuccess), _onFailure(onFailure) {}
+                                     std::function<void(RTCCallbackException)> &onFailure)
+        : _peerConnection(std::move(peerConnection)), _onSuccess(onSuccess), _onFailure(onFailure) {}
 
-    void OnSuccess(webrtc::SessionDescriptionInterface *) override;
+    void OnSuccess(webrtc::SessionDescriptionInterface *description) override;
 
-    void OnFailure(webrtc::RTCError) override;
+    void OnFailure(webrtc::RTCError error) override;
 
   private:
     // the connection may be gone by the time the description is created
@@ -32,3 +35,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_INTERFACES_CREATE_SESSION_DESCRIPTION_OBSERVER_H_

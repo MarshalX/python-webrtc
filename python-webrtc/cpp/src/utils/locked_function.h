@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_UTILS_LOCKED_FUNCTION_H_
+#define PYTHON_WEBRTC_UTILS_LOCKED_FUNCTION_H_
 
 #include <functional>
 #include <mutex>
@@ -15,16 +16,16 @@ namespace python_webrtc {
 
   // A function another object sets (like the connection of a transport), which may be set on one thread while it's
   // called on another. It's called out of the lock: calls block on libwebrtc threads, which may be setting it.
-  template<typename Signature>
+  template <typename Signature>
   class LockedFunction {
   public:
     void Set(std::function<Signature> function) {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       _function = std::move(function);
     }
 
     std::function<Signature> Get() {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       return _function;
     }
 
@@ -34,3 +35,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_UTILS_LOCKED_FUNCTION_H_

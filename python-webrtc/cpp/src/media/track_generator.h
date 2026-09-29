@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_MEDIA_TRACK_GENERATOR_H_
+#define PYTHON_WEBRTC_MEDIA_TRACK_GENERATOR_H_
 
 #include <atomic>
 #include <cstdint>
@@ -18,12 +19,12 @@
 
 #include <pybind11/pybind11.h>
 
-#include "../utils/alive_count.h"
-#include "video_frame_buffer.h"
 #include "../interfaces/media_stream_track.h"
 #include "../interfaces/peer_connection_factory.h"
 #include "../interfaces/rtc_audio_track_source.h"
 #include "../interfaces/rtc_video_track_source.h"
+#include "../utils/alive_count.h"
+#include "video_frame_buffer.h"
 
 namespace python_webrtc {
 
@@ -40,7 +41,7 @@ namespace python_webrtc {
     // the wrapper of the track, owned by Python once it has it
     std::shared_ptr<MediaStreamTrack> GetTrack();
 
-    std::string GetKind() { return _video ? "video" : "audio"; }
+    std::string GetKind() const { return _video ? "video" : "audio"; }
 
     // whether the track can still take frames: it ends with the generator or with stop()
     bool GetLive();
@@ -62,9 +63,7 @@ namespace python_webrtc {
     struct EndState : TrackEndObserver {
       std::atomic<bool> ended = false;
 
-      void OnTrackEnded() override {
-        ended = true;
-      }
+      void OnTrackEnded() override { ended = true; }
     };
 
     AliveCount<TrackGenerator> _counted;
@@ -88,3 +87,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_MEDIA_TRACK_GENERATOR_H_

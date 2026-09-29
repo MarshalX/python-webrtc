@@ -8,12 +8,12 @@
 #include <pybind11/pybind11.h>
 
 #include "config.h"
-#include "utils/gil.h"
 #include "exceptions.h"
-#include "models/models.h"
-#include "interfaces/interfaces.h"
 #include "functions/functions.h"
+#include "interfaces/interfaces.h"
 #include "media/media.h"
+#include "models/models.h"
+#include "utils/gil.h"
 
 namespace py = pybind11;
 
@@ -25,16 +25,19 @@ namespace py = pybind11;
 #endif
 #endif
 
-static bool copyrightShowed = false;
+namespace {
 
-static void ping() {
-  py::print("pong");
-}
+  void ping() {
+    py::print("pong");
+  }
+
+} // namespace
 
 PYBIND11_MODULE(wrtc, m) {
+  static bool copyrightShowed = false;
   if (!copyrightShowed) {
     auto ver = std::string(PROJECT_VER);
-    auto dev = ver.find("dev") != std::string::npos ? " DEV" : "";
+    const auto *dev = ver.find("dev") != std::string::npos ? " DEV" : "";
     py::print("Python WebRTC v" + ver + dev + ", Copyright (C) 2026 Ilya (Marshal) <https://github.com/MarshalX>");
     py::print("Licensed under the terms of the BSD 3-Clause License\n\n");
 

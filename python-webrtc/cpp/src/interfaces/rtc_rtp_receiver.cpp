@@ -13,31 +13,31 @@
 #include <pybind11/functional.h>
 #include <pybind11/stl.h>
 
-#include "rtc_peer_connection.h"
 #include "../enums/enums.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
+#include "rtc_peer_connection.h"
 
 namespace python_webrtc {
 
-  RTCRtpReceiver::RTCRtpReceiver(
-      std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver
-  ) : _factory(std::move(factory)), _receiver(std::move(receiver)),
-      _track(MediaStreamTrack::holder().GetOrCreate(_factory, _receiver->track())) {
+  RTCRtpReceiver::RTCRtpReceiver(std::shared_ptr<PeerConnectionFactory> factory,
+                                 webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver)
+      : _factory(std::move(factory)), _receiver(std::move(receiver)),
+        _track(MediaStreamTrack::holder().GetOrCreate(_factory, _receiver->track())) {
     // the track of a receiver is a remote one
     _track->MarkRemote();
     // see AliveGuard
-    _factory->_signalingThread->PostTask(_alive.Guard([this]() {
+    _factory->signalingThread()->PostTask(_alive.Guard([this]() {
       _receiver->SetObserver(this);
       holder().SetObserver(_receiver.get(), this);
     }));
   }
 
   RTCRtpReceiver::~RTCRtpReceiver() {
-    BlockingDestructor release("RTCRtpReceiver");
+    const BlockingDestructor release("RTCRtpReceiver");
 
     // callbacks run on the signaling thread, so after this none of them can be running or start again
-    _factory->_signalingThread->BlockingCall([this]() {
+    _factory->signalingThread()->BlockingCall([this]() {
       // a newer wrapper of the receiver may have taken its single observer slot
       if (holder().TakeObserver(_receiver.get(), this)) {
         _receiver->SetObserver(nullptr);
@@ -45,7 +45,7 @@ namespace python_webrtc {
     });
   }
 
-  void RTCRtpReceiver::OnFirstPacketReceived(webrtc::MediaType) {
+  void RTCRtpReceiver::OnFirstPacketReceived(webrtc::MediaType /*mediaType*/) {
     _track->SetMuted(false);
   }
 
@@ -60,24 +60,25 @@ namespace python_webrtc {
         .def_property("jitterBufferTarget", nogil_fn(&RTCRtpReceiver::GetJitterBufferTarget),
                       nogil_fn(&RTCRtpReceiver::SetJitterBufferTarget))
         .def("getParameters", &RTCRtpReceiver::GetParameters, nogil())
-        .def("getStats", WithCallbacks(&RTCRtpReceiver::GetStats), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
+        .def("getStats", WithCallbacks(&RTCRtpReceiver::GetStats), pybind11::arg("onSuccess"),
+             pybind11::arg("onFailure"))
         .def_static("getCapabilities", &RTCRtpReceiver::GetCapabilities, nogil(), pybind11::arg("kind"))
         .def("_getSources", &RTCRtpReceiver::GetSources, nogil());
   }
 
   InstanceHolder<RTCRtpReceiver, webrtc::RtpReceiverInterface> &RTCRtpReceiver::holder() {
     // never destroyed: wrappers may outlive static destructors
-    static auto holder = new InstanceHolder<RTCRtpReceiver, webrtc::RtpReceiverInterface>();
+    static auto *holder = new InstanceHolder<RTCRtpReceiver, webrtc::RtpReceiverInterface>();
     return *holder;
   }
 
   void RTCRtpReceiver::SetConnection(std::weak_ptr<RTCPeerConnection> connection) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     _connection = std::move(connection);
   }
 
   std::shared_ptr<RTCPeerConnection> RTCRtpReceiver::GetConnection() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     return _connection.lock();
   }
 
@@ -91,7 +92,7 @@ namespace python_webrtc {
     auto wrapper = RTCDtlsTransport::holder().GetOrCreate(_factory, transport);
 
     std::shared_ptr<RTCDtlsTransport> previous;
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     if (!_transport || _transport->transport() != transport) {
       previous = std::move(_transport);
       _transport = std::move(wrapper);
@@ -119,16 +120,18 @@ namespace python_webrtc {
   }
 
   std::optional<double> RTCRtpReceiver::GetJitterBufferTarget() {
-    std::lock_guard<std::mutex> lock(_mutex);
+    const std::scoped_lock lock(_mutex);
     return _jitterBufferTarget;
   }
 
   void RTCRtpReceiver::SetJitterBufferTarget(std::optional<double> target) {
     {
-      std::lock_guard<std::mutex> lock(_mutex);
+      const std::scoped_lock lock(_mutex);
       _jitterBufferTarget = target;
     }
-    _receiver->SetJitterBufferMinimumDelay(target ? std::optional<double>(*target / 1000) : std::nullopt);
+    // milliseconds in Python, seconds in libwebrtc
+    constexpr double msPerSecond = 1000;
+    _receiver->SetJitterBufferMinimumDelay(target ? std::optional<double>(*target / msPerSecond) : std::nullopt);
   }
 
   void RTCRtpReceiver::GetStats(std::function<void(std::string)> &onSuccess,
@@ -145,7 +148,7 @@ namespace python_webrtc {
     std::vector<Source> sources;
     // libwebrtc times the packets with its monotonic clock
     auto offset = static_cast<double>(webrtc::TimeUTCMillis() - webrtc::TimeMillis());
-    for (const auto &source: _receiver->GetSources()) {
+    for (const auto &source : _receiver->GetSources()) {
       auto level = source.audio_level();
       sources.emplace_back(source.source_type() == webrtc::RtpSourceType::SSRC, source.source_id(),
                            static_cast<double>(source.timestamp().ms()) + offset, source.rtp_timestamp(),

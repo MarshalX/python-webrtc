@@ -5,7 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#pragma once
+#ifndef PYTHON_WEBRTC_UTILS_ALIVE_GUARD_H_
+#define PYTHON_WEBRTC_UTILS_ALIVE_GUARD_H_
 
 #include <atomic>
 #include <memory>
@@ -18,11 +19,14 @@ namespace python_webrtc {
   // thread or block on it, so a task never overlaps a destructor.
   class AliveGuard {
   public:
-    ~AliveGuard() {
-      *_alive = false;
-    }
+    ~AliveGuard() { *_alive = false; }
 
-    template<typename F>
+    AliveGuard() = default;
+
+    AliveGuard(const AliveGuard &) = delete;
+    AliveGuard &operator=(const AliveGuard &) = delete;
+
+    template <typename F>
     auto Guard(F task) {
       return [alive = _alive, task = std::move(task)]() mutable {
         if (*alive) {
@@ -36,3 +40,5 @@ namespace python_webrtc {
   };
 
 } // namespace python_webrtc
+
+#endif // PYTHON_WEBRTC_UTILS_ALIVE_GUARD_H_

@@ -15,6 +15,8 @@ project(python_webrtc
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# for clang-tidy (make tidy) and editors
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(MSVC)
   # libwebrtc is linked against the static release CRT
   set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
