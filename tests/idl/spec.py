@@ -14,9 +14,10 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from importlib.util import find_spec
+from pathlib import Path
 from typing import Any
 
-from tests.wpt.loader import WPT_ROOT
+WPT_ROOT = Path(__file__).resolve().parents[2] / 'wpt'
 
 # needs the WPT checkout, PythonMonkey to parse and inspect.get_annotations
 AVAILABLE = sys.version_info >= (3, 10) and WPT_ROOT.is_dir() and find_spec('pythonmonkey') is not None

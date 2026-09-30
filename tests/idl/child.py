@@ -17,7 +17,7 @@ import sys
 
 import pythonmonkey as pm
 
-from tests.wpt.loader import WPT_ROOT
+from tests.idl.spec import WPT_ROOT
 
 
 def main() -> None:
