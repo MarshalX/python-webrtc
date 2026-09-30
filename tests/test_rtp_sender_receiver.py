@@ -7,6 +7,7 @@
 
 """Senders and receivers: capabilities, parameters, codecs, tracks, DTMF and synchronization sources."""
 
+import asyncio
 import time
 
 import pytest
@@ -185,6 +186,16 @@ async def test_set_parameters_key_frames(caller, callee):
     with pytest.raises(webrtc.InvalidModificationError):
         await sender.set_parameters(sender.get_parameters(), key_frames=[True, False])
     await sender.set_parameters(sender.get_parameters(), key_frames=[True])
+
+
+@pytest.mark.asyncio
+async def test_set_parameters_after_rollback(pc):
+    """A sender rolled back out of its offer has no media channel: setting parameters rejects, not hangs"""
+    sender = pc.add_transceiver(webrtc.MediaType.video).sender
+    await pc.set_local_description()
+    await pc.set_local_description({'type': 'rollback'})
+    with pytest.raises(webrtc.InvalidStateError):
+        await asyncio.wait_for(sender.set_parameters(sender.get_parameters()), 5)
 
 
 @pytest.mark.asyncio
