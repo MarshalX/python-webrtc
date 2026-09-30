@@ -5,16 +5,28 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Blob (https://developer.mozilla.org/en-US/docs/Web/API/Blob): immutable bytes, like the binary messages of a data
-channel with a ``binaryType`` of ``'blob'``."""
+"""Blob (https://developer.mozilla.org/en-US/docs/Web/API/Blob): immutable bytes with a MIME type.
+
+Like the binary messages of a data channel with a ``binaryType`` of ``'blob'``.
+"""
+
+from __future__ import annotations
 
 import asyncio
-from typing import Any, Iterable, Optional, Union
+from typing import TYPE_CHECKING, TypeVar, Union
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 BlobPart = Union[str, bytes, bytearray, memoryview, 'Blob']
+_T = TypeVar('_T')
+
+# the printable ASCII range of a MIME type
+_MIN_TYPE_CHAR = 0x20
+_MAX_TYPE_CHAR = 0x7E
 
 
-def _done(value: Any) -> asyncio.Future:
+def _done(value: _T) -> asyncio.Future[_T]:
     future = asyncio.get_running_loop().create_future()
     future.set_result(value)
     return future
@@ -25,10 +37,10 @@ class Blob:
 
     Args:
         parts (iterable, optional): Strings (encoded as UTF-8), bytes-like objects and blobs, concatenated.
-        type (:obj:`str`, optional): The MIME type, lowercased; empty if it has characters outside of U+0020–U+007E.
+        type (:obj:`str`, optional): The MIME type, lowercased; empty if it has characters outside of U+0020-U+007E.
     """
 
-    def __init__(self, parts: Optional[Iterable[BlobPart]] = None, type: str = ''):
+    def __init__(self, parts: Iterable[BlobPart] | None = None, type: str = '') -> None:
         chunks = []
         for part in parts or ():
             if isinstance(part, Blob):
@@ -40,7 +52,7 @@ class Blob:
                 chunks.append(bytes(memoryview(part)))
         self._bytes = b''.join(chunks)
         type = str(type)
-        self._type = type.lower() if all(0x20 <= ord(c) <= 0x7E for c in type) else ''
+        self._type = type.lower() if all(_MIN_TYPE_CHAR <= ord(c) <= _MAX_TYPE_CHAR for c in type) else ''
 
     @property
     def size(self) -> int:
@@ -52,7 +64,7 @@ class Blob:
         """:obj:`str`: The MIME type, empty if unknown."""
         return self._type
 
-    def slice(self, start: int = 0, end: Optional[int] = None, content_type: str = '') -> 'Blob':
+    def slice(self, start: int = 0, end: int | None = None, content_type: str = '') -> Blob:
         """Returns a blob of a range of the bytes.
 
         Args:
@@ -65,15 +77,15 @@ class Blob:
         end = size if end is None else (max(size + end, 0) if end < 0 else min(end, size))
         return Blob([self._bytes[start : max(start, end)]], content_type)
 
-    def array_buffer(self) -> asyncio.Future:
+    def array_buffer(self) -> asyncio.Future[bytes]:
         """Returns a future of the bytes, as :obj:`bytes`."""
         return _done(self._bytes)
 
-    def bytes(self) -> asyncio.Future:
+    def bytes(self) -> asyncio.Future[bytes]:
         """Returns a future of the bytes, as :obj:`bytes`."""
         return _done(self._bytes)
 
-    def text(self) -> asyncio.Future:
+    def text(self) -> asyncio.Future[str]:
         """Returns a future of the bytes decoded as UTF-8."""
         return _done(self._bytes.decode('utf-8', 'replace'))
 
@@ -83,15 +95,15 @@ class Blob:
     def __len__(self) -> int:
         return len(self._bytes)
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, Blob):
             return self._bytes == other._bytes and self._type == other._type
         return NotImplemented
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self._bytes, self._type))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f'<webrtc.Blob size={self.size} type={self._type!r}>'
 
     #: Alias for :meth:`array_buffer`

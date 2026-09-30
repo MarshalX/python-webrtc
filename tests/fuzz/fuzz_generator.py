@@ -11,19 +11,21 @@ libwebrtc checks what it's given with RTC_CHECK, which aborts the process: the g
 take. The remote tracks are read by processors, so received frames go through the native path too.
 """
 
+from __future__ import annotations
+
 import asyncio
-import os
+import pathlib
 import sys
 
 import atheris
 
 with atheris.instrument_imports():
-    from _input import Input
+    from inputs import Input
 
     import webrtc
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-from tests.helpers import connect  # noqa: E402
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
+from tests.helpers import connect
 
 EXPECTED = (TypeError, ValueError, BufferError, webrtc.NotSupportedError, webrtc.InvalidStateError)
 PIXEL_FORMATS = list(webrtc.VideoPixelFormat)
@@ -36,7 +38,7 @@ asyncio.set_event_loop(loop)
 
 
 class Session:
-    """A connected pair sending a generator of each kind, whose writers are replaced once they fail"""
+    """A connected pair sending a generator of each kind, whose writers are replaced once they fail."""
 
     async def start(self) -> None:
         self.caller, self.callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
@@ -49,7 +51,7 @@ class Session:
             self.writers[kind] = generator.writable.get_writer()
         await connect(self.caller, self.callee)
 
-    async def write(self, kind: str, chunk) -> None:
+    async def write(self, kind: str, chunk: webrtc.AudioData | webrtc.VideoFrame) -> None:
         try:
             await self.writers[kind].write(chunk)
         except EXPECTED:
@@ -61,12 +63,12 @@ class Session:
         await asyncio.sleep(0)
 
 
-def audio_data(inp: Input):
+def audio_data(inp: Input) -> webrtc.AudioData:
     format = inp.choice(SAMPLE_FORMATS)
     channels = inp.small(20) if inp.flag() else inp.integer(20)
     rate = inp.choice(RATES) if inp.flag() else inp.number(400000)
     frames = inp.small(8000) if inp.flag() else inp.integer(8000)
-    if not all(isinstance(v, int) and not isinstance(v, bool) and 0 < v for v in (channels, frames)):
+    if not all(isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in (channels, frames)):
         channels, frames = 1, 480
     size = min(frames * channels * SAMPLE_BYTES[format.value.split('-')[0]], 1 << 20)
     return webrtc.AudioData(
@@ -79,7 +81,7 @@ def audio_data(inp: Input):
     )
 
 
-def video_frame(inp: Input):
+def video_frame(inp: Input) -> webrtc.VideoFrame:
     format = inp.choice(PIXEL_FORMATS)
     width = inp.small(64) + 1 if inp.flag() else inp.choice([1, 2, 3, 15, 16, 17, 639, 640, 1920, 4096])
     height = inp.small(64) + 1 if inp.flag() else inp.choice([1, 2, 3, 15, 16, 17, 479, 480, 1080, 4096])

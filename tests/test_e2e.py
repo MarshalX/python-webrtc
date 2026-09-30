@@ -5,6 +5,8 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
+from __future__ import annotations
+
 import asyncio
 
 import pytest
@@ -15,7 +17,9 @@ from tests.helpers import wait_for_ice_gathering_complete, wait_until
 TIMEOUT = 20
 
 
-async def set_local_and_gather(pc, description):
+async def set_local_and_gather(
+    pc: webrtc.RTCPeerConnection, description: webrtc.RTCSessionDescriptionInit
+) -> webrtc.RTCSessionDescription | None:
     """Non-trickle ICE: returns the local description once all candidates are gathered."""
     await pc.set_local_description(description)
     await wait_for_ice_gathering_complete(pc, TIMEOUT)
@@ -23,7 +27,7 @@ async def set_local_and_gather(pc, description):
 
 
 @pytest.mark.asyncio
-async def test_peers_connect_and_send_audio(caller, callee):
+async def test_peers_connect_and_send_audio(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
     """Two peer connections negotiate, connect over ICE/DTLS and stream audio."""
     track = webrtc.MediaStreamTrackGenerator('audio')
     caller.add_track(track)
@@ -48,10 +52,10 @@ async def test_peers_connect_and_send_audio(caller, callee):
             lambda pc=pc: pc.connection_state == webrtc.RTCPeerConnectionState.connected, 'connection', TIMEOUT
         )
         assert pc.signaling_state == webrtc.RTCSignalingState.stable
-        assert pc.ice_connection_state in (
+        assert pc.ice_connection_state in {
             webrtc.RTCIceConnectionState.connected,
             webrtc.RTCIceConnectionState.completed,
-        )
+        }
 
     receivers = callee.get_receivers()
     assert len(receivers) == 1

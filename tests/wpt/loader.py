@@ -71,14 +71,16 @@ class TestFile:
 
 
 class _HtmlCollector(HTMLParser):
-    def __init__(self, test_file: TestFile):
+    def __init__(self, test_file: TestFile) -> None:
         super().__init__()
         self.test_file = test_file
-        self._inline = None
+        self._inline: list[str] | None = None
         self._in_title = False
 
-    def handle_starttag(self, tag, attrs):
-        attrs = dict(attrs)
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._start(tag, dict(attrs))
+
+    def _start(self, tag: str, attrs: dict[str, str | None]) -> None:
         if tag == 'script':
             if attrs.get('src'):
                 self.test_file.scripts.append(('src', attrs['src']))
@@ -91,13 +93,13 @@ class _HtmlCollector(HTMLParser):
         elif tag == 'title':
             self._in_title = True
 
-    def handle_data(self, data):
+    def handle_data(self, data: str) -> None:
         if self._inline is not None:
             self._inline.append(data)
         elif self._in_title:
             self.test_file.title += data
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str) -> None:
         if tag == 'script' and self._inline is not None:
             self.test_file.scripts.append(('inline', ''.join(self._inline)))
             self._inline = None
@@ -107,14 +109,14 @@ class _HtmlCollector(HTMLParser):
 
 def _load_html(path: Path) -> TestFile:
     test_file = TestFile(path)
-    _HtmlCollector(test_file).feed(path.read_text())
+    _HtmlCollector(test_file).feed(path.read_text(encoding='utf-8'))
     return test_file
 
 
 def _load_js(path: Path) -> TestFile:
     """Loads a .window.js or .any.js test, which WPT would wrap into a generated HTML page."""
     test_file = TestFile(path, scripts=[('src', HARNESS)])
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding='utf-8').splitlines():
         match = _META.match(line.strip())
         if not match:
             continue
@@ -180,6 +182,9 @@ def build_scripts(test_file: TestFile) -> list[str]:
 
     They are evaluated separately, like the scripts of a page (so a "use strict" directive applies to its own
     script), but all at once: in a shell, the harness considers the page loaded after the first microtask.
+
+    Returns:
+        The source of each script, in the order of the page.
     """
     parts = [POLYFILLS.read_text(), SHIM.read_text()]
     test_src = '/' + test_file.path.relative_to(WPT_ROOT).as_posix()

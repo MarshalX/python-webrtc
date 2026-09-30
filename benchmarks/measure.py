@@ -7,21 +7,32 @@
 
 """What the benchmarks measure besides media: event loop lag, CPU, memory, and the machine."""
 
+from __future__ import annotations
+
 import array
 import asyncio
+import contextlib
 import os
 import platform
+import shutil
 import statistics
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import TYPE_CHECKING
 
 from tests.helpers import rss_bytes
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from types import TracebackType
 
-def percentile(values: List[float], fraction: float) -> float:
+    from typing_extensions import Self
+
+
+def percentile(values: Sequence[float], fraction: float) -> float:
+    """The value below which the fraction of the values are, or NaN without values."""
     if not values:
         return float('nan')
     ordered = sorted(values)
@@ -29,53 +40,60 @@ def percentile(values: List[float], fraction: float) -> float:
 
 
 class LoopLag:
-    """How late the event loop runs a timer: a busy loop (like one blocked on the GIL) delays everything on it"""
+    """How late the event loop runs a timer: a busy loop (like one blocked on the GIL) delays everything on it."""
 
-    def __init__(self, interval: float = 0.005):
+    def __init__(self, interval: float = 0.005) -> None:
         self.interval = interval
         # compact: a 5 ms probe collects 12000 a minute
         self.lags = array.array('d')
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
 
-    async def _probe(self):
+    async def _probe(self) -> None:
         loop = asyncio.get_running_loop()
         while True:
             start = loop.time()
             await asyncio.sleep(self.interval)
             self.lags.append(max(0.0, loop.time() - start - self.interval))
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         self._task = asyncio.ensure_future(self._probe())
         return self
 
-    def __exit__(self, *exc_info):
-        self._task.cancel()
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None
+    ) -> None:
+        if self._task:
+            self._task.cancel()
 
     @property
     def p95_ms(self) -> float:
+        """The 95th percentile lag."""
         return percentile(self.lags, 0.95) * 1000
 
     @property
     def max_ms(self) -> float:
+        """The largest lag."""
         return max(self.lags, default=float('nan')) * 1000
 
 
 @dataclass
 class Usage:
-    """CPU and memory over a span of time"""
+    """CPU and memory over a span of time."""
 
     wall: float = 0
     cpu: float = 0
     rss_start: int = 0
     rss_end: int = 0
-    _started: tuple = field(default=(0.0, 0.0), repr=False)
+    _started: tuple[float, float] = field(default=(0.0, 0.0), repr=False)
 
-    def start(self) -> 'Usage':
+    def start(self) -> Usage:
+        """Starts the span."""
         self.rss_start = rss_bytes()
         self._started = (time.perf_counter(), time.process_time())
         return self
 
-    def stop(self) -> 'Usage':
+    def stop(self) -> Usage:
+        """Ends the span."""
         wall, cpu = self._started
         self.wall = time.perf_counter() - wall
         self.cpu = time.process_time() - cpu
@@ -84,13 +102,13 @@ class Usage:
 
     @property
     def cpu_percent(self) -> float:
-        """Of one core: the process uses several threads (encoders, decoders, network)"""
+        """Of one core: the process uses several threads (encoders, decoders, network)."""
         return self.cpu / self.wall * 100 if self.wall else float('nan')
 
 
-def slope_mb_per_minute(samples: List[tuple]) -> float:
-    """The trend of (seconds, bytes) samples, by least squares"""
-    if len(samples) < 2:
+def slope_mb_per_minute(samples: Sequence[tuple[float, int]]) -> float:
+    """The trend of (seconds, bytes) samples, by least squares: NaN for less than two."""
+    if not samples:
         return float('nan')
     xs = [t for t, _ in samples]
     ys = [b / 1e6 for _, b in samples]
@@ -102,12 +120,12 @@ def slope_mb_per_minute(samples: List[tuple]) -> float:
 
 
 def machine() -> str:
+    """The CPU, the OS and Python of the machine."""
     cpu = platform.processor() or platform.machine()
-    if sys.platform == 'darwin':
-        try:
-            cpu = subprocess.check_output(['sysctl', '-n', 'machdep.cpu.brand_string'], text=True).strip()
-        except (OSError, subprocess.CalledProcessError):
-            pass
+    sysctl = shutil.which('sysctl') if sys.platform == 'darwin' else None
+    if sysctl:
+        with contextlib.suppress(OSError, subprocess.CalledProcessError):
+            cpu = subprocess.check_output([sysctl, '-n', 'machdep.cpu.brand_string'], text=True).strip()
     return (
         f'{cpu}, {os.cpu_count()} cores, {platform.system()} {platform.release()} ({platform.machine()}), '
         f'Python {platform.python_version()}'

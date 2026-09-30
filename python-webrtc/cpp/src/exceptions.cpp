@@ -32,8 +32,9 @@ namespace python_webrtc {
     }
     // the exception classes are defined in Python, to be subclassed and constructed like any Python exception
     return pybind11::module_::import("webrtc.exceptions")
-        .attr("_from_native")(std::string(ToString(error.type())), std::string(error.message()), detail, sctpCauseCode,
-                              lineNumber);
+        .attr("_from_native")(std::string(ToString(error.type())), std::string(error.message()),
+                              pybind11::arg("detail") = detail, pybind11::arg("sctp_cause_code") = sctpCauseCode,
+                              pybind11::arg("sdp_line_number") = lineNumber);
   }
 
   pybind11::object RTCCallbackException::ToPython() const {

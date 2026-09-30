@@ -7,15 +7,17 @@
 
 """Settings, capabilities, constraints and content hints of tracks."""
 
+from __future__ import annotations
+
 import pytest
 
 import webrtc
-from tests.helpers import connect_track, run_isolated, wait_until
+from tests.helpers import capture_mode, connect_track, run_isolated, wait_until
 
 
 @pytest.mark.asyncio
-async def test_camera_settings_and_capabilities():
-    """A camera track has the size and measured frame rate of its frames, and the capabilities of the camera"""
+async def test_camera_settings_and_capabilities() -> None:
+    """A camera track has the size and measured frame rate of its frames, and the capabilities of the camera."""
     stream = webrtc.get_user_media(audio=False, video=True, width=320, height=240, frame_rate=30)
     track = stream.get_tracks()[0]
 
@@ -23,7 +25,8 @@ async def test_camera_settings_and_capabilities():
     settings = track.get_settings()
     assert (settings.width, settings.height, settings.aspect_ratio) == (320, 240, 320 / 240)
     assert abs(settings.frame_rate - 30) < 5
-    assert settings.device_id == 'synthetic-camera' and settings.resize_mode == 'none'
+    assert settings.device_id == 'synthetic-camera'
+    assert settings.resize_mode == 'none'
 
     capabilities = track.get_capabilities()
     assert capabilities.width == webrtc.ULongRange(1, 4096)
@@ -33,20 +36,21 @@ async def test_camera_settings_and_capabilities():
 
 
 @pytest.mark.asyncio
-async def test_microphone_settings(audio_stream):
-    """A microphone track has the format of its samples, and no constraints"""
+async def test_microphone_settings(audio_stream: webrtc.MediaStream) -> None:
+    """A microphone track has the format of its samples, and no constraints."""
     track = audio_stream.get_tracks()[0]
     await wait_until(lambda: track.get_settings().sample_rate is not None, 'the audio format')
     settings = track.get_settings()
     assert (settings.sample_rate, settings.channel_count, settings.sample_size) == (48000, 1, 16)
-    assert settings.echo_cancellation is False and settings.device_id == 'synthetic-microphone'
+    assert settings.echo_cancellation is False
+    assert settings.device_id == 'synthetic-microphone'
     assert track.get_capabilities().sample_rate == webrtc.ULongRange(48000, 48000)
     assert track.get_constraints() == webrtc.MediaTrackConstraints()
 
 
 @pytest.mark.asyncio
-async def test_apply_constraints_to_the_camera(video_stream):
-    """Constraints change the size and frame rate of the camera, and are kept by the track"""
+async def test_apply_constraints_to_the_camera(video_stream: webrtc.MediaStream) -> None:
+    """Constraints change the size and frame rate of the camera, and are kept by the track."""
     track = video_stream.get_tracks()[0]
     await track.apply_constraints({'width': 160, 'height': {'exact': 120}, 'frameRate': {'max': 10}})
     await wait_until(lambda: track.get_settings().width == 160, 'the new size')
@@ -60,8 +64,8 @@ async def test_apply_constraints_to_the_camera(video_stream):
 
 
 @pytest.mark.asyncio
-async def test_overconstrained(video_stream, audio_stream):
-    """A required constraint the source can't satisfy fails, leaving the track as it was"""
+async def test_overconstrained(video_stream: webrtc.MediaStream, audio_stream: webrtc.MediaStream) -> None:
+    """A required constraint the source can't satisfy fails, leaving the track as it was."""
     video = video_stream.get_tracks()[0]
     await video.apply_constraints({'width': 320})
     with pytest.raises(webrtc.OverconstrainedError) as error:
@@ -79,8 +83,10 @@ async def test_overconstrained(video_stream, audio_stream):
 
 
 @pytest.mark.asyncio
-async def test_remote_track_settings(caller, callee, video_stream):
-    """A remote track has the settings of what arrives, and no capabilities"""
+async def test_remote_track_settings(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, video_stream: webrtc.MediaStream
+) -> None:
+    """A remote track has the settings of what arrives, and no capabilities."""
     remote = await connect_track(caller, callee, video_stream.get_tracks()[0])
     await wait_until(lambda: remote.get_settings().width is not None, 'frames')
     settings = remote.get_settings()
@@ -91,23 +97,23 @@ async def test_remote_track_settings(caller, callee, video_stream):
         await remote.apply_constraints({'width': {'exact': 100}})
 
 
-@pytest.mark.asyncio
-async def test_content_hint(audio_stream, video_stream):
-    """Hints of the kind of the track are kept, others are ignored"""
+def test_content_hint(audio_stream: webrtc.MediaStream, video_stream: webrtc.MediaStream) -> None:
+    """Hints of the kind of the track are kept, others are ignored."""
     video, audio = video_stream.get_tracks()[0], audio_stream.get_tracks()[0]
-    assert video.content_hint == audio.contentHint == ''
+    assert not video.content_hint
+    assert not audio.contentHint
     video.content_hint = 'text'
     audio.content_hint = 'music'
     video.content_hint = 'speech'
     audio.content_hint = 'detail'
     assert (video.content_hint, audio.content_hint) == ('text', 'music')
     video.content_hint = ''
-    assert video.content_hint == ''
+    assert not video.content_hint
 
 
 @pytest.mark.asyncio
-async def test_constraints_of_an_ended_track(video_stream):
-    """Constraints of an ended track are accepted, even ones it couldn't satisfy"""
+async def test_constraints_of_an_ended_track(video_stream: webrtc.MediaStream) -> None:
+    """Constraints of an ended track are accepted, even ones it couldn't satisfy."""
     track = video_stream.get_tracks()[0]
     track.stop()
     await track.apply_constraints({'width': {'exact': 100000}})
@@ -118,8 +124,10 @@ async def test_constraints_of_an_ended_track(video_stream):
     'constraints',
     [{'frame_rate': float('nan')}, {'frame_rate': float('inf')}, {'width': '1'}],
 )
-async def test_constraints_have_their_webidl_types(video_stream, constraints):
-    """Unsigned longs and restricted doubles: other values are a TypeError"""
+async def test_constraints_have_their_webidl_types(
+    video_stream: webrtc.MediaStream, constraints: dict[str, object]
+) -> None:
+    """Unsigned longs and restricted doubles: other values are a TypeError."""
     with pytest.raises(TypeError):
         await video_stream.get_tracks()[0].apply_constraints(constraints)
     with pytest.raises(TypeError):
@@ -128,33 +136,35 @@ async def test_constraints_have_their_webidl_types(video_stream, constraints):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    'constraints, expected',
+    ('constraints', 'expected'),
     [
         ({'frame_rate': 10**9}, (640, 480, 120)),
         ({'frame_rate': 0}, (640, 480, 1)),
         ({'frame_rate': {'ideal': -5}}, (640, 480, 1)),
     ],
 )
-async def test_camera_stays_within_its_capabilities(video_stream, constraints, expected):
-    """Ideal values beyond the capabilities select the nearest ones"""
+async def test_camera_stays_within_its_capabilities(
+    video_stream: webrtc.MediaStream, constraints: dict[str, object], expected: tuple[int, int, float]
+) -> None:
+    """Ideal values beyond the capabilities select the nearest ones."""
     track = video_stream.get_tracks()[0]
     await track.apply_constraints(constraints)
-    assert track._native_obj._camera() == expected
+    assert capture_mode(track) == expected
 
     track = webrtc.get_user_media(audio=False, video=True, **constraints).get_tracks()[0]
-    assert track._native_obj._camera() == expected
+    assert capture_mode(track) == expected
     track.stop()
 
 
-def test_get_user_media_rejects_what_the_camera_cannot_do():
+def test_get_user_media_rejects_what_the_camera_cannot_do() -> None:
     with pytest.raises(webrtc.OverconstrainedError):
         webrtc.get_user_media(audio=False, video=True, width={'exact': 5000})
     with pytest.raises(webrtc.OverconstrainedError):
         webrtc.get_user_media(audio=False, video=True, frame_rate={'min': 500})
 
 
-def test_camera_of_impossible_sizes():
-    """A camera of no size, a negative one or a huge one aborted the process"""
+def test_camera_of_impossible_sizes() -> None:
+    """A camera of no size, a negative one or a huge one aborted the process."""
     output = run_isolated(
         """
         import asyncio

@@ -11,20 +11,27 @@ A case fails when any result differs from its expectation in either direction, s
 recorded as well: run `python -m tests.wpt update <case>` and commit the change.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from _pytest.mark import ParameterSet
 
 pytest.importorskip('pythonmonkey')
 
-from tests.wpt import runner  # noqa: E402
-from tests.wpt.expectations import Expectations  # noqa: E402
-from tests.wpt.loader import WPT_ROOT, discover  # noqa: E402
+from tests.wpt import runner
+from tests.wpt.expectations import Expectations
+from tests.wpt.loader import WPT_ROOT, discover
 
 pytestmark = pytest.mark.skipif(not WPT_ROOT.is_dir(), reason='no wpt checkout, see tests/wpt/README.md')
 
 expectations = Expectations.load()
 
 
-def _cases():
+def _cases() -> list[str | ParameterSet]:
     if not WPT_ROOT.is_dir():
         return []
     return [
@@ -36,7 +43,7 @@ def _cases():
 
 
 @pytest.mark.parametrize('case', _cases())
-def test_wpt(case):
+def test_wpt(case: str) -> None:
     problems = expectations.mismatches(case, runner.run(case))
     if problems:
         pytest.fail('\n'.join(problems), pytrace=False)

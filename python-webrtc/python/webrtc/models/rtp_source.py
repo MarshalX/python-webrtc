@@ -5,10 +5,17 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from dataclasses import dataclass
-from typing import Optional, Tuple
+"""The contributing and synchronization sources of the media a receiver received."""
 
-from webrtc.utils.names import alias
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import ClassVar
+
+from webrtc.utils.names import Alias, alias
+
+# RFC 6464 and RFC 6465 levels are -dBov, 127 being silence
+_SILENT_LEVEL = 127
 
 
 @dataclass(frozen=True)
@@ -27,24 +34,25 @@ class RTCRtpContributingSource:
     timestamp: float
     source: int
     rtp_timestamp: int
-    audio_level: Optional[float] = None
+    audio_level: float | None = None
 
     @classmethod
-    def _from_native(cls, native: Tuple[bool, int, float, int, Optional[int]]) -> 'RTCRtpContributingSource':
+    def _from_native(cls, native: tuple[bool, int, float, int, int | None]) -> RTCRtpContributingSource:
         """A source from the native one: whether it's an SSRC, the source, timestamp, RTP timestamp and level."""
         _, source, timestamp, rtp_timestamp, level = native
-        # RFC 6464 and RFC 6465 levels are -dBov, 127 being silence
         if level is not None:
-            level = 0.0 if level >= 127 else 10 ** (-level / 20)
+            level = 0.0 if level >= _SILENT_LEVEL else 10 ** (-level / 20)
         return cls(timestamp, source, rtp_timestamp, level)
 
     #: Alias for :attr:`rtp_timestamp`
-    rtpTimestamp = alias('rtp_timestamp')
+    rtpTimestamp: ClassVar[Alias[int]] = alias('rtp_timestamp')
     #: Alias for :attr:`audio_level`
-    audioLevel = alias('audio_level')
+    audioLevel: ClassVar[Alias[float | None]] = alias('audio_level')
 
 
 @dataclass(frozen=True)
 class RTCRtpSynchronizationSource(RTCRtpContributingSource):
-    """A synchronization source (SSRC) of the media an :obj:`webrtc.RTCRtpReceiver` received in the last
-    10 seconds. See :obj:`webrtc.RTCRtpContributingSource` for its members."""
+    """A synchronization source (SSRC) of the media an :obj:`webrtc.RTCRtpReceiver` received in the last 10 s.
+
+    See :obj:`webrtc.RTCRtpContributingSource` for its members.
+    """

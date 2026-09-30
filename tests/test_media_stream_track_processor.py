@@ -7,6 +7,8 @@
 
 """MediaStreamTrackProcessor, VideoTrackGenerator and MediaStreamTrackGenerator on local tracks."""
 
+from __future__ import annotations
+
 import array
 import asyncio
 
@@ -18,24 +20,24 @@ from tests.helpers import QUIET_PERIOD, wait_for_event, wait_until
 TIMEOUT = 10
 
 
-def i420(width, height, y=81, u=90, v=240):
+def i420(width: int, height: int) -> bytes:
     chroma = ((width + 1) // 2) * ((height + 1) // 2)
-    return bytes([y] * (width * height) + [u] * chroma + [v] * chroma)
+    return bytes([81] * (width * height) + [90] * chroma + [240] * chroma)
 
 
-def video_frame(timestamp, width=4, height=2):
+def video_frame(timestamp: int, width: int = 4, height: int = 2) -> webrtc.VideoFrame:
     return webrtc.VideoFrame(
         i420(width, height), format='I420', coded_width=width, coded_height=height, timestamp=timestamp
     )
 
 
-async def read(reader):
+async def read(reader: webrtc.ReadableStreamDefaultReader) -> webrtc.ReadableStreamReadResult:
     return await asyncio.wait_for(reader.read(), TIMEOUT)
 
 
 @pytest.mark.asyncio
-async def test_video_frames_of_a_camera(video_stream):
-    """A processor of a video track reads its frames, and closes when the track stops"""
+async def test_video_frames_of_a_camera(video_stream: webrtc.MediaStream) -> None:
+    """A processor of a video track reads its frames, and closes when the track stops."""
     track = video_stream.get_tracks()[0]
     processor = webrtc.MediaStreamTrackProcessor(track)
     reader = processor.readable.get_reader()
@@ -53,8 +55,8 @@ async def test_video_frames_of_a_camera(video_stream):
 
 
 @pytest.mark.asyncio
-async def test_audio_data_of_a_microphone(audio_stream):
-    """A processor of an audio track reads its samples, 10 ms at a time"""
+async def test_audio_data_of_a_microphone(audio_stream: webrtc.MediaStream) -> None:
+    """A processor of an audio track reads its samples, 10 ms at a time."""
     track = audio_stream.get_tracks()[0]
     reader = webrtc.MediaStreamTrackProcessor(track=track).readable.get_reader()
     audio = (await read(reader)).value
@@ -66,9 +68,8 @@ async def test_audio_data_of_a_microphone(audio_stream):
     await asyncio.wait_for(reader.closed, TIMEOUT)
 
 
-@pytest.mark.asyncio
-async def test_init_forms():
-    """The processor takes a track, an init or a dictionary, and rejects anything else"""
+def test_init_forms() -> None:
+    """The processor takes a track, an init or a dictionary, and rejects anything else."""
     generator = webrtc.VideoTrackGenerator()
     track = generator.track
     for processor in (
@@ -85,8 +86,8 @@ async def test_init_forms():
 
 
 @pytest.mark.asyncio
-async def test_full_buffer_drops_the_oldest_frames(video_stream):
-    """Frames nobody reads are dropped once the buffer is full, oldest first, and counted"""
+async def test_full_buffer_drops_the_oldest_frames(video_stream: webrtc.MediaStream) -> None:
+    """Frames nobody reads are dropped once the buffer is full, oldest first, and counted."""
     track = video_stream.get_tracks()[0]
     processor = webrtc.MediaStreamTrackProcessor(track, max_buffer_size=2)
     reader = processor.readable.get_reader()
@@ -101,8 +102,8 @@ async def test_full_buffer_drops_the_oldest_frames(video_stream):
 
 
 @pytest.mark.asyncio
-async def test_cancel_stops_reading(video_stream):
-    """Canceling the stream detaches the processor from the track"""
+async def test_cancel_stops_reading(video_stream: webrtc.MediaStream) -> None:
+    """Canceling the stream detaches the processor from the track."""
     processor = webrtc.MediaStreamTrackProcessor(video_stream.get_tracks()[0])
     reader = processor.readable.get_reader()
     (await read(reader)).value.close()
@@ -114,8 +115,8 @@ async def test_cancel_stops_reading(video_stream):
 
 
 @pytest.mark.asyncio
-async def test_processor_of_an_ended_track(video_stream):
-    """The stream of an ended track is closed"""
+async def test_processor_of_an_ended_track(video_stream: webrtc.MediaStream) -> None:
+    """The stream of an ended track is closed."""
     track = video_stream.get_tracks()[0]
     track.stop()
     reader = webrtc.MediaStreamTrackProcessor(track).readable.get_reader()
@@ -123,8 +124,8 @@ async def test_processor_of_an_ended_track(video_stream):
 
 
 @pytest.mark.asyncio
-async def test_generator_forwards_frames_with_their_timestamps():
-    """A frame written to a generator reaches a processor of its track, with its size and timestamp, and is closed"""
+async def test_generator_forwards_frames_with_their_timestamps() -> None:
+    """A frame written to a generator reaches a processor of its track, with its size and timestamp, and is closed."""
     generator = webrtc.VideoTrackGenerator()
     track = generator.track
     reader = webrtc.MediaStreamTrackProcessor(track, max_buffer_size=10).readable.get_reader()
@@ -147,8 +148,8 @@ async def test_generator_forwards_frames_with_their_timestamps():
 
 
 @pytest.mark.asyncio
-async def test_generator_rejects_what_it_cant_send():
-    """A video generator takes open VideoFrames only"""
+async def test_generator_rejects_what_it_cant_send() -> None:
+    """A video generator takes open VideoFrames only."""
     generator = webrtc.VideoTrackGenerator()
     writer = generator.writable.get_writer()
     closed = video_frame(0)
@@ -161,8 +162,8 @@ async def test_generator_rejects_what_it_cant_send():
 
 
 @pytest.mark.asyncio
-async def test_closing_the_generator_ends_its_track():
-    """Closing the writable ends the track, which closes the processor"""
+async def test_closing_the_generator_ends_its_track() -> None:
+    """Closing the writable ends the track, which closes the processor."""
     generator = webrtc.VideoTrackGenerator()
     track = generator.track
     ended = wait_for_event(track, 'ended')
@@ -174,14 +175,15 @@ async def test_closing_the_generator_ends_its_track():
 
 
 @pytest.mark.asyncio
-async def test_muted_generator_drops_frames():
-    """A muted generator mutes its track and drops the frames written"""
+async def test_muted_generator_drops_frames() -> None:
+    """A muted generator mutes its track and drops the frames written."""
     generator = webrtc.VideoTrackGenerator()
     track = generator.track
     muted = wait_for_event(track, 'mute')
     generator.muted = True
     await muted
-    assert generator.muted and track.muted
+    assert generator.muted
+    assert track.muted
 
     processor = webrtc.MediaStreamTrackProcessor(track, max_buffer_size=10)
     reader = processor.readable.get_reader()
@@ -198,8 +200,8 @@ async def test_muted_generator_drops_frames():
 
 
 @pytest.mark.asyncio
-async def test_audio_generator_sends_10_ms_frames():
-    """An audio generator is a track: it sends what's written in 10 ms frames, converted to 16 bits"""
+async def test_audio_generator_sends_10_ms_frames() -> None:
+    """An audio generator is a track: it sends what's written in 10 ms frames, converted to 16 bits."""
     generator = webrtc.MediaStreamTrackGenerator('audio')
     assert isinstance(generator, webrtc.MediaStreamTrack)
     assert generator.kind == webrtc.MediaType.audio
@@ -226,8 +228,8 @@ async def test_audio_generator_sends_10_ms_frames():
     generator.stop()
 
 
-def test_generator_kinds():
-    """A MediaStreamTrackGenerator is created for a kind, as a string, an init or a dictionary"""
+def test_generator_kinds() -> None:
+    """A MediaStreamTrackGenerator is created for a kind, as a string, an init or a dictionary."""
     assert webrtc.MediaStreamTrackGenerator('video').kind == webrtc.MediaType.video
     assert webrtc.MediaStreamTrackGenerator({'kind': 'audio'}).kind == webrtc.MediaType.audio
     assert (
@@ -239,20 +241,22 @@ def test_generator_kinds():
 
 
 @pytest.mark.asyncio
-async def test_pipe_processor_to_generator(video_stream):
-    """The frames of a track are piped through a transform to a generator, as in a browser"""
+async def test_pipe_processor_to_generator(video_stream: webrtc.MediaStream) -> None:
+    """The frames of a track are piped through a transform to a generator, as in a browser."""
     generator = webrtc.VideoTrackGenerator()
     reader = webrtc.MediaStreamTrackProcessor(generator.track).readable.get_reader()
 
     class Stamp:
-        def transform(self, frame, controller):
+        @staticmethod
+        def transform(frame: webrtc.VideoFrame, controller: webrtc.TransformStreamDefaultController) -> None:
             controller.enqueue(webrtc.VideoFrame(frame, timestamp=42))
             frame.close()
 
     source = webrtc.MediaStreamTrackProcessor(video_stream.get_tracks()[0]).readable
     pipe = asyncio.ensure_future(source.pipe_through(webrtc.TransformStream(Stamp())).pipe_to(generator.writable))
     frame = (await read(reader)).value
-    assert frame.timestamp == 42 and frame.coded_width == 640
+    assert frame.timestamp == 42
+    assert frame.coded_width == 640
     frame.close()
 
     video_stream.get_tracks()[0].stop()
@@ -261,8 +265,8 @@ async def test_pipe_processor_to_generator(video_stream):
 
 
 @pytest.mark.asyncio
-async def test_frames_wait_in_the_native_queue_only(video_stream):
-    """Frames are taken from the processor for pending reads only: the rest stays in its buffer, where it's dropped"""
+async def test_frames_wait_in_the_native_queue_only(video_stream: webrtc.MediaStream) -> None:
+    """Frames are taken from the processor for pending reads only: the rest stays in its buffer, where it's dropped."""
     processor = webrtc.MediaStreamTrackProcessor(video_stream.get_tracks()[0], max_buffer_size=2)
     reader = processor.readable.get_reader()
     frames = await asyncio.wait_for(asyncio.gather(*(reader.read() for _ in range(4))), TIMEOUT)

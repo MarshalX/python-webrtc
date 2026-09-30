@@ -7,45 +7,46 @@
 
 """Events of WebRTC objects. libwebrtc threads only schedule them: handlers run on their event loop."""
 
+from __future__ import annotations
+
 import asyncio
 import inspect
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import Callable, NamedTuple, TypeVar, overload
 
+import webrtc
 from webrtc.utils.task_queue import TaskQueue
 
-if TYPE_CHECKING:
-    import webrtc
+Handler = Callable[['webrtc.Event'], object]
+_H = TypeVar('_H', bound=Handler)
 
-Handler = Callable[['webrtc.Event'], Any]
+#: The tasks of the coroutine handlers, referenced until they're done
+_handler_tasks: set[asyncio.Future[object]] = set()
 
 
-def _running_loop() -> Optional[asyncio.AbstractEventLoop]:
+def _running_loop() -> asyncio.AbstractEventLoop | None:
     try:
         return asyncio.get_running_loop()
     except RuntimeError:
         return None
 
 
-class _Registration:
-    __slots__ = ('handler', 'loop', 'once')
-
-    def __init__(self, handler: Handler, loop: asyncio.AbstractEventLoop, once: bool):
-        self.handler = handler
-        self.loop = loop
-        self.once = once
+class _Registration(NamedTuple):
+    handler: Handler
+    loop: asyncio.AbstractEventLoop
+    once: bool
 
 
 class _Listeners:
     """Handlers of one native object, called by it with the name and the native arguments of an event."""
 
-    def __init__(self, target: 'EventTarget'):
+    def __init__(self, target: EventTarget) -> None:
         self.target = target
-        self.registrations: Dict[str, List[_Registration]] = {}
+        self.registrations: dict[str, list[_Registration]] = {}
         # the loop of the first handler, which delivers every event, even without handlers for it,
         # as events also update what the object shows (see EventTarget._on_event)
-        self.primary_loop: Optional[asyncio.AbstractEventLoop] = None
+        self.primary_loop: asyncio.AbstractEventLoop | None = None
 
-    def __call__(self, name: str, *args):
+    def __call__(self, name: str, *args: object) -> None:
         # a libwebrtc thread, with the GIL held: only schedule
         registrations = self.__dict__.get('registrations')
         if registrations is None:
@@ -65,14 +66,14 @@ class _Listeners:
             if not loop.is_closed():
                 TaskQueue.of(loop).post(self.deliver, loop, name, args)
 
-    def ensure_primary_loop(self) -> Optional[asyncio.AbstractEventLoop]:
+    def ensure_primary_loop(self) -> asyncio.AbstractEventLoop | None:
         """Makes the running loop the primary one if there's none yet. Returns the running loop, if any."""
         loop = _running_loop()
         if loop is not None and (self.primary_loop is None or self.primary_loop.is_closed()):
             self.primary_loop = loop
         return loop
 
-    def deliver(self, loop: asyncio.AbstractEventLoop, name: str, args: Tuple):
+    def deliver(self, loop: asyncio.AbstractEventLoop, name: str, args: tuple[object, ...]) -> None:
         if loop is self.primary_loop:
             self.target._on_event(name, *args)
         registrations = [r for r in self.registrations.get(name, ()) if r.loop is loop]
@@ -88,23 +89,28 @@ class _Listeners:
             try:
                 result = registration.handler(event)
                 if inspect.isawaitable(result):
-                    asyncio.ensure_future(result, loop=loop)
+                    task = asyncio.ensure_future(result, loop=loop)
+                    _handler_tasks.add(task)
+                    task.add_done_callback(_handler_tasks.discard)
             except Exception as e:
-                loop.call_exception_handler(
-                    {'message': f'Exception in {name!r} event handler', 'exception': e, 'event': event}
-                )
+                loop.call_exception_handler({
+                    'message': f'Exception in {name!r} event handler',
+                    'exception': e,
+                    'event': event,
+                })
 
-    def add(self, name: str, handler: Handler, once: bool):
+    def add(self, name: str, handler: Handler, *, once: bool) -> None:
         loop = self.ensure_primary_loop()
         if loop is None:
-            raise RuntimeError('event handlers must be registered from a running asyncio event loop')
+            msg = 'event handlers must be registered from a running asyncio event loop'
+            raise RuntimeError(msg)
 
         registrations = self.registrations.setdefault(name, [])
         if any(r.handler == handler for r in registrations):
             return  # like addEventListener, a handler is registered once
         registrations.append(_Registration(handler, loop, once))
 
-    def remove(self, name: str, handler: Optional[Handler]) -> None:
+    def remove(self, name: str, handler: Handler | None) -> None:
         if handler is None:
             self.registrations.pop(name, None)
             return
@@ -124,13 +130,14 @@ class EventTarget:
         async def on_candidate(event):
             await signaling.send(event.candidate)
 
+
         pc.on('track', lambda event: print(event.track))
     """
 
     #: Names of the events the object emits
-    _events: Tuple[str, ...] = ()
+    _events: tuple[str, ...] = ()
 
-    def _listeners(self, create: bool) -> Optional[_Listeners]:
+    def _listeners(self, *, create: bool) -> _Listeners | None:
         native = self._native_obj
         listeners = native._listeners
         if listeners is None and create:
@@ -141,41 +148,53 @@ class EventTarget:
         return listeners
 
     def _attach(self) -> None:
-        """Delivers the events of the object to the running loop from now on, even without handlers, as they also
-        update what the object shows (like its state, see :meth:`_on_event`). Does nothing outside of a loop."""
+        """Delivers the events of the object to the running loop from now on, even without handlers.
+
+        Events also update what the object shows (like its state, see :meth:`_on_event`). Does nothing outside of
+        a loop.
+        """
         if _running_loop() is not None:
             self._listeners(create=True).ensure_primary_loop()
 
-    def _check_event(self, name: str):
+    def _check_event(self, name: str) -> None:
         if name not in self._events:
-            raise ValueError(f'{type(self).__name__} has no event {name!r}, its events are: {", ".join(self._events)}')
+            msg = f'{type(self).__name__} has no event {name!r}, its events are: {", ".join(self._events)}'
+            raise ValueError(msg)
 
-    def _add(self, name: str, handler: Optional[Handler], once: bool):
+    def _add(self, name: str, handler: _H | None, *, once: bool) -> _H | Callable[[_H], _H]:
         self._check_event(name)
         if handler is None:
-            return lambda func: self._add(name, func, once)
-        self._listeners(create=True).add(name, handler, once)
+            return lambda func: self._add_handler(name, func, once=once)
+        return self._add_handler(name, handler, once=once)
+
+    def _add_handler(self, name: str, handler: _H, *, once: bool) -> _H:
+        self._listeners(create=True).add(name, handler, once=once)
         return handler
 
-    def _dispatch(self, name: str, *args) -> None:
+    def _dispatch(self, name: str, *args: object) -> None:
         """Delivers an event to the handlers on the running loop right away, from an event being delivered."""
         listeners = self._listeners(create=False)
         if listeners is not None:
             listeners.deliver(asyncio.get_running_loop(), name, args)
 
-    def _on_event(self, name: str, *args) -> None:
+    def _on_event(self, name: str, *args: object) -> None:
         """Called for every event on the loop of the first handler, before the handlers of the event.
 
         Names starting with ``_`` (like ``'_sent'``) are internal events of the native object: they only reach this
-        method, never handlers."""
+        method, never handlers.
+        """
 
-    def _create_event(self, name: str, *args):
+    def _create_event(self, name: str, *_args: object) -> webrtc.Event | None:
         """Creates the event object from the native arguments of an event, or returns :obj:`None` to drop it."""
-        from webrtc import Event
+        return webrtc.Event(name, self)
 
-        return Event(name, self)
+    @overload
+    def on(self, name: str, handler: None = None) -> Callable[[_H], _H]: ...
 
-    def on(self, name: str, handler: Optional[Handler] = None):
+    @overload
+    def on(self, name: str, handler: _H) -> _H: ...
+
+    def on(self, name: str, handler: _H | None = None) -> _H | Callable[[_H], _H]:
         """Registers a handler of an event. Can be used as a decorator.
 
         Args:
@@ -187,12 +206,18 @@ class EventTarget:
             :obj:`callable`: The handler, or a decorator registering it.
 
         Raises:
-            :obj:`ValueError`: If the object has no such event.
-            :obj:`RuntimeError`: If called outside of a running event loop.
+            ValueError: If the object has no such event.
+            RuntimeError: If called outside of a running event loop.
         """
         return self._add(name, handler, once=False)
 
-    def once(self, name: str, handler: Optional[Handler] = None):
+    @overload
+    def once(self, name: str, handler: None = None) -> Callable[[_H], _H]: ...
+
+    @overload
+    def once(self, name: str, handler: _H) -> _H: ...
+
+    def once(self, name: str, handler: _H | None = None) -> _H | Callable[[_H], _H]:
         """Registers a handler that is removed after it's called for the first time. Can be used as a decorator.
 
         Args:
@@ -203,12 +228,12 @@ class EventTarget:
             :obj:`callable`: The handler, or a decorator registering it.
 
         Raises:
-            :obj:`ValueError`: If the object has no such event.
-            :obj:`RuntimeError`: If called outside of a running event loop.
+            ValueError: If the object has no such event.
+            RuntimeError: If called outside of a running event loop.
         """
         return self._add(name, handler, once=True)
 
-    def off(self, name: str, handler: Optional[Handler] = None) -> None:
+    def off(self, name: str, handler: Handler | None = None) -> None:
         """Removes a handler of an event, or every handler of the event.
 
         Args:
@@ -216,7 +241,7 @@ class EventTarget:
             handler (:obj:`callable`, optional): The handler to remove. If omitted, all handlers of the event are.
 
         Raises:
-            :obj:`ValueError`: If the object has no such event.
+            ValueError: If the object has no such event.
         """
         self._check_event(name)
         listeners = self._listeners(create=False)

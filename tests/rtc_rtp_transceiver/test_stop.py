@@ -5,6 +5,8 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
+from __future__ import annotations
+
 import pytest
 
 import webrtc
@@ -12,8 +14,8 @@ from tests.helpers import exchange_offer_answer
 
 
 @pytest.mark.asyncio
-async def test_1(pc):
-    """A transceiver added and stopped before the initial offer should not get an m-section in it"""
+async def test_1(pc: webrtc.RTCPeerConnection) -> None:
+    """A transceiver added and stopped before the initial offer should not get an m-section in it."""
     init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
     pc.add_transceiver(webrtc.MediaType.audio, init)
     pc.add_transceiver(webrtc.MediaType.video)
@@ -21,12 +23,12 @@ async def test_1(pc):
 
     offer = await pc.create_offer()
 
-    assert "m=audio" not in offer.sdp, 'offer should not contain an audio m-section'
-    assert "m=video" in offer.sdp, 'offer should contain a video m-section'
+    assert 'm=audio' not in offer.sdp, 'offer should not contain an audio m-section'
+    assert 'm=video' in offer.sdp, 'offer should contain a video m-section'
 
 
-def test_2(pc):
-    """A transceiver added and stopped should not crash when getting receiver's transport"""
+def test_2(pc: webrtc.RTCPeerConnection) -> None:
+    """A transceiver added and stopped should not crash when getting receiver's transport."""
     init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
     pc.add_transceiver(webrtc.MediaType.audio, init)
     pc.add_transceiver(webrtc.MediaType.video)
@@ -37,8 +39,8 @@ def test_2(pc):
 
 
 @pytest.mark.asyncio
-async def test_3(caller, callee):
-    """During renegotiation, a transceiver added and stopped should not get an m-section in the offer"""
+async def test_3(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """During renegotiation, a transceiver added and stopped should not get an m-section in the offer."""
     caller.add_transceiver(webrtc.MediaType.audio)
 
     await exchange_offer_answer(caller, callee)
@@ -56,7 +58,9 @@ async def test_3(caller, callee):
     assert 'm=video' not in offer.sdp, 'offer should not contain a video m-section'
 
 
-async def _test_inactive_m_section(caller, callee, direction):
+async def _test_inactive_m_section(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, direction: webrtc.TransceiverDirection
+) -> None:
     caller.add_transceiver(webrtc.MediaType.audio)
 
     await exchange_offer_answer(caller, callee)
@@ -70,20 +74,20 @@ async def _test_inactive_m_section(caller, callee, direction):
 
 
 @pytest.mark.asyncio
-async def test_4(caller, callee):
-    """A stopped sendonly transceiver should generate an inactive m-section in the offer"""
+async def test_4(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """A stopped sendonly transceiver should generate an inactive m-section in the offer."""
     await _test_inactive_m_section(caller, callee, webrtc.TransceiverDirection.sendonly)
 
 
 @pytest.mark.asyncio
-async def test_5(caller, callee):
-    """A stopped inactive transceiver should generate an inactive m-section in the offer"""
+async def test_5(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """A stopped inactive transceiver should generate an inactive m-section in the offer."""
     await _test_inactive_m_section(caller, callee, webrtc.TransceiverDirection.inactive)
 
 
 @pytest.mark.asyncio
-async def test_6(caller, callee):
-    """If a transceiver is stopped locally, setting a locally generated answer should still work"""
+async def test_6(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """If a transceiver is stopped locally, setting a locally generated answer should still work."""
     caller.add_transceiver(webrtc.MediaType.audio)
 
     await exchange_offer_answer(caller, callee)
@@ -94,8 +98,8 @@ async def test_6(caller, callee):
 
 
 @pytest.mark.asyncio
-async def test_7(caller, callee):
-    """If a transceiver is stopped remotely, setting a locally generated answer should still work"""
+async def test_7(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """If a transceiver is stopped remotely, setting a locally generated answer should still work."""
     caller.add_transceiver(webrtc.MediaType.audio)
 
     await exchange_offer_answer(caller, callee)
@@ -106,8 +110,8 @@ async def test_7(caller, callee):
 
 
 @pytest.mark.asyncio
-async def test_8(caller, callee):
-    """If a transceiver is stopped, transceivers, senders and receivers should disappear after offer/answer"""
+async def test_8(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """If a transceiver is stopped, transceivers, senders and receivers should disappear after offer/answer."""
     caller.add_transceiver(webrtc.MediaType.audio)
 
     await exchange_offer_answer(caller, callee)
@@ -130,8 +134,8 @@ async def test_8(caller, callee):
 
 
 @pytest.mark.asyncio
-async def test_9(caller, callee):
-    """If a transceiver is stopped, transceivers should end up in state stopped"""
+async def test_9(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """If a transceiver is stopped, transceivers should end up in state stopped."""
     caller.add_transceiver(webrtc.MediaType.audio)
 
     await exchange_offer_answer(caller, callee)

@@ -23,17 +23,21 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tests.wpt.runner import CaseResult
 
 PATH = Path(__file__).with_name('expectations.json')
 
 HARNESS_KEY = '[harness]'
 
 
-def _allowed(expected) -> list[str]:
+def _allowed(expected: str | list[str]) -> list[str]:
     return expected if isinstance(expected, list) else [expected]
 
 
-def _describe(expected) -> str:
+def _describe(expected: str | list[str]) -> str:
     return ' or '.join(_allowed(expected))
 
 
@@ -49,14 +53,14 @@ class Expectations:
         data = json.loads(PATH.read_text())
         return cls(skip=data.get('skip', {}), results=data.get('results', {}))
 
-    def save(self):
+    def save(self) -> None:
         data = {'skip': dict(sorted(self.skip.items())), 'results': dict(sorted(self.results.items()))}
         PATH.write_text(json.dumps(data, indent=2) + '\n')
 
     def skip_reason(self, case: str) -> str | None:
         return self.skip.get(case.partition('?')[0])
 
-    def record(self, case: str, results: list[dict]):
+    def record(self, case: str, results: list[CaseResult]) -> None:
         """Records the statuses seen over one or more runs of a case.
 
         Statuses that differ between runs are recorded as a list. An existing list is kept while it still covers
@@ -84,7 +88,7 @@ class Expectations:
         else:
             self.results.pop(case, None)
 
-    def mismatches(self, case: str, result: dict) -> list[str]:
+    def mismatches(self, case: str, result: CaseResult) -> list[str]:
         expected = dict(self.results.get(case, {}))
         expected_harness = expected.pop(HARNESS_KEY, 'OK')
 
@@ -102,6 +106,8 @@ class Expectations:
             if test['status'] not in _allowed(want):
                 problems.append(f'{test["name"]}: expected {_describe(want)}, got {test["status"]}: {test["message"]}')
 
-        for name in sorted(expected.keys() - seen):
-            problems.append(f'{name}: expected {_describe(expected[name])}, but the test did not run')
+        problems.extend(
+            f'{name}: expected {_describe(expected[name])}, but the test did not run'
+            for name in sorted(expected.keys() - seen)
+        )
         return problems

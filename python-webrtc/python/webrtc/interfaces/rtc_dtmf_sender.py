@@ -5,15 +5,23 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
+"""RTCDTMFSender of WebRTC."""
+
+from __future__ import annotations
+
 import re
+from typing import TYPE_CHECKING
 
 from webrtc import InvalidCharacterError, RTCDTMFToneChangeEvent, WebRTCObject, wrtc
 from webrtc.utils.events import EventTarget
 
+if TYPE_CHECKING:
+    import webrtc
+
 _TONES = re.compile(r'[0-9A-Da-d#*,]*')
 
 
-class RTCDTMFSender(WebRTCObject, EventTarget):
+class RTCDTMFSender(WebRTCObject[wrtc.RTCDTMFSender], EventTarget):
     """Sends DTMF tones on an audio sender (:attr:`webrtc.RTCRtpSender.dtmf`).
 
     Events (see :meth:`on`):
@@ -24,12 +32,12 @@ class RTCDTMFSender(WebRTCObject, EventTarget):
     _class = wrtc.RTCDTMFSender
     _events = ('tonechange',)
 
-    def _on_event(self, name: str, *args):
+    def _on_event(self, _name: str, *args: object) -> None:
         _, tone_buffer, insertion = args
         # the tone buffer is shortened along with the event
         self._native_obj._surfaceBuffer(tone_buffer, insertion)
 
-    def _create_event(self, name: str, *args):
+    def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
         tone, _, _ = args
         return RTCDTMFToneChangeEvent(name, tone, target=self)
 
@@ -43,11 +51,12 @@ class RTCDTMFSender(WebRTCObject, EventTarget):
             inter_tone_gap (:obj:`int`, optional): The pause between tones in milliseconds, at least 30.
 
         Raises:
-            :obj:`webrtc.InvalidCharacterError`: If ``tones`` has another character.
-            :obj:`webrtc.InvalidStateError`: If the transceiver of the sender is stopped or doesn't send.
+            webrtc.InvalidCharacterError: If ``tones`` has another character.
+            webrtc.InvalidStateError: If the transceiver of the sender is stopped or doesn't send.
         """
         if not _TONES.fullmatch(tones):
-            raise InvalidCharacterError(f'{tones!r} has characters that are not DTMF tones')
+            msg = f'{tones!r} has characters that are not DTMF tones'
+            raise InvalidCharacterError(msg)
         duration = min(max(int(duration), 40), 6000)
         inter_tone_gap = min(max(int(inter_tone_gap), 30), 6000)
         self._native_obj.insertDTMF(tones.upper(), duration, inter_tone_gap)

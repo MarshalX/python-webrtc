@@ -5,7 +5,11 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING, Any, Dict, Union
+"""The description of one end of a connection."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from webrtc import RTCSessionDescriptionInit, WebRTCObject, wrtc
 
@@ -14,8 +18,9 @@ if TYPE_CHECKING:
 
 
 class RTCSessionDescription(WebRTCObject):
-    """The :obj:`webrtc.RTCSessionDescription` interface describes one end of a connection or potential
-    connection and how it's configured. Each :obj:`webrtc.RTCSessionDescription` consists of
+    """One end of a connection or potential connection and how it's configured.
+
+    Each :obj:`webrtc.RTCSessionDescription` consists of
     a description type indicating which part of the offer/answer negotiation process it describes
     and of the SDP descriptor of the session.
 
@@ -38,26 +43,28 @@ class RTCSessionDescription(WebRTCObject):
             is set.
 
     Raises:
-        :obj:`TypeError`: If the type is missing, or the SDP is :obj:`None`.
+        TypeError: If the type is missing, or the SDP is :obj:`None`.
     """
 
     _class = wrtc.RTCSessionDescription
 
     def __init__(
         self,
-        type: Union['webrtc.RTCSdpType', 'webrtc.RTCSessionDescriptionInit', Dict[str, Any]],
+        type: webrtc.RTCSdpType | webrtc.RTCSessionDescriptionInit | dict[str, Any],
         sdp: str = '',
-    ):
+    ) -> None:
         if isinstance(type, dict):
             if type.get('type') is None:
-                raise TypeError('RTCSessionDescriptionInit requires a type')
+                msg = 'RTCSessionDescriptionInit requires a type'
+                raise TypeError(msg)
             type, sdp = type['type'], type.get('sdp', '')
         if sdp is None:
-            raise TypeError('The SDP of a description may not be None')
+            msg = 'The SDP of a description may not be None'
+            raise TypeError(msg)
         init = type if isinstance(type, RTCSessionDescriptionInit) else RTCSessionDescriptionInit(type, sdp)
         super().__init__(self._class(init._native_obj))
 
-    def to_json(self) -> Dict[str, str]:
+    def to_json(self) -> dict[str, str]:
         """The description as a JSON-serializable dictionary, to send to the remote peer.
 
         Returns:
@@ -66,12 +73,12 @@ class RTCSessionDescription(WebRTCObject):
         return {'type': self.type.value, 'sdp': self.sdp}
 
     @property
-    def type(self) -> 'webrtc.RTCSdpType':
+    def type(self) -> webrtc.RTCSdpType:
         """:obj:`webrtc.RTCSdpType`: A member of the :obj:`webrtc.RTCSdpType` enum."""
         return self._native_obj.type
 
     @property
-    def sdp(self):
+    def sdp(self) -> str:
         """:obj:`str`: A string containing a SDP message describing the session."""
         return self._native_obj.sdp
 

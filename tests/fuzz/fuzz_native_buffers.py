@@ -10,12 +10,15 @@
 The native module must stay memory safe on its own: it may raise, but never read or write out of a buffer.
 """
 
+from __future__ import annotations
+
+import contextlib
 import sys
 
 import atheris
 
 with atheris.instrument_imports():
-    from _input import Input
+    from inputs import Input
 
 from webrtc import wrtc
 
@@ -30,7 +33,7 @@ MATRICES = ['', 'rgb', 'bt709', 'bt470bg', 'smpte170m', 'bt2020-ncl', 'unknown']
 EXPECTED = (TypeError, ValueError, RuntimeError, BufferError)
 
 
-def frame(inp: Input):
+def frame(inp: Input) -> wrtc.VideoFrameBuffer:
     width, height = inp.unsigned(40), inp.unsigned(40)
     layout = [(inp.unsigned(1 << 12), inp.unsigned(256)) for _ in range(inp.small(4))]
     return wrtc.VideoFrameBuffer.fromData(
@@ -78,10 +81,8 @@ def audio(inp: Input) -> None:
 
 def test_one_input(data: bytes) -> None:
     inp = Input(data)
-    try:
+    with contextlib.suppress(EXPECTED):
         video(inp) if inp.flag() else audio(inp)
-    except EXPECTED:
-        pass
 
 
 def main() -> None:

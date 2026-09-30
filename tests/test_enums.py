@@ -7,6 +7,8 @@
 
 """Enums: their members are their spec strings, in both directions of the native API."""
 
+from __future__ import annotations
+
 import enum
 
 import pytest
@@ -15,15 +17,15 @@ import webrtc
 import webrtc.enums
 
 
-def test_members_are_their_values():
-    """Members equal their values, and print as them"""
+def test_members_are_their_values() -> None:
+    """Members equal their values, and print as them."""
     assert webrtc.RTCSignalingState.have_local_offer == 'have-local-offer'
     assert webrtc.RTCPriorityType('very-low') is webrtc.RTCPriorityType.very_low
     assert str(webrtc.MediaType.audio) == f'{webrtc.MediaType.audio}' == 'audio'
 
 
-def test_enums_are_exported():
-    """Every enum is exported from the package, and defined in one module"""
+def test_enums_are_exported() -> None:
+    """Every enum is exported from the package, and defined in one module."""
     enums = [
         (name, value)
         for name, value in vars(webrtc.enums).items()
@@ -32,19 +34,20 @@ def test_enums_are_exported():
     assert enums
     for name, value in enums:
         if not name.startswith('_'):
-            assert getattr(webrtc, name) is value and name in webrtc.__all__
+            assert getattr(webrtc, name) is value
+            assert name in webrtc.__all__
 
 
-def test_native_getters_return_members(pc):
-    """The native API returns members"""
+def test_native_getters_return_members(pc: webrtc.RTCPeerConnection) -> None:
+    """The native API returns members."""
     assert pc.signaling_state is webrtc.RTCSignalingState.stable
     transceiver = pc.add_transceiver('audio')
     assert transceiver.kind is webrtc.MediaType.audio
     assert transceiver.direction is webrtc.TransceiverDirection.sendrecv
 
 
-def test_native_setters_take_members_and_values(pc):
-    """The native API takes members and their values"""
+def test_native_setters_take_members_and_values(pc: webrtc.RTCPeerConnection) -> None:
+    """The native API takes members and their values."""
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
     transceiver.direction = 'recvonly'
     assert transceiver.direction is webrtc.TransceiverDirection.recvonly
@@ -52,8 +55,8 @@ def test_native_setters_take_members_and_values(pc):
     assert transceiver.direction == 'inactive'
 
 
-def test_invalid_values_are_type_errors(pc):
-    """Like for a WebIDL enum, a value the enum doesn't have is a TypeError"""
+def test_invalid_values_are_type_errors(pc: webrtc.RTCPeerConnection) -> None:
+    """Like for a WebIDL enum, a value the enum doesn't have is a TypeError."""
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
     with pytest.raises(TypeError):
         transceiver.direction = 'nonsense'
@@ -65,7 +68,7 @@ def test_invalid_values_are_type_errors(pc):
         webrtc.RTCPeerConnection(webrtc.RTCConfiguration(bundle_policy='nonsense'))
 
 
-def test_data_channel_priority(pc):
-    """Every priority of a data channel round-trips through libwebrtc"""
+def test_data_channel_priority(pc: webrtc.RTCPeerConnection) -> None:
+    """Every priority of a data channel round-trips through libwebrtc."""
     for priority in webrtc.RTCPriorityType:
-        assert pc.create_data_channel('x', priority=priority.value).priority is priority
+        assert pc.create_data_channel('x', {'priority': priority.value}).priority is priority

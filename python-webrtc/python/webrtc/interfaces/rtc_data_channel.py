@@ -5,18 +5,107 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING, Optional, Union
+"""RTCDataChannel of WebRTC."""
 
-from webrtc import BinaryType, Blob, MessageEvent, RTCDataChannelState, RTCErrorEvent, WebRTCObject, wrtc
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, ClassVar
+
+from webrtc import (
+    BinaryType,
+    Blob,
+    MessageEvent,
+    RTCDataChannelState,
+    RTCErrorEvent,
+    RTCPriorityType,
+    WebRTCObject,
+    wrtc,
+)
 from webrtc.utils.events import EventTarget
+from webrtc.utils.names import Alias, alias
 
 if TYPE_CHECKING:
     import webrtc
 
+#: The maximum of an unsigned short, which limits the members of the init
+MAX_UNSIGNED_SHORT = 65535
 
-class RTCDataChannel(WebRTCObject, EventTarget):
-    """A bidirectional channel of messages between the peers, created with
-    :meth:`webrtc.RTCPeerConnection.create_data_channel` or received with its ``datachannel`` event.
+
+def check_utf8_length(name: str, value: str) -> None:
+    """Checks a string of the init fits in an unsigned short number of bytes, as the specification requires.
+
+    Raises:
+        ValueError: If it doesn't.
+    """
+    if len(value.encode()) > MAX_UNSIGNED_SHORT:
+        msg = f'{name} is longer than {MAX_UNSIGNED_SHORT} bytes'
+        raise ValueError(msg)
+
+
+@dataclass
+class RTCDataChannelInit:
+    """How :meth:`webrtc.RTCPeerConnection.create_data_channel` creates a channel.
+
+    Args:
+        ordered (:obj:`bool`, optional): Whether messages are delivered in order.
+        max_packet_life_time (:obj:`int`, optional): Makes the channel unreliable: how long in milliseconds
+            a message is retransmitted.
+        max_retransmits (:obj:`int`, optional): Makes the channel unreliable: how many times a message is
+            retransmitted. Can't be set along with ``max_packet_life_time``.
+        protocol (:obj:`str`, optional): The subprotocol name, up to 65535 bytes in UTF-8.
+        negotiated (:obj:`bool`, optional): Whether the application creates the channel on both ends
+            with the same ``id``, instead of announcing it to the remote peer.
+        id (:obj:`int`, optional): The SCTP stream id (0 to 65534) of a ``negotiated`` channel, which requires it.
+            Ignored otherwise, as the connection picks the id.
+        priority (:obj:`webrtc.RTCPriorityType`, optional): The priority of the channel.
+    """
+
+    ordered: bool = True
+    max_packet_life_time: int | None = None
+    max_retransmits: int | None = None
+    protocol: str = ''
+    negotiated: bool = False
+    id: int | None = None
+    priority: RTCPriorityType | str = RTCPriorityType.low
+
+    def _check(self) -> None:
+        """Checks the members, as the specification requires.
+
+        Raises:
+            ValueError: If a member is out of range, or both ``max_packet_life_time`` and ``max_retransmits`` are
+                set, or ``negotiated`` is set without ``id``.
+        """
+        check_utf8_length('protocol', self.protocol)
+        for name in ('max_packet_life_time', 'max_retransmits'):
+            value = getattr(self, name)
+            if value is not None and not 0 <= value <= MAX_UNSIGNED_SHORT:
+                msg = f'{name} must be from 0 to {MAX_UNSIGNED_SHORT}, not {value}'
+                raise ValueError(msg)
+        if self.max_packet_life_time is not None and self.max_retransmits is not None:
+            msg = 'max_packet_life_time and max_retransmits can not both be set'
+            raise ValueError(msg)
+        if not self.negotiated:
+            return
+        if self.id is None:
+            msg = 'a negotiated channel needs an id'
+            raise ValueError(msg)
+        # the last stream id is reserved
+        if not 0 <= self.id < MAX_UNSIGNED_SHORT:
+            msg = f'id must be from 0 to {MAX_UNSIGNED_SHORT - 1}, not {self.id}'
+            raise ValueError(msg)
+
+    #: Alias for :attr:`max_packet_life_time`
+    maxPacketLifeTime: ClassVar[Alias[int | None]] = alias('max_packet_life_time')
+    #: Alias for :attr:`max_retransmits`
+    maxRetransmits: ClassVar[Alias[int | None]] = alias('max_retransmits')
+
+
+class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget):
+    """A bidirectional channel of messages between the peers.
+
+    It's created with :meth:`webrtc.RTCPeerConnection.create_data_channel` or received with its ``datachannel``
+    event.
 
     Events (see :meth:`on`):
         ``open`` (:obj:`webrtc.Event`): The channel can be used to send messages.
@@ -32,9 +121,9 @@ class RTCDataChannel(WebRTCObject, EventTarget):
     _class = wrtc.RTCDataChannel
     _events = ('open', 'message', 'bufferedamountlow', 'error', 'closing', 'close')
 
-    def _on_event(self, name: str, *args):
+    def _on_event(self, name: str, *args: object) -> None:
         # readyState changes along with the events
-        if name in ('open', 'closing', 'close'):
+        if name in {'open', 'closing', 'close'}:
             (state,) = args
             self._native_obj._surfaceState(state)
         elif name == '_sent':
@@ -43,7 +132,7 @@ class RTCDataChannel(WebRTCObject, EventTarget):
                 # in the same task as the decrease, before anything that arrived meanwhile
                 self._dispatch('bufferedamountlow')
 
-    def _create_event(self, name: str, *args):
+    def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
         if name == 'open' and self.ready_state != RTCDataChannelState.open:
             # closed before it opened
             return None
@@ -70,12 +159,12 @@ class RTCDataChannel(WebRTCObject, EventTarget):
         return self._native_obj.ordered
 
     @property
-    def max_packet_life_time(self) -> Optional[int]:
+    def max_packet_life_time(self) -> int | None:
         """:obj:`int`, optional: How long in milliseconds a message is retransmitted in unreliable mode."""
         return self._native_obj.maxPacketLifeTime
 
     @property
-    def max_retransmits(self) -> Optional[int]:
+    def max_retransmits(self) -> int | None:
         """:obj:`int`, optional: How many times a message is retransmitted in unreliable mode."""
         return self._native_obj.maxRetransmits
 
@@ -90,17 +179,17 @@ class RTCDataChannel(WebRTCObject, EventTarget):
         return self._native_obj.negotiated
 
     @property
-    def id(self) -> Optional[int]:
+    def id(self) -> int | None:
         """:obj:`int`, optional: The SCTP stream id of the channel, :obj:`None` until it's known."""
         return self._native_obj.id
 
     @property
-    def priority(self) -> 'webrtc.RTCPriorityType':
+    def priority(self) -> webrtc.RTCPriorityType:
         """:obj:`webrtc.RTCPriorityType`: The priority of the channel."""
         return self._native_obj.priority
 
     @property
-    def ready_state(self) -> 'webrtc.RTCDataChannelState':
+    def ready_state(self) -> webrtc.RTCDataChannelState:
         """:obj:`webrtc.RTCDataChannelState`: The state of the channel."""
         return self._native_obj.readyState
 
@@ -115,38 +204,42 @@ class RTCDataChannel(WebRTCObject, EventTarget):
         return self._native_obj.bufferedAmountLowThreshold
 
     @buffered_amount_low_threshold.setter
-    def buffered_amount_low_threshold(self, value: int):
+    def buffered_amount_low_threshold(self, value: int) -> None:
         if not 0 <= value < 2**64:
-            raise ValueError(f'buffered_amount_low_threshold must be from 0 to 2**64-1, not {value}')
+            msg = f'buffered_amount_low_threshold must be from 0 to 2**64-1, not {value}'
+            raise ValueError(msg)
         self._native_obj.bufferedAmountLowThreshold = value
 
     @property
     def binary_type(self) -> BinaryType:
-        """:obj:`webrtc.BinaryType`: What binary messages are delivered as: :obj:`bytes` (``arraybuffer``, the
-        default) or :obj:`webrtc.Blob` (``blob``)."""
+        """:obj:`webrtc.BinaryType`: What binary messages are delivered as, :obj:`bytes` by default.
+
+        :obj:`bytes` for ``arraybuffer``, :obj:`webrtc.Blob` for ``blob``.
+        """
         return BinaryType(self._native_obj.binaryType)
 
     @binary_type.setter
-    def binary_type(self, value: Union[BinaryType, str]):
+    def binary_type(self, value: BinaryType | str) -> None:
         self._native_obj.binaryType = BinaryType(value).value
 
-    def send(self, data: Union[str, bytes, bytearray, memoryview, Blob]) -> None:
+    def send(self, data: str | bytes | bytearray | memoryview | Blob) -> None:
         """Sends a message to the remote peer.
 
         Args:
             data (:obj:`str`, bytes-like or :obj:`webrtc.Blob`): A text message, or a binary one.
 
         Raises:
-            :obj:`TypeError`: If the data is neither text, bytes nor a :obj:`webrtc.Blob`.
-            :obj:`webrtc.InvalidStateError`: If the channel isn't open.
-            :obj:`webrtc.OperationError`: If the message can't be queued, like when the queue is full.
+            TypeError: If the data is neither text, bytes nor a :obj:`webrtc.Blob`.
+            webrtc.InvalidStateError: If the channel isn't open.
+            webrtc.OperationError: If the message can't be queued, like when the queue is full.
         """
         if isinstance(data, str):
-            self._native_obj.send(data.encode(), False)
+            self._native_obj.send(data.encode(), binary=False)
         elif isinstance(data, (bytes, bytearray, memoryview, Blob)):
-            self._native_obj.send(bytes(data), True)
+            self._native_obj.send(bytes(data), binary=True)
         else:
-            raise TypeError(f'data must be str, bytes-like or Blob, not {type(data).__name__}')
+            msg = f'data must be str, bytes-like or Blob, not {type(data).__name__}'
+            raise TypeError(msg)
 
     def close(self) -> None:
         """Closes the channel. Messages queued before are still sent."""

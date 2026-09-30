@@ -7,15 +7,17 @@
 
 """The same objects used from many Python threads at once: no crash, no deadlock, no corruption."""
 
+from __future__ import annotations
+
 import pytest
 
 from tests.helpers import run_isolated
 
 
-def test_constructors_from_many_threads():
-    """Constructors register their Python object with the GIL: pybind11's registry was corrupted"""
+def test_constructors_from_many_threads() -> None:
+    """Constructors register their Python object with the GIL: pybind11's registry was corrupted."""
     output = run_isolated(
-        '''
+        """
         import gc
         import threading
         import time
@@ -46,15 +48,15 @@ def test_constructors_from_many_threads():
         track.stop()
         assert not errors, errors
         print('constructed')
-        ''',
+        """,
         timeout=90,
     )
     assert 'constructed' in output
 
 
 @pytest.mark.parametrize('kind', ['video generator', 'audio generator', 'processor'])
-def test_released_while_libwebrtc_threads_wait_for_the_gil(kind):
-    """A track's proxy released with the GIL deadlocked with the signaling thread"""
+def test_released_while_libwebrtc_threads_wait_for_the_gil(kind: str) -> None:
+    """A track's proxy released with the GIL deadlocked with the signaling thread."""
     output = run_isolated(
         f"""
         import asyncio
@@ -100,8 +102,8 @@ def test_released_while_libwebrtc_threads_wait_for_the_gil(kind):
     assert 'released' in output
 
 
-def test_wrappers_created_and_released_on_many_threads():
-    """Releasing a wrapper with the GIL waited for a holder lock held across a BlockingCall"""
+def test_wrappers_created_and_released_on_many_threads() -> None:
+    """Releasing a wrapper with the GIL waited for a holder lock held across a BlockingCall."""
     output = run_isolated(
         """
         import asyncio
@@ -153,8 +155,8 @@ def test_wrappers_created_and_released_on_many_threads():
     assert 'done' in output
 
 
-def test_wrappers_created_while_a_description_wraps_them():
-    """A thread creating a wrapper held the holder's lock waiting for the signaling thread, which waited for it"""
+def test_wrappers_created_while_a_description_wraps_them() -> None:
+    """A thread creating a wrapper held the holder's lock waiting for the signaling thread, which waited for it."""
     output = run_isolated(
         """
         import asyncio
@@ -201,8 +203,8 @@ def test_wrappers_created_while_a_description_wraps_them():
     assert 'done' in output
 
 
-def test_objects_of_connections_read_while_they_connect():
-    """Wrapping under a lock of the connection (its SCTP transport, its tracks) waited for the signaling thread"""
+def test_objects_of_connections_read_while_they_connect() -> None:
+    """Wrapping under a lock of the connection (its SCTP transport, its tracks) waited for the signaling thread."""
     output = run_isolated(
         """
         import asyncio

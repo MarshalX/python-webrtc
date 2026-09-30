@@ -7,6 +7,8 @@
 
 """Media through a connection: generated on one end, read with a processor on the other."""
 
+from __future__ import annotations
+
 import array
 import asyncio
 import math
@@ -20,13 +22,13 @@ TIMEOUT = 20
 WIDTH, HEIGHT = 320, 240
 
 
-def solid_i420(y, u, v):
+def solid_i420(y: int, u: int, v: int) -> bytes:
     chroma = (WIDTH // 2) * (HEIGHT // 2)
     return bytes([y] * (WIDTH * HEIGHT) + [u] * chroma + [v] * chroma)
 
 
-async def write_sine(generator, frequency, stop):
-    """Writes a sine of 48 kHz mono in 10 ms frames, at the pace of real time"""
+async def write_sine(generator: webrtc.MediaStreamTrackGenerator, frequency: float, *, stop: asyncio.Event) -> None:
+    """Writes a sine of 48 kHz mono in 10 ms frames, at the pace of real time."""
     writer = generator.writable.get_writer()
     loop = asyncio.get_running_loop()
     start = loop.time()
@@ -48,45 +50,54 @@ async def write_sine(generator, frequency, stop):
         await asyncio.sleep(max(0.0, start + written / 48000 - loop.time()))
 
 
-def dominant_frequency(samples, rate):
-    """The frequency of a sine, from its rising zero crossings"""
+def dominant_frequency(samples: list[float], rate: int) -> float:
+    """The frequency of a sine, from its rising zero crossings."""
     crossings = [i for i in range(1, len(samples)) if samples[i - 1] < 0 <= samples[i]]
     return (len(crossings) - 1) * rate / (crossings[-1] - crossings[0])
 
 
+async def read_frames(reader: webrtc.ReadableStreamDefaultReader, count: int) -> tuple[list[int], bytearray]:
+    """Reads frames of the size, returns their timestamps and the last one in RGBA."""
+    timestamps = []
+    for _ in range(count):
+        frame = (await asyncio.wait_for(reader.read(), TIMEOUT)).value
+        assert (frame.coded_width, frame.coded_height) == (WIDTH, HEIGHT)
+        assert frame.metadata().rtp_timestamp > 0
+        timestamps.append(frame.timestamp)
+        rgba = bytearray(frame.allocation_size({'format': 'RGBA'}))
+        await frame.copy_to(rgba, {'format': 'RGBA'})
+        frame.close()
+    return timestamps, rgba
+
+
 @pytest.mark.asyncio
-async def test_video_through_a_connection(caller, callee):
-    """Frames of one color arrive in that color, at their size, with increasing timestamps"""
+async def test_video_through_a_connection(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """Frames of one color arrive in that color, at their size, with increasing timestamps."""
     generator = webrtc.VideoTrackGenerator()
     # pure red in BT.601 limited range
-    async with writing(write_video, generator, solid_i420(81, 90, 240), WIDTH, HEIGHT):
-        remote = await connect_track(caller, callee, generator.track, TIMEOUT)
+    async with writing(write_video, generator, solid_i420(81, 90, 240), (WIDTH, HEIGHT)):
+        remote = await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
         reader = webrtc.MediaStreamTrackProcessor(remote, max_buffer_size=5).readable.get_reader()
-        timestamps = []
-        for _ in range(10):
-            frame = (await asyncio.wait_for(reader.read(), TIMEOUT)).value
-            assert (frame.coded_width, frame.coded_height) == (WIDTH, HEIGHT)
-            assert frame.metadata().rtp_timestamp > 0
-            timestamps.append(frame.timestamp)
-            rgba = bytearray(frame.allocation_size({'format': 'RGBA'}))
-            await frame.copy_to(rgba, {'format': 'RGBA'})
-            frame.close()
+        timestamps, rgba = await read_frames(reader, 10)
         await reader.cancel()
     generator.track.stop()
 
     center = (HEIGHT // 2 * WIDTH + WIDTH // 2) * 4
     r, g, b, a = rgba[center : center + 4]
     # encoding adds some noise
-    assert r > 230 and g < 25 and b < 25 and a == 255
+    assert r > 230
+    assert g < 25
+    assert b < 25
+    assert a == 255
     assert timestamps == sorted(set(timestamps))
 
 
 @pytest.mark.asyncio
-async def test_audio_through_a_connection(caller, callee):
-    """A sine arrives as a sine of the same frequency, decoded at 48 kHz"""
+async def test_audio_through_a_connection(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """A sine arrives as a sine of the same frequency, decoded at 48 kHz."""
     generator = webrtc.MediaStreamTrackGenerator('audio')
     async with writing(write_sine, generator, 440):
-        remote = await connect_track(caller, callee, generator, TIMEOUT)
+        remote = await connect_track(caller, callee, generator, timeout=TIMEOUT)
         reader = webrtc.MediaStreamTrackProcessor(remote, max_buffer_size=100).readable.get_reader()
         samples = []
         for chunk in range(150):
@@ -106,11 +117,13 @@ async def test_audio_through_a_connection(caller, callee):
 
 
 @pytest.mark.asyncio
-async def test_remote_track_end_closes_the_processor(caller, callee):
-    """The processor of a remote track closes when the remote peer stops sending it"""
+async def test_remote_track_end_closes_the_processor(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """The processor of a remote track closes when the remote peer stops sending it."""
     generator = webrtc.VideoTrackGenerator()
-    async with writing(write_video, generator, solid_i420(128, 128, 128), WIDTH, HEIGHT):
-        remote = await connect_track(caller, callee, generator.track, TIMEOUT)
+    async with writing(write_video, generator, solid_i420(128, 128, 128), (WIDTH, HEIGHT)):
+        remote = await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
         reader = webrtc.MediaStreamTrackProcessor(remote).readable.get_reader()
         (await asyncio.wait_for(reader.read(), TIMEOUT)).value.close()
         callee.close()

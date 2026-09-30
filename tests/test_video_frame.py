@@ -7,6 +7,8 @@
 
 """VideoFrame of WebCodecs: construction, copies, conversions and lifetime."""
 
+from __future__ import annotations
+
 import gc
 import math
 import struct
@@ -20,12 +22,12 @@ from webrtc import PlaneLayout, VideoPixelFormat
 I420_DATA = bytes(range(1, 13))
 
 
-def i420_4x2(data=I420_DATA, **init):
+def i420_4x2(data: bytes = I420_DATA, **init: object) -> webrtc.VideoFrame:
     return webrtc.VideoFrame(data, **{'format': 'I420', 'coded_width': 4, 'coded_height': 2, 'timestamp': 0, **init})
 
 
-def test_construct_from_buffer():
-    """A frame has the attributes of its init, and defaults for the rest"""
+def test_construct_from_buffer() -> None:
+    """A frame has the attributes of its init, and defaults for the rest."""
     frame = i420_4x2(duration=15)
     assert frame.format == VideoPixelFormat.I420
     assert (frame.coded_width, frame.coded_height) == (4, 2)
@@ -33,13 +35,14 @@ def test_construct_from_buffer():
     assert frame.coded_rect == frame.visible_rect
     assert (frame.display_width, frame.display_height) == (4, 2)
     assert (frame.timestamp, frame.duration) == (0, 15)
-    assert frame.color_space == webrtc.VideoColorSpace('bt709', 'bt709', 'bt709', False)
-    assert frame.codedWidth == frame.coded_width and frame.allocationSize() == 12
+    assert frame.color_space == webrtc.VideoColorSpace('bt709', 'bt709', 'bt709', full_range=False)
+    assert frame.codedWidth == frame.coded_width
+    assert frame.allocationSize() == 12
     frame.close()
 
 
-def test_init_as_dataclass_or_dictionary():
-    """The init is a dataclass, a dictionary with camelCase names, or keyword arguments"""
+def test_init_as_dataclass_or_dictionary() -> None:
+    """The init is a dataclass, a dictionary with camelCase names, or keyword arguments."""
     init = webrtc.VideoFrameBufferInit(format=VideoPixelFormat.I420, coded_width=4, coded_height=2, timestamp=7)
     for frame in (
         webrtc.VideoFrame(I420_DATA, init),
@@ -61,14 +64,14 @@ def test_init_as_dataclass_or_dictionary():
         {'format': 'I420', 'coded_width': 4, 'coded_height': 2},
     ],
 )
-def test_invalid_init(init):
-    """An invalid init, or a rect that isn't aligned to the chroma planes, is a TypeError"""
+def test_invalid_init(init: dict[str, object]) -> None:
+    """An invalid init, or a rect that isn't aligned to the chroma planes, is a TypeError."""
     with pytest.raises(TypeError):
         webrtc.VideoFrame(I420_DATA, **init)
 
 
-def test_buffer_too_small():
-    """The buffer must hold the frame at its layout"""
+def test_buffer_too_small() -> None:
+    """The buffer must hold the frame at its layout."""
     with pytest.raises(TypeError):
         i420_4x2(I420_DATA[:11])
     with pytest.raises(TypeError):
@@ -77,8 +80,8 @@ def test_buffer_too_small():
 
 
 @pytest.mark.asyncio
-async def test_buffer_is_copied():
-    """Changing the buffer later doesn't change the frame"""
+async def test_buffer_is_copied() -> None:
+    """Changing the buffer later doesn't change the frame."""
     data = bytearray(I420_DATA)
     frame = i420_4x2(data)
     data[0] = 99
@@ -89,8 +92,8 @@ async def test_buffer_is_copied():
 
 
 @pytest.mark.asyncio
-async def test_copy_to_layouts():
-    """copyTo writes the planes at the layout asked for, and returns it"""
+async def test_copy_to_layouts() -> None:
+    """CopyTo writes the planes at the layout asked for, and returns it."""
     frame = i420_4x2()
     out = bytearray(12)
     assert await frame.copy_to(out) == [PlaneLayout(0, 4), PlaneLayout(8, 2), PlaneLayout(10, 2)]
@@ -105,8 +108,8 @@ async def test_copy_to_layouts():
 
 
 @pytest.mark.asyncio
-async def test_copy_to_rect():
-    """A rect copies part of the frame, aligned to the chroma planes"""
+async def test_copy_to_rect() -> None:
+    """A rect copies part of the frame, aligned to the chroma planes."""
     frame = i420_4x2()
     options = {'rect': {'x': 2, 'y': 0, 'width': 2, 'height': 2}}
     out = bytearray(frame.allocation_size(options))
@@ -118,8 +121,8 @@ async def test_copy_to_rect():
 
 
 @pytest.mark.asyncio
-async def test_copy_to_errors():
-    """A small buffer and a layout of the wrong number of planes are TypeErrors, other formats aren't supported"""
+async def test_copy_to_errors() -> None:
+    """A small buffer and a layout of the wrong number of planes are TypeErrors, other formats aren't supported."""
     frame = i420_4x2()
     with pytest.raises(TypeError):
         await frame.copy_to(bytearray(11))
@@ -135,8 +138,8 @@ async def test_copy_to_errors():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('format', ['RGBA', 'RGBX', 'BGRA', 'BGRX'])
-async def test_convert_i420_to_rgb(format):
-    """copyTo converts YUV to the RGB formats, with the matrix and range of the frame"""
+async def test_convert_i420_to_rgb(format: str) -> None:
+    """CopyTo converts YUV to the RGB formats, with the matrix and range of the frame."""
     # pure red in BT.601 limited range: Y 81, U 90, V 240
     data = bytes([81] * 16 + [90] * 4 + [240] * 4)
     frame = webrtc.VideoFrame(
@@ -151,15 +154,19 @@ async def test_convert_i420_to_rgb(format):
     assert len(out) == 64
     assert await frame.copy_to(out, {'format': format}) == [PlaneLayout(0, 16)]
     r, g, b, a = out[:4] if format.startswith('RGB') else (out[2], out[1], out[0], out[3])
-    assert r > 245 and g < 10 and b < 10 and a == 255
+    assert r > 245
+    assert g < 10
+    assert b < 10
+    assert a == 255
     frame.close()
 
 
 @pytest.mark.asyncio
-async def test_rgb_formats_swap_and_alpha():
-    """RGBA converts to BGRA by swapping R and B, keeping alpha, and to RGBX without it"""
+async def test_rgb_formats_swap_and_alpha() -> None:
+    """RGBA converts to BGRA by swapping R and B, keeping alpha, and to RGBX without it."""
     frame = webrtc.VideoFrame(bytes([1, 2, 3, 4] * 4), format='RGBA', coded_width=2, coded_height=2, timestamp=0)
-    assert frame.color_space.matrix == 'rgb' and frame.color_space.full_range
+    assert frame.color_space.matrix == 'rgb'
+    assert frame.color_space.full_range
     out = bytearray(16)
     await frame.copy_to(out, {'format': 'BGRA'})
     assert list(out[:4]) == [3, 2, 1, 4]
@@ -170,7 +177,7 @@ async def test_rgb_formats_swap_and_alpha():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    'format, size',
+    ('format', 'size'),
     [
         ('I420P10', 24),
         ('I420A', 20),
@@ -180,8 +187,8 @@ async def test_rgb_formats_swap_and_alpha():
         ('NV12', 12),
     ],
 )
-async def test_other_formats_round_trip(format, size):
-    """Every planar format is kept as it is, and converts to RGBA"""
+async def test_other_formats_round_trip(format: str, size: int) -> None:
+    """Every planar format is kept as it is, and converts to RGBA."""
     data = bytes(i % 200 for i in range(size))
     frame = webrtc.VideoFrame(data, format=format, coded_width=4, coded_height=2, timestamp=0)
     assert frame.allocation_size() == size
@@ -193,8 +200,8 @@ async def test_other_formats_round_trip(format, size):
     frame.close()
 
 
-def test_high_bit_depth_samples_are_little_endian_16_bit():
-    """P10 formats have 2 bytes a sample"""
+def test_high_bit_depth_samples_are_little_endian_16_bit() -> None:
+    """P10 formats have 2 bytes a sample."""
     y = struct.pack('<8H', *[1023] * 8)
     uv = struct.pack('<4H', *[512] * 4)
     frame = webrtc.VideoFrame(y + uv, format='I420P10', coded_width=4, coded_height=2, timestamp=0)
@@ -202,8 +209,8 @@ def test_high_bit_depth_samples_are_little_endian_16_bit():
     frame.close()
 
 
-def test_frame_from_frame():
-    """A frame from another one shares its pixels, with a visible rect, display size, timestamp or alpha of its own"""
+def test_frame_from_frame() -> None:
+    """A frame from another one shares its pixels, with a visible rect, display size, timestamp or alpha of its own."""
     frame = i420_4x2(timestamp=1234, display_width=8, display_height=2)
     crop = webrtc.VideoFrame(frame, visible_rect={'x': 2, 'y': 0, 'width': 2, 'height': 2})
     assert (crop.coded_width, crop.visible_rect.x, crop.visible_rect.width) == (4, 2, 2)
@@ -220,8 +227,8 @@ def test_frame_from_frame():
         f.close()
 
 
-def test_rotation_and_flip():
-    """Rotations are rounded to a multiple of 90, and combine with the flip of the frame they're added to"""
+def test_rotation_and_flip() -> None:
+    """Rotations are rounded to a multiple of 90, and combine with the flip of the frame they're added to."""
     frame = webrtc.VideoFrame(bytes(32), format='RGBX', coded_width=4, coded_height=2, timestamp=0, rotation=-315)
     assert frame.rotation == 90
     assert (frame.display_width, frame.display_height) == (2, 4)
@@ -234,23 +241,25 @@ def test_rotation_and_flip():
 
 
 @pytest.mark.parametrize('rotation', [math.inf, -math.inf, math.nan])
-def test_rotation_must_be_finite(rotation):
-    """A rotation is a WebIDL double: non-finite values raise TypeError, they raised OverflowError (found by fuzzing)"""
+def test_rotation_must_be_finite(rotation: float) -> None:
+    """A rotation is a WebIDL double: non-finite values are a TypeError, not an OverflowError (found by fuzzing)."""
     with pytest.raises(TypeError):
         webrtc.VideoFrame(bytes(32), format='RGBX', coded_width=4, coded_height=2, timestamp=0, rotation=rotation)
-    with webrtc.VideoFrame(bytes(32), format='RGBX', coded_width=4, coded_height=2, timestamp=0) as frame:
-        with pytest.raises(TypeError):
-            webrtc.VideoFrame(frame, rotation=rotation)
+    frame = webrtc.VideoFrame(bytes(32), format='RGBX', coded_width=4, coded_height=2, timestamp=0)
+    with frame, pytest.raises(TypeError):
+        webrtc.VideoFrame(frame, rotation=rotation)
 
 
 @pytest.mark.asyncio
-async def test_close_and_clone():
-    """A closed frame has no pixels, a clone is closed separately"""
+async def test_close_and_clone() -> None:
+    """A closed frame has no pixels, a clone is closed separately."""
     frame = i420_4x2()
     clone = frame.clone()
     frame.close()
     frame.close()
-    assert frame.format is None and frame.coded_width == 0 and frame.visible_rect is None
+    assert frame.format is None
+    assert frame.coded_width == 0
+    assert frame.visible_rect is None
     assert frame.timestamp == 0
     with pytest.raises(webrtc.InvalidStateError):
         frame.allocation_size()
@@ -266,16 +275,20 @@ async def test_close_and_clone():
     assert clone.format is None
 
 
-def test_unclosed_frame_warns():
-    """A frame garbage collected without being closed warns"""
+def drop_unclosed_frame() -> None:
+    i420_4x2()
+    gc.collect()
+
+
+def test_unclosed_frame_warns() -> None:
+    """A frame garbage collected without being closed warns."""
     with pytest.warns(ResourceWarning):
-        i420_4x2()
-        gc.collect()
+        drop_unclosed_frame()
 
 
 @pytest.mark.asyncio
-async def test_visible_rect_of_a_buffer_is_the_frame():
-    """A frame created from a buffer keeps its visible rect only, which becomes the whole frame"""
+async def test_visible_rect_of_a_buffer_is_the_frame() -> None:
+    """A frame created from a buffer keeps its visible rect only, which becomes the whole frame."""
     frame = i420_4x2(visible_rect={'x': 2, 'y': 0, 'width': 2, 'height': 2})
     assert (frame.coded_width, frame.coded_height) == (2, 2)
     assert frame.visible_rect == webrtc.DOMRectReadOnly(0, 0, 2, 2)

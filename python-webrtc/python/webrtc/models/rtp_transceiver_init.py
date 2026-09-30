@@ -5,7 +5,11 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING, List, Optional
+"""The options of a new transceiver."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from webrtc import WebRTCObject, wrtc
 
@@ -29,10 +33,10 @@ class RtpTransceiverInit(WebRTCObject):
 
     def __init__(
         self,
-        direction: Optional['webrtc.TransceiverDirection'] = None,
-        send_encodings: Optional[List['webrtc.RTCRtpEncodingParameters']] = None,
-        streams: Optional[List['webrtc.MediaStream']] = None,
-    ):
+        direction: webrtc.TransceiverDirection | None = None,
+        send_encodings: list[webrtc.RTCRtpEncodingParameters] | None = None,
+        streams: list[webrtc.MediaStream] | None = None,
+    ) -> None:
         super().__init__()
         self.__send_encodings = []
 
@@ -46,36 +50,42 @@ class RtpTransceiverInit(WebRTCObject):
             self.streams = streams
 
     @property
-    def direction(self) -> 'webrtc.TransceiverDirection':
+    def direction(self) -> webrtc.TransceiverDirection:
         """:obj:`webrtc.TransceiverDirection`: The new transceiver's preferred directionality.
+
         This value is used to initialize the new :obj:`webrtc.RTCRtpTransceiver` object's
-        :attr:`webrtc.RTCRtpTransceiver.direction` property."""
+        :attr:`webrtc.RTCRtpTransceiver.direction` property.
+        """
         return self._native_obj.direction
 
     @direction.setter
-    def direction(self, value: 'webrtc.TransceiverDirection'):
+    def direction(self, value: webrtc.TransceiverDirection) -> None:
         self._native_obj.direction = value
 
     @property
-    def send_encodings(self) -> List['webrtc.RTCRtpEncodingParameters']:
-        """:obj:`list` of :obj:`webrtc.RTCRtpEncodingParameters`: A list of encodings to allow when sending RTP media
-        from the :obj:`webrtc.RTCRtpSender`, one per simulcast layer."""
+    def send_encodings(self) -> list[webrtc.RTCRtpEncodingParameters]:
+        """:obj:`list` of :obj:`webrtc.RTCRtpEncodingParameters`: The encodings of the sender.
+
+        The encodings to allow when sending RTP media from the :obj:`webrtc.RTCRtpSender`, one per simulcast layer.
+        """
         return list(self.__send_encodings)
 
     @send_encodings.setter
-    def send_encodings(self, value: List['webrtc.RTCRtpEncodingParameters']):
+    def send_encodings(self, value: list[webrtc.RTCRtpEncodingParameters]) -> None:
         self.__send_encodings = list(value)
         self._native_obj.sendEncodings = [param._to_native() for param in value]
 
     @property
-    def streams(self) -> List['webrtc.MediaStream']:
-        """:obj:`list` of :obj:`webrtc.MediaStream`: A list of :obj:`webrtc.MediaStream` objects to add to the
-        transceiver's :obj:`webrtc.RTCRtpReceiver`; when the remote peer's :obj:`webrtc.RTCPeerConnection`'s track
-        event occurs, these are the streams that will be specified by that event."""
+    def streams(self) -> list[webrtc.MediaStream]:
+        """:obj:`list` of :obj:`webrtc.MediaStream`: The streams of the track of the sender.
+
+        When the remote peer's :obj:`webrtc.RTCPeerConnection`'s track event occurs, these are the streams that will be
+        specified by that event.
+        """
         return self.__original_streams
 
     @streams.setter
-    def streams(self, value: List['webrtc.MediaStream']):
+    def streams(self, value: list[webrtc.MediaStream]) -> None:
         self.__original_streams = value
 
         self._native_obj.streamIds = [stream.id for stream in value]

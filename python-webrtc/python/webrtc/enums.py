@@ -7,6 +7,8 @@
 
 """Enums with the spec string values: ``RTCSignalingState.have_local_offer == 'have-local-offer'``."""
 
+from __future__ import annotations
+
 import enum
 
 
@@ -266,9 +268,11 @@ class BinaryType(_StrEnum):
 
 
 class VideoPixelFormat(_StrEnum):
-    """The layout of the pixels of a :obj:`webrtc.VideoFrame`: Y, U, V (and alpha) planes of 8-bit samples, or of
-    10- and 12-bit samples stored in 16 bits (``P10``, ``P12``), NV12 with interleaved U and V, or 4 bytes per RGB
-    pixel."""
+    """The layout of the pixels of a :obj:`webrtc.VideoFrame`.
+
+    Y, U, V (and alpha) planes of 8-bit samples, or of 10- and 12-bit samples stored in 16 bits (``P10``, ``P12``),
+    NV12 with interleaved U and V, or 4 bytes per RGB pixel.
+    """
 
     I420 = 'I420'
     I420P10 = 'I420P10'

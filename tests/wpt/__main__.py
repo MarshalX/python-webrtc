@@ -15,7 +15,9 @@ python -m tests.wpt update --repeat 3       the same, running each case 3 times 
 from __future__ import annotations
 
 import argparse
+import logging
 import os
+import sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
@@ -23,32 +25,35 @@ from tests.wpt import runner
 from tests.wpt.expectations import Expectations
 from tests.wpt.loader import discover
 
+logger = logging.getLogger(__name__)
 
-def _print_result(case: str, result: dict):
+
+def _print_result(case: str, result: runner.CaseResult) -> None:
     harness = result['harness']
-    print(f'{case}: harness {harness["status"]}' + (f' ({harness["message"]})' if harness['message'] else ''))
+    message = f' ({harness["message"]})' if harness['message'] else ''
+    logger.info('%s: harness %s%s', case, harness['status'], message)
     for test in result['tests']:
-        print(f'  {test["status"]:<8} {test["name"]}')
+        logger.info('  %-8s %s', test['status'], test['name'])
         if test['status'] != 'PASS' and test['message']:
-            print(f'           {test["message"]}')
+            logger.info('           %s', test['message'])
     if result['unsupported']:
-        print('  unsupported: ' + ', '.join(result['unsupported']))
+        logger.info('  unsupported: %s', ', '.join(result['unsupported']))
 
 
-def run(args):
+def run(args: argparse.Namespace) -> None:
     for case in args.cases:
         _print_result(case, runner.run(case))
 
 
-def update(args):
+def update(args: argparse.Namespace) -> None:
     expectations = Expectations.load()
     cases = [c for c in args.cases or discover() if not expectations.skip_reason(c)]
 
-    tests = Counter()
-    harness = Counter()
-    unsupported = Counter()
+    tests: Counter[str] = Counter()
+    harness: Counter[str] = Counter()
+    unsupported: Counter[str] = Counter()
 
-    def run_repeatedly(case):
+    def run_repeatedly(case: str) -> list[runner.CaseResult]:
         return [runner.run(case) for _ in range(args.repeat)]
 
     with ThreadPoolExecutor(args.jobs) as pool:
@@ -59,19 +64,19 @@ def update(args):
             tests.update(t['status'] for t in first['tests'])
             unsupported.update(first['unsupported'])
             statuses = '/'.join(sorted({r['harness']['status'] for r in results}))
-            print(f'[{done}/{len(cases)}] {statuses:<8} {case}', flush=True)
+            logger.info('[%d/%d] %-8s %s', done, len(cases), statuses, case)
 
     expectations.save()
 
-    print(f'\nfiles: {dict(harness)}')
-    print(f'tests: {dict(tests)}')
+    logger.info('\nfiles: %s', dict(harness))
+    logger.info('tests: %s', dict(tests))
     if unsupported:
-        print('unsupported members used by tests:')
+        logger.info('unsupported members used by tests:')
         for name, count in unsupported.most_common():
-            print(f'  {count:>4}  {name}')
+            logger.info('  %4d  %s', count, name)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(prog='python -m tests.wpt')
     commands = parser.add_subparsers(required=True)
 
@@ -85,6 +90,7 @@ def main():
     update_parser.add_argument('--repeat', type=int, default=1, help='runs of each case, to find flaky tests')
     update_parser.set_defaults(func=update)
 
+    logging.basicConfig(format='%(message)s', level=logging.INFO, stream=sys.stdout)
     args = parser.parse_args()
     args.func(args)
 

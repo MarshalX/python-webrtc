@@ -1547,7 +1547,7 @@ dev = [
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "pytest-timeout", specifier = ">=2.3" },
-    { name = "ruff", specifier = ">=0.13" },
+    { name = "ruff", specifier = ">=0.16.9" },
     { name = "scikit-build-core", specifier = ">=0.11" },
 ]
 test = [

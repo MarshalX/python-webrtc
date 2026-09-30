@@ -57,7 +57,7 @@ dev = [
     { include-group = "test" },
     "scikit-build-core>=0.11",
     "pybind11>=3.0",
-    "ruff>=0.13",
+    "ruff>=0.16.9",
     "pybind11-stubgen>=2.5",
 ]
 wpt = [
@@ -110,22 +110,68 @@ timeout_method = "thread"
 faulthandler_timeout = 60
 
 [tool.ruff]
+required-version = ">=0.16.9"
 line-length = 120
 target-version = "py39"
+preview = true
 include = [
     "python-webrtc/python/webrtc/**/*.py", "tests/**/*.py", "examples/**/*.py", "benchmarks/**/*.py", "cmake/**/*.py",
 ]
 extend-exclude = ["*.pyi"]
 
 [tool.ruff.format]
-quote-style = "preserve"
+quote-style = "single"
+docstring-code-format = true
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B"]
-ignore = ["UP006", "UP007", "UP035", "UP045", "B024"]
+select = ["ALL"]
+ignore = [
+    "COM812", "Q",  # the formatter owns trailing commas and quotes
+    "TRY003",  # a message per raise, not an exception class per message
+    "D105", "D107",  # class docstrings document constructors, dunders explain themselves
+    "DOC502",  # exceptions raised by native calls and helpers are documented too
+]
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["I001", "E402"]
+"__init__.py" = ["I001", "E402"]  # the import order resolves the cycles
+# camelCase aliases of the W3C names; spec internal slots shared between the classes of the package
+"python-webrtc/python/webrtc/**" = ["N815", "N816", "SLF001"]
+"python-webrtc/python/webrtc/interfaces/rtc_peer_connection.py" = ["PLR0904"]  # the W3C interface
+# user callbacks error the stream, as the specification says; handler errors go to the loop's exception handler
+"python-webrtc/python/webrtc/{streams.py,utils/events.py}" = ["BLE001"]
+"python-webrtc/python/webrtc/models/rtc_stats.py" = ["FURB189"]  # a real dict, for json and isinstance
+# native leak counters and queues have no public API; chaos replays a seeded random
+"tests/**" = ["S101", "D1", "PLR2004", "S404", "S603", "SLF001", "S311"]
+"examples/**" = ["T201"]
+"benchmarks/**" = ["T201", "S404", "S603"]
+"cmake/**" = ["T201", "S404", "S603"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-builtins]
+ignorelist = ["format", "id", "type"]  # W3C member names
+
+[tool.ruff.lint.pydoclint]
+ignore-one-line-docstrings = true
+
+[tool.ruff.lint.flake8-annotations]
+mypy-init-return = false
+
+[tool.ruff.lint.mccabe]
+max-complexity = 8
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-positional-args = 3
+max-branches = 8
+max-returns = 4
+max-statements = 30
+max-locals = 10
+max-nested-blocks = 3
+max-bool-expr = 3
+max-public-methods = 20
 
 [tool.ruff.lint.isort]
+required-imports = ["from __future__ import annotations"]
 known-first-party = ["webrtc", "wrtc", "tests", "benchmarks"]

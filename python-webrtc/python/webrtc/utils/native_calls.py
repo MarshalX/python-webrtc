@@ -5,13 +5,30 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
+"""Awaiting the native methods that report their result with callbacks."""
+
+from __future__ import annotations
+
 import asyncio
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Callable, TypeVar
 
 from webrtc.utils.task_queue import TaskQueue
 
+if TYPE_CHECKING:
+    from typing_extensions import Concatenate, ParamSpec
 
-async def call_native(method: Callable, *args) -> Any:
+    import wrtc
+
+    _P = ParamSpec('_P')
+
+_T = TypeVar('_T')
+
+
+async def call_native(
+    method: Callable[Concatenate[Callable[[_T], None], Callable[[wrtc.RTCCallbackException], None], _P], None],
+    *args: _P.args,
+    **kwargs: _P.kwargs,
+) -> _T:
     """Calls a native method taking success and failure callbacks, called from a libwebrtc thread, and awaits them.
 
     The result goes through the task queue of the loop, so the code awaiting it runs after the handlers of the events
@@ -20,6 +37,7 @@ async def call_native(method: Callable, *args) -> Any:
     Args:
         method (:obj:`callable`): The native method, called as ``method(on_success, on_failure, *args)``.
         *args: Its arguments.
+        **kwargs: Its keyword arguments.
 
     Returns:
         The result passed to ``on_success``, if any.
@@ -30,7 +48,7 @@ async def call_native(method: Callable, *args) -> Any:
     loop = asyncio.get_running_loop()
     future = loop.create_future()
 
-    def settle(result: Any, error: Any) -> None:
+    def settle(result: _T | None, error: wrtc.RTCCallbackException | None) -> None:
         # the caller may have been canceled meanwhile
         if future.done():
             return
@@ -40,11 +58,11 @@ async def call_native(method: Callable, *args) -> Any:
             future.set_result(result)
 
     # libwebrtc threads, with the GIL held: only schedule
-    def on_success(result: Any = None) -> None:
+    def on_success(result: _T | None = None) -> None:
         TaskQueue.of(loop).post(settle, result, None, resumes=True, after_ready=True)
 
-    def on_failure(error: Any) -> None:
+    def on_failure(error: wrtc.RTCCallbackException) -> None:
         TaskQueue.of(loop).post(settle, None, error, resumes=True, after_ready=True)
 
-    method(on_success, on_failure, *args)
+    method(on_success, on_failure, *args, **kwargs)
     return await future

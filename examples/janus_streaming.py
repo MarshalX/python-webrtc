@@ -3,6 +3,12 @@
 # requires-python = ">=3.9"
 # dependencies = ["wrtc>=0.0.0.dev10", "sounddevice", "httpx"]
 # ///
+#
+#  Copyright 2026 Ilya (Marshal) <https://github.com/MarshalX>.
+#
+#  Dedicated to the public domain under CC0, see the LICENSE file of the examples.
+#
+
 """Watches a stream of the public Janus demo server: the video in the terminal, the audio on your speakers.
 
     uv run janus_streaming.py
@@ -11,6 +17,8 @@
 The video is drawn with colored half blocks, so the terminal needs 24-bit color. Press Ctrl+C to stop.
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import contextlib
@@ -18,73 +26,85 @@ import shutil
 import sys
 import threading
 import uuid
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import sounddevice
 
 import webrtc
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from types import TracebackType
+
+    from typing_extensions import Self
+
 JANUS = 'https://janus.conf.meetecho.com/janus'
+Json = dict[str, Any]
 
 
 class Janus:
-    """A session with the streaming plugin of a Janus server, over its HTTP API"""
+    """A session with the streaming plugin of a Janus server, over its HTTP API."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.client = httpx.AsyncClient(timeout=60)
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         created = await self._post('', janus='create')
         self.session = f'/{created["data"]["id"]}'
         attached = await self._post(self.session, janus='attach', plugin='janus.plugin.streaming')
         self.handle = f'{self.session}/{attached["data"]["id"]}'
         return self
 
-    async def __aexit__(self, *exc_info):
+    async def __aexit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None
+    ) -> None:
         await self._post(self.session, janus='destroy')
         await self.client.aclose()
 
-    async def request(self, body, **extra):
+    async def request(self, body: Json, **extra: Json) -> Json | None:
+        """Sends a message to the plugin, returns the data of its reply."""
         reply = await self._post(self.handle, janus='message', body=body, **extra)
         return reply.get('plugindata', {}).get('data')
 
-    async def event(self):
-        """Waits up to 30 s for an event: requests reply right away and send their results, like offers, as events"""
+    async def event(self) -> Json:
+        """Waits up to 30 s for an event: requests reply right away and send their results, like offers, as events."""
         return (await self.client.get(JANUS + self.session)).json()
 
-    async def _post(self, path, **message):
-        reply = (await self.client.post(JANUS + path, json={'transaction': uuid.uuid4().hex, **message})).json()
+    async def _post(self, path: str, **message: object) -> Json:
+        reply: Json = (await self.client.post(JANUS + path, json={'transaction': uuid.uuid4().hex, **message})).json()
         if reply['janus'] == 'error':
             raise RuntimeError(reply['error']['reason'])
         return reply
 
 
 class Speakers:
-    """Plays 16-bit audio from a buffer that keeps half a second at most"""
+    """Plays 16-bit audio from a buffer that keeps half a second at most."""
 
-    def __init__(self, rate, channels):
+    def __init__(self, rate: int, channels: int) -> None:
         self.buffer, self.lock, self.limit = bytearray(), threading.Lock(), rate * channels
         self.stream = sounddevice.RawOutputStream(rate, channels=channels, dtype='int16', callback=self._on_need)
         self.stream.start()
 
-    def play(self, samples):
+    def play(self, samples: bytes) -> None:
+        """Queues samples, dropping the oldest ones over the limit."""
         with self.lock:
             self.buffer += samples
             del self.buffer[: -self.limit]
 
-    def _on_need(self, out, *_):
+    def _on_need(self, out: memoryview, *_: object) -> None:
         with self.lock:
             chunk = self.buffer[: len(out)]
             del self.buffer[: len(out)]
         out[:] = chunk.ljust(len(out), b'\0')
 
 
-def draw(rgbx, width, height):
-    """Draws a frame with ▀, whose foreground color is the upper pixel and background the lower one"""
+def draw(rgbx: bytes, width: int, height: int) -> None:
+    """Draws a frame with ▀, whose foreground color is the upper pixel and background the lower one."""
     columns, rows = shutil.get_terminal_size()
     scale = max(width / columns, height / rows / 2)
 
-    def color(x, y):
+    def color(x: int, y: int) -> str:
         i = (int(y * scale) * width + int(x * scale)) * 4
         return '{};{};{}'.format(*rgbx[i : i + 3])
 
@@ -97,8 +117,8 @@ def draw(rgbx, width, height):
 
 
 @contextlib.contextmanager
-def fullscreen():
-    """Switches to the alternate screen, without the cursor"""
+def fullscreen() -> Iterator[None]:
+    """Switches to the alternate screen, without the cursor."""
     sys.stdout.write('\033[?1049h\033[?25l')
     try:
         yield
@@ -106,7 +126,8 @@ def fullscreen():
         sys.stdout.write('\033[?25h\033[?1049l')
 
 
-async def watch(track):
+async def watch(track: webrtc.MediaStreamTrack) -> None:
+    """Draws the frames of the video track until it ends."""
     # a buffer of one frame drops the frames the terminal is too slow for
     async for frame in webrtc.MediaStreamTrackProcessor(track, max_buffer_size=1).readable:
         with frame:
@@ -116,7 +137,8 @@ async def watch(track):
         draw(rgbx, int(size.width), int(size.height))
 
 
-async def listen(track):
+async def listen(track: webrtc.MediaStreamTrack) -> None:
+    """Plays the audio track until it ends."""
     speakers = None
     try:
         async for data in webrtc.MediaStreamTrackProcessor(track, max_buffer_size=50).readable:
@@ -131,8 +153,8 @@ async def listen(track):
             speakers.stream.close()
 
 
-async def answer(pc, offer):
-    """Answers with all the ICE candidates in the SDP, since there is no trickling"""
+async def answer(pc: webrtc.RTCPeerConnection, offer: dict[str, str]) -> dict[str, str]:
+    """Answers with all the ICE candidates in the SDP, since there is no trickling."""
     gathered = asyncio.Event()
     pc.on('icegatheringstatechange', lambda _: pc.ice_gathering_state == 'complete' and gathered.set())
     await pc.set_remote_description(offer)
@@ -142,31 +164,42 @@ async def answer(pc, offer):
     return {'type': 'answer', 'sdp': pc.local_description.sdp}
 
 
-async def main(stream_id):
-    pc, tasks = webrtc.RTCPeerConnection(), []
+async def keep_alive(janus: Janus) -> None:
+    """Polls for events, which keeps the session alive."""
+    while True:
+        await janus.event()
+
+
+async def pick_stream(janus: Janus) -> int:
+    """Lists the streams of the server, returns the first one."""
+    streams = (await janus.request({'request': 'list'}))['list']
+    for stream in streams:
+        print(f'{stream["id"]}: {stream.get("description")}')
+    return streams[0]['id']
+
+
+async def main(stream_id: int | None) -> None:
+    """Watches the stream until interrupted."""
+    pc = webrtc.RTCPeerConnection()
+    tasks: list[asyncio.Future[None]] = []
 
     @pc.on('track')
-    def on_track(event):
+    def on_track(event: webrtc.RTCTrackEvent) -> None:
         play = watch if event.track.kind == 'video' else listen
         tasks.append(asyncio.ensure_future(play(event.track)))
 
     async with Janus() as janus:
         if stream_id is None:
-            streams = (await janus.request({'request': 'list'}))['list']
-            for stream in streams:
-                print(f'{stream["id"]}: {stream.get("description")}')
-            stream_id = streams[0]['id']
-
+            stream_id = await pick_stream(janus)
         await janus.request({'request': 'watch', 'id': stream_id})
-        event = {}
+        event: Json = {}
         while 'jsep' not in event:
             event = await janus.event()
         await janus.request({'request': 'start'}, jsep=await answer(pc, event['jsep']))
 
         with fullscreen():
             try:
-                while True:  # polling for events keeps the session alive
-                    await janus.event()
+                await keep_alive(janus)
             finally:
                 pc.close()  # ends the tracks, so watch and listen return
                 await asyncio.gather(*tasks)

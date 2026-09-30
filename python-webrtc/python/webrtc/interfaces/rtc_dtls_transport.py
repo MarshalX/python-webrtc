@@ -5,19 +5,20 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING, List
+"""RTCDtlsTransport of WebRTC."""
 
+from __future__ import annotations
+
+import webrtc
 from webrtc import RTCErrorEvent, WebRTCObject, wrtc
 from webrtc.utils.events import EventTarget
 
-if TYPE_CHECKING:
-    import webrtc
 
+class RTCDtlsTransport(WebRTCObject[wrtc.RTCDtlsTransport], EventTarget):
+    """The Datagram Transport Layer Security (DTLS) transport of a :obj:`webrtc.RTCPeerConnection`.
 
-class RTCDtlsTransport(WebRTCObject, EventTarget):
-    """The :obj:`webrtc.RTCDtlsTransport` interface provides access to information about the Datagram Transport
-    Layer Security (DTLS) transport over which a :obj:`webrtc.RTCPeerConnection`'s RTP and RTCP packets are sent and
-    received by its :obj:`webrtc.RTCRtpSender` and :obj:`webrtc.RTCRtpReceiver` objects.
+    The RTP and RTCP packets of its :obj:`webrtc.RTCRtpSender` and :obj:`webrtc.RTCRtpReceiver` objects are sent and
+    received over it.
 
     Events (see :meth:`on`):
         ``statechange`` (:obj:`webrtc.Event`): :attr:`state` changed.
@@ -27,32 +28,29 @@ class RTCDtlsTransport(WebRTCObject, EventTarget):
     _class = wrtc.RTCDtlsTransport
     _events = ('statechange', 'error')
 
-    def _on_event(self, name: str, *args):
+    def _on_event(self, name: str, *args: object) -> None:
         # the state changes along with its event
         if name == 'statechange':
             (state,) = args
             self._native_obj._surfaceState(state)
 
-    def _create_event(self, name: str, *args):
+    def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
         if name == 'error':
             (error,) = args
             return RTCErrorEvent(name, error.toPython(), target=self)
         return super()._create_event(name, *args)
 
     @property
-    def ice_transport(self) -> 'webrtc.RTCIceTransport':
+    def ice_transport(self) -> webrtc.RTCIceTransport:
         """:obj:`webrtc.RTCIceTransport`: Returns a reference to the underlying :obj:`webrtc.RTCIceTransport` object."""
-        from webrtc import RTCIceTransport
-
-        return RTCIceTransport._wrap(self._native_obj.iceTransport)
+        return webrtc.RTCIceTransport._wrap(self._native_obj.iceTransport)
 
     @property
-    def state(self) -> 'webrtc.DtlsTransportState':
-        """:obj:`webrtc.DtlsTransportState`: Returns a member of :obj:`webrtc.DtlsTransportState` which describes the
-        underlying Datagram Transport Layer Security (DTLS) transport state."""
+    def state(self) -> webrtc.DtlsTransportState:
+        """:obj:`webrtc.DtlsTransportState`: The state of the DTLS transport."""
         return self._native_obj.state
 
-    def get_remote_certificates(self) -> List[bytes]:
+    def get_remote_certificates(self) -> list[bytes]:
         """Returns the certificates of the remote peer, once the DTLS handshake is done.
 
         Returns:
