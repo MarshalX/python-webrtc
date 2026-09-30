@@ -23,3 +23,11 @@ without worrying about copyrights.
 ```
 OPENAI_API_KEY=sk-... uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/openai_live.py
 ```
+
+### [janus_streaming.py](janus_streaming.py)
+
+**Watching a live stream in the terminal.** Plays a stream of the public [Janus](https://janus.conf.meetecho.com/) demo server: the video drawn with colored characters, the audio on your speakers. No account or key:
+
+```
+uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/janus_streaming.py
+```
