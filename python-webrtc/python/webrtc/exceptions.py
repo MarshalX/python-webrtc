@@ -7,10 +7,16 @@
 
 """Exceptions raised by WebRTC operations, named after the ``DOMException`` of the specification."""
 
-from typing import Optional
+from __future__ import annotations
+
+from dataclasses import dataclass, fields
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from webrtc import RTCErrorDetailType, wrtc
-from webrtc.utils.names import alias
+from webrtc.utils.names import Alias, alias, members
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 PythonWebRTCExceptionBase = wrtc.PythonWebRTCExceptionBase
 PythonWebRTCException = wrtc.PythonWebRTCException
@@ -65,17 +71,17 @@ class OverconstrainedError(RTCException):
         message (:obj:`str`, optional): A description of the error.
     """
 
-    def __init__(self, constraint: str, message: str = ''):
-        super().__init__(message or f'The constraint {constraint} can\'t be satisfied')
+    def __init__(self, constraint: str, message: str = '') -> None:
+        super().__init__(message or f"The constraint {constraint} can't be satisfied")
         self.constraint = constraint
 
 
-class RTCError(OperationError):
-    """An error carrying WebRTC-specific information.
+@dataclass
+class RTCErrorInit:
+    """The WebRTC-specific information of an :obj:`RTCError`.
 
     Args:
         error_detail (:obj:`RTCErrorDetailType`): The WebRTC-specific error code.
-        message (:obj:`str`, optional): A description of the error.
         sdp_line_number (:obj:`int`, optional): The line of the SDP where a syntax error occurred.
         sctp_cause_code (:obj:`int`, optional): The SCTP cause code of a failed SCTP negotiation.
         received_alert (:obj:`int`, optional): The DTLS alert received from the remote peer.
@@ -83,28 +89,60 @@ class RTCError(OperationError):
         http_request_status_code (:obj:`int`, optional): The HTTP status code of a failed request.
 
     Raises:
-        :obj:`ValueError`: If ``error_detail`` isn't a member of :obj:`RTCErrorDetailType`.
+        ValueError: If ``error_detail`` isn't a member of :obj:`RTCErrorDetailType`.
     """
 
-    def __init__(
-        self,
-        error_detail: RTCErrorDetailType,
-        message: str = '',
-        *,
-        sdp_line_number: Optional[int] = None,
-        sctp_cause_code: Optional[int] = None,
-        received_alert: Optional[int] = None,
-        sent_alert: Optional[int] = None,
-        http_request_status_code: Optional[int] = None,
-    ):
+    error_detail: RTCErrorDetailType
+    sdp_line_number: int | None = None
+    sctp_cause_code: int | None = None
+    received_alert: int | None = None
+    sent_alert: int | None = None
+    http_request_status_code: int | None = None
+
+    def __post_init__(self) -> None:
+        self.error_detail = RTCErrorDetailType(self.error_detail)
+
+    #: Alias for :attr:`error_detail`
+    errorDetail: ClassVar[Alias[RTCErrorDetailType]] = alias('error_detail')
+    #: Alias for :attr:`sdp_line_number`
+    sdpLineNumber: ClassVar[Alias[int | None]] = alias('sdp_line_number')
+    #: Alias for :attr:`sctp_cause_code`
+    sctpCauseCode: ClassVar[Alias[int | None]] = alias('sctp_cause_code')
+    #: Alias for :attr:`received_alert`
+    receivedAlert: ClassVar[Alias[int | None]] = alias('received_alert')
+    #: Alias for :attr:`sent_alert`
+    sentAlert: ClassVar[Alias[int | None]] = alias('sent_alert')
+    #: Alias for :attr:`http_request_status_code`
+    httpRequestStatusCode: ClassVar[Alias[int | None]] = alias('http_request_status_code')
+
+
+class RTCError(OperationError):
+    """An error carrying WebRTC-specific information, the members of its :obj:`RTCErrorInit`.
+
+    Args:
+        options (:obj:`RTCErrorInit` or :obj:`dict`): The WebRTC-specific information, or a dictionary of its
+            members.
+        message (:obj:`str`, optional): A description of the error.
+
+    Raises:
+        TypeError: If a dictionary has no ``error_detail``.
+        ValueError: If ``error_detail`` isn't a member of :obj:`RTCErrorDetailType`.
+    """
+
+    def __init__(self, options: RTCErrorInit | Mapping[str, Any], message: str = '') -> None:
+        init = (
+            options
+            if isinstance(options, RTCErrorInit)
+            else RTCErrorInit(**members(options, [field.name for field in fields(RTCErrorInit)]))
+        )
         super().__init__(message)
-        self.error_detail = RTCErrorDetailType(error_detail)
         self.message = message
-        self.sdp_line_number = sdp_line_number
-        self.sctp_cause_code = sctp_cause_code
-        self.received_alert = received_alert
-        self.sent_alert = sent_alert
-        self.http_request_status_code = http_request_status_code
+        self.error_detail = init.error_detail
+        self.sdp_line_number = init.sdp_line_number
+        self.sctp_cause_code = init.sctp_cause_code
+        self.received_alert = init.received_alert
+        self.sent_alert = init.sent_alert
+        self.http_request_status_code = init.http_request_status_code
 
     #: Alias for :attr:`error_detail`
     errorDetail = alias('error_detail')
@@ -138,17 +176,17 @@ _BY_RTC_ERROR_TYPE = {
 def _from_native(
     error_type: str,
     message: str,
-    detail: Optional[RTCErrorDetailType],
-    sctp_cause_code: Optional[int],
-    sdp_line_number: Optional[int] = None,
+    *,
+    detail: RTCErrorDetailType | None,
+    sctp_cause_code: int | None,
+    sdp_line_number: int | None,
 ) -> RTCException:
-    """Creates the exception for a webrtc::RTCError. Called by name, with positional arguments, from
-    cpp/src/exceptions.cpp."""
+    """Creates the exception for a webrtc::RTCError, called from cpp/src/exceptions.cpp."""
     if error_type == 'OPERATION_ERROR_WITH_DATA' or detail is not None:
-        return RTCError(
+        init = RTCErrorInit(
             detail or RTCErrorDetailType.data_channel_failure,
-            message,
             sctp_cause_code=sctp_cause_code,
             sdp_line_number=sdp_line_number,
         )
+        return RTCError(init, message)
     return _BY_RTC_ERROR_TYPE.get(error_type, OperationError)(message)

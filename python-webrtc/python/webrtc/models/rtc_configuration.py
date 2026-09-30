@@ -5,10 +5,14 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
+"""The configuration of a connection."""
+
+from __future__ import annotations
+
 import ipaddress
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from webrtc import (
     InvalidAccessError,
@@ -21,10 +25,15 @@ from webrtc import (
     RTCRtpHeaderEncryptionPolicy,
     wrtc,
 )
-from webrtc.utils.names import alias
+from webrtc.utils.names import Alias, alias
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 # the longest TURN username, as browsers limit it
 _MAX_USERNAME_LENGTH = 509
+_MAX_PORT = 65535
+_MAX_CANDIDATE_POOL_SIZE = 255
 
 # RFC 7064 and RFC 7065: scheme ":" host [ ":" port ] [ "?transport=" transport ], with udp and tcp transports only
 _URL = re.compile(
@@ -38,25 +47,30 @@ def _check_url(url: str) -> str:
     """Returns the scheme of a STUN or TURN server URL.
 
     Raises:
-        :obj:`webrtc.InvalidSyntaxError`: If the URL doesn't match RFC 7064 or RFC 7065.
+        webrtc.InvalidSyntaxError: If the URL doesn't match RFC 7064 or RFC 7065.
     """
     match = _URL.fullmatch(url)
-    if not match or match['scheme'] not in ('stun', 'stuns', 'turn', 'turns'):
-        raise InvalidSyntaxError(f'{url!r} is not a valid STUN or TURN URL')
+    if not match or match['scheme'] not in {'stun', 'stuns', 'turn', 'turns'}:
+        msg = f'{url!r} is not a valid STUN or TURN URL'
+        raise InvalidSyntaxError(msg)
 
     host, port, transport = match['host'], match['port'], match['transport']
     if host.startswith('['):
         try:
             ipaddress.IPv6Address(host[1:-1])
         except ValueError:
-            raise InvalidSyntaxError(f'{url!r} has an invalid IPv6 address') from None
+            msg = f'{url!r} has an invalid IPv6 address'
+            raise InvalidSyntaxError(msg) from None
     elif not _REG_NAME.fullmatch(host):
-        raise InvalidSyntaxError(f'{url!r} has an invalid host')
+        msg = f'{url!r} has an invalid host'
+        raise InvalidSyntaxError(msg)
 
-    if port is not None and (not port or int(port) > 65535):
-        raise InvalidSyntaxError(f'{url!r} has an invalid port')
-    if transport is not None and (match['scheme'].startswith('stun') or transport not in ('udp', 'tcp')):
-        raise InvalidSyntaxError(f'{url!r} has an invalid transport')
+    if port is not None and (not port or int(port) > _MAX_PORT):
+        msg = f'{url!r} has an invalid port'
+        raise InvalidSyntaxError(msg)
+    if transport is not None and (match['scheme'].startswith('stun') or transport not in {'udp', 'tcp'}):
+        msg = f'{url!r} has an invalid transport'
+        raise InvalidSyntaxError(msg)
     return match['scheme']
 
 
@@ -73,9 +87,9 @@ class RTCOAuthCredential:
     access_token: str
 
     #: Alias for :attr:`mac_key`
-    macKey = alias('mac_key')
+    macKey: ClassVar[Alias[str]] = alias('mac_key')
     #: Alias for :attr:`access_token`
-    accessToken = alias('access_token')
+    accessToken: ClassVar[Alias[str]] = alias('access_token')
 
 
 @dataclass
@@ -92,34 +106,40 @@ class RTCIceServer:
             doesn't support.
     """
 
-    urls: Union[str, List[str]]
-    username: Optional[str] = None
-    credential: Optional[Union[str, RTCOAuthCredential]] = None
+    urls: str | list[str]
+    username: str | None = None
+    credential: str | RTCOAuthCredential | None = None
     credential_type: str = 'password'
 
     @classmethod
-    def _to_native_list(cls, servers: Iterable[Union['RTCIceServer', Dict[str, Any]]]) -> List['wrtc.IceServerInit']:
+    def _to_native_list(cls, servers: Iterable[RTCIceServer | dict[str, Any]]) -> list[wrtc.IceServerInit]:
         """The native servers of a list of servers, or of their keyword arguments."""
         return [(cls(**server) if isinstance(server, dict) else server)._to_native() for server in servers]
 
-    def _to_native(self) -> 'wrtc.IceServerInit':
+    def _to_native(self) -> wrtc.IceServerInit:
         urls = [self.urls] if isinstance(self.urls, str) else list(self.urls)
         if not urls:
-            raise InvalidSyntaxError('urls of an ICE server must not be empty')
+            msg = 'urls of an ICE server must not be empty'
+            raise InvalidSyntaxError(msg)
 
         # every URL is parsed before the credentials are checked
         schemes = [_check_url(url) for url in urls]
-        if self.credential_type not in ('password', 'oauth'):
-            raise ValueError(f"credential_type must be 'password' or 'oauth', not {self.credential_type!r}")
-        if any(scheme in ('turn', 'turns') for scheme in schemes):
+        if self.credential_type not in {'password', 'oauth'}:
+            msg = f"credential_type must be 'password' or 'oauth', not {self.credential_type!r}"
+            raise ValueError(msg)
+        if any(scheme in {'turn', 'turns'} for scheme in schemes):
             if self.credential_type == 'oauth':
                 if not isinstance(self.credential, RTCOAuthCredential):
-                    raise InvalidAccessError('an OAuth TURN server needs an RTCOAuthCredential')
-                raise NotSupportedError('libwebrtc does not support OAuth credentials of TURN servers')
+                    msg = 'an OAuth TURN server needs an RTCOAuthCredential'
+                    raise InvalidAccessError(msg)
+                msg = 'libwebrtc does not support OAuth credentials of TURN servers'
+                raise NotSupportedError(msg)
             if self.username is None or not self.credential:
-                raise InvalidAccessError('a TURN server needs a username and a credential')
+                msg = 'a TURN server needs a username and a credential'
+                raise InvalidAccessError(msg)
             if len(self.username) > _MAX_USERNAME_LENGTH:
-                raise InvalidAccessError(f'the username of a TURN server is longer than {_MAX_USERNAME_LENGTH}')
+                msg = f'the username of a TURN server is longer than {_MAX_USERNAME_LENGTH}'
+                raise InvalidAccessError(msg)
 
         native = wrtc.IceServerInit()
         native.urls = urls
@@ -128,7 +148,7 @@ class RTCIceServer:
         return native
 
     #: Alias for :attr:`credential_type`
-    credentialType = alias('credential_type')
+    credentialType: ClassVar[Alias[str]] = alias('credential_type')
 
 
 @dataclass
@@ -157,24 +177,25 @@ class RTCConfiguration:
             a remote description without it fails (``require``). Can't be changed.
     """
 
-    ice_servers: List[Union[RTCIceServer, Dict[str, Any]]] = field(default_factory=list)
+    ice_servers: list[RTCIceServer | dict[str, Any]] = field(default_factory=list)
     ice_transport_policy: RTCIceTransportPolicy = RTCIceTransportPolicy.all
     bundle_policy: RTCBundlePolicy = RTCBundlePolicy.balanced
     rtcp_mux_policy: RTCRtcpMuxPolicy = RTCRtcpMuxPolicy.require
     ice_candidate_pool_size: int = 0
-    port_range: Optional[Tuple[int, int]] = None
-    certificates: Optional[List[RTCCertificate]] = None
+    port_range: tuple[int, int] | None = None
+    certificates: list[RTCCertificate] | None = None
     always_negotiate_data_channels: bool = False
     rtp_header_encryption_policy: RTCRtpHeaderEncryptionPolicy = RTCRtpHeaderEncryptionPolicy.negotiate
 
-    def _to_native(self) -> 'wrtc.ConfigurationInit':
+    def _to_native(self) -> wrtc.ConfigurationInit:
         """Validates the configuration and creates the native one.
 
+        Returns:
+            :obj:`wrtc.ConfigurationInit`: The native configuration.
+
         Raises:
-            :obj:`TypeError`: If a member has a wrong type.
-            :obj:`ValueError`: If ``ice_candidate_pool_size`` or ``port_range`` is out of range.
-            :obj:`webrtc.InvalidSyntaxError`: If an ICE server URL is invalid.
-            :obj:`webrtc.InvalidAccessError`: If a TURN server has no credentials.
+            ValueError: If ``ice_candidate_pool_size`` or ``port_range`` is out of range.
+            webrtc.InvalidAccessError: If a certificate has expired.
         """
         native = wrtc.ConfigurationInit()
         native.iceServers = RTCIceServer._to_native_list(self.ice_servers)
@@ -182,27 +203,31 @@ class RTCConfiguration:
         native.bundlePolicy = self.bundle_policy
         native.rtcpMuxPolicy = self.rtcp_mux_policy
 
-        if not isinstance(self.ice_candidate_pool_size, int) or not 0 <= self.ice_candidate_pool_size <= 255:
-            raise ValueError(f'ice_candidate_pool_size must be from 0 to 255, not {self.ice_candidate_pool_size}')
-        native.iceCandidatePoolSize = self.ice_candidate_pool_size
+        pool_size = self.ice_candidate_pool_size
+        if not isinstance(pool_size, int) or not 0 <= pool_size <= _MAX_CANDIDATE_POOL_SIZE:
+            msg = f'ice_candidate_pool_size must be from 0 to {_MAX_CANDIDATE_POOL_SIZE}, not {pool_size}'
+            raise ValueError(msg)
+        native.iceCandidatePoolSize = pool_size
         native.alwaysNegotiateDataChannels = bool(self.always_negotiate_data_channels)
         native.rtpHeaderEncryptionPolicy = self.rtp_header_encryption_policy
 
         if self.certificates is not None:
             for certificate in self.certificates:
                 if certificate.expired:
-                    raise InvalidAccessError('the certificate has expired')
+                    msg = 'the certificate has expired'
+                    raise InvalidAccessError(msg)
             native.certificates = [certificate._native_obj for certificate in self.certificates]
 
         if self.port_range is not None:
             low, high = self.port_range
-            if not 0 <= low <= high <= 65535:
-                raise ValueError(f'port_range must be two ports from low to high, not {self.port_range}')
+            if not 0 <= low <= high <= _MAX_PORT:
+                msg = f'port_range must be two ports from low to high, not {self.port_range}'
+                raise ValueError(msg)
             native.portRange = (low, high)
         return native
 
     @classmethod
-    def _from_native(cls, native: 'wrtc.ConfigurationInit') -> 'RTCConfiguration':
+    def _from_native(cls, native: wrtc.ConfigurationInit) -> RTCConfiguration:
         return cls(
             ice_servers=[
                 RTCIceServer(
@@ -223,18 +248,18 @@ class RTCConfiguration:
         )
 
     #: Alias for :attr:`ice_servers`
-    iceServers = alias('ice_servers')
+    iceServers: ClassVar[Alias[list[RTCIceServer | dict[str, Any]]]] = alias('ice_servers')
     #: Alias for :attr:`ice_transport_policy`
-    iceTransportPolicy = alias('ice_transport_policy')
+    iceTransportPolicy: ClassVar[Alias[RTCIceTransportPolicy]] = alias('ice_transport_policy')
     #: Alias for :attr:`bundle_policy`
-    bundlePolicy = alias('bundle_policy')
+    bundlePolicy: ClassVar[Alias[RTCBundlePolicy]] = alias('bundle_policy')
     #: Alias for :attr:`rtcp_mux_policy`
-    rtcpMuxPolicy = alias('rtcp_mux_policy')
+    rtcpMuxPolicy: ClassVar[Alias[RTCRtcpMuxPolicy]] = alias('rtcp_mux_policy')
     #: Alias for :attr:`ice_candidate_pool_size`
-    iceCandidatePoolSize = alias('ice_candidate_pool_size')
+    iceCandidatePoolSize: ClassVar[Alias[int]] = alias('ice_candidate_pool_size')
     #: Alias for :attr:`port_range`
-    portRange = alias('port_range')
+    portRange: ClassVar[Alias[tuple[int, int] | None]] = alias('port_range')
     #: Alias for :attr:`always_negotiate_data_channels`
-    alwaysNegotiateDataChannels = alias('always_negotiate_data_channels')
+    alwaysNegotiateDataChannels: ClassVar[Alias[bool]] = alias('always_negotiate_data_channels')
     #: Alias for :attr:`rtp_header_encryption_policy`
-    rtpHeaderEncryptionPolicy = alias('rtp_header_encryption_policy')
+    rtpHeaderEncryptionPolicy: ClassVar[Alias[RTCRtpHeaderEncryptionPolicy]] = alias('rtp_header_encryption_policy')

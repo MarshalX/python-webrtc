@@ -7,6 +7,8 @@
 
 """Order of the callbacks of TaskQueue, which delivers events and results of operations."""
 
+from __future__ import annotations
+
 import asyncio
 import gc
 import threading
@@ -18,13 +20,13 @@ from webrtc.utils.task_queue import TaskQueue
 
 
 @pytest.mark.asyncio
-async def test_posted_callbacks_run_before_later_timers():
-    """Callbacks posted from another thread run before a timer set after they were posted"""
+async def test_posted_callbacks_run_before_later_timers() -> None:
+    """Callbacks posted from another thread run before a timer set after they were posted."""
     loop = asyncio.get_running_loop()
     queue = TaskQueue.of(loop)
     order = []
 
-    def post_many():
+    def post_many() -> None:
         for i in range(10):
             queue.post(order.append, i)
 
@@ -33,7 +35,7 @@ async def test_posted_callbacks_run_before_later_timers():
     thread.join()
     timer = loop.create_future()
 
-    def on_timer():
+    def on_timer() -> None:
         order.append('timer')
         timer.set_result(None)
 
@@ -43,18 +45,18 @@ async def test_posted_callbacks_run_before_later_timers():
 
 
 @pytest.mark.asyncio
-async def test_microtasks_of_a_callback_run_before_the_next_one():
-    """What a callback schedules with call_soon runs before the next posted callback"""
+async def test_microtasks_of_a_callback_run_before_the_next_one() -> None:
+    """What a callback schedules with call_soon runs before the next posted callback."""
     loop = asyncio.get_running_loop()
     queue = TaskQueue.of(loop)
     order = []
     done = loop.create_future()
 
-    def first():
+    def first() -> None:
         order.append('first')
         loop.call_soon(order.append, 'microtask')
 
-    def second():
+    def second() -> None:
         order.append('second')
         done.set_result(None)
 
@@ -65,14 +67,14 @@ async def test_microtasks_of_a_callback_run_before_the_next_one():
 
 
 @pytest.mark.asyncio
-async def test_resumed_code_runs_before_the_next_callback_only():
-    """Code a callback resumes runs before the next callback; after it, callbacks don't wait for timers"""
+async def test_resumed_code_runs_before_the_next_callback_only() -> None:
+    """Code a callback resumes runs before the next callback; after it, callbacks don't wait for timers."""
     loop = asyncio.get_running_loop()
     queue = TaskQueue.of(loop)
     order = []
     resumed = asyncio.Event()
 
-    async def awaiting():
+    async def awaiting() -> None:
         await resumed.wait()
         order.append('resumed')
         await asyncio.sleep(0)
@@ -96,8 +98,8 @@ async def test_resumed_code_runs_before_the_next_callback_only():
     assert order[-1] == 'later'
 
 
-def test_loops_are_collected_with_what_they_had_queued():
-    """A closed loop is collected with what was still queued for it"""
+def test_loops_are_collected_with_what_they_had_queued() -> None:
+    """A closed loop is collected with what was still queued for it."""
 
     class Held:
         pass
@@ -108,7 +110,7 @@ def test_loops_are_collected_with_what_they_had_queued():
         held = Held()
         held.loop = loop
         # never run: the loop closes first
-        TaskQueue.of(loop).post(lambda held=held: None)
+        TaskQueue.of(loop).post(lambda _held=held: None)
         loop.close()
         refs.append((weakref.ref(loop), weakref.ref(held)))
         del loop, held

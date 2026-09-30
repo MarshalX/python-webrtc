@@ -7,58 +7,62 @@
 
 """call_native, which awaits native methods reporting to callbacks from libwebrtc threads."""
 
+from __future__ import annotations
+
 import asyncio
 import threading
+from types import SimpleNamespace
+from typing import Callable
 
 import pytest
 
 from webrtc.utils.native_calls import call_native
 
-
-class _Error:
-    def __init__(self, error):
-        self._error = error
-
-    def toPython(self):
-        return self._error
+OnSuccess = Callable[[object], None]
+OnFailure = Callable[[SimpleNamespace], None]
 
 
-def _later(callback, *args, delay=0.0):
+def _error(error: Exception) -> SimpleNamespace:
+    """A stand-in of the native exception passed to on_failure."""
+    return SimpleNamespace(toPython=lambda: error)
+
+
+def _later(callback: Callable[..., None], *args: object, delay: float = 0.0) -> None:
     threading.Timer(delay, callback, args).start()
 
 
 @pytest.mark.asyncio
-async def test_result():
-    def method(on_success, on_failure, a, b):
-        _later(on_success, a + b)
+async def test_result() -> None:
+    def method(on_success: Callable[[int], None], _on_failure: OnFailure, *numbers: int) -> None:
+        _later(on_success, sum(numbers))
 
     assert await call_native(method, 1, 2) == 3
 
 
 @pytest.mark.asyncio
-async def test_no_result():
-    assert await call_native(lambda on_success, on_failure: _later(on_success)) is None
+async def test_no_result() -> None:
+    assert await call_native(lambda on_success, _: _later(on_success)) is None
 
 
 @pytest.mark.asyncio
-async def test_failure_is_raised_as_python_error():
-    def method(on_success, on_failure):
-        _later(on_failure, _Error(ValueError('native')))
+async def test_failure_is_raised_as_python_error() -> None:
+    def method(_on_success: OnSuccess, on_failure: OnFailure) -> None:
+        _later(on_failure, _error(ValueError('native')))
 
     with pytest.raises(ValueError, match='native'):
         await call_native(method)
 
 
 @pytest.mark.asyncio
-async def test_late_result_after_cancel_is_dropped():
-    """A result arriving after the caller was canceled doesn't reach the loop's exception handler"""
+async def test_late_result_after_cancel_is_dropped() -> None:
+    """A result arriving after the caller was canceled doesn't reach the loop's exception handler."""
     loop = asyncio.get_running_loop()
     errors = []
-    loop.set_exception_handler(lambda loop, context: errors.append(context))
+    loop.set_exception_handler(lambda _, context: errors.append(context))
     settled = threading.Event()
 
-    def method(on_success, on_failure):
-        def succeed():
+    def method(on_success: OnSuccess, _on_failure: OnFailure) -> None:
+        def succeed() -> None:
             on_success('late')
             settled.set()
 

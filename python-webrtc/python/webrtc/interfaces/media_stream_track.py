@@ -5,9 +5,13 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
+"""MediaStreamTrack of Media Capture and Streams, and the constraints of its synthetic sources."""
+
+from __future__ import annotations
+
 import asyncio
 import math
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any
 
 from webrtc import (
     DoubleRange,
@@ -67,39 +71,50 @@ _CONSTRAINABLE = (
 )
 
 
-def _satisfied(value: Any, capability: Any, current: Any) -> bool:
-    """Whether the required parts of a constraint (exact, min, max) are satisfiable: within the capability of the
-    source if it has one, by the current setting if it doesn't"""
-    if not isinstance(value, dict):
-        return True
-    exact, low, high = value.get('exact'), value.get('min'), value.get('max')
-    if exact is None and low is None and high is None:
+def _satisfied(value: object, capability: object, current: float | str | None) -> bool:
+    """Whether the required parts of a constraint (exact, min, max) are satisfiable.
+
+    They're satisfiable within the capability of the source if it has one, by the current setting if it doesn't.
+
+    Returns:
+        :obj:`bool`: Whether they are.
+    """
+    if not isinstance(value, dict) or all(value.get(key) is None for key in ('exact', 'min', 'max')):
         return True
     if isinstance(capability, (ULongRange, DoubleRange)):
-        low_cap = capability.min if capability.min is not None else float('-inf')
-        high_cap = capability.max if capability.max is not None else float('inf')
-        if exact is not None and not low_cap <= exact <= high_cap:
-            return False
-        if low is not None and low > high_cap:
-            return False
-        if high is not None and high < low_cap:
-            return False
-        return low is None or high is None or low <= high
+        return _within_range(value, capability)
+    if capability is None:
+        return _satisfied_by_setting(value, current)
+    return _matches(value.get('exact'), capability)
+
+
+def _within_range(value: dict[str, float], capability: ULongRange | DoubleRange) -> bool:
+    exact, low, high = value.get('exact'), value.get('min'), value.get('max')
+    low_cap = capability.min if capability.min is not None else float('-inf')
+    high_cap = capability.max if capability.max is not None else float('inf')
+    exact_within = exact is None or low_cap <= exact <= high_cap
+    bounds_within = (low is None or low <= high_cap) and (high is None or high >= low_cap)
+    return exact_within and bounds_within and (low is None or high is None or low <= high)
+
+
+def _matches(exact: object, capability: object) -> bool:
+    """Whether an exact value (or one of a list of them) is the capability, or one of a list of them."""
+    if exact is None:
+        return True
     if isinstance(capability, list):
-        return exact is None or exact in capability
-    if capability is not None:
-        return exact is None or exact == capability or (isinstance(exact, list) and capability in exact)
-    if current is None:
-        return False
-    if exact is not None and exact != current and not (isinstance(exact, list) and current in exact):
-        return False
-    if low is not None and current < low:
-        return False
-    return high is None or current <= high
+        return exact in capability
+    return exact == capability or (isinstance(exact, list) and capability in exact)
 
 
-def _selected(value: Any, current: float, capability: Any = None) -> float:
-    """The value a constraint selects (exact, ideal or current), the nearest within its range and the capability"""
+def _satisfied_by_setting(value: dict[str, float], current: float | str | None) -> bool:
+    if current is None or not _matches(value.get('exact'), current):
+        return False
+    low, high = value.get('min'), value.get('max')
+    return (low is None or low <= current) and (high is None or current <= high)
+
+
+def _selected(value: float | dict[str, float] | None, current: float, capability: object = None) -> float:
+    """The value a constraint selects (exact, ideal or current), the nearest within its range and the capability."""
     low, high = float('-inf'), float('inf')
     if isinstance(capability, (ULongRange, DoubleRange)):
         low = capability.min if capability.min is not None else low
@@ -123,28 +138,28 @@ _DOUBLE_CONSTRAINTS = ('aspect_ratio', 'frame_rate')
 
 
 def _check_numbers(constraint_set: MediaTrackConstraints) -> None:
-    """The WebIDL types of the numbers of a constraint set: finite, and not negative for unsigned longs"""
+    """The WebIDL types of the numbers of a constraint set: finite, and not negative for unsigned longs."""
     for name in _ULONG_CONSTRAINTS + _DOUBLE_CONSTRAINTS:
         value = getattr(constraint_set, name)
         members = [value.get(key) for key in ('exact', 'ideal', 'min', 'max')] if isinstance(value, dict) else [value]
+        unsigned = name in _ULONG_CONSTRAINTS
         for member in members:
-            if member is None:
-                continue
-            unsigned = name in _ULONG_CONSTRAINTS
-            if (
-                isinstance(member, bool)
-                or not isinstance(member, (int, float))
-                or not math.isfinite(member)
-                or (unsigned and member < 0)
-            ):
+            if member is not None and not _valid_number(member, unsigned=unsigned):
                 kind = 'a finite number that is not negative' if unsigned else 'a finite number'
-                raise TypeError(f'{name} must be {kind}, not {member!r}')
+                msg = f'{name} must be {kind}, not {member!r}'
+                raise TypeError(msg)
+
+
+def _valid_number(member: object, *, unsigned: bool) -> bool:
+    if isinstance(member, bool) or not isinstance(member, (int, float)):
+        return False
+    return math.isfinite(member) and not (unsigned and member < 0)
 
 
 def _unsatisfied(
     constraint_set: MediaTrackConstraints, capabilities: MediaTrackCapabilities, settings: MediaTrackSettings
-) -> Optional[str]:
-    """The name of the first constraint of the set that can't be satisfied, if any"""
+) -> str | None:
+    """The name of the first constraint of the set that can't be satisfied, if any."""
     for name in _CONSTRAINABLE:
         value = getattr(constraint_set, name)
         if value is not None and not _satisfied(value, getattr(capabilities, name), getattr(settings, name)):
@@ -152,9 +167,8 @@ def _unsatisfied(
     return None
 
 
-class MediaStreamTrack(WebRTCObject, EventTarget):
-    """The MediaStreamTrack interface represents a single media track within a stream;
-    typically, these are audio or video tracks, but other track types may exist as well.
+class MediaStreamTrack(WebRTCObject[wrtc.MediaStreamTrack], EventTarget):
+    """A single audio or video track of media, within a stream.
 
     Events (see :meth:`on`):
         ``mute`` and ``unmute`` (:obj:`webrtc.Event`): :attr:`muted` changed: a remote track is muted until media
@@ -166,9 +180,9 @@ class MediaStreamTrack(WebRTCObject, EventTarget):
     _class = wrtc.MediaStreamTrack
     _events = ('mute', 'unmute', 'ended')
 
-    def _on_event(self, name: str, *args):
+    def _on_event(self, name: str, *args: object) -> None:
         # muted changes along with the events
-        if name in ('mute', 'unmute'):
+        if name in {'mute', 'unmute'}:
             (muted,) = args
             self._native_obj._surfaceMuted(muted)
         elif name == 'ended':
@@ -176,13 +190,14 @@ class MediaStreamTrack(WebRTCObject, EventTarget):
 
     @property
     def enabled(self) -> bool:
-        """:obj:`bool`: A Boolean whose value of true if the track is enabled, that is allowed to render
-        the media source stream; or false if it is disabled, that is not rendering the media source stream but silence
-        and blackness. If the track has been disconnected, this value can be changed but has no more effect."""
+        """:obj:`bool`: Whether the track renders its source, rather than silence or blackness.
+
+        Once the track is disconnected, it can still be changed, to no effect.
+        """
         return self._native_obj.enabled
 
     @enabled.setter
-    def enabled(self, value: bool):
+    def enabled(self, value: bool) -> None:
         self._native_obj.enabled = value
 
     @property
@@ -196,41 +211,43 @@ class MediaStreamTrack(WebRTCObject, EventTarget):
         return self._native_obj.label
 
     @property
-    def kind(self) -> 'webrtc.MediaType':
-        """:obj:`webrtc.MediaType`: Indicating type of media. Audio or video. It doesn't change if the track is
-        deassociated from its source."""
+    def kind(self) -> webrtc.MediaType:
+        """:obj:`webrtc.MediaType`: The kind of media, audio or video, even once detached from the source."""
         return self._native_obj.kind
 
     @property
-    def ready_state(self) -> 'webrtc.MediaStreamTrackState':
+    def ready_state(self) -> webrtc.MediaStreamTrackState:
         """:obj:`webrtc.MediaStreamTrackState`: Returns an enumerated value giving the status of the track."""
         return self._native_obj.readyState
 
     @property
     def muted(self) -> bool:
-        """:obj:`bool`: A value indicating whether the track
-        is unable to provide media data due to a technical issue."""
+        """:obj:`bool`: Whether the track can't provide media, due to a technical issue."""
         return self._native_obj.muted
 
     @property
     def content_hint(self) -> str:
-        """:obj:`str`: What the track carries, which encoders optimize for: ``'speech'``, ``'speaking'`` or
-        ``'music'`` for audio, ``'motion'``, ``'detail'`` or ``'text'`` for video, empty if unknown (the default).
-        Other values, and the ones of the other kind, are ignored."""
+        """:obj:`str`: What the track carries, which encoders optimize for, empty if unknown (the default).
+
+        ``'speech'``, ``'speaking'`` or ``'music'`` for audio, ``'motion'``, ``'detail'`` or ``'text'`` for video.
+        Other values, and the ones of the other kind, are ignored.
+        """
         return self._native_obj.contentHint
 
     @content_hint.setter
-    def content_hint(self, value: str):
+    def content_hint(self, value: str) -> None:
         self._native_obj.contentHint = str(value)
 
     def get_settings(self) -> MediaTrackSettings:
-        """Returns what the track carries: the size and frame rate of the frames last seen, the format of the audio,
-        and the device of the tracks of :func:`webrtc.get_user_media`.
+        """Returns what the track carries.
+
+        The size and frame rate of the frames last seen, the format of the audio, and the device of the tracks of
+        :func:`webrtc.get_user_media`.
 
         Returns:
             :obj:`webrtc.MediaTrackSettings`: The settings.
         """
-        native: Dict[str, Any] = self._native_obj._settings()
+        native: dict[str, Any] = self._native_obj._settings()
         settings = MediaTrackSettings()
         if 'width' in native:
             settings.width, settings.height = native['width'], native['height']
@@ -250,8 +267,10 @@ class MediaStreamTrack(WebRTCObject, EventTarget):
         return settings
 
     def get_capabilities(self) -> MediaTrackCapabilities:
-        """Returns what the source of the track can do: the synthetic camera and microphone of
-        :func:`webrtc.get_user_media` have capabilities, other tracks (remote, generated) have none.
+        """Returns what the source of the track can do.
+
+        The synthetic camera and microphone of :func:`webrtc.get_user_media` have capabilities, other tracks (remote,
+        generated) have none.
 
         Returns:
             :obj:`webrtc.MediaTrackCapabilities`: The capabilities.
@@ -272,9 +291,13 @@ class MediaStreamTrack(WebRTCObject, EventTarget):
         constraints = self._native_obj._constraints
         return constraints if constraints is not None else MediaTrackConstraints()
 
-    def apply_constraints(self, constraints: Optional[Any] = None) -> asyncio.Future:
-        """Applies constraints to the track: the synthetic camera of :func:`webrtc.get_user_media` changes its size
-        and frame rate, the source of other tracks stays as it is.
+    def apply_constraints(
+        self, constraints: MediaTrackConstraints | dict[str, Any] | None = None
+    ) -> asyncio.Future[None]:
+        """Applies constraints to the track.
+
+        The synthetic camera of :func:`webrtc.get_user_media` changes its size and frame rate, the source of other
+        tracks stays as it is.
 
         Args:
             constraints (:obj:`webrtc.MediaTrackConstraints` or :obj:`dict`, optional): The constraints, none to
@@ -317,14 +340,13 @@ class MediaStreamTrack(WebRTCObject, EventTarget):
                 self._native_obj._reconfigureCamera(int(width), int(height), float(frame_rate))
         self._native_obj._constraints = constraints
 
-    def clone(self) -> 'webrtc.MediaStreamTrack':
+    def clone(self) -> webrtc.MediaStreamTrack:
         """Returns a duplicate of the :obj:`webrtc.MediaStreamTrack`."""
         return self._wrap(self._native_obj.clone())
 
-    def stop(self):
-        """Stops playing the source associated to the track, both the source and the track are deassociated.
-        The track state is set to ended."""
-        return self._native_obj.stop()
+    def stop(self) -> None:
+        """Stops the track, detached from its source: its :attr:`ready_state` becomes ended."""
+        self._native_obj.stop()
 
     #: Alias for :attr:`ready_state`
     readyState = ready_state

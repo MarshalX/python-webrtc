@@ -5,7 +5,11 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING, Dict, Optional, Union
+"""getUserMedia of Media Capture and Streams, with a synthetic microphone and camera."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Union
 
 from webrtc import MediaStream, MediaTrackConstraints, MediaTrackSettings, OverconstrainedError, wrtc
 from webrtc.interfaces.media_stream_track import _CAMERA_CAPABILITIES, _check_numbers, _selected, _unsatisfied
@@ -15,21 +19,22 @@ if TYPE_CHECKING:
 
 
 #: A value, or a constraint on it: a :obj:`dict` with any of ``exact``, ``ideal``, ``min`` and ``max``
-Constrain = Union[float, Dict[str, float]]
+Constrain = Union[float, dict[str, float]]
 
 
 def get_user_media(
+    *,
     audio: bool = True,
     video: bool = False,
-    *,
-    width: Optional[Constrain] = None,
-    height: Optional[Constrain] = None,
-    frame_rate: Optional[Constrain] = None,
-) -> 'webrtc.MediaStream':
-    """Returns a stream of local media, as requested: an audio track of a synthetic microphone (quiet noise), and/or
-    a video track of a synthetic camera, which draws a moving pattern (use :obj:`webrtc.VideoTrackGenerator` and
-    :obj:`webrtc.MediaStreamTrackGenerator` for real media). The constraints given are the ones of the tracks (see
-    :meth:`webrtc.MediaStreamTrack.get_constraints`).
+    width: Constrain | None = None,
+    height: Constrain | None = None,
+    frame_rate: Constrain | None = None,
+) -> webrtc.MediaStream:
+    """Returns a stream of local media, as requested: a synthetic microphone and/or camera.
+
+    The audio track is quiet noise, the video track draws a moving pattern (use :obj:`webrtc.VideoTrackGenerator`
+    and :obj:`webrtc.MediaStreamTrackGenerator` for real media). The constraints given are the ones of the tracks
+    (see :meth:`webrtc.MediaStreamTrack.get_constraints`).
 
     Args:
         audio (:obj:`bool`, optional): Whether the stream has an audio track.
@@ -44,14 +49,15 @@ def get_user_media(
         :obj:`webrtc.MediaStream`: The stream.
 
     Raises:
-        :obj:`TypeError`: If neither audio nor video is requested, or a value isn't a finite number (negative for
+        TypeError: If neither audio nor video is requested, or a value isn't a finite number (negative for
             the size).
-        :obj:`webrtc.OverconstrainedError`: If a required value (``exact``, ``min``, ``max``) is beyond what the
+        webrtc.OverconstrainedError: If a required value (``exact``, ``min``, ``max``) is beyond what the
             camera can do: 1 to 4096 pixels wide and high, 1 to 120 frames per second. Other values are brought
             within that.
     """
     if not audio and not video:
-        raise TypeError('audio or video must be requested')
+        msg = 'audio or video must be requested'
+        raise TypeError(msg)
     constraints = MediaTrackConstraints(width=width, height=height, frame_rate=frame_rate)
     _check_numbers(constraints)
     if video:

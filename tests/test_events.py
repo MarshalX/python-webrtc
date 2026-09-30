@@ -7,6 +7,8 @@
 
 """Events: on/once/off, delivery on the event loop, and states that change along with their events."""
 
+from __future__ import annotations
+
 import asyncio
 
 import pytest
@@ -16,18 +18,18 @@ from tests.helpers import QUIET_PERIOD, connect, wait_for_event
 
 
 @pytest.mark.asyncio
-async def test_on_decorator_once_and_off(pc):
-    """Handlers registered with the decorator and once are called, a handler removed with off isn't"""
+async def test_on_decorator_once_and_off(pc: webrtc.RTCPeerConnection) -> None:
+    """Handlers registered with the decorator and once are called, a handler removed with off isn't."""
     calls = []
 
     @pc.on('negotiationneeded')
-    def decorated(event):
+    def decorated(event: webrtc.Event) -> None:
         calls.append(('decorated', event.type, event.target is pc))
 
-    def once(event):
+    def once(event: webrtc.Event) -> None:
         calls.append(('once', event.type))
 
-    def removed(event):
+    def removed(_event: webrtc.Event) -> None:
         calls.append(('removed',))
 
     pc.once('negotiationneeded', once)
@@ -43,12 +45,12 @@ async def test_on_decorator_once_and_off(pc):
 
 
 @pytest.mark.asyncio
-async def test_async_handlers_run_as_tasks(pc):
-    """A coroutine function handler is run as a task on the loop"""
+async def test_async_handlers_run_as_tasks(pc: webrtc.RTCPeerConnection) -> None:
+    """A coroutine function handler is run as a task on the loop."""
     done = asyncio.get_running_loop().create_future()
 
     @pc.on('negotiationneeded')
-    async def handler(event):
+    async def handler(event: webrtc.Event) -> None:
         await asyncio.sleep(0)
         if not done.done():
             done.set_result(event.type)
@@ -57,24 +59,24 @@ async def test_async_handlers_run_as_tasks(pc):
     assert await asyncio.wait_for(done, 5) == 'negotiationneeded'
 
 
-def test_unknown_event(pc):
-    """Registering a handler of an event the object doesn't have is a ValueError"""
-    with pytest.raises(ValueError):
-        pc.on('nosuchevent', lambda event: None)
+def test_unknown_event(pc: webrtc.RTCPeerConnection) -> None:
+    """Registering a handler of an event the object doesn't have is a ValueError."""
+    with pytest.raises(ValueError, match="no event 'nosuchevent'"):
+        pc.on('nosuchevent', lambda _: None)
 
 
-def test_handlers_need_a_running_loop(pc):
-    """Handlers are called on the loop they were registered from, so registering needs a running loop"""
+def test_handlers_need_a_running_loop(pc: webrtc.RTCPeerConnection) -> None:
+    """Handlers are called on the loop they were registered from, so registering needs a running loop."""
     with pytest.raises(RuntimeError):
-        pc.on('track', lambda event: None)
+        pc.on('track', lambda _: None)
 
 
 @pytest.mark.asyncio
-async def test_signaling_state_changes_with_its_event(pc):
-    """Every signalingstatechange event sees its state, and comes before the operation that changed it resolves"""
+async def test_signaling_state_changes_with_its_event(pc: webrtc.RTCPeerConnection) -> None:
+    """Every signalingstatechange event sees its state, and comes before the operation that changed it resolves."""
     states = []
 
-    def on_change(event):
+    def on_change(_event: webrtc.Event) -> None:
         states.append(pc.signaling_state)
 
     pc.on('signalingstatechange', on_change)
@@ -87,11 +89,13 @@ async def test_signaling_state_changes_with_its_event(pc):
 
 
 @pytest.mark.asyncio
-async def test_closed_connection_emits_nothing(caller, callee):
-    """Closing a connection changes its states without emitting their events"""
+async def test_closed_connection_emits_nothing(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """Closing a connection changes its states without emitting their events."""
     events = []
 
-    def on_event(event):
+    def on_event(event: webrtc.Event) -> None:
         events.append(event.type)
 
     for name in ('connectionstatechange', 'iceconnectionstatechange', 'signalingstatechange'):
@@ -109,11 +113,11 @@ async def test_closed_connection_emits_nothing(caller, callee):
 
 
 @pytest.mark.asyncio
-async def test_ice_candidates_and_end_of_candidates(pc):
-    """Candidates are parsed, each transport ends with an empty one, and the final None adds a=end-of-candidates"""
+async def test_ice_candidates_and_end_of_candidates(pc: webrtc.RTCPeerConnection) -> None:
+    """Candidates are parsed, each transport ends with an empty one, and the final None adds a=end-of-candidates."""
     candidates = []
 
-    def on_candidate(event):
+    def on_candidate(event: webrtc.RTCPeerConnectionIceEvent) -> None:
         candidates.append(event.candidate)
 
     pc.on('icecandidate', on_candidate)
@@ -123,25 +127,26 @@ async def test_ice_candidates_and_end_of_candidates(pc):
     await gathered
 
     host = [c for c in candidates if c is not None and c.candidate]
-    assert host and all(c.type is not None for c in host), candidates
-    assert any(c is not None and c.candidate == '' for c in candidates), candidates
+    assert host, candidates
+    assert all(c.type is not None for c in host), candidates
+    assert any(c is not None and not c.candidate for c in candidates), candidates
     assert 'a=end-of-candidates' in pc.local_description.sdp, pc.local_description.sdp
 
 
 @pytest.mark.asyncio
-async def test_descriptions_change_with_signaling_events(caller, callee):
-    """An offer received in have-local-offer rolls back first: each signalingstatechange sees its descriptions"""
+async def test_descriptions_change_with_signaling_events(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """An offer received in have-local-offer rolls back first: each signalingstatechange sees its descriptions."""
     await caller.set_local_description(await caller.create_offer())
     seen = []
 
-    def on_change(event):
-        seen.append(
-            {
-                'state': caller.signaling_state,
-                'local': caller.pending_local_description,
-                'remote': caller.pending_remote_description,
-            }
-        )
+    def on_change(_event: webrtc.Event) -> None:
+        seen.append({
+            'state': caller.signaling_state,
+            'local': caller.pending_local_description,
+            'remote': caller.pending_remote_description,
+        })
 
     caller.on('signalingstatechange', on_change)
     await caller.set_remote_description(await callee.create_offer())
@@ -154,8 +159,8 @@ async def test_descriptions_change_with_signaling_events(caller, callee):
 
 
 @pytest.mark.asyncio
-async def test_restart_ice_before_negotiation_needs_nothing(pc):
-    """restart_ice before the first negotiation doesn't fire negotiationneeded"""
+async def test_restart_ice_before_negotiation_needs_nothing(pc: webrtc.RTCPeerConnection) -> None:
+    """restart_ice before the first negotiation doesn't fire negotiationneeded."""
     events = []
     pc.on('negotiationneeded', events.append)
     pc.restart_ice()
@@ -163,11 +168,11 @@ async def test_restart_ice_before_negotiation_needs_nothing(pc):
     assert events == []
 
 
-def test_objects_used_from_another_loop_see_their_events():
-    """Once its first loop is closed, an object is updated on the loop of its handlers"""
+def test_objects_used_from_another_loop_see_their_events() -> None:
+    """Once its first loop is closed, an object is updated on the loop of its handlers."""
     objects = {}
 
-    async def first():
+    async def first() -> None:
         caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
         channel = caller.create_data_channel('loops')
         opened = wait_for_event(channel, 'open')
@@ -175,7 +180,7 @@ def test_objects_used_from_another_loop_see_their_events():
         await opened
         objects.update(caller=caller, callee=callee, channel=channel)
 
-    async def second():
+    async def second() -> None:
         channel = objects['channel']
         closed = wait_for_event(channel, 'close')
         objects['callee'].close()

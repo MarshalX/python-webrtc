@@ -7,12 +7,14 @@
 
 """Fuzzes AudioData: creation, and copy_to with every conversion of format and layout."""
 
+from __future__ import annotations
+
 import sys
 
 import atheris
 
 with atheris.instrument_imports():
-    from _input import Input
+    from inputs import Input
 
     import webrtc
 
@@ -22,7 +24,7 @@ SAMPLE_BYTES = {'u8': 1, 's16': 2, 's32': 4, 'f32': 4}
 
 
 def check_identity(audio: webrtc.AudioData, data: bytes) -> None:
-    """Interleaved samples copied out in their own format are the same bytes"""
+    """Interleaved samples copied out in their own format are the same bytes."""
     if audio.format.value.endswith('-planar'):
         return
     out = bytearray(audio.allocation_size({'plane_index': 0}))
@@ -53,8 +55,12 @@ def test_one_input(data: bytes) -> None:
     except EXPECTED:
         return
     check_identity(audio, bytes(source))
+    exercise(inp, audio)
+
+
+def exercise(inp: Input, audio: webrtc.AudioData) -> None:
     for _ in range(inp.small(4)):
-        options = {'plane_index': inp.integer(8)}
+        options: dict[str, object] = {'plane_index': inp.integer(8)}
         if inp.flag():
             options['frame_offset'] = inp.integer(512)
         if inp.flag():

@@ -5,8 +5,12 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""ICE transports: the ones of a connection, and ones of their own (the WebRTC ICE extension), which gather, start
-and connect without a connection."""
+"""ICE transports: the ones of a connection, and ones of their own.
+
+The ones of their own (the WebRTC ICE extension) gather, start and connect without a connection.
+"""
+
+from __future__ import annotations
 
 import asyncio
 
@@ -17,8 +21,10 @@ from tests.helpers import connect, wait_for_event, wait_until
 
 
 @pytest.mark.asyncio
-async def test_candidates_parameters_and_role(caller, callee):
-    """A connection's transport learns its role from the answer, and has the signaled parameters and candidates"""
+async def test_candidates_parameters_and_role(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """A connection's transport learns its role from the answer, and has the signaled parameters and candidates."""
     caller.create_data_channel('ice')
     await caller.set_local_description()
     ice = caller.sctp.transport.ice_transport
@@ -29,25 +35,28 @@ async def test_candidates_parameters_and_role(caller, callee):
     await wait_until(lambda: ice.role == webrtc.RTCIceRole.controlling, 'the controlling role')
     remote_ice = callee.sctp.transport.ice_transport
     local, remote = ice.get_local_parameters(), ice.get_remote_parameters()
-    assert isinstance(local, webrtc.RTCIceParameters) and local.username_fragment and local.password
+    assert isinstance(local, webrtc.RTCIceParameters)
+    assert local.username_fragment
+    assert local.password
     assert remote.username_fragment == remote_ice.get_local_parameters().username_fragment
-    assert ice.get_local_candidates() and all(c.candidate for c in ice.get_local_candidates())
+    assert ice.get_local_candidates()
+    assert all(c.candidate for c in ice.get_local_candidates())
     assert {c.candidate for c in ice.get_remote_candidates()} <= {
         c.candidate for c in remote_ice.get_local_candidates()
     }
 
 
 @pytest.mark.asyncio
-async def test_component(caller, callee):
-    """RTP and RTCP are multiplexed on the transport of the RTP component"""
+async def test_component(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """RTP and RTCP are multiplexed on the transport of the RTP component."""
     transceiver = caller.add_transceiver(webrtc.MediaType.audio)
     await connect(caller, callee)
     assert transceiver.sender.transport.ice_transport.component == webrtc.RTCIceComponent.rtp
 
 
 @pytest.mark.asyncio
-async def test_close_keeps_gathering_state(pc):
-    """Closing a connection closes its transports, it doesn't complete their gathering"""
+async def test_close_keeps_gathering_state(pc: webrtc.RTCPeerConnection) -> None:
+    """Closing a connection closes its transports, it doesn't complete their gathering."""
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
     await pc.set_local_description()
     ice = transceiver.sender.transport.ice_transport
@@ -58,15 +67,17 @@ async def test_close_keeps_gathering_state(pc):
 
 
 @pytest.mark.asyncio
-async def test_two_transports_connect():
-    """Two transports gather, start with each other's parameters and connect, one switching to the controlled role"""
+async def test_two_transports_connect() -> None:
+    """Two transports gather, start with each other's parameters and connect, one switching to the controlled role."""
     local, remote = webrtc.RTCIceTransport(), webrtc.RTCIceTransport()
-    assert local.role is None and local.state == webrtc.RTCIceTransportState.new
-    assert local.get_local_parameters() and local.get_remote_parameters() is None
+    assert local.role is None
+    assert local.state == webrtc.RTCIceTransportState.new
+    assert local.get_local_parameters()
+    assert local.get_remote_parameters() is None
 
     for transport, other in ((local, remote), (remote, local)):
 
-        def on_candidate(event, other=other):
+        def on_candidate(event: webrtc.RTCPeerConnectionIceEvent, other: webrtc.RTCIceTransport = other) -> None:
             if event.candidate:
                 other.add_remote_candidate(event.candidate)
 
@@ -94,8 +105,8 @@ async def test_two_transports_connect():
     remote.stop()
 
 
-def test_start_validation():
-    """start checks the remote parameters and the role, and other remote parameters restart the checks"""
+def test_start_validation() -> None:
+    """Start checks the remote parameters and the role, and other remote parameters restart the checks."""
     transport = webrtc.RTCIceTransport()
     with pytest.raises(webrtc.InvalidSyntaxError):
         transport.start(webrtc.RTCIceParameters('ab', 'p' * 22))

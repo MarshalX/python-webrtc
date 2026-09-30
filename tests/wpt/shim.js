@@ -136,10 +136,10 @@
   const setAttr = (self, name, value) => unwrap(bridge.set_attr(pyObjects.get(self), name, value));
   const callMethod = (self, name, ...args) => callMethodWithKeywords(self, name, args, {});
   const callMethodWithKeywords = (self, name, args, kwargs) =>
-    unwrap(bridge.call_method(pyObjects.get(self), name, args.map(toPy), kwargs));
+    unwrap(bridge.call_method(pyObjects.get(self), name, {args: args.map(toPy), kwargs}));
   const callAsyncMethod = async (self, name, ...args) => callAsyncMethodWithKeywords(self, name, args, {});
   const callAsyncMethodWithKeywords = async (self, name, args, kwargs) =>
-    unwrap(await bridge.call_async_method(pyObjects.get(self), name, args.map(toPy), kwargs));
+    unwrap(await bridge.call_async_method(pyObjects.get(self), name, {args: args.map(toPy), kwargs}));
   const callStatic = (className, name, ...args) => unwrap(bridge.call_static(className, name, args.map(toPy)));
   // an attribute that is a promise, like the closed one of a reader
   const awaitAttr = async (self, name) => unwrap(await bridge.await_attr(pyObjects.get(self), name));
@@ -800,7 +800,7 @@
       requireArguments(arguments, 1, 'RTCPeerConnection.createDataChannel');
       const kwargs = convertDictionary(requireDictionary(init, 'RTCDataChannelInit'), 'RTCDataChannelInit',
         DATA_CHANNEL_INIT);
-      return callMethodWithKeywords(this, 'create_data_channel', [toUSVString(label)], kwargs);
+      return callMethod(this, 'create_data_channel', toUSVString(label), kwargs);
     }
 
     async addIceCandidate(candidate) {
@@ -884,7 +884,7 @@
           throw new TypeError('RTCError: missing required member errorDetail');
         }
         // the library validates the error detail, an RTCErrorDetailType
-        construct('RTCError', {error_detail: pyEnum('RTCErrorDetailType', init.errorDetail), message: String(message)});
+        construct('RTCErrorInit', {error_detail: pyEnum('RTCErrorDetailType', init.errorDetail)});
       }
       super(message, 'OperationError');
       const detail = {
@@ -1007,7 +1007,7 @@
 
     async copyTo(destination, options) {
       const bytes = bytesOf(destination, 'destination');
-      const {layout, data} = unwrap(bridge.video_frame_copy_to(pyObjects.get(this), bytes, copyToOptions(options)));
+      const {layout, data} = unwrap(await bridge.video_frame_copy_to(pyObjects.get(this), bytes, copyToOptions(options)));
       bytes.set(new Uint8Array(data));
       return layout;
     }

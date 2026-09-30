@@ -7,6 +7,8 @@
 
 """Senders and receivers: capabilities, parameters, codecs, tracks, DTMF and synchronization sources."""
 
+from __future__ import annotations
+
 import asyncio
 import time
 
@@ -16,8 +18,8 @@ import webrtc
 from tests.helpers import connect, exchange_offer_answer, next_task, wait_for_event, wait_until
 
 
-def test_capabilities():
-    """Senders and receivers of audio and video have codecs and header extensions, of data none"""
+def test_capabilities() -> None:
+    """Senders and receivers of audio and video have codecs and header extensions, of data none."""
     audio = webrtc.RTCRtpSender.get_capabilities(webrtc.MediaType.audio)
     assert any(codec.mime_type == 'audio/opus' for codec in audio.codecs)
     assert audio.header_extensions
@@ -25,15 +27,15 @@ def test_capabilities():
     assert webrtc.RTCRtpSender.get_capabilities('data') is None
 
 
-def add_simulcast_sender(pc):
+def add_simulcast_sender(pc: webrtc.RTCPeerConnection) -> webrtc.RTCRtpSender:
     init = webrtc.RtpTransceiverInit(
         send_encodings=[webrtc.RTCRtpEncodingParameters(rid='hi'), webrtc.RTCRtpEncodingParameters(rid='lo')]
     )
     return pc.add_transceiver(webrtc.MediaType.video, init).sender
 
 
-def test_default_send_parameters(pc):
-    """Video encodings scale down by powers of 2 by default, and the parameters of a task share a transaction"""
+def test_default_send_parameters(pc: webrtc.RTCPeerConnection) -> None:
+    """Video encodings scale down by powers of 2 by default, and the parameters of a task share a transaction."""
     sender = add_simulcast_sender(pc)
     parameters = sender.get_parameters()
     assert [e.scale_resolution_down_by for e in parameters.encodings] == [2.0, 1.0]
@@ -41,8 +43,8 @@ def test_default_send_parameters(pc):
 
 
 @pytest.mark.asyncio
-async def test_set_send_parameters(pc):
-    """Changed encodings are applied"""
+async def test_set_send_parameters(pc: webrtc.RTCPeerConnection) -> None:
+    """Changed encodings are applied."""
     sender = add_simulcast_sender(pc)
     parameters = sender.get_parameters()
     parameters.encodings[0].max_bitrate = 500_000
@@ -52,12 +54,13 @@ async def test_set_send_parameters(pc):
     await next_task()
 
     changed = sender.get_parameters()
-    assert changed.encodings[0].max_bitrate == 500_000 and not changed.encodings[1].active
+    assert changed.encodings[0].max_bitrate == 500_000
+    assert not changed.encodings[1].active
 
 
 @pytest.mark.asyncio
-async def test_send_parameters_out_of_range(pc):
-    """An encoding can't scale the resolution up"""
+async def test_send_parameters_out_of_range(pc: webrtc.RTCPeerConnection) -> None:
+    """An encoding can't scale the resolution up."""
     sender = add_simulcast_sender(pc)
     parameters = sender.get_parameters()
     parameters.encodings[0].scale_resolution_down_by = 0.5
@@ -66,8 +69,8 @@ async def test_send_parameters_out_of_range(pc):
 
 
 @pytest.mark.asyncio
-async def test_send_parameters_with_other_encodings(pc):
-    """The number of encodings can't change"""
+async def test_send_parameters_with_other_encodings(pc: webrtc.RTCPeerConnection) -> None:
+    """The number of encodings can't change."""
     sender = add_simulcast_sender(pc)
     parameters = sender.get_parameters()
     parameters.encodings.pop()
@@ -76,8 +79,8 @@ async def test_send_parameters_with_other_encodings(pc):
 
 
 @pytest.mark.asyncio
-async def test_parameters_expire_with_their_task(pc):
-    """Parameters are only accepted in the task that got them"""
+async def test_parameters_expire_with_their_task(pc: webrtc.RTCPeerConnection) -> None:
+    """Parameters are only accepted in the task that got them."""
     sender = add_simulcast_sender(pc)
     parameters = sender.get_parameters()
     await next_task()
@@ -86,32 +89,32 @@ async def test_parameters_expire_with_their_task(pc):
 
 
 @pytest.mark.parametrize(
-    'encodings',
+    ('encodings', 'error'),
     [
-        [{'rid': 'a'}, {'rid': 'a'}],
-        [{'rid': 'a'}, {}],
-        [{'rid': 'no-dash'}],
-        [{'rid': ''}],
+        ([{'rid': 'a'}, {'rid': 'a'}], 'needs a distinct rid'),
+        ([{'rid': 'a'}, {}], 'needs a distinct rid'),
+        ([{'rid': 'no-dash'}], 'not a valid rid'),
+        ([{'rid': ''}], 'not a valid rid'),
     ],
     ids=['duplicate rid', 'missing rid', 'invalid rid', 'empty rid'],
 )
-def test_invalid_send_encodings(pc, encodings):
-    """The rids of send encodings are unique, present when there are several, and alphanumeric"""
+def test_invalid_send_encodings(pc: webrtc.RTCPeerConnection, encodings: list[dict[str, str]], error: str) -> None:
+    """The rids of send encodings are unique, present when there are several, and alphanumeric."""
     init = webrtc.RtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(**e) for e in encodings])
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=error):
         pc.add_transceiver(webrtc.MediaType.video, init)
 
 
-def test_send_encoding_of_an_unknown_codec(pc):
-    """The codec of a send encoding must be one the sender supports"""
+def test_send_encoding_of_an_unknown_codec(pc: webrtc.RTCPeerConnection) -> None:
+    """The codec of a send encoding must be one the sender supports."""
     unknown = webrtc.RTCRtpEncodingParameters(codec=webrtc.RTCRtpCodec('audio/unknown', 8000))
     with pytest.raises(webrtc.OperationError):
         pc.add_transceiver(webrtc.MediaType.audio, webrtc.RtpTransceiverInit(send_encodings=[unknown]))
 
 
 @pytest.mark.asyncio
-async def test_negotiated_codecs(caller, callee):
-    """The parameters of senders and receivers list their negotiated codecs"""
+async def test_negotiated_codecs(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """The parameters of senders and receivers list their negotiated codecs."""
     transceiver = caller.add_transceiver(webrtc.MediaType.audio)
     await exchange_offer_answer(caller, callee)
 
@@ -120,8 +123,10 @@ async def test_negotiated_codecs(caller, callee):
 
 
 @pytest.mark.asyncio
-async def test_replace_track(pc, audio_stream, video_stream):
-    """A track is replaced by one of the same kind, or by None"""
+async def test_replace_track(
+    pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream, video_stream: webrtc.MediaStream
+) -> None:
+    """A track is replaced by one of the same kind, or by None."""
     (audio,), (video,) = audio_stream.get_tracks(), video_stream.get_tracks()
     sender = pc.add_transceiver(webrtc.MediaType.audio).sender
     await sender.replace_track(audio)
@@ -132,8 +137,8 @@ async def test_replace_track(pc, audio_stream, video_stream):
     assert sender.track is None
 
 
-def test_codec_preferences_and_header_extensions(pc):
-    """Codec preferences take supported codecs only, and header extensions to negotiate can be stopped"""
+def test_codec_preferences_and_header_extensions(pc: webrtc.RTCPeerConnection) -> None:
+    """Codec preferences take supported codecs only, and header extensions to negotiate can be stopped."""
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
     opus = [c for c in webrtc.RTCRtpReceiver.get_capabilities('audio').codecs if c.mime_type == 'audio/opus']
     transceiver.set_codec_preferences(opus)
@@ -148,8 +153,10 @@ def test_codec_preferences_and_header_extensions(pc):
 
 
 @pytest.mark.asyncio
-async def test_sender_codecs_leave_out_unknown_remote_codecs(caller, callee):
-    """The codecs of a sender are the negotiated ones it knows, and are read-only"""
+async def test_sender_codecs_leave_out_unknown_remote_codecs(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """The codecs of a sender are the negotiated ones it knows, and are read-only."""
     sender = caller.add_transceiver(webrtc.MediaType.audio).sender
     await caller.set_local_description()
     await callee.set_remote_description(caller.local_description)
@@ -169,8 +176,8 @@ async def test_sender_codecs_leave_out_unknown_remote_codecs(caller, callee):
 
 
 @pytest.mark.asyncio
-async def test_setting_a_description_expires_sender_parameters(pc):
-    """Setting a description changes what parameters are valid, so earlier ones expire"""
+async def test_setting_a_description_expires_sender_parameters(pc: webrtc.RTCPeerConnection) -> None:
+    """Setting a description changes what parameters are valid, so earlier ones expire."""
     sender = pc.add_transceiver(webrtc.MediaType.audio).sender
     parameters = sender.get_parameters()
     await pc.set_local_description()
@@ -179,8 +186,8 @@ async def test_setting_a_description_expires_sender_parameters(pc):
 
 
 @pytest.mark.asyncio
-async def test_set_parameters_key_frames(caller, callee):
-    """A key frame is requested per encoding"""
+async def test_set_parameters_key_frames(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """A key frame is requested per encoding."""
     sender = caller.add_transceiver(webrtc.MediaType.video).sender
     await exchange_offer_answer(caller, callee)
     with pytest.raises(webrtc.InvalidModificationError):
@@ -189,8 +196,8 @@ async def test_set_parameters_key_frames(caller, callee):
 
 
 @pytest.mark.asyncio
-async def test_set_parameters_after_rollback(pc):
-    """A sender rolled back out of its offer has no media channel: setting parameters rejects, not hangs"""
+async def test_set_parameters_after_rollback(pc: webrtc.RTCPeerConnection) -> None:
+    """A sender rolled back out of its offer has no media channel: setting parameters rejects, not hangs."""
     sender = pc.add_transceiver(webrtc.MediaType.video).sender
     await pc.set_local_description()
     await pc.set_local_description({'type': 'rollback'})
@@ -199,26 +206,32 @@ async def test_set_parameters_after_rollback(pc):
 
 
 @pytest.mark.asyncio
-async def test_simulcast_receiver_parameters(caller, callee):
-    """The receiver of simulcast has the negotiated codecs and header extensions"""
+async def test_simulcast_receiver_parameters(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """The receiver of simulcast has the negotiated codecs and header extensions."""
     encodings = [webrtc.RTCRtpEncodingParameters(rid='a'), webrtc.RTCRtpEncodingParameters(rid='b')]
     caller.add_transceiver(webrtc.MediaType.video, webrtc.RtpTransceiverInit(send_encodings=encodings))
     await exchange_offer_answer(caller, callee)
     parameters = callee.get_transceivers()[0].receiver.get_parameters()
-    assert parameters.codecs and parameters.header_extensions
+    assert parameters.codecs
+    assert parameters.header_extensions
 
 
 @pytest.mark.asyncio
-async def test_dtmf(caller, callee, audio_stream):
-    """An audio sender plays tones, normalized and checked, announcing each one, then an empty one"""
+async def test_dtmf(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """An audio sender plays tones, normalized and checked, announcing each one, then an empty one."""
     sender = caller.add_track(audio_stream.get_tracks()[0], audio_stream)
     await connect(caller, callee)
     dtmf = sender.dtmf
-    assert dtmf is not None and dtmf.can_insert_dtmf
+    assert dtmf is not None
+    assert dtmf.can_insert_dtmf
 
     tones = []
     dtmf.on('tonechange', lambda event: tones.append(event.tone))
-    done = wait_for_event(dtmf, 'tonechange', timeout=5, predicate=lambda event: event.tone == '')
+    done = wait_for_event(dtmf, 'tonechange', timeout=5, predicate=lambda event: not event.tone)
 
     with pytest.raises(webrtc.InvalidCharacterError):
         dtmf.insert_dtmf('12X')
@@ -229,8 +242,10 @@ async def test_dtmf(caller, callee, audio_stream):
 
 
 @pytest.mark.asyncio
-async def test_synchronization_sources(caller, callee, video_stream):
-    """A receiver reports the source of the media it decodes"""
+async def test_synchronization_sources(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, video_stream: webrtc.MediaStream
+) -> None:
+    """A receiver reports the source of the media it decodes."""
     caller.add_track(video_stream.get_tracks()[0], video_stream)
     remote_track = wait_for_event(callee, 'track')
     await connect(caller, callee)
@@ -258,8 +273,8 @@ async def test_synchronization_sources(caller, callee, video_stream):
         {'scale_resolution_down_by': float('nan')},
     ],
 )
-def test_encodings_have_their_webidl_types(pc, encoding):
-    """An [EnforceRange] unsigned long and restricted doubles: other values are a TypeError, not sent to libwebrtc"""
+def test_encodings_have_their_webidl_types(pc: webrtc.RTCPeerConnection, encoding: dict[str, float]) -> None:
+    """An [EnforceRange] unsigned long and restricted doubles: other values are a TypeError, not sent to libwebrtc."""
     with pytest.raises(TypeError):
         pc.add_transceiver(
             webrtc.MediaType.video,
@@ -267,14 +282,14 @@ def test_encodings_have_their_webidl_types(pc, encoding):
         )
 
 
-def test_encoding_bitrate_beyond_an_int_is_no_limit(pc):
+def test_encoding_bitrate_beyond_an_int_is_no_limit(pc: webrtc.RTCPeerConnection) -> None:
     init = webrtc.RtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(max_bitrate=2**32 - 1)])
     sender = pc.add_transceiver(webrtc.MediaType.video, init).sender
     assert sender.get_parameters().encodings[0].max_bitrate == 2**31 - 1
 
 
-def test_transceiver_init_as_a_dictionary(pc):
-    """As in browsers, with camelCase or snake_case names, the encodings too; unknown members are ignored"""
+def test_transceiver_init_as_a_dictionary(pc: webrtc.RTCPeerConnection) -> None:
+    """As in browsers, with camelCase or snake_case names, the encodings too; unknown members are ignored."""
     init = {'direction': 'sendonly', 'sendEncodings': [{'rid': 'a', 'maxBitrate': 100000}, {'rid': 'b'}], 'x': 1}
     transceiver = pc.add_transceiver(webrtc.MediaType.video, init)
     assert transceiver.direction == webrtc.TransceiverDirection.sendonly

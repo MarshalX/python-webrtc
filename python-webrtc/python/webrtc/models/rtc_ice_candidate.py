@@ -5,9 +5,14 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
+"""ICE candidates and parameters."""
+
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple, Union
+from enum import Enum
+from typing import Any, ClassVar, TypeVar, Union
 
 from webrtc import (
     RTCIceCandidateType,
@@ -16,78 +21,124 @@ from webrtc import (
     RTCIceServerTransportProtocol,
     RTCIceTcpCandidateType,
 )
-from webrtc.utils.names import alias
+from webrtc.utils.names import Alias, alias
 
 _FOUNDATION = re.compile(r'[A-Za-z0-9+/]{1,32}')
 _DIGITS = re.compile(r'[0-9]+')
 _TOKEN = re.compile(r"[!#$%&'*+\-.^_`{|}~A-Za-z0-9]+")
 
+_MIN_TOKENS = 8  # foundation, component, transport, priority, address, port, "typ" and the type
+_RELATED_TOKENS = 4  # "raddr", the address, "rport" and the port
+_TCP_TYPE_TOKENS = 2  # "tcptype" and the type
+_PORTS = range(65536)
+_COMPONENTS = {1: 'rtp', 2: 'rtcp'}
+_PROTOCOLS = frozenset({'udp', 'tcp'})
+_TYPES = frozenset({'host', 'srflx', 'prflx', 'relay'})
+_TCP_TYPES = frozenset({'active', 'passive', 'so'})
 
-def _number(token: str, max_digits: int, low: int, high: int) -> Optional[int]:
+_T = TypeVar('_T')
+_EnumT = TypeVar('_EnumT', bound=Enum)
+#: The fields parsed from a candidate-attribute, by the names of the properties of RTCIceCandidate
+_CandidateFields = dict[str, Union[str, int, None]]
+
+
+class _InvalidCandidateError(ValueError):
+    """A candidate-attribute that doesn't parse."""
+
+
+def _number(token: str, max_digits: int, valid: range) -> int | None:
     if len(token) > max_digits or not _DIGITS.fullmatch(token):
         return None
     value = int(token)
-    return value if low <= value <= high else None
+    return value if value in valid else None
 
 
-def _parse_candidate(value: str, strict: bool = True) -> Optional[Dict[str, Any]]:
-    """Parses a candidate-attribute (RFC 8839, with the tcptype of RFC 6544), or returns :obj:`None`.
-    Not strict, a candidate other than a host one may have no related address, as libwebrtc describes
-    peer-reflexive candidates."""
-    if not value.startswith('candidate:'):
-        return None
-    tokens = value[len('candidate:') :].split(' ')
-    if len(tokens) < 8 or tokens[6] != 'typ' or any(not t for t in tokens):
-        return None
+def _required(value: _T | None) -> _T:
+    if value is None:
+        raise _InvalidCandidateError
+    return value
 
-    foundation, component, transport, priority, address, port, _, cand_type, *rest = tokens
-    component_id = _number(component, 3, 1, 256)
-    fields = {
-        'foundation': foundation if _FOUNDATION.fullmatch(foundation) else None,
-        'component': {1: 'rtp', 2: 'rtcp'}.get(component_id),
-        'priority': _number(priority, 10, 1, 2**31 - 1),
+
+def _one_of(value: str, allowed: frozenset[str]) -> str:
+    if value not in allowed:
+        raise _InvalidCandidateError
+    return value
+
+
+def _parse_related(fields: _CandidateFields, rest: list[str], *, strict: bool) -> list[str]:
+    """Parses the related address and port into the fields, returns the tokens after them."""
+    if rest[:1] == ['raddr']:
+        if len(rest) < _RELATED_TOKENS or rest[2] != 'rport':
+            raise _InvalidCandidateError
+        fields['related_address'] = rest[1]
+        fields['related_port'] = _required(_number(rest[3], 5, _PORTS))
+        return rest[_RELATED_TOKENS:]
+    if fields['type'] != 'host' and strict:
+        raise _InvalidCandidateError
+    return rest
+
+
+def _parse_tcp_type(fields: _CandidateFields, rest: list[str]) -> list[str]:
+    """Parses the tcptype into the fields, returns the tokens after it."""
+    if rest[:1] == ['tcptype']:
+        if len(rest) < _TCP_TYPE_TOKENS:
+            raise _InvalidCandidateError
+        fields['tcp_type'] = _one_of(rest[1].lower(), _TCP_TYPES)
+        return rest[_TCP_TYPE_TOKENS:]
+    if fields['protocol'] == 'tcp' and fields['type'] != 'relay':
+        raise _InvalidCandidateError
+    return rest
+
+
+def _base_fields(tokens: list[str]) -> _CandidateFields:
+    """The fields of the tokens up to the type."""
+    foundation, component, transport, priority, address, port, _, cand_type = tokens
+    component_id = _required(_number(component, 3, range(1, 257)))
+    return {
+        'foundation': _required(foundation if _FOUNDATION.fullmatch(foundation) else None),
+        'component': _COMPONENTS.get(component_id),
+        'priority': _required(_number(priority, 10, range(1, 2**31))),
         'address': address,
-        'protocol': transport.lower(),
-        'port': _number(port, 5, 0, 65535),
-        'type': cand_type.lower(),
+        'protocol': _one_of(transport.lower(), _PROTOCOLS),
+        'port': _required(_number(port, 5, _PORTS)),
+        'type': _one_of(cand_type.lower(), _TYPES),
         'tcp_type': None,
         'related_address': None,
         'related_port': None,
     }
-    if (
-        None in (fields['foundation'], fields['priority'], fields['port'])
-        or component_id is None
-        or fields['protocol'] not in ('udp', 'tcp')
-        or fields['type'] not in ('host', 'srflx', 'prflx', 'relay')
-    ):
-        return None
 
-    if rest[:1] == ['raddr']:
-        if len(rest) < 4 or rest[2] != 'rport':
-            return None
-        fields['related_address'] = rest[1]
-        fields['related_port'] = _number(rest[3], 5, 0, 65535)
-        if fields['related_port'] is None:
-            return None
-        rest = rest[4:]
-    elif fields['type'] != 'host' and strict:
-        return None
 
-    if rest[:1] == ['tcptype']:
-        if len(rest) < 2 or rest[1].lower() not in ('active', 'passive', 'so'):
-            return None
-        fields['tcp_type'] = rest[1].lower()
-        rest = rest[2:]
-    elif fields['protocol'] == 'tcp' and fields['type'] != 'relay':
-        return None
+def _parse_fields(value: str, *, strict: bool) -> _CandidateFields:
+    if not value.startswith('candidate:'):
+        raise _InvalidCandidateError
+    tokens = value[len('candidate:') :].split(' ')
+    if len(tokens) < _MIN_TOKENS or tokens[6] != 'typ' or not all(tokens):
+        raise _InvalidCandidateError
 
+    fields = _base_fields(tokens[:_MIN_TOKENS])
+    rest = _parse_tcp_type(fields, _parse_related(fields, tokens[_MIN_TOKENS:], strict=strict))
     # extensions are pairs of a token and a value without spaces (like an ufrag, with "/" and "+")
     if len(rest) % 2 or not all(_TOKEN.fullmatch(t) for t in rest[::2]):
-        return None
+        raise _InvalidCandidateError
     return fields
 
 
-def _member_or_none(cls, value):
+def _parse_candidate(value: str, *, strict: bool = True) -> _CandidateFields | None:
+    """Parses a candidate-attribute (RFC 8839, with the tcptype of RFC 6544).
+
+    Not strict, a candidate other than a host one may have no related address, as libwebrtc describes
+    peer-reflexive candidates.
+
+    Returns:
+        :obj:`dict`: The fields, or :obj:`None` if the candidate doesn't parse.
+    """
+    try:
+        return _parse_fields(value, strict=strict)
+    except _InvalidCandidateError:
+        return None
+
+
+def _member_or_none(cls: type[_EnumT], value: object) -> _EnumT | None:
     # candidates with values the enum doesn't have are valid
     try:
         return cls(value) if value is not None else None
@@ -108,7 +159,7 @@ class RTCIceParameters:
     password: str
 
     #: Alias for :attr:`username_fragment`
-    usernameFragment = alias('username_fragment')
+    usernameFragment: ClassVar[Alias[str]] = alias('username_fragment')
 
 
 @dataclass(frozen=True)
@@ -120,8 +171,8 @@ class RTCIceCandidatePair:
         remote (:obj:`webrtc.RTCIceCandidate`): The remote candidate.
     """
 
-    local: 'RTCIceCandidate'
-    remote: 'RTCIceCandidate'
+    local: RTCIceCandidate
+    remote: RTCIceCandidate
 
 
 @dataclass(frozen=True, repr=False)
@@ -143,19 +194,20 @@ class RTCIceCandidate:
         url (:obj:`str`, optional): For a local candidate, the STUN or TURN server that gathered it.
 
     Raises:
-        :obj:`TypeError`: If both ``sdp_mid`` and ``sdp_m_line_index`` are :obj:`None`.
+        TypeError: If both ``sdp_mid`` and ``sdp_m_line_index`` are :obj:`None`.
     """
 
     candidate: str = ''
-    sdp_mid: Optional[str] = None
-    sdp_m_line_index: Optional[int] = None
-    username_fragment: Optional[str] = None
-    relay_protocol: Optional[RTCIceServerTransportProtocol] = None
-    url: Optional[str] = None
+    sdp_mid: str | None = None
+    sdp_m_line_index: int | None = None
+    username_fragment: str | None = None
+    relay_protocol: RTCIceServerTransportProtocol | None = None
+    url: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.sdp_mid is None and self.sdp_m_line_index is None:
-            raise TypeError('sdp_mid and sdp_m_line_index are both None')
+            msg = 'sdp_mid and sdp_m_line_index are both None'
+            raise TypeError(msg)
         object.__setattr__(self, 'candidate', str(self.candidate))
         object.__setattr__(self, 'relay_protocol', _member_or_none(RTCIceServerTransportProtocol, self.relay_protocol))
         # the fields parsed from the candidate, not a field of the dataclass
@@ -163,8 +215,8 @@ class RTCIceCandidate:
 
     @staticmethod
     def _members_of(
-        candidate: Union['RTCIceCandidate', Dict[str, Any]],
-    ) -> Tuple[str, Optional[str], Optional[int], Optional[str]]:
+        candidate: RTCIceCandidate | dict[str, Any],
+    ) -> tuple[str, str | None, int | None, str | None]:
         """The candidate, sdp_mid, sdp_m_line_index and username_fragment of a candidate or of its JSON form."""
         if isinstance(candidate, RTCIceCandidate):
             return candidate.candidate, candidate.sdp_mid, candidate.sdp_m_line_index, candidate.username_fragment
@@ -175,24 +227,31 @@ class RTCIceCandidate:
                 candidate.get('sdpMLineIndex'),
                 candidate.get('usernameFragment'),
             )
-        raise TypeError(f'candidate must be an RTCIceCandidate or a dict, not {type(candidate).__name__}')
+        msg = f'candidate must be an RTCIceCandidate or a dict, not {type(candidate).__name__}'
+        raise TypeError(msg)
 
     @classmethod
-    def _peer_reflexive(cls, kwargs: Dict[str, Any]) -> 'RTCIceCandidate':
-        """A remote peer-reflexive candidate, only known from connectivity checks: its candidate string and
-        address aren't exposed, as the remote peer didn't signal them.
+    def _peer_reflexive(cls, kwargs: dict[str, Any]) -> RTCIceCandidate:
+        """A remote peer-reflexive candidate, only known from connectivity checks.
+
+        Its candidate string and address aren't exposed, as the remote peer didn't signal them.
 
         Args:
-            kwargs (:obj:`dict`): The arguments of the constructor, as the native candidate gives them."""
+            kwargs (:obj:`dict`): The arguments of the constructor, as the native candidate gives them.
+
+        Returns:
+            :obj:`webrtc.RTCIceCandidate`: The candidate.
+        """
         fields = _parse_candidate(kwargs.get('candidate', ''), strict=False) or {}
         candidate = cls(**{**kwargs, 'candidate': ''})
         # libwebrtc knows no related address of it, which is port 0
         parsed = {**fields, 'address': None, 'related_address': None, 'related_port': 0}
-        object.__setattr__(candidate, '_parsed', parsed)
+        # past the frozen __setattr__, as __post_init__ parsed the empty candidate string
+        vars(candidate)['_parsed'] = parsed
         return candidate
 
     @classmethod
-    def from_json(cls, init: Dict[str, Any]) -> 'RTCIceCandidate':
+    def from_json(cls, init: dict[str, Any]) -> RTCIceCandidate:
         """Creates a candidate from its JSON form, as :meth:`to_json` returns it.
 
         Args:
@@ -201,63 +260,60 @@ class RTCIceCandidate:
 
         Returns:
             :obj:`webrtc.RTCIceCandidate`: The candidate.
-
-        Raises:
-            :obj:`TypeError`: If both ``sdpMid`` and ``sdpMLineIndex`` are missing or :obj:`None`.
         """
         return cls(*cls._members_of(init))
 
     @property
-    def foundation(self) -> Optional[str]:
+    def foundation(self) -> str | None:
         """:obj:`str`, optional: An identifier of candidates of the same type, base and server."""
         return self._parsed.get('foundation')
 
     @property
-    def component(self) -> Optional[RTCIceComponent]:
+    def component(self) -> RTCIceComponent | None:
         """:obj:`webrtc.RTCIceComponent`, optional: Whether the candidate is for RTP or RTCP."""
         return _member_or_none(RTCIceComponent, self._parsed.get('component'))
 
     @property
-    def priority(self) -> Optional[int]:
+    def priority(self) -> int | None:
         """:obj:`int`, optional: The priority of the candidate."""
         return self._parsed.get('priority')
 
     @property
-    def address(self) -> Optional[str]:
+    def address(self) -> str | None:
         """:obj:`str`, optional: The IP address or the host name of the candidate."""
         return self._parsed.get('address')
 
     @property
-    def protocol(self) -> Optional[RTCIceProtocol]:
+    def protocol(self) -> RTCIceProtocol | None:
         """:obj:`webrtc.RTCIceProtocol`, optional: The transport protocol of the candidate."""
         return _member_or_none(RTCIceProtocol, self._parsed.get('protocol'))
 
     @property
-    def port(self) -> Optional[int]:
+    def port(self) -> int | None:
         """:obj:`int`, optional: The port of the candidate."""
         return self._parsed.get('port')
 
     @property
-    def type(self) -> Optional[RTCIceCandidateType]:
+    def type(self) -> RTCIceCandidateType | None:
         """:obj:`webrtc.RTCIceCandidateType`, optional: The type of the candidate."""
         return _member_or_none(RTCIceCandidateType, self._parsed.get('type'))
 
     @property
-    def tcp_type(self) -> Optional[RTCIceTcpCandidateType]:
+    def tcp_type(self) -> RTCIceTcpCandidateType | None:
         """:obj:`webrtc.RTCIceTcpCandidateType`, optional: The type of a TCP candidate."""
         return _member_or_none(RTCIceTcpCandidateType, self._parsed.get('tcp_type'))
 
     @property
-    def related_address(self) -> Optional[str]:
+    def related_address(self) -> str | None:
         """:obj:`str`, optional: For a candidate that isn't a host one, the address it's derived from."""
         return self._parsed.get('related_address')
 
     @property
-    def related_port(self) -> Optional[int]:
+    def related_port(self) -> int | None:
         """:obj:`int`, optional: For a candidate that isn't a host one, the port it's derived from."""
         return self._parsed.get('related_port')
 
-    def to_json(self) -> Dict[str, Any]:
+    def to_json(self) -> dict[str, Any]:
         """The candidate as a JSON-serializable dictionary, to send to the remote peer.
 
         Returns:
@@ -270,26 +326,26 @@ class RTCIceCandidate:
             'usernameFragment': self.username_fragment,
         }
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f'RTCIceCandidate({self.candidate!r}, sdp_mid={self.sdp_mid!r}, sdp_m_line_index={self.sdp_m_line_index!r})'
         )
 
     #: Alias for :attr:`sdp_mid`
-    sdpMid = alias('sdp_mid')
+    sdpMid: ClassVar[Alias[str | None]] = alias('sdp_mid')
     #: Alias for :attr:`sdp_m_line_index`
-    sdpMLineIndex = alias('sdp_m_line_index')
+    sdpMLineIndex: ClassVar[Alias[int | None]] = alias('sdp_m_line_index')
     #: Alias for :attr:`username_fragment`
-    usernameFragment = alias('username_fragment')
+    usernameFragment: ClassVar[Alias[str | None]] = alias('username_fragment')
     #: Alias for :attr:`relay_protocol`
-    relayProtocol = alias('relay_protocol')
+    relayProtocol: ClassVar[Alias[RTCIceServerTransportProtocol | None]] = alias('relay_protocol')
     #: Alias for :attr:`tcp_type`
-    tcpType = tcp_type
+    tcpType: ClassVar = tcp_type
     #: Alias for :attr:`related_address`
-    relatedAddress = related_address
+    relatedAddress: ClassVar = related_address
     #: Alias for :attr:`related_port`
-    relatedPort = related_port
+    relatedPort: ClassVar = related_port
     #: Alias for :attr:`to_json`
-    toJSON = to_json
+    toJSON: ClassVar = to_json
     #: Alias for :attr:`from_json`
-    fromJSON = from_json
+    fromJSON: ClassVar = from_json

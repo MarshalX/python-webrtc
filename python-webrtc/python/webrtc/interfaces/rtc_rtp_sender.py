@@ -5,8 +5,13 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING, List, Optional, Sequence
+"""RTCRtpSender of WebRTC."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import webrtc
 from webrtc import (
     InvalidModificationError,
     InvalidRangeError,
@@ -23,74 +28,38 @@ from webrtc.utils.operations import later
 from webrtc.utils.task_queue import TaskQueue
 
 if TYPE_CHECKING:
-    import webrtc
+    from collections.abc import Sequence
 
 
-class RTCRtpSender(WebRTCObject):
-    """The :obj:`webrtc.RTCRtpSender` interface sends the media of a track, encoded, to the remote peer, and
-    controls how it's sent. It's the sender of an :obj:`webrtc.RTCRtpTransceiver` of an
-    :obj:`webrtc.RTCPeerConnection`.
+class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
+    """Sends the media of a track, encoded, to the remote peer, and controls how it's sent.
+
+    It's the sender of an :obj:`webrtc.RTCRtpTransceiver` of an :obj:`webrtc.RTCPeerConnection`.
     """
 
     _class = wrtc.RTCRtpSender
 
-    def _check_parameters(
-        self,
-        parameters: 'webrtc.RTCRtpSendParameters',
-        last: 'wrtc.RtpParameters',
-        key_frames: Optional[Sequence[bool]],
-    ) -> None:
-        """Checks the parameters set_parameters() takes against the ones get_parameters() returned last, as the
-        specification requires, before libwebrtc gets them."""
-        returned = RTCRtpSendParameters._from_native(last)
-        if parameters.transaction_id != returned.transaction_id:
-            raise InvalidModificationError("The transaction_id doesn't match the one of the last get_parameters()")
-        for name in ('codecs', 'header_extensions', 'rtcp'):
-            if getattr(parameters, name) != getattr(returned, name):
-                raise InvalidModificationError(f'{name} of the parameters can not be changed')
-        if [e.rid for e in parameters.encodings] != [e.rid for e in returned.encodings]:
-            raise InvalidModificationError('The number of encodings and their rid can not be changed')
-        if key_frames is not None and len(key_frames) != len(parameters.encodings):
-            raise InvalidModificationError('key_frames must have one value per encoding')
-        if self.kind != MediaType.video:
-            return
-        for encoding in parameters.encodings:
-            if encoding.scale_resolution_down_by is not None and encoding.scale_resolution_down_by < 1:
-                raise InvalidRangeError('scale_resolution_down_by must be at least 1')
-            if encoding.max_framerate is not None and encoding.max_framerate < 0:
-                raise InvalidRangeError('max_framerate must not be negative')
+    @property
+    def track(self) -> webrtc.MediaStreamTrack | None:
+        """:obj:`webrtc.MediaStreamTrack`, optional: The track the sender sends, :obj:`None` to send nothing."""
+        return webrtc.MediaStreamTrack._wrap_optional(self._native_obj.track)
 
     @property
-    def track(self) -> Optional['webrtc.MediaStreamTrack']:
-        """:obj:`webrtc.MediaStreamTrack`, optional: The :obj:`webrtc.MediaStreamTrack` which is being handled by
-        the :obj:`webrtc.RTCRtpSender`. If track is :obj:`None`, the :obj:`webrtc.RTCRtpSender`
-        doesn't transmit anything."""
-        from webrtc import MediaStreamTrack
-
-        return MediaStreamTrack._wrap_optional(self._native_obj.track)
+    def transport(self) -> webrtc.RTCDtlsTransport | None:
+        """:obj:`webrtc.RTCDtlsTransport`, optional: The transport of the packets, :obj:`None` until there's one."""
+        return webrtc.RTCDtlsTransport._wrap_optional(self._native_obj.transport)
 
     @property
-    def transport(self) -> Optional['webrtc.RTCDtlsTransport']:
-        """:obj:`webrtc.RTCDtlsTransport`, optional: An object representing the underlying transport being used by
-        the sender to exchange packets with the remote peer, or :obj:`None` if the sender isn't yet connected
-        to transport."""
-        from webrtc import RTCDtlsTransport
-
-        return RTCDtlsTransport._wrap_optional(self._native_obj.transport)
-
-    @property
-    def dtmf(self) -> Optional['webrtc.RTCDTMFSender']:
+    def dtmf(self) -> webrtc.RTCDTMFSender | None:
         """:obj:`webrtc.RTCDTMFSender`, optional: Sends DTMF tones, for an audio sender."""
-        from webrtc import RTCDTMFSender
-
-        return RTCDTMFSender._wrap_optional(self._native_obj.dtmf)
+        return webrtc.RTCDTMFSender._wrap_optional(self._native_obj.dtmf)
 
     @property
-    def kind(self) -> 'webrtc.MediaType':
+    def kind(self) -> webrtc.MediaType:
         """:obj:`webrtc.MediaType`: The kind of media the sender sends, audio or video."""
         return self._native_obj.kind
 
-    def get_parameters(self) -> 'webrtc.RTCRtpSendParameters':
+    def get_parameters(self) -> webrtc.RTCRtpSendParameters:
         """Returns the parameters the sender sends with.
 
         To change them, modify the returned parameters and pass them to :meth:`set_parameters` before the current
@@ -107,7 +76,7 @@ class RTCRtpSender(WebRTCObject):
         return parameters
 
     async def set_parameters(
-        self, parameters: 'webrtc.RTCRtpSendParameters', *, key_frames: Optional[Sequence[bool]] = None
+        self, parameters: webrtc.RTCRtpSendParameters, *, key_frames: Sequence[bool] | None = None
     ) -> None:
         """Changes how the sender sends: its encodings and degradation preference.
 
@@ -118,18 +87,22 @@ class RTCRtpSender(WebRTCObject):
                 right away.
 
         Raises:
-            :obj:`webrtc.InvalidStateError`: If :meth:`get_parameters` wasn't called in the current task.
-            :obj:`webrtc.InvalidModificationError`: If the ``transaction_id``, the codecs, the header extensions,
+            webrtc.InvalidStateError: If :meth:`get_parameters` wasn't called in the current task.
+            webrtc.InvalidModificationError: If the ``transaction_id``, the codecs, the header extensions,
                 the RTCP parameters, the number of encodings or their ``rid`` changed, the codec of an encoding
                 isn't negotiated, or ``key_frames`` isn't one per encoding.
-            :obj:`webrtc.InvalidRangeError`: If a value is out of range, like ``scale_resolution_down_by`` below 1.
+            webrtc.InvalidRangeError: If a value is out of range, like ``scale_resolution_down_by`` below 1.
         """
         if self._native_obj._transceiverStopped():
-            raise InvalidStateError('The transceiver of the sender is stopped')
+            msg = 'The transceiver of the sender is stopped'
+            raise InvalidStateError(msg)
         last = self._native_obj._lastParameters()
         if last is None:
-            raise InvalidStateError('get_parameters() must be called before set_parameters(), in the same task')
-        self._check_parameters(parameters, last, key_frames)
+            msg = 'get_parameters() must be called before set_parameters(), in the same task'
+            raise InvalidStateError(msg)
+        _check_unchanged(parameters, RTCRtpSendParameters._from_native(last), key_frames)
+        if self.kind == MediaType.video:
+            _check_video_ranges(parameters.encodings)
 
         kind = self.kind
         # a copy (pybind returns one): changed, then set back
@@ -142,7 +115,7 @@ class RTCRtpSender(WebRTCObject):
         last.degradationPreference = parameters.degradation_preference
         await call_native(self._native_obj.setParameters, last)
 
-    async def replace_track(self, track: Optional['webrtc.MediaStreamTrack']) -> None:
+    async def replace_track(self, track: webrtc.MediaStreamTrack | None) -> None:
         """Replaces the track the sender sends, without negotiation.
 
         The track is replaced in the operations chain of the connection, after the operations started before
@@ -153,30 +126,30 @@ class RTCRtpSender(WebRTCObject):
                 to stop sending.
 
         Raises:
-            :obj:`TypeError`: If the track is of another kind.
-            :obj:`webrtc.InvalidStateError`: If the transceiver of the sender is stopped, or the connection closed.
+            TypeError: If the track is of another kind.
+            webrtc.InvalidStateError: If the transceiver of the sender is stopped, or the connection closed.
         """
-        from webrtc import RTCPeerConnection
-
         if track is not None and track.kind != self.kind:
-            raise TypeError(f'a {track.kind} track can not replace the track of a {self.kind} sender')
+            msg = f'a {track.kind} track can not replace the track of a {self.kind} sender'
+            raise TypeError(msg)
 
-        def replace():
+        def replace() -> None:
             native_track = track._native_obj if track is not None else None
             if self._native_obj._transceiverStopped() or not self._native_obj.replaceTrack(native_track):
-                raise InvalidStateError('The track of a stopped sender can not be replaced')
+                msg = 'The track of a stopped sender can not be replaced'
+                raise InvalidStateError(msg)
 
         connection = wrtc.RTCPeerConnection._connectionOf(self._native_obj)
         if connection is None:
             replace()
             return
-        pc = RTCPeerConnection._wrap(connection)
+        pc = webrtc.RTCPeerConnection._wrap(connection)
         async with pc._operation():
             pc._check_state('replace the track')
             await later()
             replace()
 
-    def set_streams(self, *streams: 'webrtc.MediaStream') -> None:
+    def set_streams(self, *streams: webrtc.MediaStream) -> None:
         """Sets the streams the remote peer associates the track of the sender with, from the next negotiation.
 
         Args:
@@ -189,7 +162,7 @@ class RTCRtpSender(WebRTCObject):
         self._native_obj.setStreams(ids)
 
     @staticmethod
-    def get_capabilities(kind: 'webrtc.MediaType') -> Optional['webrtc.RTCRtpCapabilities']:
+    def get_capabilities(kind: webrtc.MediaType) -> webrtc.RTCRtpCapabilities | None:
         """Returns the codecs and header extensions senders of a kind support.
 
         Args:
@@ -200,14 +173,14 @@ class RTCRtpSender(WebRTCObject):
         """
         return RTCRtpCapabilities._supported(wrtc.RTCRtpSender, kind)
 
-    async def get_stats(self) -> 'webrtc.RTCStatsReport':
+    async def get_stats(self) -> webrtc.RTCStatsReport:
         """Collects the stats of the sender, and of the objects its stats refer to.
 
         Returns:
             :obj:`webrtc.RTCStatsReport`: The stats.
 
         Raises:
-            :obj:`webrtc.InvalidStateError`: If the connection is closed.
+            webrtc.InvalidStateError: If the connection is closed.
         """
         return RTCStatsReport._from_native(await call_native(self._native_obj.getStats))
 
@@ -225,7 +198,47 @@ class RTCRtpSender(WebRTCObject):
     getCapabilities = get_capabilities
 
 
-def _default_scale_resolution_down_by(encodings: List['webrtc.RTCRtpEncodingParameters']) -> None:
+def _check_unchanged(
+    parameters: webrtc.RTCRtpSendParameters,
+    returned: webrtc.RTCRtpSendParameters,
+    key_frames: Sequence[bool] | None,
+) -> None:
+    """Checks what set_parameters() can't change against the parameters get_parameters() returned last.
+
+    Raises:
+        webrtc.InvalidModificationError: If something changed, or ``key_frames`` isn't one per encoding.
+    """
+    if parameters.transaction_id != returned.transaction_id:
+        msg = "The transaction_id doesn't match the one of the last get_parameters()"
+        raise InvalidModificationError(msg)
+    for name in ('codecs', 'header_extensions', 'rtcp'):
+        if getattr(parameters, name) != getattr(returned, name):
+            msg = f'{name} of the parameters can not be changed'
+            raise InvalidModificationError(msg)
+    if [e.rid for e in parameters.encodings] != [e.rid for e in returned.encodings]:
+        msg = 'The number of encodings and their rid can not be changed'
+        raise InvalidModificationError(msg)
+    if key_frames is not None and len(key_frames) != len(parameters.encodings):
+        msg = 'key_frames must have one value per encoding'
+        raise InvalidModificationError(msg)
+
+
+def _check_video_ranges(encodings: list[webrtc.RTCRtpEncodingParameters]) -> None:
+    """Checks the values of video encodings, before libwebrtc gets them.
+
+    Raises:
+        webrtc.InvalidRangeError: If a value is out of range.
+    """
+    for encoding in encodings:
+        if encoding.scale_resolution_down_by is not None and encoding.scale_resolution_down_by < 1:
+            msg = 'scale_resolution_down_by must be at least 1'
+            raise InvalidRangeError(msg)
+        if encoding.max_framerate is not None and encoding.max_framerate < 0:
+            msg = 'max_framerate must not be negative'
+            raise InvalidRangeError(msg)
+
+
+def _default_scale_resolution_down_by(encodings: list[webrtc.RTCRtpEncodingParameters]) -> None:
     """Video encodings without scale_resolution_down_by scale by 1, or by descending powers of 2 if none has one."""
     if all(e.scale_resolution_down_by is None for e in encodings):
         for i, encoding in enumerate(encodings):

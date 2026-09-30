@@ -7,9 +7,12 @@
 
 """Event objects passed to the handlers registered with ``on()`` (see :obj:`webrtc.utils.events.EventTarget`)."""
 
-from typing import TYPE_CHECKING, Any, List, Optional, Union
+from __future__ import annotations
 
-from webrtc.utils.names import alias
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, ClassVar
+
+from webrtc.utils.names import Alias, alias
 
 if TYPE_CHECKING:
     import webrtc
@@ -23,15 +26,16 @@ class Event:
         target (:obj:`object`, optional): The object that emitted the event.
     """
 
-    def __init__(self, type: str, target: Any = None):
+    def __init__(self, type: str, target: webrtc.EventTarget | None = None) -> None:
         self.type = type
         self.target = target
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         fields = ', '.join(f'{k}={v!r}' for k, v in vars(self).items() if k != 'target')
         return f'{type(self).__name__}({fields})'
 
 
+@dataclass(eq=False, repr=False)
 class RTCPeerConnectionIceEvent(Event):
     """An ``icecandidate`` event of :obj:`webrtc.RTCPeerConnection`.
 
@@ -42,18 +46,13 @@ class RTCPeerConnectionIceEvent(Event):
         target (:obj:`object`, optional): The object that emitted the event.
     """
 
-    def __init__(
-        self,
-        type: str,
-        candidate: Optional['webrtc.RTCIceCandidate'] = None,
-        url: Optional[str] = None,
-        target: Any = None,
-    ):
-        super().__init__(type, target)
-        self.candidate = candidate
-        self.url = url
+    type: str
+    candidate: webrtc.RTCIceCandidate | None = None
+    url: str | None = None
+    target: webrtc.EventTarget | None = None
 
 
+@dataclass(eq=False, repr=False)
 class RTCPeerConnectionIceErrorEvent(Event):
     """An ``icecandidateerror`` event of :obj:`webrtc.RTCPeerConnection`: a STUN or TURN server failed.
 
@@ -67,29 +66,21 @@ class RTCPeerConnectionIceErrorEvent(Event):
         target (:obj:`object`, optional): The object that emitted the event.
     """
 
-    def __init__(
-        self,
-        type: str,
-        address: Optional[str],
-        port: Optional[int],
-        url: str,
-        error_code: int,
-        error_text: str,
-        target: Any = None,
-    ):
-        super().__init__(type, target)
-        self.address = address
-        self.port = port
-        self.url = url
-        self.error_code = error_code
-        self.error_text = error_text
+    type: str
+    address: str | None
+    port: int | None
+    url: str
+    error_code: int
+    error_text: str
+    target: webrtc.EventTarget | None = None
 
     #: Alias for :attr:`error_code`
-    errorCode = alias('error_code')
+    errorCode: ClassVar[Alias[int]] = alias('error_code')
     #: Alias for :attr:`error_text`
-    errorText = alias('error_text')
+    errorText: ClassVar[Alias[str]] = alias('error_text')
 
 
+@dataclass(eq=False, repr=False)
 class MessageEvent(Event):
     """A ``message`` event of :obj:`webrtc.RTCDataChannel`.
 
@@ -99,11 +90,12 @@ class MessageEvent(Event):
         target (:obj:`object`, optional): The object that emitted the event.
     """
 
-    def __init__(self, type: str, data: Union[str, bytes], target: Any = None):
-        super().__init__(type, target)
-        self.data = data
+    type: str
+    data: str | bytes
+    target: webrtc.EventTarget | None = None
 
 
+@dataclass(eq=False, repr=False)
 class RTCDataChannelEvent(Event):
     """A ``datachannel`` event of :obj:`webrtc.RTCPeerConnection`: the remote peer created a channel.
 
@@ -113,11 +105,12 @@ class RTCDataChannelEvent(Event):
         target (:obj:`object`, optional): The object that emitted the event.
     """
 
-    def __init__(self, type: str, channel: 'webrtc.RTCDataChannel', target: Any = None):
-        super().__init__(type, target)
-        self.channel = channel
+    type: str
+    channel: webrtc.RTCDataChannel
+    target: webrtc.EventTarget | None = None
 
 
+@dataclass(eq=False, repr=False)
 class MediaStreamTrackEvent(Event):
     """An ``addtrack`` or ``removetrack`` event of :obj:`webrtc.MediaStream`.
 
@@ -127,11 +120,12 @@ class MediaStreamTrackEvent(Event):
         target (:obj:`object`, optional): The object that emitted the event.
     """
 
-    def __init__(self, type: str, track: 'webrtc.MediaStreamTrack', target: Any = None):
-        super().__init__(type, target)
-        self.track = track
+    type: str
+    track: webrtc.MediaStreamTrack
+    target: webrtc.EventTarget | None = None
 
 
+@dataclass(eq=False, repr=False)
 class RTCDTMFToneChangeEvent(Event):
     """A ``tonechange`` event of :obj:`webrtc.RTCDTMFSender`.
 
@@ -141,11 +135,12 @@ class RTCDTMFToneChangeEvent(Event):
         target (:obj:`object`, optional): The object that emitted the event.
     """
 
-    def __init__(self, type: str, tone: str = '', target: Any = None):
-        super().__init__(type, target)
-        self.tone = tone
+    type: str
+    tone: str = ''
+    target: webrtc.EventTarget | None = None
 
 
+@dataclass(eq=False, repr=False)
 class RTCErrorEvent(Event):
     """An ``error`` event, carrying the :obj:`webrtc.RTCError` that occurred.
 
@@ -155,11 +150,12 @@ class RTCErrorEvent(Event):
         target (:obj:`object`, optional): The object that emitted the event.
     """
 
-    def __init__(self, type: str, error: 'webrtc.RTCError', target: Any = None):
-        super().__init__(type, target)
-        self.error = error
+    type: str
+    error: webrtc.RTCError
+    target: webrtc.EventTarget | None = None
 
 
+@dataclass(eq=False, repr=False)
 class RTCTrackEvent(Event):
     """A ``track`` event of :obj:`webrtc.RTCPeerConnection`: a remote track was negotiated.
 
@@ -172,17 +168,9 @@ class RTCTrackEvent(Event):
         target (:obj:`object`, optional): The object that emitted the event.
     """
 
-    def __init__(
-        self,
-        type: str,
-        receiver: 'webrtc.RTCRtpReceiver',
-        track: 'webrtc.MediaStreamTrack',
-        streams: List['webrtc.MediaStream'],
-        transceiver: 'webrtc.RTCRtpTransceiver',
-        target: Any = None,
-    ):
-        super().__init__(type, target)
-        self.receiver = receiver
-        self.track = track
-        self.streams = streams
-        self.transceiver = transceiver
+    type: str
+    receiver: webrtc.RTCRtpReceiver
+    track: webrtc.MediaStreamTrack
+    streams: list[webrtc.MediaStream]
+    transceiver: webrtc.RTCRtpTransceiver
+    target: webrtc.EventTarget | None = None

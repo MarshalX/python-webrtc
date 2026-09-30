@@ -15,23 +15,29 @@ An operation (like setting a description) is used as::
         ...  # the native call
 """
 
+from __future__ import annotations
+
 import asyncio
 import contextlib
-from typing import AsyncIterator, Callable, Optional
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 class OperationsChain:
-    """Runs the operations of a connection one after another, as the specification requires. With none running,
-    an operation starts right away, so its checks fail in the task that called it.
+    """Runs the operations of a connection one after another, as the specification requires.
+
+    With none running, an operation starts right away, so its checks fail in the task that called it.
 
     Args:
         on_empty (:obj:`callable`): Called when the last operation ends.
     """
 
-    def __init__(self, on_empty: Callable[[], None]):
+    def __init__(self, on_empty: Callable[[], None]) -> None:
         self._on_empty = on_empty
         #: The operation that ends last
-        self._last: Optional[asyncio.Future] = None
+        self._last: asyncio.Future[None] | None = None
 
     @property
     def busy(self) -> bool:
@@ -55,6 +61,8 @@ class OperationsChain:
 
 
 async def later() -> None:
-    """Operations of a connection take effect in a later task than the code that started them: a track added right
-    after set_remote_description() is added before the description is applied."""
+    """Waits for a later task, where the operations of a connection take effect.
+
+    A track added right after set_remote_description() is added before the description is applied.
+    """
     await asyncio.sleep(0)

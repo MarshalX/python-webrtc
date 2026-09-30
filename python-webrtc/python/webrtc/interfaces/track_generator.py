@@ -7,39 +7,48 @@
 
 """Tracks of media the application writes: VideoTrackGenerator, and MediaStreamTrackGenerator of Chrome."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, Union
+from typing import TYPE_CHECKING
 
 from webrtc import AudioData, AudioSampleFormat, MediaStreamTrack, MediaType, VideoFrame, wrtc
 from webrtc.exceptions import NotSupportedError
 from webrtc.streams import WritableStream
 
+if TYPE_CHECKING:
+    from webrtc.streams import WritableStreamDefaultController
+
 
 class _TrackSink:
-    """The underlying sink of a generator's writable stream: sends each chunk on the track, closing it"""
+    """The underlying sink of a generator's writable stream: sends each chunk on the track, closing it."""
 
-    def __init__(self, native: 'wrtc.TrackGenerator'):
+    def __init__(self, native: wrtc.TrackGenerator) -> None:
         self._native = native
 
-    def write(self, chunk: Any, controller) -> None:
+    def write(self, chunk: object, _controller: WritableStreamDefaultController) -> None:
         if self._native.kind == 'video':
             self._write_video(chunk)
         else:
             self._write_audio(chunk)
 
-    def _write_video(self, frame: Any) -> None:
+    def _write_video(self, frame: object) -> None:
         if not isinstance(frame, VideoFrame):
-            raise TypeError(f'A video generator takes VideoFrame, not {type(frame).__name__}')
+            msg = f'A video generator takes VideoFrame, not {type(frame).__name__}'
+            raise TypeError(msg)
         if frame._resource is None:
-            raise TypeError('The frame is closed')
+            msg = 'The frame is closed'
+            raise TypeError(msg)
         timestamp, rotation = frame.timestamp, frame.rotation
         self._native.writeVideo(frame._take_resource(), timestamp, rotation)
 
-    def _write_audio(self, data: Any) -> None:
+    def _write_audio(self, data: object) -> None:
         if not isinstance(data, AudioData):
-            raise TypeError(f'An audio generator takes AudioData, not {type(data).__name__}')
+            msg = f'An audio generator takes AudioData, not {type(data).__name__}'
+            raise TypeError(msg)
         if data._data is None:
-            raise TypeError('The data is closed')
+            msg = 'The data is closed'
+            raise TypeError(msg)
         audio = data._take()
         if audio.format == AudioSampleFormat.s16:
             samples = audio._data
@@ -60,13 +69,14 @@ class _TrackSink:
         # ends the tracks of the generator
         self._native.close()
 
-    def abort(self, reason: Any) -> None:
+    def abort(self, _reason: object) -> None:
         self._native.close()
 
 
 class VideoTrackGenerator:
-    """A video track of the frames written to a stream
-    (https://developer.mozilla.org/en-US/docs/Web/API/VideoTrackGenerator).
+    """A video track of the frames written to a stream.
+
+    See https://developer.mozilla.org/en-US/docs/Web/API/VideoTrackGenerator.
 
     Each frame written is sent on :attr:`track` and closed. Closing or aborting :attr:`writable` ends the track.
 
@@ -78,7 +88,7 @@ class VideoTrackGenerator:
         await writer.write(webrtc.VideoFrame(i420, format='I420', coded_width=640, coded_height=480, timestamp=0))
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._native = wrtc.TrackGenerator('video')
         # the native generator doesn't keep the track, Python does
         self._track = MediaStreamTrack._wrap(self._native.track)
@@ -100,7 +110,7 @@ class VideoTrackGenerator:
         return self._native.muted
 
     @muted.setter
-    def muted(self, value: bool):
+    def muted(self, value: bool) -> None:
         self._native.muted = bool(value)
 
 
@@ -116,8 +126,9 @@ class MediaStreamTrackGeneratorInit:
 
 
 class MediaStreamTrackGenerator(MediaStreamTrack):
-    """A track of the media written to a stream, :obj:`webrtc.VideoFrame` or :obj:`webrtc.AudioData` objects. It's
-    Chrome's API (https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrackGenerator), the only one for
+    """A track of the media written to a stream, :obj:`webrtc.VideoFrame` or :obj:`webrtc.AudioData` objects.
+
+    It's Chrome's API (https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrackGenerator), the only one for
     audio: for video, :obj:`VideoTrackGenerator` is the standard one.
 
     Audio is sent in 10 ms frames: samples short of one wait for the next ones written.
@@ -127,16 +138,17 @@ class MediaStreamTrackGenerator(MediaStreamTrack):
             or the init with it. A dictionary of the init's members is taken too.
 
     Raises:
-        :obj:`TypeError`: If the kind isn't audio or video.
+        TypeError: If the kind isn't audio or video.
     """
 
-    def __init__(self, kind: Union[str, MediaType, MediaStreamTrackGeneratorInit, dict]):
+    def __init__(self, kind: str | MediaType | MediaStreamTrackGeneratorInit | dict[str, str]) -> None:
         if isinstance(kind, MediaStreamTrackGeneratorInit):
             kind = kind.kind
         elif isinstance(kind, dict):
             kind = kind.get('kind')
-        if kind not in ('audio', 'video'):
-            raise TypeError(f"The kind must be 'audio' or 'video', not {kind!r}")
+        if kind not in {'audio', 'video'}:
+            msg = f"The kind must be 'audio' or 'video', not {kind!r}"
+            raise TypeError(msg)
         self._generator = wrtc.TrackGenerator(MediaType(kind).value)
         super().__init__(self._generator.track)
         self._attach()

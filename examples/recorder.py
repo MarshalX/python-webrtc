@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+#
+#  Copyright 2026 Ilya (Marshal) <https://github.com/MarshalX>.
+#
+#  Dedicated to the public domain under CC0, see the LICENSE file of the examples.
+#
+
 """Records the media a peer receives to raw files, with MediaStreamTrackProcessor.
 
 Two connections in this process stand for the two peers: one sends the synthetic camera and microphone of
@@ -8,16 +15,21 @@ which play with:
     ffplay -f s16le -ar 48000 -ch_layout mono audio.pcm
 """
 
+from __future__ import annotations
+
 import asyncio
+import pathlib
+from typing import BinaryIO
 
 import webrtc
 
 SECONDS = 5
 
 
-async def record(track, path):
+async def record(track: webrtc.MediaStreamTrack, file: BinaryIO) -> None:
+    """Writes the frames of a track to a file until the track ends."""
     frames = 0
-    with open(path, 'wb') as file:
+    with file:
         async for media in webrtc.MediaStreamTrackProcessor(track, max_buffer_size=30).readable:
             if track.kind == 'audio':
                 data = bytearray(media.allocation_size({'plane_index': 0}))
@@ -28,22 +40,24 @@ async def record(track, path):
             media.close()
             file.write(data)
             frames += 1
-    print(f'{path}: {frames} {track.kind} frames')
+    print(f'{file.name}: {frames} {track.kind} frames')
 
 
-def trickle(caller, callee):
-    """Passes the ICE candidates of each connection to the other one"""
+def trickle(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """Passes the ICE candidates of each connection to the other one."""
     for pc, other in ((caller, callee), (callee, caller)):
 
-        async def on_candidate(event, other=other):
+        async def on_candidate(
+            event: webrtc.RTCPeerConnectionIceEvent, other: webrtc.RTCPeerConnection = other
+        ) -> None:
             if event.candidate:
                 await other.add_ice_candidate(event.candidate)
 
         pc.on('icecandidate', on_candidate)
 
 
-async def negotiate(caller, callee):
-    """Exchanges an offer and an answer"""
+async def negotiate(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """Exchanges an offer and an answer."""
     offer = await caller.create_offer()
     await caller.set_local_description(offer)
     await callee.set_remote_description(offer)
@@ -52,19 +66,20 @@ async def negotiate(caller, callee):
     await caller.set_remote_description(answer)
 
 
-async def main():
+async def main() -> None:
+    """Records the camera and the microphone for a few seconds."""
     sender, receiver = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
     trickle(sender, receiver)
     stream = webrtc.get_user_media(audio=True, video=True)
     for track in stream.get_tracks():
         sender.add_track(track, stream)
 
-    recordings = []
+    recordings: list[asyncio.Future[None]] = []
 
     @receiver.on('track')
-    def on_track(event):
-        path = 'audio.pcm' if event.track.kind == 'audio' else 'video.i420'
-        recordings.append(asyncio.ensure_future(record(event.track, path)))
+    def on_track(event: webrtc.RTCTrackEvent) -> None:
+        path = pathlib.Path('audio.pcm' if event.track.kind == 'audio' else 'video.i420')
+        recordings.append(asyncio.ensure_future(record(event.track, path.open('wb'))))
 
     await negotiate(sender, receiver)
     await asyncio.sleep(SECONDS)

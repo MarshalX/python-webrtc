@@ -5,6 +5,8 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
+from __future__ import annotations
+
 import asyncio
 
 import pytest
@@ -13,8 +15,8 @@ import webrtc
 from tests.helpers import exchange_offer_answer, wait_for_ice_gathering_complete
 
 
-def test_1(pc, audio_stream):
-    """addTrack when pc is closed should throw PythonWebRTCException with invalid state"""
+def test_1(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
+    """AddTrack when pc is closed should throw PythonWebRTCException with invalid state."""
     track, *_ = audio_stream.get_audio_tracks()
     pc.close()
 
@@ -22,15 +24,15 @@ def test_1(pc, audio_stream):
         pc.add_track(track, audio_stream)
 
 
-def test_2(pc, audio_stream):
-    """add_track with single track argument and no stream should succeed"""
+def test_2(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
+    """add_track with single track argument and no stream should succeed."""
     track, *_ = audio_stream.get_tracks()
 
     sender = pc.add_track(track)
 
     assert isinstance(sender, webrtc.RTCRtpSender), 'Expect sender to be instance of RTCRtpSender'
 
-    assert track == sender.track, 'Expect sender\'s track to be the added track'
+    assert track == sender.track, "Expect sender's track to be the added track"
 
     transceivers = pc.get_transceivers()
     assert len(transceivers) == 1, 'Expect only one transceiver with sender added'
@@ -46,19 +48,19 @@ def test_2(pc, audio_stream):
     assert [receiver] == pc.get_receivers(), 'Expect only one receiver associated with transceiver added'
 
 
-def test_3(pc, audio_stream):
-    """add_track with single track argument and single stream should succeed"""
+def test_3(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
+    """add_track with single track argument and single stream should succeed."""
     track, *_ = audio_stream.get_tracks()
 
     sender = pc.add_track(track, audio_stream)
 
     assert isinstance(sender, webrtc.RTCRtpSender), 'Expect sender to be instance of RTCRtpSender'
 
-    assert sender.track == track, 'Expect sender\'s track to be the added track'
+    assert sender.track == track, "Expect sender's track to be the added track"
 
 
-def test_4(pc, audio_stream):
-    """add_track with single track argument and multiple streams should succeed"""
+def test_4(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
+    """add_track with single track argument and multiple streams should succeed."""
     track, *_ = audio_stream.get_tracks()
 
     stream2 = audio_stream.clone()
@@ -67,11 +69,11 @@ def test_4(pc, audio_stream):
 
     assert isinstance(sender, webrtc.RTCRtpSender), 'Expect sender to be instance of RTCRtpSender'
 
-    assert sender.track == track, 'Expect sender\'s track to be the added track'
+    assert sender.track == track, "Expect sender's track to be the added track"
 
 
-def test_5(pc, audio_stream):
-    """Adding the same track multiple times should throw RTCException"""
+def test_5(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
+    """Adding the same track multiple times should throw RTCException."""
     track, *_ = audio_stream.get_tracks()
 
     pc.add_track(track, audio_stream)
@@ -80,8 +82,8 @@ def test_5(pc, audio_stream):
         pc.add_track(track, audio_stream)
 
 
-def test_6(pc, audio_stream):
-    """add_track with existing sender with None track, same kind, and recvonly direction should reuse sender"""
+def test_6(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
+    """add_track with existing sender with None track, same kind, and recvonly direction should reuse sender."""
     init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.recvonly)
     transceiver = pc.add_transceiver(webrtc.MediaType.audio, init)
 
@@ -97,8 +99,8 @@ def test_6(pc, audio_stream):
     assert [sender] == pc.get_senders()
 
 
-def test_7(pc, audio_stream):
-    """add_track with existing sender that has not been used to send should reuse the sender"""
+def test_7(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
+    """add_track with existing sender that has not been used to send should reuse the sender."""
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
     assert transceiver.sender.track is None
     assert transceiver.direction == webrtc.TransceiverDirection.sendrecv
@@ -111,8 +113,10 @@ def test_7(pc, audio_stream):
 
 
 @pytest.mark.asyncio
-async def test_8(caller, callee, audio_stream):
-    """add_track with existing sender that has been used to send should create new sender"""
+async def test_8(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """add_track with existing sender that has been used to send should create new sender."""
     track, *_ = audio_stream.get_tracks()
     transceiver = caller.add_transceiver(track)
 
@@ -135,8 +139,8 @@ async def test_8(caller, callee, audio_stream):
     assert sender != transceiver.sender
 
 
-def test_9(pc, audio_stream):
-    """add_track with existing recvonly sender with null track of a different kind should create new sender"""
+def test_9(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
+    """add_track with existing recvonly sender with null track of a different kind should create new sender."""
     init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.recvonly)
     transceiver = pc.add_transceiver(webrtc.MediaType.video, init)
 
@@ -153,12 +157,18 @@ def test_9(pc, audio_stream):
 
     assert len(senders) == 2, 'Expect 2 senders added to connection'
     assert sender in senders, 'Expect senders list to include sender'
-    assert transceiver.sender in senders, 'Expect senders list to include first transceiver\'s sender'
+    assert transceiver.sender in senders, "Expect senders list to include first transceiver's sender"
 
 
 @pytest.mark.asyncio
-async def test_10(caller, callee, audio_stream, audio_stream2):
-    """Adding more tracks does not generate more candidates if bundled"""
+async def test_10(
+    caller: webrtc.RTCPeerConnection,
+    callee: webrtc.RTCPeerConnection,
+    audio_stream: webrtc.MediaStream,
+    *,
+    audio_stream2: webrtc.MediaStream,
+) -> None:
+    """Adding more tracks does not generate more candidates if bundled."""
     track, *_ = audio_stream.get_tracks()
     transceiver = caller.add_transceiver(track)
 
@@ -170,12 +180,14 @@ async def test_10(caller, callee, audio_stream, audio_stream2):
     await wait_for_ice_gathering_complete(callee)
 
     second_track, *_ = audio_stream2.get_tracks()
-
-    # TODO onicecandidate event should not be occurred
+    candidates = []
+    caller.on('icecandidate', lambda event: candidates.append(event.candidate))
 
     caller.add_track(second_track)
 
     await exchange_offer_answer(caller, callee)
+    await asyncio.sleep(0.1)
+    assert not candidates, 'Expect no icecandidate events after adding a bundled track'
 
     first_transceiver, second_transceiver, *_ = caller.get_transceivers()
     assert first_transceiver.receiver.transport == second_transceiver.receiver.transport
@@ -183,8 +195,10 @@ async def test_10(caller, callee, audio_stream, audio_stream2):
 
 
 @pytest.mark.asyncio
-async def test_11(caller, callee, audio_stream):
-    """add_track while set_remote_description(offer) is pending should reuse the transceiver the offer creates"""
+async def test_11(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """add_track while set_remote_description(offer) is pending should reuse the transceiver the offer creates."""
     track, *_ = audio_stream.get_tracks()
 
     caller.add_track(track)

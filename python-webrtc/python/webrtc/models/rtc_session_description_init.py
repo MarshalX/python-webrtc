@@ -5,7 +5,11 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-from typing import TYPE_CHECKING, Dict
+"""The type and the SDP of a description."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from webrtc import WebRTCObject, wrtc
 
@@ -14,8 +18,9 @@ if TYPE_CHECKING:
 
 
 class RTCSessionDescriptionInit(WebRTCObject):
-    """The type and the SDP of a description, as :meth:`webrtc.RTCPeerConnection.create_offer` and
-    :meth:`webrtc.RTCPeerConnection.create_answer` return them.
+    """The type and the SDP of a description.
+
+    As :meth:`webrtc.RTCPeerConnection.create_offer` and :meth:`webrtc.RTCPeerConnection.create_answer` return them.
 
     Args:
         type (:obj:`webrtc.RTCSdpType`): The type of the description, or its value (like ``'offer'``).
@@ -24,29 +29,31 @@ class RTCSessionDescriptionInit(WebRTCObject):
 
     _class = wrtc.RTCSessionDescriptionInit
 
-    def __init__(self, type: 'webrtc.RTCSdpType', sdp: str = ''):
+    def __init__(self, type: webrtc.RTCSdpType, sdp: str = '') -> None:
         super().__init__(self._class(type, sdp))
 
     @property
-    def type(self) -> 'webrtc.RTCSdpType':
+    def type(self) -> webrtc.RTCSdpType:
         """:obj:`webrtc.RTCSdpType`: A member of the :obj:`webrtc.RTCSdpType` enum."""
         return self._native_obj.type
 
     @type.setter
-    def type(self, value: 'webrtc.RTCSdpType'):
+    def type(self, value: webrtc.RTCSdpType) -> None:
         self._native_obj.type = value
 
     @property
     def sdp(self) -> str:
         """:obj:`str`: A string containing a SDP message describing the session.
-        This value is an empty string by default and may not be :obj:`None`."""
+
+        This value is an empty string by default and may not be :obj:`None`.
+        """
         return self._native_obj.sdp
 
     @sdp.setter
-    def sdp(self, value: str):
+    def sdp(self, value: str) -> None:
         self._native_obj.sdp = value
 
-    def to_json(self) -> Dict[str, str]:
+    def to_json(self) -> dict[str, str]:
         """The description as a JSON-serializable dictionary, to send to the remote peer.
 
         Returns:
@@ -54,7 +61,7 @@ class RTCSessionDescriptionInit(WebRTCObject):
         """
         return {'type': self.type.value, 'sdp': self.sdp}
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f'RTCSessionDescriptionInit(type={self.type.value!r}, sdp={len(self.sdp)} characters)'
 
     #: Alias for :attr:`to_json`

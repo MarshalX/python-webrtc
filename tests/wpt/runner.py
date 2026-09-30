@@ -8,7 +8,7 @@
 """Runs web-platform-tests cases against python-webrtc in PythonMonkey.
 
 PythonMonkey has one global object per process and WPT helpers declare top-level constants, so each case runs
-in a child process: `python -m tests.wpt.runner <case>` prints a single ``WPT_RESULT <json>`` line.
+in a child process: `python -m tests.wpt.child <case>` prints a single ``WPT_RESULT <json>`` line.
 
 A result looks like:
     {
@@ -20,13 +20,13 @@ A result looks like:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import TypedDict
 
-from tests.wpt.loader import build_scripts, load, split_case
+from tests.wpt.loader import load, split_case
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -40,109 +40,44 @@ LONG_TIMEOUT = 60
 RESULT_PREFIX = 'WPT_RESULT '
 
 
-def _harness_result(status: str, message: str) -> dict:
+class HarnessResult(TypedDict):
+    status: str
+    message: str | None
+
+
+class TestResult(TypedDict):
+    name: str
+    status: str
+    message: str | None
+
+
+class CaseResult(TypedDict):
+    harness: HarnessResult
+    tests: list[TestResult]
+    unsupported: list[str]
+
+
+def harness_result(status: str, message: str) -> CaseResult:
     return {'harness': {'status': status, 'message': message}, 'tests': [], 'unsupported': []}
 
 
-def _text(value):
-    # JS null and undefined arrive as PythonMonkey objects
-    return value if isinstance(value, str) else None
-
-
-def _log_unhandled_rejections(loop, context):
-    """PythonMonkey's handler of unhandled rejections stops its timers, which leaves the rest of the file hanging.
-    It also reports rejections that get handled later (as testharness does), so they are only logged. Any other
-    exception goes to the default handler."""
-    import pythonmonkey as pm
-
-    if isinstance(context.get('exception'), pm.SpiderMonkeyError):
-        print('unhandled rejection:', context['exception'], file=sys.stderr)
-    else:
-        loop.default_exception_handler(context)
-
-
-async def run_in_process(case: str) -> dict:
-    import pythonmonkey as pm
-
-    from tests.wpt import bridge
-
-    path, variant = split_case(case)
-    test_file = load(path)
-
-    loop = asyncio.get_running_loop()
-    completed = loop.create_future()
-    unsupported = set()
-
-    def complete(result):
-        if not completed.done():
-            completed.set_result(result)
-
-    bridge.LOOP = loop
-    loop.set_exception_handler(_log_unhandled_rejections)
-
-    pm.eval('(env) => { globalThis.__wpt = env; }')(
-        {'bridge': bridge.EXPORTS, 'unsupported': unsupported.add, 'complete': complete}
-    )
-    pm.eval('(search, pathname) => { globalThis.location = {search, pathname, href: pathname + search}; }')(
-        variant, '/' + case.partition('?')[0]
-    )
-
-    try:
-        # one after another, without giving control to the loop in between
-        for script in build_scripts(test_file):
-            pm.eval(script)
-    except pm.SpiderMonkeyError as e:
-        return _harness_result('ERROR', str(e))
-
-    timeout = LONG_TIMEOUT if test_file.long_timeout else TIMEOUT
-    try:
-        result = await asyncio.wait_for(asyncio.shield(completed), timeout)
-    except asyncio.TimeoutError:
-        # marks unfinished tests as timed out and completes the harness
-        pm.eval('timeout')()
-        try:
-            result = await asyncio.wait_for(completed, 5)
-        except asyncio.TimeoutError:
-            return _harness_result('TIMEOUT', 'the harness did not complete after timing out')
-
-    return {
-        'harness': {
-            'status': HARNESS_STATUSES[int(result['harness']['status'])],
-            'message': _text(result['harness']['message']),
-        },
-        'tests': [
-            {'name': t['name'], 'status': TEST_STATUSES[int(t['status'])], 'message': _text(t['message'])}
-            for t in result['tests']
-        ],
-        'unsupported': sorted(unsupported),
-    }
-
-
-def run(case: str) -> dict:
+def run(case: str) -> CaseResult:
     """Runs a case in a child process. A crash or a hang of the child becomes the harness status."""
     path, _ = split_case(case)
     limit = (LONG_TIMEOUT if load(path).long_timeout else TIMEOUT) + 30
     try:
         proc = subprocess.run(
-            [sys.executable, '-m', 'tests.wpt.runner', case],
+            [sys.executable, '-m', 'tests.wpt.child', case],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
             timeout=limit,
+            check=False,
         )
     except subprocess.TimeoutExpired:
-        return _harness_result('TIMEOUT', f'the runner did not finish in {limit} seconds')
+        return harness_result('TIMEOUT', f'the runner did not finish in {limit} seconds')
 
     for line in proc.stdout.splitlines():
         if line.startswith(RESULT_PREFIX):
             return json.loads(line[len(RESULT_PREFIX) :])
-    return _harness_result('CRASH', f'exit code {proc.returncode}\n{proc.stderr[-2000:]}')
-
-
-def main():
-    result = asyncio.run(run_in_process(sys.argv[1]))
-    print(RESULT_PREFIX + json.dumps(result), flush=True)
-
-
-if __name__ == '__main__':
-    main()
+    return harness_result('CRASH', f'exit code {proc.returncode}\n{proc.stderr[-2000:]}')

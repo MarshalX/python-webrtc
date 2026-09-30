@@ -7,13 +7,15 @@
 
 """The interpreter exits while objects are alive and busy: no hang, no crash."""
 
+from __future__ import annotations
+
 import os
 
 import pytest
 
 from tests.helpers import run_isolated
 
-BUSY_AT_EXIT = '''
+BUSY_AT_EXIT = """
     import asyncio
     import threading
     import webrtc
@@ -42,16 +44,16 @@ BUSY_AT_EXIT = '''
     # kept alive until the interpreter finalizes
     objects = asyncio.run(main())
     print('exiting')
-'''
+"""
 
 
-@pytest.mark.parametrize('attempt', range(5))
-def test_exit_while_objects_are_busy(attempt):
-    """Wrappers released by the last collection must not block on threads hung in the GIL"""
+@pytest.mark.parametrize('_attempt', range(5))
+def test_exit_while_objects_are_busy(_attempt: int) -> None:
+    """Wrappers released by the last collection must not block on threads hung in the GIL."""
     assert 'exiting' in run_isolated(BUSY_AT_EXIT, timeout=30)
 
 
-PENDING_AT_EXIT = '''
+PENDING_AT_EXIT = """
     import threading
     import time
     import webrtc
@@ -68,18 +70,18 @@ PENDING_AT_EXIT = '''
         threading.Thread(target=spin, daemon=True).start()
     time.sleep(0.3)
     print('exiting')
-'''
+"""
 
 
-@pytest.mark.parametrize('attempt', range(5))
-def test_exit_while_operations_are_pending(attempt):
-    """Callbacks of operations completing at exit are dropped, not run by a libwebrtc thread taking the GIL"""
+@pytest.mark.parametrize('_attempt', range(5))
+def test_exit_while_operations_are_pending(_attempt: int) -> None:
+    """Callbacks of operations completing at exit are dropped, not run by a libwebrtc thread taking the GIL."""
     assert 'exiting' in run_isolated(PENDING_AT_EXIT, timeout=30)
 
 
 @pytest.mark.skipif(not hasattr(os, 'fork'), reason='no fork')
-def test_forked_child_leaves_the_objects_of_its_parent_alone():
-    """The child of a fork doesn't block on its parent's threads; new objects work (raise on macOS)"""
+def test_forked_child_leaves_the_objects_of_its_parent_alone() -> None:
+    """The child of a fork doesn't block on its parent's threads; new objects work (raise on macOS)."""
     output = run_isolated(
         """
         import asyncio

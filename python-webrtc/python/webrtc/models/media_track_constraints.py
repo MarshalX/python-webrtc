@@ -5,16 +5,20 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Settings, capabilities and constraints of tracks
-(https://developer.mozilla.org/en-US/docs/Web/API/Media_Capture_and_Streams_API/Constraints)."""
+"""Settings, capabilities and constraints of tracks.
+
+See https://developer.mozilla.org/en-US/docs/Web/API/Media_Capture_and_Streams_API/Constraints.
+"""
+
+from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, ClassVar, Union
 
-from webrtc.utils.names import alias, snake_case
+from webrtc.utils.names import Alias, alias, snake_case
 
 #: A value, or a constraint on it: a :obj:`dict` with any of ``exact``, ``ideal``, ``min`` and ``max``
-ConstrainValue = Union[float, int, str, bool, Dict[str, Any]]
+ConstrainValue = Union[float, int, str, bool, dict[str, Any]]
 
 
 @dataclass
@@ -26,8 +30,8 @@ class ULongRange:
         max (:obj:`int`, optional): The highest value.
     """
 
-    min: Optional[int] = None
-    max: Optional[int] = None
+    min: int | None = None
+    max: int | None = None
 
 
 @dataclass
@@ -39,14 +43,15 @@ class DoubleRange:
         max (:obj:`float`, optional): The highest value.
     """
 
-    min: Optional[float] = None
-    max: Optional[float] = None
+    min: float | None = None
+    max: float | None = None
 
 
 @dataclass
 class MediaTrackSettings:
-    """What a track carries, as far as it's known (:meth:`webrtc.MediaStreamTrack.get_settings`). Members are
-    :obj:`None` when they don't apply to the track.
+    """What a track carries, as far as it's known (:meth:`webrtc.MediaStreamTrack.get_settings`).
+
+    Members are :obj:`None` when they don't apply to the track.
 
     Args:
         width (:obj:`int`, optional): The width of the video.
@@ -64,48 +69,50 @@ class MediaTrackSettings:
         noise_suppression (:obj:`bool`, optional): Whether noise is suppressed.
     """
 
-    width: Optional[int] = None
-    height: Optional[int] = None
-    aspect_ratio: Optional[float] = None
-    frame_rate: Optional[float] = None
-    resize_mode: Optional[str] = None
-    device_id: Optional[str] = None
-    group_id: Optional[str] = None
-    sample_rate: Optional[int] = None
-    sample_size: Optional[int] = None
-    channel_count: Optional[int] = None
-    echo_cancellation: Optional[bool] = None
-    auto_gain_control: Optional[bool] = None
-    noise_suppression: Optional[bool] = None
+    width: int | None = None
+    height: int | None = None
+    aspect_ratio: float | None = None
+    frame_rate: float | None = None
+    resize_mode: str | None = None
+    device_id: str | None = None
+    group_id: str | None = None
+    sample_rate: int | None = None
+    sample_size: int | None = None
+    channel_count: int | None = None
+    echo_cancellation: bool | None = None
+    auto_gain_control: bool | None = None
+    noise_suppression: bool | None = None
 
     #: Alias for :attr:`aspect_ratio`
-    aspectRatio = alias('aspect_ratio')
+    aspectRatio: ClassVar[Alias[float | None]] = alias('aspect_ratio')
     #: Alias for :attr:`frame_rate`
-    frameRate = alias('frame_rate')
+    frameRate: ClassVar[Alias[float | None]] = alias('frame_rate')
     #: Alias for :attr:`resize_mode`
-    resizeMode = alias('resize_mode')
+    resizeMode: ClassVar[Alias[str | None]] = alias('resize_mode')
     #: Alias for :attr:`device_id`
-    deviceId = alias('device_id')
+    deviceId: ClassVar[Alias[str | None]] = alias('device_id')
     #: Alias for :attr:`group_id`
-    groupId = alias('group_id')
+    groupId: ClassVar[Alias[str | None]] = alias('group_id')
     #: Alias for :attr:`sample_rate`
-    sampleRate = alias('sample_rate')
+    sampleRate: ClassVar[Alias[int | None]] = alias('sample_rate')
     #: Alias for :attr:`sample_size`
-    sampleSize = alias('sample_size')
+    sampleSize: ClassVar[Alias[int | None]] = alias('sample_size')
     #: Alias for :attr:`channel_count`
-    channelCount = alias('channel_count')
+    channelCount: ClassVar[Alias[int | None]] = alias('channel_count')
     #: Alias for :attr:`echo_cancellation`
-    echoCancellation = alias('echo_cancellation')
+    echoCancellation: ClassVar[Alias[bool | None]] = alias('echo_cancellation')
     #: Alias for :attr:`auto_gain_control`
-    autoGainControl = alias('auto_gain_control')
+    autoGainControl: ClassVar[Alias[bool | None]] = alias('auto_gain_control')
     #: Alias for :attr:`noise_suppression`
-    noiseSuppression = alias('noise_suppression')
+    noiseSuppression: ClassVar[Alias[bool | None]] = alias('noise_suppression')
 
 
 @dataclass
 class MediaTrackCapabilities:
-    """What the source of a track can do (:meth:`webrtc.MediaStreamTrack.get_capabilities`): the synthetic camera and
-    microphone of :func:`webrtc.get_user_media` have capabilities, other tracks don't control their source.
+    """What the source of a track can do (:meth:`webrtc.MediaStreamTrack.get_capabilities`).
+
+    The synthetic camera and microphone of :func:`webrtc.get_user_media` have capabilities, other tracks don't control
+    their source.
 
     Args:
         width (:obj:`ULongRange`, optional): The widths of the video.
@@ -123,49 +130,50 @@ class MediaTrackCapabilities:
         noise_suppression (:obj:`list` of :obj:`bool`, optional): Whether noise can be suppressed.
     """
 
-    width: Optional[ULongRange] = None
-    height: Optional[ULongRange] = None
-    aspect_ratio: Optional[DoubleRange] = None
-    frame_rate: Optional[DoubleRange] = None
-    resize_mode: Optional[List[str]] = None
-    device_id: Optional[str] = None
-    group_id: Optional[str] = None
-    sample_rate: Optional[ULongRange] = None
-    sample_size: Optional[ULongRange] = None
-    channel_count: Optional[ULongRange] = None
-    echo_cancellation: Optional[List[bool]] = None
-    auto_gain_control: Optional[List[bool]] = None
-    noise_suppression: Optional[List[bool]] = None
+    width: ULongRange | None = None
+    height: ULongRange | None = None
+    aspect_ratio: DoubleRange | None = None
+    frame_rate: DoubleRange | None = None
+    resize_mode: list[str] | None = None
+    device_id: str | None = None
+    group_id: str | None = None
+    sample_rate: ULongRange | None = None
+    sample_size: ULongRange | None = None
+    channel_count: ULongRange | None = None
+    echo_cancellation: list[bool] | None = None
+    auto_gain_control: list[bool] | None = None
+    noise_suppression: list[bool] | None = None
 
     #: Alias for :attr:`aspect_ratio`
-    aspectRatio = alias('aspect_ratio')
+    aspectRatio: ClassVar[Alias[DoubleRange | None]] = alias('aspect_ratio')
     #: Alias for :attr:`frame_rate`
-    frameRate = alias('frame_rate')
+    frameRate: ClassVar[Alias[DoubleRange | None]] = alias('frame_rate')
     #: Alias for :attr:`resize_mode`
-    resizeMode = alias('resize_mode')
+    resizeMode: ClassVar[Alias[list[str] | None]] = alias('resize_mode')
     #: Alias for :attr:`device_id`
-    deviceId = alias('device_id')
+    deviceId: ClassVar[Alias[str | None]] = alias('device_id')
     #: Alias for :attr:`group_id`
-    groupId = alias('group_id')
+    groupId: ClassVar[Alias[str | None]] = alias('group_id')
     #: Alias for :attr:`sample_rate`
-    sampleRate = alias('sample_rate')
+    sampleRate: ClassVar[Alias[ULongRange | None]] = alias('sample_rate')
     #: Alias for :attr:`sample_size`
-    sampleSize = alias('sample_size')
+    sampleSize: ClassVar[Alias[ULongRange | None]] = alias('sample_size')
     #: Alias for :attr:`channel_count`
-    channelCount = alias('channel_count')
+    channelCount: ClassVar[Alias[ULongRange | None]] = alias('channel_count')
     #: Alias for :attr:`echo_cancellation`
-    echoCancellation = alias('echo_cancellation')
+    echoCancellation: ClassVar[Alias[list[bool] | None]] = alias('echo_cancellation')
     #: Alias for :attr:`auto_gain_control`
-    autoGainControl = alias('auto_gain_control')
+    autoGainControl: ClassVar[Alias[list[bool] | None]] = alias('auto_gain_control')
     #: Alias for :attr:`noise_suppression`
-    noiseSuppression = alias('noise_suppression')
+    noiseSuppression: ClassVar[Alias[list[bool] | None]] = alias('noise_suppression')
 
 
 @dataclass
 class MediaTrackConstraints:
-    """What a track is asked to be (:meth:`webrtc.MediaStreamTrack.apply_constraints`). Each member is a value (an
-    ideal one) or a :obj:`dict` of ``exact``, ``ideal``, ``min`` and ``max``: the required ones make the constraints
-    fail if the source can't satisfy them.
+    """What a track is asked to be (:meth:`webrtc.MediaStreamTrack.apply_constraints`).
+
+    Each member is a value (an ideal one) or a :obj:`dict` of ``exact``, ``ideal``, ``min`` and ``max``: the required
+    ones make the constraints fail if the source can't satisfy them.
 
     Args:
         width (optional): The width of the video.
@@ -185,54 +193,55 @@ class MediaTrackConstraints:
             be satisfied.
     """
 
-    width: Optional[ConstrainValue] = None
-    height: Optional[ConstrainValue] = None
-    aspect_ratio: Optional[ConstrainValue] = None
-    frame_rate: Optional[ConstrainValue] = None
-    resize_mode: Optional[ConstrainValue] = None
-    device_id: Optional[ConstrainValue] = None
-    group_id: Optional[ConstrainValue] = None
-    sample_rate: Optional[ConstrainValue] = None
-    sample_size: Optional[ConstrainValue] = None
-    channel_count: Optional[ConstrainValue] = None
-    echo_cancellation: Optional[ConstrainValue] = None
-    auto_gain_control: Optional[ConstrainValue] = None
-    noise_suppression: Optional[ConstrainValue] = None
-    advanced: Optional[List[Dict[str, Any]]] = None
+    width: ConstrainValue | None = None
+    height: ConstrainValue | None = None
+    aspect_ratio: ConstrainValue | None = None
+    frame_rate: ConstrainValue | None = None
+    resize_mode: ConstrainValue | None = None
+    device_id: ConstrainValue | None = None
+    group_id: ConstrainValue | None = None
+    sample_rate: ConstrainValue | None = None
+    sample_size: ConstrainValue | None = None
+    channel_count: ConstrainValue | None = None
+    echo_cancellation: ConstrainValue | None = None
+    auto_gain_control: ConstrainValue | None = None
+    noise_suppression: ConstrainValue | None = None
+    advanced: list[dict[str, Any]] | None = None
 
     @classmethod
-    def _parse(cls, value: Any) -> 'MediaTrackConstraints':
-        """Constraints from an instance or a dictionary, with snake_case or camelCase names"""
+    def _parse(cls, value: object) -> MediaTrackConstraints:
+        """Constraints from an instance or a dictionary, with snake_case or camelCase names."""
         if value is None:
             return cls()
         if isinstance(value, cls):
             return value
         if not isinstance(value, dict):
-            raise TypeError(f'{value!r} is not a MediaTrackConstraints')
+            msg = f'{value!r} is not a MediaTrackConstraints'
+            raise TypeError(msg)
         names = {f.name for f in fields(cls)}
         members = {snake_case(k): v for k, v in value.items()}
         # unknown members are ignored, as the specification says
         return cls(**{k: v for k, v in members.items() if k in names})
 
     #: Alias for :attr:`aspect_ratio`
-    aspectRatio = alias('aspect_ratio')
+    aspectRatio: ClassVar[Alias[ConstrainValue | None]] = alias('aspect_ratio')
     #: Alias for :attr:`frame_rate`
-    frameRate = alias('frame_rate')
+    frameRate: ClassVar[Alias[ConstrainValue | None]] = alias('frame_rate')
     #: Alias for :attr:`resize_mode`
-    resizeMode = alias('resize_mode')
+    resizeMode: ClassVar[Alias[ConstrainValue | None]] = alias('resize_mode')
     #: Alias for :attr:`device_id`
-    deviceId = alias('device_id')
+    deviceId: ClassVar[Alias[ConstrainValue | None]] = alias('device_id')
     #: Alias for :attr:`group_id`
-    groupId = alias('group_id')
+    groupId: ClassVar[Alias[ConstrainValue | None]] = alias('group_id')
     #: Alias for :attr:`sample_rate`
-    sampleRate = alias('sample_rate')
+    sampleRate: ClassVar[Alias[ConstrainValue | None]] = alias('sample_rate')
     #: Alias for :attr:`sample_size`
-    sampleSize = alias('sample_size')
+    sampleSize: ClassVar[Alias[ConstrainValue | None]] = alias('sample_size')
     #: Alias for :attr:`channel_count`
-    channelCount = alias('channel_count')
+    channelCount: ClassVar[Alias[ConstrainValue | None]] = alias('channel_count')
     #: Alias for :attr:`echo_cancellation`
-    echoCancellation = alias('echo_cancellation')
+    echoCancellation: ClassVar[Alias[ConstrainValue | None]] = alias('echo_cancellation')
     #: Alias for :attr:`auto_gain_control`
-    autoGainControl = alias('auto_gain_control')
+    autoGainControl: ClassVar[Alias[ConstrainValue | None]] = alias('auto_gain_control')
     #: Alias for :attr:`noise_suppression`
-    noiseSuppression = alias('noise_suppression')
+    noiseSuppression: ClassVar[Alias[ConstrainValue | None]] = alias('noise_suppression')

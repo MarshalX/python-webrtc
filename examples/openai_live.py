@@ -3,6 +3,12 @@
 # requires-python = ">=3.9"
 # dependencies = ["wrtc>=0.0.0.dev10", "sounddevice", "httpx"]
 # ///
+#
+#  Copyright 2026 Ilya (Marshal) <https://github.com/MarshalX>.
+#
+#  Dedicated to the public domain under CC0, see the LICENSE file of the examples.
+#
+
 """Talk to OpenAI GPT-Live from the terminal: your microphone goes to the model, its voice to your speakers.
 
 No server needed: the script posts its SDP offer to the OpenAI API with your key, as the guide
@@ -23,8 +29,11 @@ Press Ctrl+C to hang up. Without headphones the microphone is muted while the as
 hear itself; with headphones pass --barge-in to be able to interrupt it.
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import signal
@@ -32,6 +41,7 @@ import sys
 import threading
 import time
 from array import array
+from typing import Any, ClassVar
 
 import httpx
 import sounddevice
@@ -44,49 +54,65 @@ FRAME = SAMPLE_RATE // 100  # 10 ms of samples, as WebRTC sends them
 VOICE_LEVEL = 0.02  # the peak level above which audio counts as speech
 ECHO_TAIL = 0.6  # seconds the microphone stays muted after the assistant stops
 MAX_PLAYBACK = 0.5  # seconds of assistant audio buffered before the oldest is dropped
+SILENT_MIC_WARNING = 10  # seconds of silence before the microphone is suspected
 
 
 class Console:
-    """Human-readable output: timestamped status lines and live transcripts that share the terminal"""
+    """Human-readable output: timestamped status lines and live transcripts that share the terminal."""
 
-    COLORS = {'dim': '2', 'red': '31', 'green': '32', 'yellow': '33', 'blue': '34', 'magenta': '35', 'cyan': '36'}
+    COLORS: ClassVar[dict[str, str]] = {
+        'dim': '2',
+        'red': '31',
+        'green': '32',
+        'yellow': '33',
+        'blue': '34',
+        'magenta': '35',
+        'cyan': '36',
+    }
 
-    def __init__(self, verbose):
+    def __init__(self, *, verbose: bool) -> None:
         self.verbose = verbose
         self.color = sys.stdout.isatty() and not os.environ.get('NO_COLOR')
-        self.speaker = None  # who the open transcript line belongs to
+        self.speaker: str | None = None  # who the open transcript line belongs to
 
-    def paint(self, text, color):
+    def paint(self, text: str, color: str) -> str:
+        """The text in a color, if the terminal shows colors."""
         return f'\033[{self.COLORS[color]}m{text}\033[0m' if self.color else text
 
-    def _end_transcript(self):
+    def _end_transcript(self) -> None:
         if self.speaker:
             print(flush=True)
             self.speaker = None
 
-    def log(self, icon, text, color=None):
+    def log(self, icon: str, text: str, color: str | None = None) -> None:
+        """Prints a timestamped status line."""
         self._end_transcript()
         line = f'{self.paint(time.strftime("%H:%M:%S"), "dim")}  {icon}  {text}'
         print(self.paint(line, color) if color else line, flush=True)
 
-    def info(self, text):
+    def info(self, text: str) -> None:
+        """Prints a status line."""
         self.log('•', text)
 
-    def ok(self, text):
+    def ok(self, text: str) -> None:
+        """Prints a line of a success."""
         self.log('✓', text, 'green')
 
-    def warn(self, text):
+    def warn(self, text: str) -> None:
+        """Prints a line of a problem."""
         self.log('!', text, 'yellow')
 
-    def error(self, text):
+    def error(self, text: str) -> None:
+        """Prints a line of a failure."""
         self.log('✗', text, 'red')
 
-    def debug(self, text):
+    def debug(self, text: str) -> None:
+        """Prints a line in verbose mode only."""
         if self.verbose:
             self.log('·', text, 'dim')
 
-    def transcript(self, speaker, delta):
-        """Appends a fragment to the speaker's line; fragments have no end marker, so a new speaker starts a line"""
+    def transcript(self, speaker: str, delta: str) -> None:
+        """Appends a fragment to the speaker's line; fragments have no end marker, so a new speaker starts a line."""
         if speaker != self.speaker:
             self._end_transcript()
             label, color = ('You', 'cyan') if speaker == 'user' else ('Assistant', 'magenta')
@@ -95,51 +121,54 @@ class Console:
         print(delta, end='', flush=True)
 
 
-def peak(samples):
-    """The peak level of 16-bit samples, from 0 to 1"""
+def peak(samples: bytes) -> float:
+    """The peak level of 16-bit samples, from 0 to 1."""
     values = array('h', samples)
-    return max(max(values), -min(values)) / 32768 if values else 0
+    return max(*values, -min(values)) / 32768 if values else 0
 
 
 class Microphone:
-    """Captures 10 ms chunks of 16-bit mono audio from a device into an asyncio queue"""
+    """Captures 10 ms chunks of 16-bit mono audio from a device into an asyncio queue."""
 
-    def __init__(self, device, loop):
-        self.queue = asyncio.Queue(maxsize=50)
+    def __init__(self, device: str | int | None, loop: asyncio.AbstractEventLoop) -> None:
+        self.queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=50)
         self._loop = loop
         self._stream = sounddevice.RawInputStream(
             samplerate=SAMPLE_RATE, channels=1, dtype='int16', blocksize=FRAME, device=device, callback=self._on_audio
         )
         self.name = sounddevice.query_devices(self._stream.device)['name']
 
-    def _on_audio(self, data, frames, time_info, status):
+    def _on_audio(self, data: memoryview, *_: object) -> None:
         self._loop.call_soon_threadsafe(self._put, bytes(data))
 
-    def _put(self, chunk):
+    def _put(self, chunk: bytes) -> None:
         if self.queue.full():
             self.queue.get_nowait()
         self.queue.put_nowait(chunk)
 
-    def start(self):
+    def start(self) -> None:
+        """Starts capturing."""
         self._stream.start()
 
-    def close(self):
+    def close(self) -> None:
+        """Stops capturing and releases the device."""
         self._stream.stop()
         self._stream.close()
 
 
 class Speakers:
-    """Plays 16-bit audio on a device from a small buffer, opened on the first chunk to match its format"""
+    """Plays 16-bit audio on a device from a small buffer, opened on the first chunk to match its format."""
 
-    def __init__(self, device):
+    def __init__(self, device: str | int | None) -> None:
         self.device = device
         self.name = sounddevice.query_devices(device, 'output')['name']
-        self._stream = None
+        self._stream: sounddevice.RawOutputStream | None = None
         self._buffer = bytearray()
         self._lock = threading.Lock()
         self._limit = 0
 
-    def play(self, samples, sample_rate, channels):
+    def play(self, samples: bytes, sample_rate: int, channels: int) -> None:
+        """Queues samples, opening the device on the first ones."""
         if self._stream is None:
             self._limit = int(sample_rate * MAX_PLAYBACK) * channels * 2
             self._stream = sounddevice.RawOutputStream(
@@ -151,7 +180,7 @@ class Speakers:
             if len(self._buffer) > self._limit:
                 del self._buffer[: len(self._buffer) - self._limit]
 
-    def _on_need(self, out, frames, time_info, status):
+    def _on_need(self, out: memoryview, *_: object) -> None:
         size = len(out)
         with self._lock:
             chunk = self._buffer[:size]
@@ -159,25 +188,29 @@ class Speakers:
         out[: len(chunk)] = chunk
         out[len(chunk) :] = bytes(size - len(chunk))
 
-    def close(self):
+    def close(self) -> None:
+        """Releases the device."""
         if self._stream is not None:
             self._stream.stop()
             self._stream.close()
 
 
 class LiveCall:
-    def __init__(self, args, console):
+    """A call with the model: the microphone and the speakers, the connection and its event channel."""
+
+    def __init__(self, args: argparse.Namespace, console: Console) -> None:
         self.args = args
         self.console = console
-        self.pc = None
-        self.events = None
-        self.microphone = None
-        self.speakers = None
-        self.tasks = []
+        self.pc: webrtc.RTCPeerConnection | None = None
+        self.events: webrtc.RTCDataChannel | None = None
+        self.microphone: Microphone | None = None
+        self.speakers: Speakers | None = None
+        self.tasks: list[asyncio.Future[None]] = []
         self.session_closed = asyncio.Event()
         self.assistant_spoke_at = 0.0  # when the assistant's audio was last above the speech level
 
-    async def run(self, hang_up):
+    async def run(self, hang_up: asyncio.Event) -> None:
+        """Connects, then talks until hung up."""
         console, args = self.console, self.args
         loop = asyncio.get_running_loop()
 
@@ -196,7 +229,7 @@ class LiveCall:
         self.pc.add_track(generator)
         # created before the offer, so the offer negotiates it
         self.events = self.pc.create_data_channel('oai-events')
-        self.events.on('open', lambda event: console.ok('Event channel open'))
+        self.events.on('open', lambda _event: console.ok('Event channel open'))
         self.events.on('message', self._on_message)
 
         offer = await self.pc.create_offer()
@@ -212,18 +245,18 @@ class LiveCall:
         await hang_up.wait()
         await self.close()
 
-    async def _gathered(self):
-        """Waits for the local ICE candidates, which go in the offer since there is no trickling"""
+    async def _gathered(self) -> None:
+        """Waits for the local ICE candidates, which go in the offer since there is no trickling."""
         done = asyncio.Event()
-        self.pc.on('icegatheringstatechange', lambda event: self.pc.ice_gathering_state == 'complete' and done.set())
+        self.pc.on('icegatheringstatechange', lambda _event: self.pc.ice_gathering_state == 'complete' and done.set())
         if self.pc.ice_gathering_state != 'complete':
             try:
                 await asyncio.wait_for(done.wait(), 5)
             except asyncio.TimeoutError:
                 self.console.warn('ICE gathering is slow, sending the candidates found so far')
 
-    async def _create_session(self, sdp):
-        session = {'model': self.args.model}
+    async def _create_session(self, sdp: str) -> str:
+        session: dict[str, object] = {'model': self.args.model}
         if self.args.instructions:
             session['instructions'] = self.args.instructions
         if self.args.voice:
@@ -236,14 +269,15 @@ class LiveCall:
                     json={'session': session, 'transport': {'type': 'webrtc', 'sdp': sdp}},
                 )
         except httpx.HTTPError as e:
-            raise CallError(f'Could not reach the OpenAI API: {e or type(e).__name__}') from None
+            msg = f'Could not reach the OpenAI API: {e or type(e).__name__}'
+            raise CallError(msg) from None
         if response.is_error:
             raise CallError(_describe_http_error(response))
-        reply = response.json()
+        reply: dict[str, Any] = response.json()
         self.console.ok(f'Session created: {reply.get("session", {}).get("id", "?")}')
         return reply['transport']['sdp']
 
-    def _on_connection_state(self, event):
+    def _on_connection_state(self, _event: webrtc.Event) -> None:
         state = self.pc.connection_state
         messages = {
             'connecting': ('info', 'Connecting audio...'),
@@ -255,12 +289,12 @@ class LiveCall:
             level, text = messages[state]
             getattr(self.console, level)(text)
 
-    def _on_track(self, event):
-        self.console.debug(f'Receiving the assistant\'s {event.track.kind} track')
+    def _on_track(self, event: webrtc.RTCTrackEvent) -> None:
+        self.console.debug(f"Receiving the assistant's {event.track.kind} track")
         self.tasks.append(asyncio.ensure_future(self._play(event.track)))
 
-    async def _send_microphone(self, writer):
-        """Sends the microphone to the model, silence instead while the echo guard holds it"""
+    async def _send_microphone(self, writer: webrtc.WritableStreamDefaultWriter) -> None:
+        """Sends the microphone to the model, silence instead while the echo guard holds it."""
         console, loop = self.console, asyncio.get_running_loop()
         silence = bytes(FRAME * 2)
         timestamp, heard, started = 0, False, loop.time()
@@ -270,9 +304,12 @@ class LiveCall:
                 if peak(chunk) > VOICE_LEVEL:
                     heard = True
                     console.ok('Microphone is picking up sound')
-                elif loop.time() - started > 10:
+                elif loop.time() - started > SILENT_MIC_WARNING:
                     heard = True
-                    console.warn('The microphone has been silent for 10 s: check its permission and input level')
+                    console.warn(
+                        f'The microphone has been silent for {SILENT_MIC_WARNING} s: '
+                        'check its permission and input level'
+                    )
             guarded = not self.args.barge_in and time.monotonic() - self.assistant_spoke_at < ECHO_TAIL
             data = webrtc.AudioData(
                 format='s16',
@@ -285,8 +322,8 @@ class LiveCall:
             await writer.write(data)
             timestamp += 10_000
 
-    async def _play(self, track):
-        """Plays the assistant's audio"""
+    async def _play(self, track: webrtc.MediaStreamTrack) -> None:
+        """Plays the assistant's audio."""
         heard = False
         async for data in webrtc.MediaStreamTrackProcessor(track, max_buffer_size=50).readable:
             with data:
@@ -297,13 +334,13 @@ class LiveCall:
                 self.assistant_spoke_at = time.monotonic()
                 if not heard:
                     heard = True
-                    self.console.ok(f'Receiving the assistant\'s voice ({rate} Hz, {channels} ch)')
+                    self.console.ok(f"Receiving the assistant's voice ({rate} Hz, {channels} ch)")
             self.speakers.play(samples, rate, channels)
 
-    def _on_message(self, event):
+    def _on_message(self, event: webrtc.MessageEvent) -> None:
         console = self.console
         try:
-            message = json.loads(event.data)
+            message: dict[str, Any] = json.loads(event.data)
         except ValueError:
             console.debug(f'Not JSON: {event.data!r}')
             return
@@ -330,8 +367,8 @@ class LiveCall:
         else:
             console.debug(f'Event {kind}')
 
-    async def close(self):
-        """Ends the session gracefully, then releases the audio devices"""
+    async def close(self) -> None:
+        """Ends the session gracefully, then releases the audio devices."""
         console = self.console
         if self.events is not None and self.events.ready_state == 'open':
             console.info('Hanging up...')
@@ -339,7 +376,7 @@ class LiveCall:
             try:
                 await asyncio.wait_for(self.session_closed.wait(), 5)
             except asyncio.TimeoutError:
-                console.warn('The session didn\'t confirm closing')
+                console.warn("The session didn't confirm closing")
         for task in self.tasks:
             task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
@@ -353,10 +390,10 @@ class LiveCall:
 
 
 class CallError(Exception):
-    pass
+    """The call couldn't be set up."""
 
 
-def _describe_http_error(response):
+def _describe_http_error(response: httpx.Response) -> str:
     try:
         message = response.json().get('error', {}).get('message')
     except ValueError:
@@ -371,7 +408,8 @@ def _describe_http_error(response):
     return f'OpenAI API returned {response.status_code}, {summary}' + (f': {message}' if message else '')
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
+    """The options of the command line."""
     parser = argparse.ArgumentParser(
         description='Voice chat with OpenAI GPT-Live over WebRTC.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -393,21 +431,21 @@ def parse_args():
     return args
 
 
-async def main():
+async def main() -> None:
+    """Runs a call until Ctrl+C."""
     args = parse_args()
     if args.list_devices:
         print(sounddevice.query_devices())
         return
-    console = Console(args.verbose)
+    console = Console(verbose=args.verbose)
     if not args.api_key:
         console.error('No API key: set OPENAI_API_KEY or pass --api-key')
         sys.exit(1)
 
     hang_up = asyncio.Event()
-    try:
+    # on Windows, Ctrl+C raises KeyboardInterrupt instead
+    with contextlib.suppress(NotImplementedError):
         asyncio.get_running_loop().add_signal_handler(signal.SIGINT, hang_up.set)
-    except NotImplementedError:
-        pass  # Windows: Ctrl+C raises KeyboardInterrupt instead
 
     call = LiveCall(args, console)
     try:
@@ -419,7 +457,5 @@ async def main():
 
 
 if __name__ == '__main__':
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(main())
-    except KeyboardInterrupt:
-        pass

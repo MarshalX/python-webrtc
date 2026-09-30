@@ -5,21 +5,22 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
+from __future__ import annotations
+
 import pytest
 
 import webrtc
 
 
-def test_1(pc):
-    """add_transceiver with string argument as invalid kind should throw TypeError"""
-
+def test_1(pc: webrtc.RTCPeerConnection) -> None:
+    """add_transceiver with string argument as invalid kind should throw TypeError."""
     assert hasattr(pc, 'add_transceiver')
 
     with pytest.raises(TypeError):
         pc.add_transceiver('invalid')
 
 
-def _create_and_test_transceiver(pc, kind):
+def _create_and_test_transceiver(pc: webrtc.RTCPeerConnection, kind: webrtc.MediaType) -> None:
     assert hasattr(pc, 'add_transceiver')
 
     transceiver = pc.add_transceiver(kind)
@@ -32,7 +33,7 @@ def _create_and_test_transceiver(pc, kind):
     assert transceiver.current_direction is None
 
     assert [transceiver] == pc.get_transceivers(), (
-        'Expect added transceiver to be the only element in connection\'s list of transceivers'
+        "Expect added transceiver to be the only element in connection's list of transceivers"
     )
 
     sender = transceiver.sender
@@ -41,7 +42,7 @@ def _create_and_test_transceiver(pc, kind):
 
     assert sender.track is None
 
-    assert [sender] == pc.get_senders(), 'Expect added sender to be the only element in connection\'s list of senders'
+    assert [sender] == pc.get_senders(), "Expect added sender to be the only element in connection's list of senders"
 
     receiver = transceiver.receiver
     assert isinstance(receiver, webrtc.RTCRtpReceiver)
@@ -53,37 +54,36 @@ def _create_and_test_transceiver(pc, kind):
     assert track.ready_state == webrtc.MediaStreamTrackState.live
 
     assert [receiver] == pc.get_receivers(), (
-        'Expect added receiver to be the only element in connection\'s list of receivers'
+        "Expect added receiver to be the only element in connection's list of receivers"
     )
 
 
-def test_2(pc):
-    """add_transceiver('audio') should return an audio transceiver"""
+def test_2(pc: webrtc.RTCPeerConnection) -> None:
+    """add_transceiver('audio') should return an audio transceiver."""
     _create_and_test_transceiver(pc, webrtc.MediaType.audio)
 
 
-def test_3(pc):
-    """add_transceiver('video') should return a video transceiver"""
+def test_3(pc: webrtc.RTCPeerConnection) -> None:
+    """add_transceiver('video') should return a video transceiver."""
     _create_and_test_transceiver(pc, webrtc.MediaType.video)
 
 
-def test_4(pc):
-    """add_transceiver with direction inactive should have result transceiver.direction be the same"""
+def test_4(pc: webrtc.RTCPeerConnection) -> None:
+    """add_transceiver with direction inactive should have result transceiver.direction be the same."""
     init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.inactive)
     transceiver = pc.add_transceiver(webrtc.MediaType.audio, init)
 
     assert transceiver.direction == webrtc.TransceiverDirection.inactive
 
 
-def test_5(pc):
-    """add_transceiver with invalid direction should throw TypeError"""
+def test_5(pc: webrtc.RTCPeerConnection) -> None:
+    """add_transceiver with invalid direction should throw TypeError."""
     with pytest.raises(TypeError):
-        init = webrtc.RtpTransceiverInit(direction='invalid')
-        pc.add_transceiver(webrtc.MediaType.audio, init)
+        pc.add_transceiver(webrtc.MediaType.audio, {'direction': 'invalid'})
 
 
-def test_6(pc, audio_stream):
-    """add_transceiver(track) should have result with sender.track be given track"""
+def test_6(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
+    """add_transceiver(track) should have result with sender.track be given track."""
     track, *_ = audio_stream.get_tracks()
     transceiver = pc.add_transceiver(track)
     sender, receiver = transceiver.sender, transceiver.receiver
@@ -99,24 +99,24 @@ def test_6(pc, audio_stream):
         'Expect receiver.track to be instance of MediaStreamTrack'
     )
     assert receiver_track.kind == webrtc.MediaType.audio, (
-        'receiver.track should have the same kind as added track\'s kind'
+        "receiver.track should have the same kind as added track's kind"
     )
 
     assert receiver_track.ready_state == webrtc.MediaStreamTrackState.live
 
     assert [transceiver] == pc.get_transceivers(), (
-        'Expect added transceiver to be the only element in connection\'s list of transceivers'
+        "Expect added transceiver to be the only element in connection's list of transceivers"
     )
 
-    assert [sender] == pc.get_senders(), 'Expect added sender to be the only element in connection\'s list of senders'
+    assert [sender] == pc.get_senders(), "Expect added sender to be the only element in connection's list of senders"
 
     assert [receiver] == pc.get_receivers(), (
-        'Expect added receiver to be the only element in connection\'s list of receivers'
+        "Expect added receiver to be the only element in connection's list of receivers"
     )
 
 
-def test_7(pc, audio_stream):
-    """add_transceiver(track) multiple times should create multiple transceivers"""
+def test_7(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
+    """add_transceiver(track) multiple times should create multiple transceivers."""
     track, *_ = audio_stream.get_tracks()
     transceiver1 = pc.add_transceiver(track)
     transceiver2 = pc.add_transceiver(track)
@@ -144,51 +144,51 @@ def test_7(pc, audio_stream):
 
 
 @pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
-def test_8(pc, kind):
-    """add_transceiver with rid containing invalid non-alphanumeric characters should throw ValueError"""
-    encodings = [webrtc.RtpEncodingParameters(rid="@Invalid!")]
+def test_8(pc: webrtc.RTCPeerConnection, kind: webrtc.MediaType) -> None:
+    """add_transceiver with rid containing invalid non-alphanumeric characters should throw ValueError."""
+    encodings = [webrtc.RTCRtpEncodingParameters(rid='@Invalid!')]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='is not a valid rid'):
         pc.add_transceiver(kind, init)
 
 
 @pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
-def test_9(pc, kind):
-    """add_transceiver with rid longer than 16 characters should throw ValueError"""
-    encodings = [webrtc.RtpEncodingParameters(rid="a" * 17)]
+def test_9(pc: webrtc.RTCPeerConnection, kind: webrtc.MediaType) -> None:
+    """add_transceiver with rid longer than 16 characters should throw ValueError."""
+    encodings = [webrtc.RTCRtpEncodingParameters(rid='a' * 17)]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='is not a valid rid'):
         pc.add_transceiver(kind, init)
 
 
 @pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
-def test_10(pc, kind):
-    """add_transceiver with valid rid value should succeed"""
-    encodings = [webrtc.RtpEncodingParameters(rid="foo")]
+def test_10(pc: webrtc.RTCPeerConnection, kind: webrtc.MediaType) -> None:
+    """add_transceiver with valid rid value should succeed."""
+    encodings = [webrtc.RTCRtpEncodingParameters(rid='foo')]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
     pc.add_transceiver(kind, init)
 
 
-def test_11(pc):
-    """add_transceiver with valid sendEncodings should succeed"""
-    # dtx and ptime from the original test aren't supported by RtpEncodingParameters
-    encodings = [webrtc.RtpEncodingParameters(active=False, max_bitrate=8, max_framerate=25, rid="foo")]
+def test_11(pc: webrtc.RTCPeerConnection) -> None:
+    """add_transceiver with valid sendEncodings should succeed."""
+    # dtx and ptime from the original test aren't supported by RTCRtpEncodingParameters
+    encodings = [webrtc.RTCRtpEncodingParameters(active=False, max_bitrate=8, max_framerate=25, rid='foo')]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
     pc.add_transceiver(webrtc.MediaType.video, init)
 
 
-def test_12(pc):
-    """add_transceiver with direction sendonly should have result transceiver.direction be the same"""
+def test_12(pc: webrtc.RTCPeerConnection) -> None:
+    """add_transceiver with direction sendonly should have result transceiver.direction be the same."""
     init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
     transceiver = pc.add_transceiver(webrtc.MediaType.audio, init)
 
     assert transceiver.direction == webrtc.TransceiverDirection.sendonly
 
 
-def test_13(pc):
-    """add_transceiver with multiple rid values should succeed"""
-    encodings = [webrtc.RtpEncodingParameters(rid="a"), webrtc.RtpEncodingParameters(rid="b")]
+def test_13(pc: webrtc.RTCPeerConnection) -> None:
+    """add_transceiver with multiple rid values should succeed."""
+    encodings = [webrtc.RTCRtpEncodingParameters(rid='a'), webrtc.RTCRtpEncodingParameters(rid='b')]
     init = webrtc.RtpTransceiverInit(send_encodings=encodings)
     pc.add_transceiver(webrtc.MediaType.video, init)
