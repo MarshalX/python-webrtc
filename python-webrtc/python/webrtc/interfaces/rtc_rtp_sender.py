@@ -18,7 +18,7 @@ from webrtc import (
     WebRTCObject,
     wrtc,
 )
-from webrtc.utils.callbacks_to_async import to_async
+from webrtc.utils.native_calls import call_native
 from webrtc.utils.operations import later
 from webrtc.utils.task_queue import TaskQueue
 
@@ -140,7 +140,7 @@ class RTCRtpSender(WebRTCObject):
             native.requestKeyFrame = bool(key_frame)
         last.encodings = encodings
         last.degradationPreference = parameters.degradation_preference
-        await to_async(self._native_obj.setParameters)(last)
+        await call_native(self._native_obj.setParameters, last)
 
     async def replace_track(self, track: Optional['webrtc.MediaStreamTrack']) -> None:
         """Replaces the track the sender sends, without negotiation.
@@ -209,7 +209,7 @@ class RTCRtpSender(WebRTCObject):
         Raises:
             :obj:`webrtc.InvalidStateError`: If the connection is closed.
         """
-        return RTCStatsReport._from_native(await to_async(self._native_obj.getStats)())
+        return RTCStatsReport._from_native(await call_native(self._native_obj.getStats))
 
     #: Alias for :attr:`get_stats`
     getStats = get_stats
