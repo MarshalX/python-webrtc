@@ -87,10 +87,11 @@ test-groups = ["test"]
 test-command = "pytest {project}/tests && pytest {project}/tests --gc-on-emit"
 
 [tool.cibuildwheel.linux]
-archs = ["x86_64"]
+archs = ["native"]
 manylinux-x86_64-image = "manylinux_2_28"
-# libwebrtc for Linux is compiled against Chromium's libc++, which needs Clang
-before-all = "dnf install -y clang lld"
+manylinux-aarch64-image = "manylinux_2_28"
+# libwebrtc for Linux is compiled against Chromium's libc++, which needs Clang; arm64 links compiler-rt
+before-all = "dnf install -y clang lld compiler-rt"
 environment = { CC = "clang", CXX = "clang++", WRTC_CACHE_DIR = "/tmp/wrtc-cache" }
 
 [tool.cibuildwheel.macos]
