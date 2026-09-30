@@ -117,7 +117,11 @@ async def send_audio_data(generator, input_filename):
             await asyncio.sleep(max(0.0, start + chunks / 100 - loop.time()))
 
 
-async def main(client, input_peer, input_filename):
+async def main(input_peer, input_filename):
+    client = pyrogram.Client(
+        os.environ.get('SESSION_NAME'), api_hash=os.environ.get('API_HASH'), api_id=os.environ.get('API_ID')
+    )
+    await client.start()
     pc = webrtc.RTCPeerConnection()
 
     generator = webrtc.MediaStreamTrackGenerator('audio')
@@ -151,15 +155,11 @@ async def main(client, input_peer, input_filename):
 
     await pyrogram.idle()
     sending.cancel()
+    await client.stop()
 
 
 if __name__ == '__main__':
-    pyro_client = pyrogram.Client(
-        os.environ.get('SESSION_NAME'), api_hash=os.environ.get('API_HASH'), api_id=os.environ.get('API_ID')
-    )
-    pyro_client.start()
-
     peer = input('Input peer:')
     filename = input('Input filename to play:')
 
-    asyncio.get_event_loop().run_until_complete(main(pyro_client, peer, filename))
+    asyncio.run(main(peer, filename))

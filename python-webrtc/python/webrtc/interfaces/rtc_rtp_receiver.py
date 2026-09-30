@@ -17,7 +17,7 @@ from webrtc import (
     WebRTCObject,
     wrtc,
 )
-from webrtc.utils.callbacks_to_async import to_async
+from webrtc.utils.native_calls import call_native
 
 if TYPE_CHECKING:
     import webrtc
@@ -92,7 +92,7 @@ class RTCRtpReceiver(WebRTCObject):
         Raises:
             :obj:`webrtc.InvalidStateError`: If the connection is closed.
         """
-        return RTCStatsReport._from_native(await to_async(self._native_obj.getStats)(), [self])
+        return RTCStatsReport._from_native(await call_native(self._native_obj.getStats), [self])
 
     def get_synchronization_sources(self) -> List['webrtc.RTCRtpSynchronizationSource']:
         """Returns the synchronization sources (SSRCs) of the media received in the last 10 seconds.

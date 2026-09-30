@@ -35,9 +35,9 @@ from webrtc import (
     WebRTCObject,
     wrtc,
 )
-from webrtc.utils.callbacks_to_async import to_async
 from webrtc.utils.events import EventTarget
 from webrtc.utils.names import snake_case
+from webrtc.utils.native_calls import call_native
 from webrtc.utils.operations import OperationsChain, later
 from webrtc.utils.task_queue import TaskQueue
 
@@ -311,7 +311,7 @@ class RTCPeerConnection(WebRTCObject, EventTarget):
             self._apply_legacy_offer_option(MediaType.audio, offer_to_receive_audio)
             self._apply_legacy_offer_option(MediaType.video, offer_to_receive_video)
             await later()
-            return _init_of(await to_async(self._native_obj.createOffer)(ice_restart, voice_activity_detection))
+            return _init_of(await call_native(self._native_obj.createOffer, ice_restart, voice_activity_detection))
 
     async def create_answer(self, *, voice_activity_detection: bool = True) -> 'webrtc.RTCSessionDescriptionInit':
         """Initiates the creation an SDP answer to an offer received from a remote peer during the offer/answer
@@ -332,7 +332,7 @@ class RTCPeerConnection(WebRTCObject, EventTarget):
                 'create an answer', RTCSignalingState.have_remote_offer, RTCSignalingState.have_local_pranswer
             )
             await later()
-            return _init_of(await to_async(self._native_obj.createAnswer)(voice_activity_detection))
+            return _init_of(await call_native(self._native_obj.createAnswer, voice_activity_detection))
 
     async def set_local_description(self, description: Optional[_Description] = None) -> None:
         """Changes the local description associated with the connection. This description specifies the properties
@@ -356,7 +356,7 @@ class RTCPeerConnection(WebRTCObject, EventTarget):
             allowed = _LOCAL_DESCRIPTION_STATES[init.type] if init is not None else ()
             self._check_state('set the local description', *allowed)
             await later()
-            await to_async(self._native_obj.setLocalDescription)(init)
+            await call_native(self._native_obj.setLocalDescription, init)
             self._completed_description()
 
     async def set_remote_description(self, description: _Description) -> None:
@@ -379,7 +379,7 @@ class RTCPeerConnection(WebRTCObject, EventTarget):
         async with self._operation():
             self._check_state('set the remote description', *_REMOTE_DESCRIPTION_STATES.get(init.type, ()))
             await later()
-            await to_async(self._native_obj.setRemoteDescription)(init)
+            await call_native(self._native_obj.setRemoteDescription, init)
             self._completed_description()
 
     def add_track(
@@ -547,7 +547,7 @@ class RTCPeerConnection(WebRTCObject, EventTarget):
             if self.remote_description is None:
                 raise InvalidStateError('A candidate can only be added once there is a remote description')
             await later()
-            await to_async(self._native_obj.addIceCandidate)(candidate_str, sdp_mid, sdp_m_line_index, ufrag)
+            await call_native(self._native_obj.addIceCandidate, candidate_str, sdp_mid, sdp_m_line_index, ufrag)
 
     def create_data_channel(
         self,
@@ -626,7 +626,7 @@ class RTCPeerConnection(WebRTCObject, EventTarget):
             if len(matches) != 1:
                 raise InvalidAccessError(f'{len(matches)} senders and receivers have the track, not exactly one')
             return await matches[0].get_stats()
-        return RTCStatsReport._from_native(await to_async(self._native_obj.getStats)(), self.get_receivers())
+        return RTCStatsReport._from_native(await call_native(self._native_obj.getStats), self.get_receivers())
 
     @staticmethod
     async def generate_certificate(
