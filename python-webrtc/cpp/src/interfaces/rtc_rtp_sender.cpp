@@ -8,6 +8,10 @@
 #include "rtc_rtp_sender.h"
 #include "../utils/python_callback.h"
 
+#include <functional>
+#include <memory>
+#include <utility>
+
 #include <pybind11/functional.h>
 #include <pybind11/stl.h>
 
@@ -16,6 +20,43 @@
 #include "rtc_peer_connection.h"
 
 namespace python_webrtc {
+
+  namespace {
+
+    // libwebrtc drops the callback of SetParametersAsync without calling it when the sender has no media channel
+    // (like after a rollback of its offer) or loses it meanwhile: rejects like it does once the channel is gone
+    class SetParametersCompletion final {
+    public:
+      SetParametersCompletion(std::function<void()> onSuccess, std::function<void(RTCCallbackException)> onFailure)
+          : _onSuccess(std::move(onSuccess)), _onFailure(std::move(onFailure)) {}
+      SetParametersCompletion(const SetParametersCompletion &) = delete;
+      SetParametersCompletion(SetParametersCompletion &&) = delete;
+      SetParametersCompletion &operator=(const SetParametersCompletion &) = delete;
+      SetParametersCompletion &operator=(SetParametersCompletion &&) = delete;
+
+      ~SetParametersCompletion() {
+        if (_onFailure) {
+          _onFailure(RTCCallbackException(webrtc::RTCErrorType::INVALID_STATE,
+                                          "The sender was detached before the parameters were set"));
+        }
+      }
+
+      void operator()(webrtc::RTCError error) {
+        auto onSuccess = std::exchange(_onSuccess, nullptr);
+        auto onFailure = std::exchange(_onFailure, nullptr);
+        if (error.ok()) {
+          onSuccess();
+        } else {
+          onFailure(RTCCallbackException(std::move(error)));
+        }
+      }
+
+    private:
+      std::function<void()> _onSuccess;
+      std::function<void(RTCCallbackException)> _onFailure;
+    };
+
+  } // namespace
 
   RTCRtpSender::RTCRtpSender(std::shared_ptr<PeerConnectionFactory> factory,
                              webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender)
@@ -184,13 +225,8 @@ namespace python_webrtc {
     current.transaction_id = fresh.transaction_id;
     // read-only: getParameters() shows the negotiated codecs this side can send, libwebrtc takes its own list
     current.codecs = fresh.codecs;
-    _sender->SetParametersAsync(current, [onSuccess, onFailure](webrtc::RTCError error) {
-      if (error.ok()) {
-        onSuccess();
-      } else {
-        onFailure(RTCCallbackException(std::move(error)));
-      }
-    });
+    _sender->SetParametersAsync(current, [completion = std::make_unique<SetParametersCompletion>(onSuccess, onFailure)](
+                                             webrtc::RTCError error) { (*completion)(std::move(error)); });
   }
 
   bool RTCRtpSender::ReplaceTrack(std::optional<std::reference_wrapper<MediaStreamTrack>> track) {
