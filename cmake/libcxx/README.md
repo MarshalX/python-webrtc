@@ -6,11 +6,16 @@ and verifies them against these lists:
   llvm-project at `LIBCXX_LLVM_COMMIT`.
 - `config.sha256` — Chromium's build-generated `__config_site` and `__assertion_handler`, fetched from
   `buildtools/third_party/libc++/` at `LIBCXX_CHROMIUM_TAG`.
+- `runtime.sha256` — the libc++ and libc++abi sources Chromium builds (from its `BUILD.gn` at
+  `LIBCXX_CHROMIUM_TAG`) and every file they include, fetched from llvm-project at `LIBCXX_LLVM_COMMIT`,
+  `LIBCXXABI_LLVM_COMMIT` and `LLVM_LIBC_COMMIT`. The linux-arm64 prebuilt lacks the compiled runtime, so
+  CMake builds it from these into a static `chromium_libcxx`.
 
-Both variables live in `cmake/libwebrtc.cmake`. When bumping `LIBWEBRTC_VERSION`, unpack the new
-`libwebrtc-linux-x64.tar.xz` and run
+The commits are the ones WebRTC's `DEPS` pins libc++, libc++abi and llvm-libc at, resolved from Chromium's
+per-directory mirrors to llvm-project. All variables live in `cmake/libwebrtc.cmake`. When bumping
+`LIBWEBRTC_VERSION`, unpack the new `libwebrtc-linux-x64.tar.xz` and run
 
     python cmake/libcxx/update.py <unpacked>/include/third_party/libc++/src/include \
-        --chromium-tag <chromium tag of the WebRTC branch> --since ... --until ...
+        --webrtc-branch <WebRTC branch, e.g. 7977> --chromium-tag <chromium tag of the WebRTC branch>
 
-with a window of ~3 months before the Chromium branch point, then set both variables to the printed values.
+then set the variables to the printed values.

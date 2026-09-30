@@ -61,9 +61,9 @@ if __name__ == '__main__':
 
 Python 3.9 – 3.14 (CPython) on:
 
-| Linux                          | macOS                          | Windows |
-|--------------------------------|--------------------------------|---------|
-| x86_64 (glibc 2.27+, manylinux) | 13+, Intel and Apple Silicon | x64     |
+| Linux                                       | macOS                        | Windows |
+|---------------------------------------------|------------------------------|---------|
+| x86_64 and aarch64 (glibc 2.27+, manylinux) | 13+, Intel and Apple Silicon | x64     |
 
 #### Building from sources (sdist)
 

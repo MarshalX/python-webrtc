@@ -13,8 +13,8 @@
 set(LIBWEBRTC_VERSION "152.7977.0.0")
 set(LIBWEBRTC_URL_BASE "https://github.com/crow-misia/libwebrtc-bin/releases/download/${LIBWEBRTC_VERSION}")
 
-# linux-arm64 is not listed: its archive lacks most of libc++ and libc++abi.
 set(LIBWEBRTC_SHA256_linux-x64   5ba9bbb3392671d96f8fb300e2a2c1566d76fa4e590e3b4f959fa144da16da5c)
+set(LIBWEBRTC_SHA256_linux-arm64 11b84989ee3ca7fb75ff5041bf5aab5fda8934da02d1705891e1adc9c75f1ba4)
 set(LIBWEBRTC_SHA256_macos-x64   1d4f4480316e227fa026bb928c31c3fc2fcc0e8c65f85323c314e1be4ac55b14)
 set(LIBWEBRTC_SHA256_macos-arm64 3a7d3d7d10de56580d3cbe18910a92c3ab85ae07316e6f745890c7b545c0a9c7)
 set(LIBWEBRTC_SHA256_win-x64     41e64b712f3777db0377e8445972051366bc333905b0880a1fc6c4bef1f5b8cf)
@@ -23,23 +23,42 @@ set(LIBWEBRTC_SHA256_win-x86     44cb24862b8deb5cbeef697d1e84bdb5a93ec416602aafa
 # The Linux prebuilts are compiled against Chromium's libc++ but only ship its *.h
 # headers. The extensionless ones are fetched from the matching llvm-project commit
 # (see cmake/libcxx/README.md). Its build-generated config comes from the matching Chromium tag.
-set(LIBCXX_LLVM_COMMIT fe2138d9ec791069edf8183a962711c96db55e3f)
+# The linux-arm64 prebuilt also lacks the compiled libc++ and libc++abi, which are built from the
+# llvm-project commits WebRTC pins them (and llvm-libc, which libc++ uses) at.
+set(LIBCXX_LLVM_COMMIT 54359956733059b058c071264ad58a6ddbed4976)
+set(LIBCXXABI_LLVM_COMMIT 4ffd373e3853ebc00fb339611e215deab682a54c)
+set(LLVM_LIBC_COMMIT 2abc19543d802780eadd1450f0aa0c28fed080af)
 set(LIBCXX_CHROMIUM_TAG 152.0.7977.0)
 
-# Downloads every "<sha256>  <path>" entry of a manifest from <base_url>/<path> into <dest>/<path>.
+# Downloads every "<sha256>  <path>" entry of a manifest from <base_url>/<path> into <dest>/<path>,
+# optionally only the paths starting with <prefix>.
 function(_fetch_pinned manifest base_url dest)
-  file(STRINGS "${manifest}" _lines)
+  if(ARGC GREATER 3)
+    file(STRINGS "${manifest}" _lines REGEX "  ${ARGV3}")
+  else()
+    file(STRINGS "${manifest}" _lines)
+  endif()
   foreach(_line IN LISTS _lines)
     string(REGEX MATCH "^([0-9a-f]+)  (.+)$" _ "${_line}")
-    file(DOWNLOAD "${base_url}/${CMAKE_MATCH_2}" "${dest}/${CMAKE_MATCH_2}"
-        EXPECTED_HASH SHA256=${CMAKE_MATCH_1}
-        STATUS _status
-        TLS_VERIFY ON
-    )
-    list(GET _status 0 _code)
-    if(NOT _code EQUAL 0)
-      message(FATAL_ERROR "Failed to download ${base_url}/${CMAKE_MATCH_2}: ${_status}")
-    endif()
+    set(_sha "${CMAKE_MATCH_1}")
+    set(_path "${CMAKE_MATCH_2}")
+    # raw.githubusercontent.com fails now and then over hundreds of requests, so retry;
+    # no EXPECTED_HASH, it turns a failed attempt into a configure error
+    foreach(_attempt RANGE 1 4)
+      file(DOWNLOAD "${base_url}/${_path}" "${dest}/${_path}" STATUS _status TLS_VERIFY ON)
+      list(GET _status 0 _code)
+      if(_code EQUAL 0)
+        file(SHA256 "${dest}/${_path}" _actual)
+        if(_actual STREQUAL _sha)
+          break()
+        endif()
+        set(_status "SHA256 mismatch: ${_actual}")
+      endif()
+      if(_attempt EQUAL 4)
+        message(FATAL_ERROR "Failed to download ${base_url}/${_path}: ${_status}")
+      endif()
+      execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep ${_attempt})
+    endforeach()
   endforeach()
 endfunction()
 
@@ -87,6 +106,7 @@ set(LIBWEBRTC_PLATFORM "${_os}-${_arch}")
 if(NOT DEFINED LIBWEBRTC_SHA256_${LIBWEBRTC_PLATFORM})
   message(FATAL_ERROR "No prebuilt libwebrtc for ${LIBWEBRTC_PLATFORM}")
 endif()
+set(_build_libcxx OFF)
 
 # --- download & unpack -------------------------------------------------------
 
@@ -111,6 +131,11 @@ if(NOT LIBWEBRTC_ROOT)
     file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/libcxx/headers.sha256" _headers_hash)
     file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/libcxx/config.sha256" _config_hash)
     string(APPEND _stamp_content ";${LIBCXX_LLVM_COMMIT};${_headers_hash};${LIBCXX_CHROMIUM_TAG};${_config_hash}")
+  endif()
+  if(LIBWEBRTC_PLATFORM STREQUAL "linux-arm64")
+    set(_build_libcxx ON)
+    file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/libcxx/runtime.sha256" _runtime_hash)
+    string(APPEND _stamp_content ";${LIBCXXABI_LLVM_COMMIT};${LLVM_LIBC_COMMIT};${_runtime_hash}")
   endif()
   set(_stamp_current "")
   if(EXISTS "${_stamp}")
@@ -160,6 +185,16 @@ if(NOT LIBWEBRTC_ROOT)
       _fetch_pinned("${CMAKE_CURRENT_LIST_DIR}/libcxx/config.sha256"
           "https://raw.githubusercontent.com/chromium/chromium/${LIBCXX_CHROMIUM_TAG}/buildtools/third_party/libc++"
           "${LIBWEBRTC_ROOT}/include/buildtools/third_party/libc++")
+    endif()
+    if(_build_libcxx)
+      message(STATUS "Downloading libc++, libc++abi and llvm-libc sources")
+      foreach(_dir_commit libcxx/${LIBCXX_LLVM_COMMIT} libcxxabi/${LIBCXXABI_LLVM_COMMIT} libc/${LLVM_LIBC_COMMIT})
+        string(REPLACE "/" ";" _dir_commit "${_dir_commit}")
+        list(GET _dir_commit 0 _dir)
+        list(GET _dir_commit 1 _commit)
+        _fetch_pinned("${CMAKE_CURRENT_LIST_DIR}/libcxx/runtime.sha256"
+            "https://raw.githubusercontent.com/llvm/llvm-project/${_commit}" "${LIBWEBRTC_ROOT}/llvm" "${_dir}/")
+      endforeach()
     endif()
 
     if(WIN32)
@@ -225,21 +260,57 @@ elseif(_os STREQUAL "linux")
         "libwebrtc for Linux is built against Chromium's libc++, which requires Clang. "
         "Set CXX=clang++ (and CC=clang).")
   endif()
-  target_compile_definitions(libwebrtc INTERFACE
-      WEBRTC_LINUX
-      _LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_EXTENSIVE
-  )
-  # Use the bundled libc++ (namespace std::__Cr) instead of the system libstdc++;
-  # its implementation is part of libwebrtc.a.
-  target_compile_options(libwebrtc INTERFACE
+  set(_libcxx_defines _LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_EXTENSIVE)
+  set(_libcxx_options
       $<$<COMPILE_LANGUAGE:CXX>:-nostdinc++>
       "SHELL:-isystem ${_inc}/buildtools/third_party/libc++"
       "SHELL:-isystem ${_inc}/third_party/libc++/src/include"
       "SHELL:-isystem ${_inc}/third_party/libc++abi/src/include"
   )
+  target_compile_definitions(libwebrtc INTERFACE WEBRTC_LINUX ${_libcxx_defines})
+  # Use the bundled libc++ (namespace std::__Cr) instead of the system libstdc++;
+  # its implementation is part of libwebrtc.a (built below on arm64).
+  target_compile_options(libwebrtc INTERFACE ${_libcxx_options})
   # BIND_NOW: an incomplete prebuilt must fail on import, not on the first call
   target_link_options(libwebrtc INTERFACE -nostdlib++ "LINKER:--exclude-libs,ALL" "LINKER:-z,now")
   # Declared by a libwebrtc-bin Linux patch, but their definitions are missing from the archive
   target_sources(libwebrtc INTERFACE "${CMAKE_CURRENT_LIST_DIR}/libwebrtc_linux_fixups.cpp")
   target_link_libraries(libwebrtc INTERFACE dl rt m)
+
+  if(_build_libcxx)
+    # Chromium's libc++ and libc++abi, with the flags of its buildtools/third_party/libc++*/BUILD.gn
+    set(_llvm "${LIBWEBRTC_ROOT}/llvm")
+    file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/libcxx/runtime.sha256" _runtime)
+    list(TRANSFORM _runtime REPLACE "^[0-9a-f]+  " "${_llvm}/")
+    list(FILTER _runtime INCLUDE REGEX "/libcxx(abi)?/src/.*\\.cpp$")
+    set(_libcxxabi_sources ${_runtime})
+    list(FILTER _libcxxabi_sources INCLUDE REGEX "/libcxxabi/")
+    add_library(chromium_libcxx STATIC ${_runtime})
+    set_target_properties(chromium_libcxx PROPERTIES
+        CXX_STANDARD 26
+        CXX_VISIBILITY_PRESET hidden
+        POSITION_INDEPENDENT_CODE ON
+        UNITY_BUILD OFF
+    )
+    target_compile_definitions(chromium_libcxx PRIVATE
+        ${_libcxx_defines} NDEBUG _LIBCPP_BUILDING_LIBRARY LIBC_NAMESPACE=__llvm_libc_cr
+    )
+    target_compile_options(chromium_libcxx PRIVATE ${_libcxx_options} -fstrict-aliasing -w)
+    target_include_directories(chromium_libcxx PRIVATE "${_llvm}/libcxx/src" "${_llvm}/libc")
+    set_source_files_properties(${_runtime} PROPERTIES COMPILE_DEFINITIONS LIBCXX_BUILDING_LIBCXXABI)
+    set_source_files_properties(${_libcxxabi_sources} PROPERTIES COMPILE_DEFINITIONS
+        "LIBCXXABI_SILENT_TERMINATE;_LIBCXXABI_USE_FUTEX;_LIBCPP_CONSTINIT=constinit"
+    )
+
+    # libwebrtc calls SME ABI routines (__arm_tpidr2_save) that only compiler-rt provides, not libgcc
+    execute_process(
+        COMMAND "${CMAKE_CXX_COMPILER}" --rtlib=compiler-rt -print-libgcc-file-name
+        OUTPUT_VARIABLE _builtins
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT EXISTS "${_builtins}")
+      message(FATAL_ERROR "Clang's compiler-rt builtins not found (${_builtins}), install compiler-rt")
+    endif()
+    target_link_libraries(libwebrtc INTERFACE chromium_libcxx "${_builtins}")
+  endif()
 endif()
