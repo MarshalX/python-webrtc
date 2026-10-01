@@ -1,0 +1,562 @@
+{
+  "AudioData": [
+    "constructor(**options): extra argument",
+    "constructor(init): should be required"
+  ],
+  "AudioDataInit": [
+    "transfer: missing member"
+  ],
+  "Blob": [
+    "constructor(blobParts): named parts",
+    "constructor(blobParts): type lacks Blob",
+    "constructor(options.endings): missing member",
+    "stream: missing method",
+    "textStream: missing method"
+  ],
+  "BlobPropertyBag": [
+    "missing dictionary"
+  ],
+  "CameraDevicePermissionDescriptor": [
+    "missing dictionary"
+  ],
+  "ConstrainBooleanOrDOMStringParameters": [
+    "missing dictionary"
+  ],
+  "ConstrainBooleanParameters": [
+    "missing dictionary"
+  ],
+  "ConstrainDOMStringParameters": [
+    "missing dictionary"
+  ],
+  "ConstrainDoubleRange": [
+    "missing dictionary"
+  ],
+  "ConstrainULongRange": [
+    "missing dictionary"
+  ],
+  "DOMRectInit": [
+    "missing dictionary"
+  ],
+  "DOMRectReadOnly": [
+    "fromRect: missing method",
+    "toJSON: missing method"
+  ],
+  "DeviceChangeEvent": [
+    "missing interface"
+  ],
+  "DeviceChangeEventInit": [
+    "missing dictionary"
+  ],
+  "EchoCancellationModeEnum": [
+    "missing enum"
+  ],
+  "EncodedVideoChunkType": [
+    "missing enum"
+  ],
+  "EndingType": [
+    "missing enum"
+  ],
+  "InputDeviceInfo": [
+    "missing interface"
+  ],
+  "KeyFrameRequestEvent": [
+    "missing interface"
+  ],
+  "MediaDeviceInfo": [
+    "missing interface"
+  ],
+  "MediaDeviceKind": [
+    "missing enum"
+  ],
+  "MediaDevices": [
+    "missing interface"
+  ],
+  "MediaStream": [
+    "constructor(tracks): extra argument"
+  ],
+  "MediaStreamConstraints": [
+    "missing dictionary"
+  ],
+  "MediaStreamTrack": [
+    "content_hint: extra member"
+  ],
+  "MediaStreamTrackEvent": [
+    "constructor(target): extra argument"
+  ],
+  "MediaStreamTrackEventInit": [
+    "missing dictionary"
+  ],
+  "MediaStreamTrackHandle": [
+    "missing interface"
+  ],
+  "MediaStreamTrackProcessor": [
+    "constructor(**options): extra argument",
+    "constructor(init.track): should be required",
+    "constructor(init.track): type lacks MediaStreamTrackHandle"
+  ],
+  "MediaStreamTrackProcessorInit": [
+    "track: type lacks MediaStreamTrackHandle"
+  ],
+  "MediaTrackCapabilities": [
+    "backgroundBlur: missing member",
+    "facingMode: missing member",
+    "latency: missing member"
+  ],
+  "MediaTrackConstraintSet": [
+    "missing dictionary"
+  ],
+  "MediaTrackConstraints": [
+    "advanced: type lacks MediaTrackConstraintSet",
+    "aspectRatio: type lacks ConstrainDoubleRange",
+    "autoGainControl: type lacks ConstrainBooleanParameters",
+    "backgroundBlur: missing member",
+    "channelCount: type lacks ConstrainULongRange",
+    "deviceId: type lacks ConstrainDOMStringParameters",
+    "echoCancellation: type lacks ConstrainBooleanOrDOMStringParameters",
+    "facingMode: missing member",
+    "frameRate: type lacks ConstrainDoubleRange",
+    "groupId: type lacks ConstrainDOMStringParameters",
+    "height: type lacks ConstrainULongRange",
+    "latency: missing member",
+    "noiseSuppression: type lacks ConstrainBooleanParameters",
+    "resizeMode: type lacks ConstrainDOMStringParameters",
+    "sampleRate: type lacks ConstrainULongRange",
+    "sampleSize: type lacks ConstrainULongRange",
+    "width: type lacks ConstrainULongRange"
+  ],
+  "MediaTrackSettings": [
+    "backgroundBlur: missing member",
+    "facingMode: missing member",
+    "latency: missing member"
+  ],
+  "MediaTrackSupportedConstraints": [
+    "missing dictionary"
+  ],
+  "QueuingStrategy": [
+    "missing dictionary"
+  ],
+  "RTCAnswerOptions": [
+    "missing dictionary"
+  ],
+  "RTCAudioPlayoutStats": [
+    "missing dictionary"
+  ],
+  "RTCAudioSourceStats": [
+    "missing dictionary"
+  ],
+  "RTCCertificate": [
+    "expired: extra member",
+    "generate: extra member"
+  ],
+  "RTCCertificateExpiration": [
+    "missing dictionary"
+  ],
+  "RTCCertificateStats": [
+    "missing dictionary"
+  ],
+  "RTCCodecStats": [
+    "missing dictionary"
+  ],
+  "RTCConfiguration": [
+    "always_negotiate_data_channels: extra member",
+    "port_range: extra member",
+    "rtp_header_encryption_policy: extra member"
+  ],
+  "RTCDTMFToneChangeEvent": [
+    "constructor(target): extra argument"
+  ],
+  "RTCDTMFToneChangeEventInit": [
+    "missing dictionary"
+  ],
+  "RTCDataChannelEvent": [
+    "constructor(target): extra argument"
+  ],
+  "RTCDataChannelEventInit": [
+    "missing dictionary"
+  ],
+  "RTCDataChannelStats": [
+    "missing dictionary"
+  ],
+  "RTCDtlsFingerprint": [
+    "algorithm: should be optional",
+    "value: should be optional"
+  ],
+  "RTCDtlsRole": [
+    "missing enum"
+  ],
+  "RTCDtlsTransport": [
+    "state: type lacks RTCDtlsTransportState"
+  ],
+  "RTCDtlsTransportState": [
+    "missing enum"
+  ],
+  "RTCEncodedAudioFrame": [
+    "missing interface"
+  ],
+  "RTCEncodedAudioFrameMetadata": [
+    "missing dictionary"
+  ],
+  "RTCEncodedAudioFrameOptions": [
+    "missing dictionary"
+  ],
+  "RTCEncodedFrameMetadata": [
+    "missing dictionary"
+  ],
+  "RTCEncodedVideoFrame": [
+    "missing interface"
+  ],
+  "RTCEncodedVideoFrameMetadata": [
+    "missing dictionary"
+  ],
+  "RTCEncodedVideoFrameOptions": [
+    "missing dictionary"
+  ],
+  "RTCError": [
+    "constructor(init): named options",
+    "http_request_status_code: extra member",
+    "message: extra member"
+  ],
+  "RTCErrorEvent": [
+    "constructor(target): extra argument"
+  ],
+  "RTCErrorEventInit": [
+    "missing dictionary"
+  ],
+  "RTCErrorInit": [
+    "http_request_status_code: extra member"
+  ],
+  "RTCIceCandidate": [
+    "from_json: extra member",
+    "toJSON(): type lacks RTCIceCandidateInit"
+  ],
+  "RTCIceCandidateInit": [
+    "missing dictionary"
+  ],
+  "RTCIceCandidatePairStats": [
+    "missing dictionary"
+  ],
+  "RTCIceCandidateStats": [
+    "missing dictionary"
+  ],
+  "RTCIceConnectionState": [
+    "extra value 'max'"
+  ],
+  "RTCIceGatherOptions": [
+    "missing dictionary"
+  ],
+  "RTCIceGathererState": [
+    "missing enum"
+  ],
+  "RTCIceParameters": [
+    "iceLite: missing member",
+    "password: should be optional",
+    "usernameFragment: should be optional"
+  ],
+  "RTCIceServer": [
+    "credential_type: extra member"
+  ],
+  "RTCIceTransport": [
+    "addRemoteCandidate(remoteCandidate): named candidate",
+    "addRemoteCandidate(remoteCandidate): should be optional",
+    "addRemoteCandidate(remoteCandidate): type lacks RTCIceCandidateInit",
+    "gatheringState: type lacks RTCIceGathererState",
+    "onerror: missing event",
+    "start(remoteParameters): should be optional"
+  ],
+  "RTCInboundRtpStreamStats": [
+    "missing dictionary"
+  ],
+  "RTCLocalIceCandidateInit": [
+    "missing dictionary"
+  ],
+  "RTCLocalSessionDescriptionInit": [
+    "missing dictionary"
+  ],
+  "RTCMediaSourceStats": [
+    "missing dictionary"
+  ],
+  "RTCOfferAnswerOptions": [
+    "missing dictionary"
+  ],
+  "RTCOfferOptions": [
+    "missing dictionary"
+  ],
+  "RTCOutboundRtpStreamStats": [
+    "missing dictionary"
+  ],
+  "RTCPeerConnection": [
+    "addIceCandidate(candidate): type lacks RTCIceCandidateInit",
+    "addTrack(streams): named stream",
+    "addTrack(streams): should be variadic",
+    "addTransceiver(init): type lacks RTCRtpTransceiverInit",
+    "createAnswer(options): missing argument",
+    "createAnswer(voice_activity_detection): extra argument",
+    "createDataChannel(dataChannelDict): named options",
+    "createOffer(voice_activity_detection): extra argument",
+    "generateCertificate(expires): extra argument",
+    "generateCertificate(keygenAlgorithm): named algorithm",
+    "generateCertificate(keygenAlgorithm): should be required",
+    "setLocalDescription(description): type lacks RTCLocalSessionDescriptionInit",
+    "setRemoteDescription(description): type lacks RTCSessionDescriptionInit"
+  ],
+  "RTCPeerConnectionIceErrorEvent": [
+    "constructor(eventInitDict.address): should be optional",
+    "constructor(eventInitDict.errorText): should be optional",
+    "constructor(eventInitDict.port): should be optional",
+    "constructor(eventInitDict.url): should be optional",
+    "constructor(target): extra argument"
+  ],
+  "RTCPeerConnectionIceErrorEventInit": [
+    "missing dictionary"
+  ],
+  "RTCPeerConnectionIceEvent": [
+    "constructor(target): extra argument"
+  ],
+  "RTCPeerConnectionIceEventInit": [
+    "missing dictionary"
+  ],
+  "RTCPeerConnectionStats": [
+    "missing dictionary"
+  ],
+  "RTCQualityLimitationReason": [
+    "missing enum"
+  ],
+  "RTCReceivedRtpStreamStats": [
+    "missing dictionary"
+  ],
+  "RTCRemoteInboundRtpStreamStats": [
+    "missing dictionary"
+  ],
+  "RTCRemoteOutboundRtpStreamStats": [
+    "missing dictionary"
+  ],
+  "RTCRtpCapabilities": [
+    "codecs: should be required",
+    "headerExtensions: should be required"
+  ],
+  "RTCRtpCodingParameters": [
+    "missing dictionary"
+  ],
+  "RTCRtpEncodingParameters": [
+    "adaptive_ptime: extra member"
+  ],
+  "RTCRtpHeaderExtensionCapability": [
+    "direction: extra member"
+  ],
+  "RTCRtpParameters": [
+    "missing dictionary"
+  ],
+  "RTCRtpReceiveParameters": [
+    "codecs: should be required",
+    "headerExtensions: should be required",
+    "rtcp: should be required"
+  ],
+  "RTCRtpReceiver": [
+    "transform: missing attribute"
+  ],
+  "RTCRtpSFrameDecryptor": [
+    "missing interface"
+  ],
+  "RTCRtpSFrameEncryptor": [
+    "missing interface"
+  ],
+  "RTCRtpSFrameEncryptorOptions": [
+    "missing dictionary"
+  ],
+  "RTCRtpScriptTransform": [
+    "missing interface"
+  ],
+  "RTCRtpScriptTransformType": [
+    "missing enum"
+  ],
+  "RTCRtpScriptTransformer": [
+    "missing interface"
+  ],
+  "RTCRtpSendParameters": [
+    "codecs: should be required",
+    "degradation_preference: extra member",
+    "encodings: should be required",
+    "headerExtensions: should be required",
+    "rtcp: should be required"
+  ],
+  "RTCRtpSender": [
+    "kind: extra member",
+    "replaceTrack(withTrack): named track",
+    "setParameters(key_frames): extra argument",
+    "setParameters(setParameterOptions): missing argument",
+    "transform: missing attribute"
+  ],
+  "RTCRtpStreamStats": [
+    "missing dictionary"
+  ],
+  "RTCRtpTransceiver": [
+    "currentDirection: type lacks RTCRtpTransceiverDirection",
+    "direction: type lacks RTCRtpTransceiverDirection",
+    "get_header_extensions_to_negotiate: extra member",
+    "get_negotiated_header_extensions: extra member",
+    "kind: extra member",
+    "set_header_extensions_to_negotiate: extra member",
+    "stopped: extra member"
+  ],
+  "RTCRtpTransceiverDirection": [
+    "missing enum"
+  ],
+  "RTCRtpTransceiverInit": [
+    "missing dictionary"
+  ],
+  "RTCSctpTransport": [
+    "state: type lacks RTCSctpTransportState"
+  ],
+  "RTCSctpTransportState": [
+    "missing enum"
+  ],
+  "RTCSentRtpStreamStats": [
+    "missing dictionary"
+  ],
+  "RTCSessionDescription": [
+    "toJSON(): type lacks RTCSessionDescriptionInit"
+  ],
+  "RTCSessionDescriptionInit": [
+    "to_json: extra member"
+  ],
+  "RTCSetParameterOptions": [
+    "missing dictionary"
+  ],
+  "RTCStatsIceCandidatePairState": [
+    "missing enum"
+  ],
+  "RTCStatsReport": [
+    "of_type: extra member"
+  ],
+  "RTCStatsType": [
+    "missing enum"
+  ],
+  "RTCTrackEvent": [
+    "constructor(eventInitDict.streams): should be optional",
+    "constructor(target): extra argument"
+  ],
+  "RTCTrackEventInit": [
+    "missing dictionary"
+  ],
+  "RTCTransformEvent": [
+    "missing interface"
+  ],
+  "RTCTransportStats": [
+    "missing dictionary"
+  ],
+  "RTCVideoSourceStats": [
+    "missing dictionary"
+  ],
+  "ReadableStream": [
+    "constructor(strategy.size): missing member",
+    "from: missing method",
+    "getReader(options): missing argument",
+    "pipeThrough(options): should be optional",
+    "pipeThrough(options): type lacks StreamPipeOptions",
+    "pipeThrough(transform): type lacks ReadableWritablePair",
+    "pipeTo(options.signal): missing member",
+    "tee: missing method",
+    "values: extra member"
+  ],
+  "ReadableStreamDefaultController": [
+    "enqueue(chunk): should be optional",
+    "error(e): named error"
+  ],
+  "ReadableStreamDefaultReader": [
+    "read(): type lacks ReadableStreamReadResult"
+  ],
+  "ReadableStreamGetReaderOptions": [
+    "missing dictionary"
+  ],
+  "ReadableStreamIteratorOptions": [
+    "missing dictionary"
+  ],
+  "ReadableStreamReadResult": [
+    "done: should be optional",
+    "value: should be optional"
+  ],
+  "ReadableStreamReaderMode": [
+    "missing enum"
+  ],
+  "ReadableWritablePair": [
+    "missing dictionary"
+  ],
+  "SFrameCipherSuite": [
+    "missing enum"
+  ],
+  "SFrameDecryptorStream": [
+    "missing interface"
+  ],
+  "SFrameEncryptorStream": [
+    "missing interface"
+  ],
+  "SFrameTransformErrorEvent": [
+    "missing interface"
+  ],
+  "SFrameTransformErrorEventInit": [
+    "missing dictionary"
+  ],
+  "SFrameTransformErrorEventType": [
+    "missing enum"
+  ],
+  "SFrameTransformOptions": [
+    "missing dictionary"
+  ],
+  "SFrameType": [
+    "missing enum"
+  ],
+  "StreamPipeOptions": [
+    "missing dictionary"
+  ],
+  "TransformStream": [
+    "constructor(readableStrategy): missing argument",
+    "constructor(writableStrategy): missing argument"
+  ],
+  "TransformStreamDefaultController": [
+    "enqueue(chunk): should be optional",
+    "error(reason): named error"
+  ],
+  "VideoColorSpaceInit": [
+    "missing dictionary"
+  ],
+  "VideoFacingModeEnum": [
+    "missing enum"
+  ],
+  "VideoFrame": [
+    "constructor(**options): extra argument",
+    "constructor(image): named source"
+  ],
+  "VideoFrameBufferInit": [
+    "colorSpace: type lacks VideoColorSpaceInit",
+    "metadata: missing member",
+    "transfer: missing member",
+    "visibleRect: type lacks DOMRectInit"
+  ],
+  "VideoFrameCopyToOptions": [
+    "colorSpace: missing member",
+    "rect: type lacks DOMRectInit"
+  ],
+  "VideoFrameInit": [
+    "metadata: missing member",
+    "visibleRect: type lacks DOMRectInit"
+  ],
+  "VideoFrameMetadata": [
+    "rtp_timestamp: extra member"
+  ],
+  "VideoResizeModeEnum": [
+    "missing enum"
+  ],
+  "WorkerAndParameters": [
+    "missing dictionary"
+  ],
+  "WritableStream": [
+    "constructor(strategy.size): missing member"
+  ],
+  "WritableStreamDefaultController": [
+    "error(e): named error",
+    "signal: missing attribute"
+  ],
+  "WritableStreamDefaultWriter": [
+    "write(chunk): should be optional"
+  ]
+}
