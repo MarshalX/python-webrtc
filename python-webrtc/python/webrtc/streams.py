@@ -54,6 +54,8 @@ _T = TypeVar('_T', default=object)
 #: The type of the chunks a transform stream outputs
 _O = TypeVar('_O', default=object)
 _R = TypeVar('_R')
+#: The type of the chunks a writable stream takes: one taking any object takes chunks of any type
+_W_contra = TypeVar('_W_contra', contravariant=True, default=object)
 
 
 def _loop() -> asyncio.AbstractEventLoop:
@@ -188,14 +190,14 @@ def _run(
     _then(result, on_done, on_error)
 
 
-class _GenericTransformStream(Protocol[_T, _O]):
+class _GenericTransformStream(Protocol[_W_contra, _O]):
     """A pair of streams like :obj:`TransformStream`."""
 
     @property
     def readable(self) -> ReadableStream[_O]: ...
 
     @property
-    def writable(self) -> WritableStream[_T]: ...
+    def writable(self) -> WritableStream[_W_contra]: ...
 
 
 @dataclass
@@ -914,10 +916,10 @@ class _IteratorSource(Generic[_T]):
 _CLOSE = object()
 
 
-class WritableStreamDefaultController(Generic[_T]):
+class WritableStreamDefaultController(Generic[_W_contra]):
     """Lets an underlying sink error its stream."""
 
-    def __init__(self, stream: WritableStream[_T], sink: object, strategy: _Strategy[_T]) -> None:
+    def __init__(self, stream: WritableStream[_W_contra], sink: object, strategy: _Strategy[_W_contra]) -> None:
         self._stream = stream
         self._sink = sink
         self._strategy = strategy
@@ -945,7 +947,7 @@ class WritableStreamDefaultController(Generic[_T]):
 
         _then(_call(self._sink, 'start', self), started, failed)
 
-    def _write(self, chunk: _T, future: asyncio.Future[None]) -> None:
+    def _write(self, chunk: _W_contra, future: asyncio.Future[None]) -> None:
         try:
             size = _chunk_size(self._strategy, chunk)
         except Exception as e:
@@ -1010,7 +1012,7 @@ class WritableStreamDefaultController(Generic[_T]):
             self._queue.append(in_flight)
 
 
-class WritableStream(Generic[_T]):
+class WritableStream(Generic[_W_contra]):
     """A stream to write chunks to (https://developer.mozilla.org/en-US/docs/Web/API/WritableStream).
 
     Args:
@@ -1022,11 +1024,11 @@ class WritableStream(Generic[_T]):
         webrtc.InvalidRangeError: If the high water mark of the strategy is negative or NaN.
     """
 
-    def __init__(self, underlying_sink: object = None, strategy: QueuingStrategy[_T] | None = None) -> None:
+    def __init__(self, underlying_sink: object = None, strategy: QueuingStrategy[_W_contra] | None = None) -> None:
         extracted = _extract_strategy(strategy, 1)
         self._state = 'writable'
         self._stored_error: BaseException | None = None
-        self._writer: WritableStreamDefaultWriter[_T] | None = None
+        self._writer: WritableStreamDefaultWriter[_W_contra] | None = None
         self._close_requested = False
         self._controller = WritableStreamDefaultController(self, underlying_sink, extracted)
         self._controller._start()
@@ -1036,7 +1038,7 @@ class WritableStream(Generic[_T]):
         """:obj:`bool`: Whether a writer holds the stream."""
         return self._writer is not None
 
-    def get_writer(self) -> WritableStreamDefaultWriter[_T]:
+    def get_writer(self) -> WritableStreamDefaultWriter[_W_contra]:
         """Returns a writer, which holds the stream until it's released.
 
         Raises :obj:`TypeError` if the stream is locked.
@@ -1126,7 +1128,7 @@ class WritableStream(Generic[_T]):
     getWriter = get_writer
 
 
-class WritableStreamDefaultWriter(Generic[_T]):
+class WritableStreamDefaultWriter(Generic[_W_contra]):
     """Writes chunks to a stream, which it locks until :meth:`release_lock`.
 
     Args:
@@ -1136,11 +1138,11 @@ class WritableStreamDefaultWriter(Generic[_T]):
         TypeError: If the stream is locked.
     """
 
-    def __init__(self, stream: WritableStream[_T]) -> None:
+    def __init__(self, stream: WritableStream[_W_contra]) -> None:
         if stream.locked:
             msg = 'The stream is locked'
             raise TypeError(msg)
-        self._stream: WritableStream[_T] | None = stream
+        self._stream: WritableStream[_W_contra] | None = stream
         stream._writer = self
         self._closed: asyncio.Future[None] = _handled(_pending())
         self._ready: asyncio.Future[None] = _handled(_pending())
@@ -1181,7 +1183,7 @@ class WritableStreamDefaultWriter(Generic[_T]):
             return 0
         return stream._controller._desired_size()
 
-    def write(self, chunk: _T | None = None) -> asyncio.Future[None]:
+    def write(self, chunk: _W_contra | None = None) -> asyncio.Future[None]:
         """Writes a chunk.
 
         Returns:
@@ -1196,7 +1198,7 @@ class WritableStreamDefaultWriter(Generic[_T]):
         if stream._close_requested or stream._state == 'closed':
             return _rejected(TypeError('The stream is closed or closing'))
         future: asyncio.Future[None] = _pending()
-        stream._controller._write(cast('_T', chunk), future)
+        stream._controller._write(cast('_W_contra', chunk), future)
         return future
 
     def close(self) -> asyncio.Future[None]:

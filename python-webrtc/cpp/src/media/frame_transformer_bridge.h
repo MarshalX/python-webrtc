@@ -29,7 +29,6 @@ namespace python_webrtc {
 
   class FrameTransformerBridge;
 
-  // A transform of the encoded frames of a sender or receiver (its transform attribute), done in Python or natively
   class RtpTransform {
   public:
     virtual ~RtpTransform() = default;
@@ -39,16 +38,13 @@ namespace python_webrtc {
     RtpTransform(const RtpTransform &) = delete;
     RtpTransform &operator=(const RtpTransform &) = delete;
 
-    // a transform has one sender or receiver for its whole life: false if it had one already
     bool TakeOwnership() { return !_owned.exchange(true); }
 
-    // a frame of the sender or receiver, on a libwebrtc thread: given back with bridge.Output(), or dropped
+    // on a libwebrtc thread: the frame goes back with bridge.Output(), or is dropped
     virtual void Transform(std::unique_ptr<webrtc::TransformableFrameInterface> frame) = 0;
 
-    // frames come from the bridge from now on, and go back to it
     virtual void Associate(webrtc::scoped_refptr<FrameTransformerBridge> bridge) = 0;
 
-    // no frames come anymore
     virtual void Disassociate() = 0;
 
     static void Init(pybind11::module &m);
@@ -57,19 +53,16 @@ namespace python_webrtc {
     std::atomic<bool> _owned{false};
   };
 
-  // What a bridge knows of its sender or receiver: functions hold it weakly, and do nothing once it's gone
+  // the functions hold the sender or receiver weakly, and do nothing once it's gone
   struct FrameSource {
     enum class KeyFrameResult : uint8_t { kRequested, kUnknownRid };
 
     bool sender = false;
     bool video = false;
-    // key frames for the layers of the rids (every layer for none), of a video sender
     std::function<KeyFrameResult(const std::vector<std::string> &)> generateKeyFrame;
-    // asks the remote sender for a key frame, for a video receiver
     std::function<void()> sendKeyFrameRequest;
   };
 
-  // The frame transformer of a sender or receiver, installed once: frames go to its transform, or straight back
   class FrameTransformerBridge : public webrtc::FrameTransformerInterface {
   public:
     explicit FrameTransformerBridge(FrameSource source);
@@ -81,13 +74,13 @@ namespace python_webrtc {
 
     [[nodiscard]] const FrameSource &Source() const { return _source; }
 
-    // the transform frames go to, null for none
+    // identifies the bridge for the frames it gives, never reused (unlike its address)
+    [[nodiscard]] uint64_t Id() const { return _id; }
+
     void SetTransform(std::shared_ptr<RtpTransform> transform);
 
-    // gives a frame back to libwebrtc, on any thread
     void Output(std::unique_ptr<webrtc::TransformableFrameInterface> frame);
 
-    // FrameTransformerInterface
     void Transform(std::unique_ptr<webrtc::TransformableFrameInterface> frame) override;
 
     void RegisterTransformedFrameCallback(webrtc::scoped_refptr<webrtc::TransformedFrameCallback> callback) override;
@@ -102,6 +95,7 @@ namespace python_webrtc {
   private:
     AliveCount<FrameTransformerBridge> _counted;
     const FrameSource _source;
+    const uint64_t _id;
 
     std::mutex _mutex;
     std::shared_ptr<RtpTransform> _transform;
@@ -110,16 +104,14 @@ namespace python_webrtc {
     std::map<uint32_t, webrtc::scoped_refptr<webrtc::TransformedFrameCallback>> _sinkCallbacks;
   };
 
-  // The transform attribute of a sender or receiver, and the bridge installed for it
   class TransformSlot {
   public:
     std::shared_ptr<RtpTransform> Get();
 
-    // InvalidStateError for a transform used elsewhere; installs the bridge on first use (calls libwebrtc, no GIL)
+    // calls libwebrtc: without the GIL
     void Set(const std::shared_ptr<RtpTransform> &transform, const std::function<FrameSource()> &source,
              const std::function<void(const webrtc::scoped_refptr<FrameTransformerBridge> &)> &install);
 
-    // closed or gone: the transform (still the attribute) gets no frames anymore, the bridge passes them through
     void Release();
 
   private:

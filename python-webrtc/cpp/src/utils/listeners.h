@@ -42,6 +42,10 @@ namespace python_webrtc {
     pybind11::object GetListeners() { return _listeners ? _listeners : pybind11::none(); }
 
     void SetListeners(pybind11::object listeners) {
+      // accepted and dropped once closed, like the handlers of a target that never dispatches again
+      if (_closed) {
+        return;
+      }
       _listeners = listeners.is_none() ? pybind11::object() : std::move(listeners);
       _active = static_cast<bool>(_listeners);
       if (_active) {
@@ -82,6 +86,11 @@ namespace python_webrtc {
     void DropListeners() noexcept {
       _active = false;
       ReleasePythonObject(_listeners);
+    }
+
+    void CloseListeners() noexcept {
+      _closed = true;
+      DropListeners();
     }
 
   private:
@@ -158,6 +167,7 @@ namespace python_webrtc {
     }
 
     std::atomic<bool> _active{false};
+    std::atomic<bool> _closed{false};
     pybind11::object _listeners;
     HeldEvents _held;
   };

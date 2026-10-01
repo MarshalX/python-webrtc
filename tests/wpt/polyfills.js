@@ -56,8 +56,7 @@
     }
   };
 
-  // WebCrypto as far as tests of WebRTC use it: secret keys imported from raw bytes, which the SFrame transforms
-  // of shim.js take (Symbol.for('wpt.keyData'))
+  // WebCrypto as far as WebRTC tests use it: raw secret keys, which shim.js's SFrame transforms take
   const KEY_DATA = Symbol.for('wpt.keyData');
   globalThis.CryptoKey ??= class CryptoKey {
     #algorithm;
@@ -155,11 +154,9 @@
     (Array.isArray(transferOrOptions) ? transferOrOptions : transferOrOptions?.transfer ?? []);
   globalThis.structuredClone ??= (value, options) => cloneWith(value, new Set(transferList(options)));
 
-  // Messages between a worker and the window cross threads in a browser, which takes a little while, and each is a
-  // task of its own: tests start listening for the next message once a message is handled
+  // browser messages cross threads, each a task: tests listen for the next one only once a message is handled
   const CROSS_THREAD_DELAY_MS = 5;
 
-  // runs callbacks one after another, each a while after the previous one ran
   class Mailbox {
     #queue = [];
 
@@ -220,7 +217,6 @@
     #deliver(data) {
       const event = new Event('message');
       Object.defineProperty(event, 'data', {value: data});
-      // dispatchEvent calls the on<type> handler too
       this.dispatchEvent(event);
     }
   }
@@ -233,8 +229,7 @@
     }
   };
 
-  // Worker, in process: the script runs on this global with a scope of its own (self, postMessage, on* handlers,
-  // its globals), on the same event loop. Transferred objects (ports, streams, channels) pass as they are.
+  // Worker, in process: the script runs on this global and loop, with a scope of its own
   const messageEvent = (data) => {
     const event = new Event('message');
     Object.defineProperty(event, 'data', {value: data});
@@ -305,7 +300,6 @@
 
     terminate() {}
 
-    // delivers an event of the platform to the scope of the worker, like rtctransform
     __dispatchInScope(event) {
       this.#ready.then(() => this.#dispatch(this.#scope, event));
     }

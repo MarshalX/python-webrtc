@@ -371,7 +371,6 @@
   function toAlgorithm(algorithm) {
     if (typeof algorithm !== 'object' || algorithm === null) return String(algorithm);
     const converted = {name: String(algorithm.name)};
-    // RTCCertificateExpiration, a member of the algorithm object
     if (algorithm.expires !== undefined) converted.expires = enforceRange(algorithm.expires, 0, Number.MAX_SAFE_INTEGER);
     if (algorithm.namedCurve !== undefined) converted.namedCurve = String(algorithm.namedCurve);
     if (algorithm.modulusLength !== undefined) converted.modulusLength = enforceRange(algorithm.modulusLength, 0, 2 ** 32 - 1);
@@ -591,7 +590,6 @@
       return callStatic('RTCRtpSender', 'get_capabilities', String(kind));
     }
   }
-  // (RTCRtpSFrameEncryptor or RTCRtpScriptTransform)? and its receiver counterpart
   const toTransform = (sframe) => (value) => {
     if (value === null || value === undefined) return null;
     if (!(value instanceof RTCRtpScriptTransform) && !(value instanceof sframe())) {
@@ -933,7 +931,6 @@
     RTCTransformEvent: defineEvent('RTCTransformEvent', ['transformer'], {}, {transformer: () => RTCRtpScriptTransformer}),
     SFrameTransformErrorEvent: defineEvent('SFrameTransformErrorEvent', ['errorType', 'frame'], {keyID: null}),
     KeyFrameRequestEvent: class KeyFrameRequestEvent extends Event {
-      // constructor(DOMString type, optional DOMString rid); the library's events come with their members
       constructor(type, rid) {
         requireArguments(arguments, 1, 'KeyFrameRequestEvent');
         super(String(type));
@@ -964,7 +961,6 @@
     }
 
     pipeThrough(transform, options) {
-      // ReadableWritablePair, read from any object with the members (like a GenericTransformStream)
       const pair = requireMembers(transform, 'ReadableWritablePair', ['readable', 'writable']);
       requireInterface(pair.readable, ReadableStream, 'ReadableStream.pipeThrough');
       requireInterface(pair.writable, WritableStream, 'ReadableStream.pipeThrough');
@@ -1188,8 +1184,7 @@
   }
   defineAttributes(MediaStreamTrackGenerator, [['writable', 'writable']]);
 
-  // WebRTC Encoded Transform. The worker of a transform is a Worker of polyfills.js, which gets the rtctransform
-  // event in its scope; options are an `any`, which the worker gets as given (a browser clones them)
+  // WebRTC Encoded Transform: the worker is a Worker of polyfills.js
   const transformerOptions = new WeakMap();
 
   class RTCRtpScriptTransform extends Interface {
@@ -1232,8 +1227,7 @@
   ]);
   defineEventHandlers(RTCRtpScriptTransformer, ['keyframerequest']);
 
-  // the ArrayBuffer of the data of a frame, sharing the memory of the bytearray of the library, the same one while
-  // that bytearray is
+  // shares the memory of the library's bytearray, the same ArrayBuffer while that bytearray is
   const frameBuffers = new WeakMap();
 
   class EncodedFrame extends Interface {
@@ -1253,7 +1247,6 @@
     }
 
     set data(value) {
-      // an ArrayBuffer: not a view, nor a resizable or shared buffer
       if (!(value instanceof ArrayBuffer) || value.resizable) throw new TypeError('data is not an ArrayBuffer');
       setAttr(this, 'data', value);
     }
@@ -1286,7 +1279,6 @@
     }
   }
 
-  // SFrame. Keys are the CryptoKeys of polyfills.js, the library takes their raw bytes
   function keyBytes(key) {
     const data = key?.[Symbol.for('wpt.keyData')];
     if (!(data instanceof Uint8Array)) throw new TypeError('key is not a CryptoKey');
@@ -1301,7 +1293,6 @@
     return pyJson(dictName, pick(requireMembers(args[0], dictName, ['cipherSuite']), members));
   };
 
-  // SFrameEncryptorManager and SFrameDecryptorManager
   const encryptorManager = {
     async setEncryptionKey(key, keyId) {
       requireArguments(arguments, 2, 'setEncryptionKey');

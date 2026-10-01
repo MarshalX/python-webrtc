@@ -28,15 +28,11 @@
 
 namespace python_webrtc {
 
-  // SFrame encryption or decryption of the frames of a sender or receiver on libwebrtc threads, without the GIL
-  // (webrtc.RTCRtpSFrameEncryptor and RTCRtpSFrameDecryptor), and of the chunks of the SFrame streams.
-  // Frames that don't decrypt are dropped, and reported to Python as "error" events.
   class SFrameTransform : public RtpTransform,
                           public Listeners,
                           public Wakeable,
                           public std::enable_shared_from_this<SFrameTransform> {
   public:
-    // errors not delivered yet, before the oldest is dropped
     static constexpr size_t kMaxQueuedErrors = 120;
 
     static std::shared_ptr<SFrameTransform> Create(int cipherSuite, bool encrypting);
@@ -48,33 +44,33 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
-    // RtpTransform
     void Transform(std::unique_ptr<webrtc::TransformableFrameInterface> frame) override;
 
     void Associate(webrtc::scoped_refptr<FrameTransformerBridge> bridge) override;
 
     void Disassociate() override;
 
-    // Wakeable
     void OnWakeup() override;
 
     [[nodiscard]] bool IsEncrypting() const { return _encrypting; }
 
     SFrameContext &Context() { return _context; }
 
-    // the ciphertext of a chunk, None without a key
     pybind11::object Encrypt(const pybind11::buffer &data);
 
-    // (plaintext or None, SFrameError, key id or None) of a chunk
+    // (plaintext or None, SFrameError, key id or None)
     std::tuple<pybind11::object, int, std::optional<uint64_t>> Decrypt(const pybind11::buffer &data);
 
   private:
     SFrameTransform(SFrameCipherSuite suite, bool encrypting);
 
+    void WakeLocked();
+
     struct Error {
       SFrameError error = SFrameError::kNone;
       std::optional<uint64_t> keyId;
       std::unique_ptr<webrtc::TransformableFrameInterface> frame;
+      uint64_t source = 0;
     };
 
     AliveCount<SFrameTransform> _counted;
@@ -85,6 +81,7 @@ namespace python_webrtc {
     webrtc::scoped_refptr<FrameTransformerBridge> _bridge;
     std::deque<Error> _errors;
     bool _wakePending = false;
+    bool _disassociated = false;
   };
 
 } // namespace python_webrtc

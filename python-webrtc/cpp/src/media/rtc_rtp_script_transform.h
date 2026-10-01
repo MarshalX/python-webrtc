@@ -28,19 +28,15 @@
 
 namespace python_webrtc {
 
-  // Queues the frames of a sender or receiver for Python (webrtc.RTCRtpScriptTransform), woken with "_ready"
   class RTCRtpScriptTransform : public RtpTransform,
                                 public Listeners,
                                 public Wakeable,
                                 public std::enable_shared_from_this<RTCRtpScriptTransform> {
   public:
-    // frames queued for a transformer that doesn't read them, before the oldest is dropped
     static constexpr size_t kMaxQueuedFrames = 120;
 
-    // whether frames come: not yet, from a sender or receiver, or not anymore
     enum class State : uint8_t { kNew, kAssociated, kDisassociated };
 
-    // the result of generateKeyFrame: requested, InvalidStateError (not a video sender) or NotFoundError
     enum class KeyFrameResult : uint8_t { kRequested, kInvalidState, kNotFound };
 
     static std::shared_ptr<RTCRtpScriptTransform> Create();
@@ -52,36 +48,29 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
-    // RtpTransform
     void Transform(std::unique_ptr<webrtc::TransformableFrameInterface> frame) override;
 
     void Associate(webrtc::scoped_refptr<FrameTransformerBridge> bridge) override;
 
     void Disassociate() override;
 
-    // Wakeable
     void OnWakeup() override;
 
-    // the oldest frame queued, or None
     std::shared_ptr<EncodedFrame> Read();
 
-    // gives a frame back to its sender or receiver with new data, if associated; false if dropped
     bool Write(EncodedFrame &frame, std::optional<pybind11::buffer> data);
 
-    // Python got the wakeup: the next frame wakes it again
     void AckWakeup();
 
     State GetState();
 
-    // identifies the sender or receiver (its bridge), 0 before one
     uint64_t GetSourceId();
 
-    // (is a sender, is video) of the sender or receiver, None before one
+    // (sender, video)
     std::optional<std::pair<bool, bool>> GetSourceKind();
 
     KeyFrameResult GenerateKeyFrame(const std::optional<std::string> &rid);
 
-    // false if not a video receiver
     bool SendKeyFrameRequest();
 
   private:
@@ -89,7 +78,6 @@ namespace python_webrtc {
 
     webrtc::scoped_refptr<FrameTransformerBridge> Bridge();
 
-    // wakes Python, unless a wakeup is pending
     void WakeLocked();
 
     AliveCount<RTCRtpScriptTransform> _counted;

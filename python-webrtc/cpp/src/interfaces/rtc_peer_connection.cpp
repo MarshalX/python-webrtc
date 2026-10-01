@@ -1301,7 +1301,6 @@ namespace python_webrtc {
       pc->Close();
       for (const auto &transceiver : pc->GetTransceivers()) {
         Wrap(_transceivers, transceiver)->GetReceiver()->GetTrack()->OnPeerConnectionClosed();
-        // transforms get no frames anymore, their streams end
         if (auto sender = RTCRtpSender::holder().Find(transceiver->sender().get())) {
           sender->ReleaseTransform();
         }

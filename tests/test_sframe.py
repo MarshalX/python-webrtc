@@ -149,7 +149,6 @@ def test_rfc_vectors(vector: Vector) -> None:
     assert wrtc._sframeDecrypt(vector.cipher_suite, VECTOR_BASE_KEY, VECTOR_METADATA, bytes.fromhex(vector.ct)) == (
         VECTOR_PT
     )
-    # the metadata is authenticated, and so is every byte of the ciphertext
     assert wrtc._sframeDecrypt(vector.cipher_suite, VECTOR_BASE_KEY, b'', bytes.fromhex(vector.ct)) is None
     tampered = bytearray.fromhex(vector.ct)
     tampered[-1] ^= 1
@@ -164,7 +163,6 @@ def test_rfc_headers(kid: int, ctr: int, encoded: str) -> None:
 
 def test_truncated_headers() -> None:
     assert wrtc._sframeParseHeader(b'') is None
-    # an extended KID or CTR without its bytes
     assert wrtc._sframeParseHeader(bytes.fromhex('9901')) is None
     assert wrtc._sframeParseHeader(bytes.fromhex('0f01')) is None
 
@@ -236,7 +234,6 @@ async def test_streams_round_trip(suite: webrtc.SFrameCipherSuite) -> None:
     for counter, plaintext in enumerate(plaintexts):
         ciphertext = await through(encryptor, plaintext)
         assert isinstance(ciphertext, bytes)
-        # each a header of the key id and the counter, which grows from 0
         header = wrtc._sframeParseHeader(ciphertext)
         assert header is not None
         assert header[:2] == (300, counter)
@@ -316,7 +313,6 @@ async def test_decryptor_stream_errors() -> None:
     decryptor = webrtc.SFrameDecryptorStream(options(suite))
     probe = Probe(decryptor)
 
-    # no key of that id
     event = await probe.error_of(ciphertext)
     assert event.error_type == webrtc.SFrameTransformErrorEventType.key_id
     assert event.errorType == 'keyID'
@@ -325,17 +321,14 @@ async def test_decryptor_stream_errors() -> None:
     assert event.frame == ciphertext
     assert event.target == decryptor
 
-    # another key of that id
     await decryptor.add_decryption_key(OTHER_KEY, 7)
     event = await probe.error_of(ciphertext)
     assert event.error_type == webrtc.SFrameTransformErrorEventType.authentication
     assert event.key_id is None
 
-    # not SFrame: a truncated header, or no room for the tag
     for chunk in (b'', bytes.fromhex('9901'), ciphertext[:4]):
         event = await probe.error_of(chunk)
         assert event.error_type == webrtc.SFrameTransformErrorEventType.syntax
-    # nothing that failed was enqueued
     assert not probe.read.done()
     probe.read.cancel()
 
@@ -350,10 +343,8 @@ async def test_decryptor_stream_keys() -> None:
     await decryptor.add_decryption_key(OTHER_KEY, 2**64 - 1)
     event = await probe.error_of(ciphertext)
     assert event.error_type == webrtc.SFrameTransformErrorEventType.authentication
-    # replaced by the right key
     await decryptor.add_decryption_key(KEY, 2**64 - 1)
     assert await probe.plaintext_of(ciphertext) == b'secret'
-    # removed: the key id is unknown again
     await decryptor.remove_decryption_key(2**64 - 1)
     event = await probe.error_of(ciphertext)
     assert event.error_type == webrtc.SFrameTransformErrorEventType.key_id
@@ -414,9 +405,6 @@ def test_error_event() -> None:
     assert event.error_type == webrtc.SFrameTransformErrorEventType.key_id
     assert event.key_id == 5
     assert event.frame is frame
-
-
-# connections
 
 
 @pytest.fixture
@@ -525,11 +513,9 @@ class Inspector:
     async def __call__(self, event: webrtc.RTCTransformEvent) -> None:
         transformer = event.transformer
         inspect: webrtc.TransformStream[Frame, Frame] = webrtc.TransformStream({'transform': self.record})
-        # the streams end with an error on close
         with contextlib.suppress(Exception):
-            # the streams of frames take frames, the decryptor any buffer too
-            decrypted = transformer.readable.pipe_through(inspect).pipe_through(self.decryptor)  # pyrefly: ignore[bad-argument-type]
-            await decrypted.pipe_to(transformer.writable)  # pyrefly: ignore[bad-argument-type]
+            decrypted = transformer.readable.pipe_through(inspect).pipe_through(self.decryptor)
+            await decrypted.pipe_to(transformer.writable)
         self.done.set_result(None)
 
 
@@ -553,7 +539,6 @@ async def test_frames_are_encrypted_on_the_wire(
 
     assert len(inspector.headers) >= 5
     assert all(key_id == 9 for key_id, _, _ in inspector.headers)
-    # one counter for the encryptor, growing
     counters = [counter for _, counter, _ in inspector.headers]
     assert counters == sorted(counters)
     assert len(set(counters)) == len(counters)
@@ -576,7 +561,6 @@ async def test_decryption_errors(pair: tuple[webrtc.RTCPeerConnection, webrtc.RT
     assert event.frame.get_metadata().synchronization_source is not None
     assert event.target == decryptor
 
-    # a key id the decryptor doesn't know
     await encryptor.set_encryption_key(KEY, 2**64 - 1)
     await asyncio.sleep(0.5)
     errors.events.clear()
@@ -584,7 +568,6 @@ async def test_decryption_errors(pair: tuple[webrtc.RTCPeerConnection, webrtc.RT
     assert event.error_type == webrtc.SFrameTransformErrorEventType.key_id
     assert event.key_id == 2**64 - 1
 
-    # the right key: frames decrypt
     await decryptor.add_decryption_key(KEY, 2**64 - 1)
     await read_media(receiver.track, 5)
     assert sender.transform == encryptor
@@ -607,7 +590,6 @@ async def test_key_rotation(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeer
     await read_media(receiver.track, 10)
     assert errors.events == []
 
-    # without the key in use, frames are keyID errors
     await decryptor.remove_decryption_key(2)
     event = await errors.wait()
     assert event.error_type == webrtc.SFrameTransformErrorEventType.key_id
@@ -625,7 +607,6 @@ async def test_encryptor_without_a_key_sends_nothing(
     errors = Errors(decryptor)
     _, receiver = await encrypted_call(caller, callee, 'audio', encryptor=encryptor, receiver_transform=decryptor)
     await asyncio.sleep(1)
-    # nothing was sent in clear, so nothing failed to decrypt
     assert errors.events == []
     assert receiver.track.muted
 
@@ -654,7 +635,6 @@ def test_transform_attribute_types(pair: tuple[webrtc.RTCPeerConnection, webrtc.
         video.sender.transform = encryptor
     with pytest.raises(webrtc.InvalidStateError):
         video.receiver.transform = decryptor
-    # set again on its sender or receiver
     audio.sender.transform = encryptor
     audio.receiver.transform = decryptor
     assert audio.sender.transform == encryptor
@@ -688,7 +668,6 @@ async def test_closing_releases_transforms() -> None:
         caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
         encryptor, decryptor = sframe_pair()
         await encryptor.set_encryption_key(KEY, 1)
-        # errors queued for Python too
         await decryptor.add_decryption_key(OTHER_KEY, 1)
         errors = Errors(decryptor)
         await encrypted_call(caller, callee, 'video', encryptor=encryptor, receiver_transform=decryptor)

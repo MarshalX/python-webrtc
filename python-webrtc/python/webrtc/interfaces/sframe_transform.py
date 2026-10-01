@@ -7,9 +7,6 @@
 
 """SFrame (RFC 9605) of WebRTC Encoded Transform: end-to-end encryption of the encoded frames.
 
-The encryptor and decryptor transform the frames of a sender and a receiver natively, on the threads of libwebrtc.
-The streams transform chunks in Python, like the frames of an :obj:`webrtc.RTCRtpScriptTransformer`.
-
 Keys are the raw bytes of the base keys of RFC 9605 (Python has no ``CryptoKey``), each with its key id. Frames are
 encrypted whole ("per-frame"), so codecs whose RTP packetization parses the payload (H.264, AV1) don't go through:
 VP8, VP9 and Opus do.
@@ -18,9 +15,9 @@ VP8, VP9 and Opus do.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Union, cast
+from typing import TYPE_CHECKING, Generic, Union, cast
 
-from typing_extensions import Buffer
+from typing_extensions import Buffer, TypeVar
 
 from webrtc import (
     InvalidModificationError,
@@ -46,9 +43,10 @@ SFrameInput = Union[RTCEncodedVideoFrame, RTCEncodedAudioFrame, Buffer]
 #: What the SFrame streams output: the frame, or the bytes of a buffer
 SFrameChunk = Union[RTCEncodedVideoFrame, RTCEncodedAudioFrame, bytes]
 
+_C = TypeVar('_C', bound=SFrameChunk, default=Union[RTCEncodedVideoFrame, RTCEncodedAudioFrame])
+
 # the identifiers of the cipher suites, of RFC 9605 Section 8.1 and draft-barnes-sframe-iana-256
 _CIPHER_SUITE_IDS = {suite: index + 1 for index, suite in enumerate(SFrameCipherSuite)}
-# the native errors, after none
 _ERROR_TYPES = {
     1: SFrameTransformErrorEventType.authentication,
     2: SFrameTransformErrorEventType.key_id,
@@ -66,7 +64,6 @@ def _key(key: Buffer) -> bytes:
 
 
 def _key_id(key_id: int) -> int:
-    """A CryptoKeyID: an unsigned 64-bit integer."""
     if isinstance(key_id, bool) or not isinstance(key_id, int):
         msg = f'key_id must be an int, not {type(key_id).__name__}'
         raise TypeError(msg)
@@ -92,7 +89,6 @@ def _native(options: SFrameTransformOptions, *, encrypting: bool) -> wrtc.SFrame
 
 
 def _error_event(name: str, *args: object) -> SFrameTransformErrorEvent:
-    """The event of an error: its SFrameError, the key id of a ``keyID`` one, and the frame or chunk."""
     error, key_id, frame = args
     if isinstance(frame, wrtc.RTCEncodedFrame):
         # a frame libwebrtc gave, of no transformer
@@ -108,8 +104,6 @@ def _error_event(name: str, *args: object) -> SFrameTransformErrorEvent:
 
 
 class _SFrameEncryptorManager:
-    """Sets the key of an SFrame encryptor."""
-
     if TYPE_CHECKING:
 
         @property
@@ -139,8 +133,6 @@ class _SFrameEncryptorManager:
 
 
 class _SFrameDecryptorManager:
-    """The keys of an SFrame decryptor, by key id."""
-
     if TYPE_CHECKING:
 
         @property
@@ -235,10 +227,8 @@ class RTCRtpSFrameDecryptor(_SFrameDecryptorManager, WebRTCObject[wrtc.SFrameTra
         self._attach()
 
 
-class _SFrameStreamTransformer:
-    """The transformer of the TransformStream of an SFrame stream."""
-
-    def __init__(self, stream: _SFrameStream, *, encrypting: bool) -> None:
+class _SFrameStreamTransformer(Generic[_C]):
+    def __init__(self, stream: _SFrameStream[_C], *, encrypting: bool) -> None:
         self._stream = stream
         self._encrypting = encrypting
 
@@ -246,7 +236,6 @@ class _SFrameStreamTransformer:
         frame = chunk if isinstance(chunk, (RTCEncodedVideoFrame, RTCEncodedAudioFrame)) else None
         data = frame.data if frame is not None else _buffer(chunk)
         out = self._encrypt(data) if self._encrypting else self._decrypt(data, frame)
-        # dropped: no key, or it didn't decrypt
         if out is None:
             return
         if frame is not None:
@@ -268,8 +257,12 @@ class _SFrameStreamTransformer:
         return out
 
 
-class _SFrameStream(WebRTCObject[wrtc.SFrameTransform]):
-    """A GenericTransformStream of SFrame: frames or buffers written to :attr:`writable` are read transformed."""
+class _SFrameStream(WebRTCObject[wrtc.SFrameTransform], Generic[_C]):
+    """A GenericTransformStream of SFrame: frames or buffers written to :attr:`writable` are read transformed.
+
+    Typed by its chunks: encoded frames by default, like the streams of a transformer it's piped between; ``bytes``
+    (``SFrameEncryptorStream[bytes]``) for buffers, or :obj:`SFrameChunk` for both.
+    """
 
     def __init__(self, native: wrtc.SFrameTransform, *, encrypting: bool) -> None:
         super().__init__(native)
@@ -278,12 +271,12 @@ class _SFrameStream(WebRTCObject[wrtc.SFrameTransform]):
         )
 
     @property
-    def readable(self) -> ReadableStream[SFrameChunk]:
+    def readable(self) -> ReadableStream[_C]:
         """:obj:`webrtc.ReadableStream`: The transformed chunks: the frames written, or :obj:`bytes`."""
-        return self._transform.readable
+        return cast('ReadableStream[_C]', self._transform.readable)
 
     @property
-    def writable(self) -> WritableStream[SFrameInput]:
+    def writable(self) -> WritableStream[_C | Buffer]:
         """:obj:`webrtc.WritableStream`: The chunks to transform, encoded frames or buffers.
 
         Takes :obj:`webrtc.RTCEncodedVideoFrame`, :obj:`webrtc.RTCEncodedAudioFrame` or any buffer. Anything else
@@ -292,7 +285,7 @@ class _SFrameStream(WebRTCObject[wrtc.SFrameTransform]):
         return self._transform.writable
 
 
-class SFrameEncryptorStream(_SFrameEncryptorManager, _SFrameStream):
+class SFrameEncryptorStream(_SFrameEncryptorManager, _SFrameStream[_C]):
     """Encrypts the frames or buffers written to it with SFrame, like a :obj:`webrtc.TransformStream`.
 
     A frame is read back with its data encrypted, a buffer as the :obj:`bytes` of the SFrame ciphertext. Until a key
@@ -317,7 +310,7 @@ class SFrameEncryptorStream(_SFrameEncryptorManager, _SFrameStream):
         super().__init__(_native(options, encrypting=True), encrypting=True)
 
 
-class SFrameDecryptorStream(_SFrameDecryptorManager, _SFrameStream, EventTarget):
+class SFrameDecryptorStream(_SFrameDecryptorManager, _SFrameStream[_C], EventTarget):
     """Decrypts the SFrame frames or buffers written to it, like a :obj:`webrtc.TransformStream`.
 
     A frame is read back with its data decrypted, a buffer as the :obj:`bytes` of the plaintext. Chunks that don't

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
+import weakref
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, NamedTuple, Union, cast
@@ -49,9 +50,10 @@ EncodedFrame = Union[RTCEncodedVideoFrame, RTCEncodedAudioFrame]
 # a rid of RFC 8851: alphanumeric, at most 255 characters
 _RID = re.compile(r'[A-Za-z0-9]{1,255}')
 
-# the states of the native transform: new, associated or disassociated
+# the transforms of the native ones: once disassociated, a native transform lets go of its transformer
+_transforms: weakref.WeakValueDictionary[int, RTCRtpScriptTransform] = weakref.WeakValueDictionary()
+
 _DISASSOCIATED = 2
-# the results of the native generateKeyFrame, besides requested
 _KEY_FRAME_INVALID_STATE, _KEY_FRAME_NOT_FOUND = 1, 2
 
 
@@ -81,16 +83,12 @@ class WorkerAndParameters(Dictionary):
 
 
 class _KeyFrameRequest(NamedTuple):
-    # the layer, None for any
     rid: str | None
     future: asyncio.Future[None]
 
 
 class _FrameSource:
-    """The underlying source of :attr:`RTCRtpScriptTransformer.readable`.
-
-    It takes frames from the native queue only for pending reads, so the native queue drops the oldest when full.
-    """
+    """Takes frames from the native queue only for pending reads, so that queue drops the oldest when full."""
 
     def __init__(self, transformer: RTCRtpScriptTransformer) -> None:
         self._transformer = transformer
@@ -104,8 +102,6 @@ class _FrameSource:
 
 
 class _FrameSink:
-    """The underlying sink of :attr:`RTCRtpScriptTransformer.writable`, which gives frames back to libwebrtc."""
-
     def __init__(self, transformer: RTCRtpScriptTransformer) -> None:
         self._transformer = transformer
 
@@ -151,7 +147,6 @@ class RTCRtpScriptTransformer(EventTarget):
             self._deliver()
 
     def _deliver(self) -> None:
-        """Fulfills the pending reads with the frames queued, and ends the streams once disassociated."""
         native = self._native_obj
         stream = self._readable
         controller = self._source._controller
@@ -173,7 +168,6 @@ class RTCRtpScriptTransformer(EventTarget):
             self._end()
 
     def _end(self) -> None:
-        """Disassociated: the readable stream is cancelled and the writable one aborted, as the specification says."""
         self._ended = True
         error = InvalidStateError('The transform was removed from its sender or receiver')
         _ = _handled(self._readable._cancel(error))
@@ -306,7 +300,6 @@ class RTCRtpScriptTransform(WebRTCObject[wrtc.RTCRtpScriptTransform]):
         options: object = None,
         transfer: Iterable[object] | None = None,
     ) -> None:
-        # SFrame packetization, for the frames of an SFrame transform
         self._type: RTCRtpScriptTransformType | None = None
         if isinstance(worker_or_worker_and_parameters, WorkerAndParameters):
             worker = worker_or_worker_and_parameters.worker
@@ -320,8 +313,9 @@ class RTCRtpScriptTransform(WebRTCObject[wrtc.RTCRtpScriptTransform]):
         loop = asyncio.get_running_loop()
         super().__init__()
         self._transformer = RTCRtpScriptTransformer(self, options)
-        # the native events go to the transformer, which the sender or receiver finds the transform from
         self._transformer._attach()
+        # the native object, and so its id, lives as long as this one
+        _transforms[id(self._native_obj)] = self
         _ = loop.call_soon(self._fire, worker, loop)
 
     def _fire(self, worker: Worker, loop: asyncio.AbstractEventLoop) -> None:
@@ -341,13 +335,13 @@ class RTCRtpScriptTransform(WebRTCObject[wrtc.RTCRtpScriptTransform]):
 
     @classmethod
     def _of_native(cls, native: wrtc._RtpTransform | None) -> RTCRtpScriptTransform | None:
-        """The transform of a native one, which its transformer receives the native events of."""
+        """The transform of a native one, or a new wrapper once that's gone."""
         if not isinstance(native, wrtc.RTCRtpScriptTransform):
             return None
-        listeners = native._listeners
-        if listeners is None:
-            return cls._wrap(native)
-        return cast('RTCRtpScriptTransformer', listeners.target)._transform
+        transform = _transforms.get(id(native))
+        if transform is not None and transform._native_obj is native:
+            return transform
+        return cls._wrap(native)
 
 
 def _check_transfer(transfer: Iterable[object] | None) -> None:

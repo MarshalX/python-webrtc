@@ -80,10 +80,8 @@ namespace python_webrtc {
 
     std::shared_ptr<RtpTransform> GetTransform() { return _transform.Get(); }
 
-    // InvalidStateError if the transform has had a sender or receiver
     void SetTransform(const std::shared_ptr<RtpTransform> &transform);
 
-    // the connection closed: the transform gets no frames anymore
     void ReleaseTransform() { _transform.Release(); }
 
   private:

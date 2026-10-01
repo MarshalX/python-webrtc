@@ -17,11 +17,20 @@
 namespace python_webrtc {
 
   void RtpTransform::Init(pybind11::module &m) {
-    // the base of the transforms the transform attributes take
     pybind11::class_<RtpTransform, std::shared_ptr<RtpTransform>>(m, "_RtpTransform");
   }
 
-  FrameTransformerBridge::FrameTransformerBridge(FrameSource source) : _source(std::move(source)) {}
+  namespace {
+
+    uint64_t NextBridgeId() {
+      static std::atomic<uint64_t> last{0};
+      return ++last;
+    }
+
+  } // namespace
+
+  FrameTransformerBridge::FrameTransformerBridge(FrameSource source)
+      : _source(std::move(source)), _id(NextBridgeId()) {}
 
   FrameTransformerBridge::~FrameTransformerBridge() {
     // libwebrtc may release the bridge on its threads: the transform is then deleted elsewhere
@@ -52,13 +61,10 @@ namespace python_webrtc {
   }
 
   void FrameTransformerBridge::Output(std::unique_ptr<webrtc::TransformableFrameInterface> frame) {
-    webrtc::scoped_refptr<webrtc::TransformedFrameCallback> callback;
-    {
-      const std::scoped_lock lock(_mutex);
-      auto it = _sinkCallbacks.find(frame->GetSsrc());
-      callback = it != _sinkCallbacks.end() ? it->second : _callback;
-    }
-    // called out of the lock: it posts to the stream's queue, whose thread may be registering a callback
+    // called under the lock, as callbacks only post to a queue: none is called once unregistered (queue may be gone)
+    const std::scoped_lock lock(_mutex);
+    auto it = _sinkCallbacks.find(frame->GetSsrc());
+    const auto &callback = it != _sinkCallbacks.end() ? it->second : _callback;
     if (callback) {
       callback->OnTransformedFrame(std::move(frame));
     }
@@ -101,7 +107,7 @@ namespace python_webrtc {
                           const std::function<void(const webrtc::scoped_refptr<FrameTransformerBridge> &)> &install) {
     const std::scoped_lock setLock(_setMutex);
     if (transform && transform == Get()) {
-      // set again on its sender or receiver, as browsers allow
+      // browsers allow setting the same transform again
       return;
     }
     if (transform && !transform->TakeOwnership()) {
@@ -129,7 +135,7 @@ namespace python_webrtc {
     if (previous) {
       previous->Disassociate();
     }
-    // after the transform is set: frames may come right away
+    // installed after the transform is set, as frames may come right away
     if (installing) {
       install(bridge);
     }

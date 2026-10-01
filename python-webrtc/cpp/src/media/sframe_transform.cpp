@@ -104,7 +104,7 @@ namespace python_webrtc {
       const std::scoped_lock lock(_mutex);
       bridge = _bridge;
     }
-    // frames of no sender or receiver anymore are dropped, so is what doesn't encrypt (no key): never sent in clear
+    // a frame that doesn't encrypt (no key) is dropped, never sent in clear
     if (!bridge) {
       return;
     }
@@ -129,11 +129,9 @@ namespace python_webrtc {
       dropped = std::move(_errors.front());
       _errors.pop_front();
     }
-    _errors.push_back({.error = result.error, .keyId = result.keyId, .frame = std::move(frame)});
-    if (!_wakePending) {
-      _wakePending = true;
-      Wakeup::Post(weak_from_this());
-    }
+    _errors.push_back(
+        {.error = result.error, .keyId = result.keyId, .frame = std::move(frame), .source = bridge->Id()});
+    WakeLocked();
   }
 
   void SFrameTransform::Associate(webrtc::scoped_refptr<FrameTransformerBridge> bridge) {
@@ -145,17 +143,33 @@ namespace python_webrtc {
     webrtc::scoped_refptr<FrameTransformerBridge> bridge;
     const std::scoped_lock lock(_mutex);
     bridge = std::move(_bridge);
+    _disassociated = true;
+    WakeLocked();
+  }
+
+  void SFrameTransform::WakeLocked() {
+    if (!_wakePending) {
+      _wakePending = true;
+      Wakeup::Post(weak_from_this());
+    }
   }
 
   void SFrameTransform::OnWakeup() {
     std::deque<Error> errors;
+    bool ended = false;
     {
       const std::scoped_lock lock(_mutex);
       std::swap(errors, _errors);
       _wakePending = false;
+      ended = _disassociated;
     }
     for (auto &error : errors) {
-      Emit("error", static_cast<int>(error.error), error.keyId, std::make_shared<EncodedFrame>(std::move(error.frame)));
+      Emit("error", static_cast<int>(error.error), error.keyId,
+           std::make_shared<EncodedFrame>(std::move(error.frame), error.source));
+    }
+    if (ended) {
+      // never associated again: drops handlers that may reference the sender or receiver
+      CloseListeners();
     }
   }
 

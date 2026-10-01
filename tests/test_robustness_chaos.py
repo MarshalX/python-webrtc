@@ -20,8 +20,10 @@ import pytest
 from tests.helpers import ROOT
 
 
-def run_chaos(seed: int, steps: int, timeout: float) -> None:
+def run_chaos(seed: int, steps: int, timeout: float, *, transforms: bool = False) -> None:
     command = [sys.executable, '-m', 'tests.chaos', '--seed', str(seed), '--steps', str(steps)]
+    if transforms:
+        command.append('--transforms')
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, cwd=ROOT, check=False)
     except subprocess.TimeoutExpired as e:
@@ -36,8 +38,21 @@ def test_chaos(seed: int) -> None:
     run_chaos(seed, steps=150, timeout=120)
 
 
+@pytest.mark.parametrize('seed', range(2))
+def test_chaos_of_transforms(seed: int) -> None:
+    """Transforms, SFrame keys and encoded frames, on connections sending media."""
+    run_chaos(seed, steps=150, timeout=120, transforms=True)
+
+
 @pytest.mark.stress
 @pytest.mark.timeout(900)
 @pytest.mark.parametrize('seed', range(100, 120))
 def test_chaos_long(seed: int) -> None:
     run_chaos(seed, steps=1000, timeout=600)
+
+
+@pytest.mark.stress
+@pytest.mark.timeout(900)
+@pytest.mark.parametrize('seed', range(200, 210))
+def test_chaos_of_transforms_long(seed: int) -> None:
+    run_chaos(seed, steps=1000, timeout=600, transforms=True)

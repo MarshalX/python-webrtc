@@ -77,6 +77,9 @@ class _Listeners:
         return loop
 
     def deliver(self, loop: asyncio.AbstractEventLoop, name: str, args: tuple[object, ...]) -> None:
+        if 'registrations' not in self.__dict__:
+            # the garbage collector cleared this object since the event was posted
+            return
         if loop is self.primary_loop:
             self.target._on_event(name, *args)
         registrations = [r for r in self.registrations.get(name, ()) if r.loop is loop]
@@ -86,7 +89,11 @@ class _Listeners:
         if event is None:
             return
         event.target = self.target
+        self._call(loop, name, event, registrations=registrations)
 
+    def _call(
+        self, loop: asyncio.AbstractEventLoop, name: str, event: webrtc.Event, *, registrations: list[_Registration]
+    ) -> None:
         for registration in registrations:
             if registration.once:
                 self.remove(name, registration.handler)

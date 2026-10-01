@@ -152,18 +152,13 @@ _MetadataT = TypeVar('_MetadataT', bound=RTCEncodedFrameMetadata)
 
 
 class _RTCEncodedFrame(Generic[_MetadataT]):
-    """An encoded frame: its payload and metadata, and the native frame of libwebrtc for one that was read."""
-
     _metadata_class: type[_MetadataT]
 
-    # the native frame, None for a constructed one or once it's written
     _native: wrtc.RTCEncodedFrame | None
-    # the payload, read from the native frame when first used
     _payload: bytearray | None
     _metadata: _MetadataT
     # the sender or receiver the frame came from (see RTCRtpScriptTransformer), 0 for a constructed frame
     _owner: int
-    # its position in the frames of the transformer
     _counter: int
     # given up to libwebrtc by a write, like a transferred ArrayBuffer
     _detached: bool
@@ -205,7 +200,6 @@ class _RTCEncodedFrame(Generic[_MetadataT]):
         """Takes what the metadata dataclass doesn't have from the native metadata."""
 
     def _detach(self) -> tuple[wrtc.RTCEncodedFrame | None, bytearray | None]:
-        """The native frame and its new payload, if it was used, for a write: the frame can't be written again."""
         native, payload = self._native, self._payload
         self._native = None
         self._payload = None
@@ -273,7 +267,6 @@ class RTCEncodedVideoFrame(_RTCEncodedFrame[RTCEncodedVideoFrameMetadata]):
     def _init_native(self, values: dict[str, object]) -> None:
         self._type = EncodedVideoChunkType.key if values.get('keyFrame') is True else EncodedVideoChunkType.delta
         rid = values.get('rid')
-        # the simulcast layer the frame is of
         self._rid = rid if isinstance(rid, str) else None
 
     _type: EncodedVideoChunkType

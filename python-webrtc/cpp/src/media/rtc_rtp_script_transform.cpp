@@ -94,7 +94,13 @@ namespace python_webrtc {
   }
 
   void RTCRtpScriptTransform::OnWakeup() {
+    // read before the event, whose delivery ends the streams then
+    const bool ended = GetState() == State::kDisassociated;
     Emit("_ready");
+    if (ended) {
+      // never associated again: drops handlers that may reference the sender or receiver
+      CloseListeners();
+    }
   }
 
   void RTCRtpScriptTransform::AckWakeup() {
@@ -104,6 +110,7 @@ namespace python_webrtc {
 
   std::shared_ptr<EncodedFrame> RTCRtpScriptTransform::Read() {
     std::unique_ptr<webrtc::TransformableFrameInterface> frame;
+    uint64_t source = 0;
     {
       const gil_release release;
       const std::scoped_lock lock(_mutex);
@@ -112,8 +119,10 @@ namespace python_webrtc {
       }
       frame = std::move(_queue.front());
       _queue.pop_front();
+      // frames are queued once associated, and the bridge is kept since
+      source = _bridge->Id();
     }
-    return std::make_shared<EncodedFrame>(std::move(frame));
+    return std::make_shared<EncodedFrame>(std::move(frame), source);
   }
 
   bool RTCRtpScriptTransform::Write(EncodedFrame &frame, std::optional<pybind11::buffer> data) {
@@ -134,6 +143,10 @@ namespace python_webrtc {
         return false;
       }
       bridge = _bridge;
+    }
+    // a frame of another sender or receiver (another kind, direction) would be cast to what it isn't by libwebrtc
+    if (frame.Source() != bridge->Id()) {
+      return false;
     }
     auto transformable = frame.Take();
     if (!transformable) {
@@ -157,8 +170,8 @@ namespace python_webrtc {
   }
 
   uint64_t RTCRtpScriptTransform::GetSourceId() {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the address identifies the bridge
-    return reinterpret_cast<uint64_t>(Bridge().get());
+    auto bridge = Bridge();
+    return bridge ? bridge->Id() : 0;
   }
 
   std::optional<std::pair<bool, bool>> RTCRtpScriptTransform::GetSourceKind() {

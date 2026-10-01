@@ -175,7 +175,6 @@ async def test_video_metadata(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPe
     assert received.synchronization_source == sent.synchronization_source
     assert received.receive_time is not None
     assert abs(received.receive_time - time.time() * 1000) < 60_000
-    # a copy, which changing doesn't change the frame
     received.width = 1
     again = receiving.frames[0].get_metadata()
     assert isinstance(again, webrtc.RTCEncodedVideoFrameMetadata)
@@ -287,7 +286,6 @@ async def test_write_rules(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerC
     assert {b'copy', b'twice', b'reordered'}.isdisjoint(payloads)
     assert third.get_metadata().mime_type == 'audio/opus'
 
-    # anything else errors the stream
     with pytest.raises(TypeError):
         await writer.write(mistyped(None))
 
@@ -303,7 +301,6 @@ async def test_generate_key_frame(pair: tuple[webrtc.RTCPeerConnection, webrtc.R
 
     keys = key_frames(sending)
     await asyncio.wait_for(sending.transformer.generate_key_frame(), TIMEOUT)
-    # resolved right before the key frame is read
     await asyncio.sleep(QUIET_PERIOD)
     assert key_frames(sending) > keys
     await asyncio.wait_for(sending.transformer.generateKeyFrame(), TIMEOUT)
@@ -359,7 +356,6 @@ async def test_removing_a_transform(pair: tuple[webrtc.RTCPeerConnection, webrtc
     sender.transform = None
     assert sender.transform is None
     await asyncio.wait_for(sending.done, TIMEOUT)
-    # the receiver's transform keeps getting frames, unmarked now
     count = len(receiving.frames)
     await receiving.wait_frames(count + 10)
     assert receiving.frames[-1].data[-1:] != bytes([MARK])
@@ -388,7 +384,6 @@ async def test_a_transform_has_one_sender_or_receiver(
         second.transform = transform
     with pytest.raises(webrtc.InvalidStateError):
         caller.get_transceivers()[1].receiver.transform = transform
-    # not even once removed, or on the same sender
     first.transform = None
     with pytest.raises(webrtc.InvalidStateError):
         first.transform = transform
@@ -448,7 +443,6 @@ async def test_nobody_reading(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPe
     await connect(caller, callee)
     await asyncio.sleep(1)
     assert len(started) == 1
-    # more frames than the queue holds were encoded
     caller.close()
     callee.close()
 
@@ -481,11 +475,9 @@ async def test_closing_releases_transforms() -> None:
         sending, receiving = Recorder(mark), Recorder(unmark)
         await transformed_call(caller, callee, 'video', sender_worker=sending, receiver_worker=receiving)
         await receiving.wait_frames(5)
-        # one more that isn't read, with frames queued
         caller.add_track(await local_track('audio')).transform = webrtc.RTCRtpScriptTransform(lambda _event: None)
         caller.close()
         callee.close()
-        # the streams end on close
         await asyncio.wait_for(asyncio.gather(sending.done, receiving.done), TIMEOUT)
 
     await session()

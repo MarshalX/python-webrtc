@@ -26,7 +26,6 @@ namespace python_webrtc {
     SFrameCipherSuite id;
     const EVP_MD *(*hash)();
     size_t hashSize;
-    // the AES key of the CTR suites, 0 for GCM
     size_t encryptionKeySize;
     size_t keySize;
     size_t tagSize;
@@ -143,7 +142,6 @@ namespace python_webrtc {
       }
     }
 
-    // the fewest bytes a value takes, at least one
     size_t MinimalSize(uint64_t value) {
       size_t size = 1;
       while (size < sizeof(value) && (value >> (kBitsPerByte * size)) != 0) {
@@ -152,7 +150,6 @@ namespace python_webrtc {
       return size;
     }
 
-    // a K or C field of the config byte, and the size of what follows the config byte for it
     std::pair<uint8_t, size_t> HeaderField(uint64_t value) {
       if (value <= kValueMask) {
         return {static_cast<uint8_t>(value), 0};
@@ -161,7 +158,6 @@ namespace python_webrtc {
       return {static_cast<uint8_t>(kExtendedFlag | (size - 1)), size};
     }
 
-    // salt XOR the counter, big-endian on Nn bytes
     std::array<uint8_t, kNonceSize> Nonce(const Octets &salt, uint64_t counter) {
       std::array<uint8_t, kNonceSize> nonce{};
       for (size_t i = 0; i < kNonceSize; ++i) {
@@ -172,7 +168,6 @@ namespace python_webrtc {
       return nonce;
     }
 
-    // AES-CTR from the counter block nonce + 0x00000000
     bool AesCtr(const Suite &suite, OctetSpan key, const std::array<uint8_t, kNonceSize> &nonce, OctetSpan input,
                 uint8_t *out) {
       if (input.empty()) {
@@ -212,7 +207,6 @@ namespace python_webrtc {
       return tag;
     }
 
-    // "SFrame 1.0 Secret key " or "... salt " + KID (8 bytes) + cipher suite (2 bytes)
     Octets Label(std::string_view prefix, uint64_t keyId, SFrameCipherSuite suite) {
       Octets label(prefix.begin(), prefix.end());
       AppendBigEndian(label, keyId, sizeof(keyId));

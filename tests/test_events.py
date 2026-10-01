@@ -14,7 +14,8 @@ import asyncio
 import pytest
 
 import webrtc
-from tests.helpers import QUIET_PERIOD, connect, wait_for_event
+from tests.helpers import QUIET_PERIOD, connect, next_task, wait_for_event
+from webrtc.utils.task_queue import TaskQueue
 
 
 @pytest.mark.asyncio
@@ -205,3 +206,23 @@ def test_objects_used_from_another_loop_see_their_events() -> None:
 
     asyncio.run(first())
     asyncio.run(second())
+
+
+@pytest.mark.asyncio
+async def test_event_delivered_after_the_collector_cleared_its_listeners() -> None:
+    """An event posted before the collector cleared the listeners (in a cycle with their target) is dropped."""
+    loop = asyncio.get_running_loop()
+    reported: list[dict[str, object]] = []
+    loop.set_exception_handler(lambda _loop, context: reported.append(context))
+    try:
+        decryptor = webrtc.RTCRtpSFrameDecryptor(webrtc.SFrameTransformOptions('AES_128_GCM_SHA256_128'))
+        decryptor.on('error', lambda _event: None)
+        listeners = decryptor._listeners()
+        assert listeners is not None
+        TaskQueue.of(loop).post(listeners.deliver, loop, 'error', (1, None, b''))
+        # what tp_clear does to the listeners
+        listeners.__dict__.clear()
+        await next_task()
+        assert reported == []
+    finally:
+        loop.set_exception_handler(None)

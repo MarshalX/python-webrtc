@@ -10,12 +10,14 @@
 Every step is logged before it runs, so the output of a crash names the sequence; the same seed replays it.
 
     python -m tests.chaos --seed 7 --steps 500
+    python -m tests.chaos --seed 7 --steps 500 --transforms
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import gc
 import logging
 import random
@@ -26,7 +28,7 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 import webrtc
 import wrtc
-from tests.helpers import connect
+from tests.helpers import connect, copy_frame
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -59,6 +61,8 @@ class State:
         self.generators: list[tuple[webrtc.WritableStreamDefaultWriter, str]] = []
         self.frames: list[webrtc.VideoFrame] = []
         self.tasks: list[threading.Thread | asyncio.Future[None]] = []
+        self.transformers: list[webrtc.RTCRtpScriptTransformer] = []
+        self.encoded: list[webrtc.RTCEncodedVideoFrame | webrtc.RTCEncodedAudioFrame] = []
 
     def pick(self, pool: list[T]) -> T | None:
         return self.random.choice(pool) if len(pool) > 0 else None
@@ -326,6 +330,132 @@ class MediaSteps(State):
         stream.get_tracks()
 
 
+class TransformSteps(State):
+    """Steps of encoded transforms, SFrame and encoded frames."""
+
+    def _parts(self) -> list[webrtc.RTCRtpSender | webrtc.RTCRtpReceiver]:
+        return [part for pc in self.connections for part in (*pc.get_senders(), *pc.get_receivers())]
+
+    def _worker(self) -> Callable[[webrtc.RTCTransformEvent], Coroutine[object, object, None]]:
+        """Passes frames through, drops them, holds them or never reads."""
+        mode = self.random.choice(['pass', 'drop', 'hold', 'idle'])
+
+        async def worker(event: webrtc.RTCTransformEvent) -> None:
+            transformer = event.transformer
+            self.transformers.append(transformer)
+            if mode == 'idle':
+                return
+            reader = transformer.readable.get_reader()
+            writer = transformer.writable.get_writer()
+            while True:
+                result = await reader.read()
+                if result.done or result.value is None:
+                    return
+                if mode == 'hold' and len(self.encoded) < 200:
+                    self.encoded.append(result.value)
+                elif mode == 'pass':
+                    # rejected once the transform is removed
+                    writer.write(result.value).add_done_callback(lambda f: f.cancelled() or f.exception())
+
+        return worker
+
+    async def script_transform(self) -> None:
+        part = self.pick(self._parts())
+        if part is not None:
+            part.transform = webrtc.RTCRtpScriptTransform(self._worker())
+
+    async def sframe_transform(self) -> None:
+        part = self.pick(self._parts())
+        if part is None:
+            return
+        suite = self.random.choice(list(webrtc.SFrameCipherSuite))
+        key = bytes(self.random.randrange(256) for _ in range(self.random.choice([0, 16, 32])))
+        if isinstance(part, webrtc.RTCRtpSender):
+            encryptor = webrtc.RTCRtpSFrameEncryptor(webrtc.RTCRtpSFrameEncryptorOptions(suite))
+            if self.random.random() < 0.8:
+                await encryptor.set_encryption_key(key, self.random.randrange(4))
+            part.transform = encryptor
+        else:
+            decryptor = webrtc.RTCRtpSFrameDecryptor(webrtc.SFrameTransformOptions(suite))
+            await decryptor.add_decryption_key(key, self.random.randrange(4))
+            decryptor.on('error', self.random.choice([self.handler(), self._keep_frame]))
+            part.transform = decryptor
+
+    def _keep_frame(self, event: webrtc.SFrameTransformErrorEvent) -> None:
+        if isinstance(event.frame, (webrtc.RTCEncodedVideoFrame, webrtc.RTCEncodedAudioFrame)):
+            self.encoded.append(event.frame)
+
+    async def remove_transform(self) -> None:
+        part = self.pick(self._parts())
+        if part is not None:
+            part.transform = None
+
+    async def rotate_key(self) -> None:
+        part = self.pick(self._parts())
+        transform = part.transform if part is not None else None
+        key, key_id = bytes(range(self.random.choice([1, 16]))), self.random.randrange(4)
+        if isinstance(transform, webrtc.RTCRtpSFrameEncryptor):
+            await transform.set_encryption_key(key, key_id)
+        elif isinstance(transform, webrtc.RTCRtpSFrameDecryptor):
+            if self.random.random() < 0.5:
+                await transform.add_decryption_key(key, key_id)
+            else:
+                await transform.remove_decryption_key(key_id)
+
+    async def write_frame(self) -> None:
+        """Writes a held frame, or a copy, to any transformer: frames of others are dropped."""
+        frame, transformer = self.pick(self.encoded), self.pick(self.transformers)
+        if frame is None or transformer is None:
+            return
+        if self.random.random() < 0.3:
+            frame = copy_frame(frame)
+        if self.random.random() < 0.5:
+            frame.data = bytearray(self.random.randrange(2000))
+        if self.random.random() < 0.5 and frame._native is not None:
+            # natively, past the checks of Python
+            transformer._native_obj.write(frame._native, None)
+            return
+        if not transformer.writable.locked:
+            writer = transformer.writable.get_writer()
+            writer.write(frame).add_done_callback(lambda f: f.cancelled() or f.exception())
+            writer.release_lock()
+
+    async def use_encoded_frame(self) -> None:
+        frame = self.pick(self.encoded)
+        if frame is not None:
+            _ = frame.data, frame.get_metadata()
+            if self.random.random() < 0.3:
+                self.encoded.append(copy_frame(frame))
+            if self.random.random() < 0.3:
+                self.drop(self.encoded)
+
+    async def key_frame(self) -> None:
+        transformer = self.pick(self.transformers)
+        if transformer is not None:
+            request = self.random.choice([transformer.generate_key_frame, transformer.send_key_frame_request])
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(request(), 0.2)
+
+    async def sframe_stream(self) -> None:
+        suite = self.random.choice(list(webrtc.SFrameCipherSuite))
+        encryptor = webrtc.SFrameEncryptorStream(webrtc.SFrameTransformOptions(suite))
+        decryptor = webrtc.SFrameDecryptorStream(webrtc.SFrameTransformOptions(suite))
+        decryptor.on('error', self.handler())
+        await encryptor.set_encryption_key(b'key', 5)
+        await decryptor.add_decryption_key(b'key', self.random.choice([5, 6]))
+        writer = encryptor.writable.get_writer()
+        chunks = [bytes(self.random.randrange(100)), *(f for f in self.encoded[-3:] if self.random.random() < 0.5)]
+        for chunk in chunks:
+            writer.write(chunk).add_done_callback(lambda f: f.cancelled() or f.exception())
+        if self.random.random() < 0.5:
+            reader = encryptor.readable.pipe_through(decryptor).get_reader()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(reader.read(), 0.2)
+
+    async def drop_transformer(self) -> None:
+        self.drop(self.transformers)
+
+
 class LoopSteps(State):
     """Steps of threads, the garbage collector and the loop."""
 
@@ -352,16 +482,31 @@ class LoopSteps(State):
         await asyncio.sleep(self.random.random() * 0.05)
 
 
-class Chaos(ConnectionSteps, MediaSteps, LoopSteps):
+class Chaos(ConnectionSteps, MediaSteps, TransformSteps, LoopSteps):
     """Every step, run in a random sequence."""
 
-    STEPS: ClassVar[list[str]] = sorted([*steps(ConnectionSteps), *steps(MediaSteps), *steps(LoopSteps)])
+    STEPS: ClassVar[list[str]] = sorted([
+        *steps(ConnectionSteps),
+        *steps(MediaSteps),
+        *steps(TransformSteps),
+        *steps(LoopSteps),
+    ])
+    #: The steps of transforms, and those getting media to flow through them
+    TRANSFORM_STEPS: ClassVar[list[str]] = sorted([
+        *steps(TransformSteps),
+        *('new_connection', 'close_connection', 'drop_connection', 'connect_two', 'add_track', 'get_user_media'),
+        *steps(LoopSteps),
+    ])
+
+    def __init__(self, seed: int, *, transforms: bool = False) -> None:
+        super().__init__(seed)
+        self.steps = self.TRANSFORM_STEPS if transforms else self.STEPS
 
     async def run(self, count: int) -> None:
         # handlers raise on purpose
         asyncio.get_running_loop().set_exception_handler(lambda _loop, _context: None)
         for index in range(count):
-            await self.step(index, self.random.choice(self.STEPS))
+            await self.step(index, self.random.choice(self.steps))
         for pc in self.connections:
             pc.close()
         for track in self.tracks:
@@ -393,10 +538,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--steps', type=int, default=300)
+    parser.add_argument('--transforms', action='store_true', help='the steps of transforms only, and media for them')
     args = parser.parse_args()
     logging.basicConfig(stream=sys.stdout, format='%(message)s', level=logging.INFO)
     log.info('seed %d, %d steps', args.seed, args.steps)
-    asyncio.run(Chaos(args.seed).run(args.steps))
+    asyncio.run(Chaos(args.seed, transforms=args.transforms).run(args.steps))
     # the last references may be released on helper threads
     deadline = time.monotonic() + 1
     while wrtc._alive_factories() != 0 and time.monotonic() < deadline:
