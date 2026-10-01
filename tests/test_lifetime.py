@@ -28,12 +28,18 @@ import wrtc
 from tests.helpers import QUIET_PERIOD, connect, exchange_offer_answer, wait_for_event
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Awaitable, Callable, Iterator
 
 
 def collect() -> None:
     gc.collect()
     gc.collect()
+
+
+async def received_track_event(event: Awaitable[webrtc.Event]) -> webrtc.RTCTrackEvent:
+    received = await event
+    assert isinstance(received, webrtc.RTCTrackEvent)
+    return received
 
 
 def alive_factories() -> int:
@@ -93,7 +99,7 @@ def test_factories_return_to_baseline_when_everything_is_gone() -> None:
     pc.add_track(generator)
 
     # one factory for everything
-    assert alive_factories() == (baseline or 1)
+    assert alive_factories() == (baseline if baseline != 0 else 1)
 
     pc.close()
     del pc, stream, generator
@@ -153,7 +159,10 @@ def test_destroyed_track_wrapper_is_not_notified() -> None:
     collect()
 
     for i in range(10):
-        pc.get_senders()[0].track.enabled = bool(i % 2)
+        track = pc.get_senders()[0].track
+        assert track is not None
+        track.enabled = bool(i % 2)
+        del track
         collect()
 
     pc.close()
@@ -249,7 +258,10 @@ async def test_drop_and_refetch_transports(
         collect()
 
     assert caller.get_senders()[0].transport == caller.get_transceivers()[0].receiver.transport
-    assert caller.get_senders()[0].transport.ice_transport == caller.get_receivers()[0].transport.ice_transport
+    sender_transport, receiver_transport = caller.get_senders()[0].transport, caller.get_receivers()[0].transport
+    assert sender_transport is not None
+    assert receiver_transport is not None
+    assert sender_transport.ice_transport == receiver_transport.ice_transport
 
 
 @pytest.mark.asyncio
@@ -261,6 +273,7 @@ async def test_transports_outlive_closed_connection(
     await exchange_offer_answer(caller, callee)
 
     transport = caller.get_senders()[0].transport
+    assert transport is not None
     ice_transport = transport.ice_transport
     caller.close()
     callee.close()
@@ -343,7 +356,7 @@ async def test_channel_handlers_do_not_dangle_after_close_and_gc() -> None:
     """Handlers of a channel collected with echoed messages in flight are never called again, and nothing crashes."""
     caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
     channel = caller.create_data_channel('lifetime')
-    received = []
+    received: list[str] = []
 
     def on_close(_event: webrtc.Event) -> None:
         received.append('close')
@@ -430,7 +443,7 @@ async def test_stream_tracks_read_while_they_change(
     sender = caller.add_track(audio, audio_stream)
     track_event = wait_for_event(callee, 'track')
     await exchange_offer_answer(caller, callee)
-    remote = (await track_event).streams[0]
+    remote = (await received_track_event(track_event)).streams[0]
 
     stop = threading.Event()
 
@@ -595,7 +608,13 @@ async def test_handler_of_a_track_referencing_its_sender_or_receiver(part: str) 
             owner = pc.add_track(webrtc.get_user_media(audio=True, video=False).get_tracks()[0])
         else:
             owner = pc.add_transceiver(webrtc.MediaType.audio).receiver
-        owner.track.on('ended', lambda _: owner.track)
+        track = owner.track
+        assert track is not None
+
+        def on_ended(_event: webrtc.Event) -> webrtc.MediaStreamTrack | None:
+            return owner.track
+
+        track.on('ended', on_ended)
         pc.close()
         return weakref.ref(owner)
 
@@ -637,7 +656,7 @@ async def test_a_session_releases_every_native_object() -> None:
         channel = caller.create_data_channel('session')
         received = wait_for_event(callee, 'track')
         await connect(caller, callee)
-        remote = (await received).track
+        remote = (await received_track_event(received)).track
         reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(remote)).readable.get_reader()
         writer = generator.writable.get_writer()
         await writer.write(
@@ -646,7 +665,9 @@ async def test_a_session_releases_every_native_object() -> None:
                 webrtc.VideoFrameBufferInit(format='RGBA', coded_width=64, coded_height=48, timestamp=0),
             )
         )
-        (await asyncio.wait_for(reader.read(), 5)).value.close()
+        frame = (await asyncio.wait_for(reader.read(), 5)).value
+        assert frame is not None
+        frame.close()
         await caller.get_stats()
         channel.send('bye')
         for track in stream.get_tracks():

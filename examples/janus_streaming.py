@@ -26,21 +26,69 @@ import shutil
 import sys
 import threading
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, TypedDict
 
 import httpx
 import sounddevice
+from typing_extensions import NotRequired, Required
 
 import webrtc
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from types import TracebackType
 
     from typing_extensions import Self
 
 JANUS = 'https://janus.conf.meetecho.com/janus'
-Json = dict[str, Any]
+
+
+class Stream(TypedDict):
+    """A stream of the streaming plugin."""
+
+    id: int
+    description: NotRequired[str]
+
+
+class Jsep(TypedDict):
+    """A session description of the Janus API."""
+
+    type: str
+    sdp: str
+
+
+class PluginReply(TypedDict, total=False):
+    """The data of a plugin reply: the streams of a list request."""
+
+    list: list[Stream]
+
+
+class PluginData(TypedDict, total=False):
+    """The reply of a plugin."""
+
+    data: PluginReply
+
+
+class Created(TypedDict):
+    """The id of a created session or handle."""
+
+    id: int
+
+
+class Error(TypedDict):
+    """An error of the Janus API."""
+
+    reason: str
+
+
+class Reply(TypedDict, total=False):
+    """A message of the Janus API: the fields used here."""
+
+    janus: Required[str]
+    data: Created
+    error: Error
+    plugindata: PluginData
+    jsep: Jsep
 
 
 class Janus:
@@ -48,12 +96,12 @@ class Janus:
 
     def __init__(self) -> None:
         self.client = httpx.AsyncClient(timeout=60)
+        self.session = ''
+        self.handle = ''
 
     async def __aenter__(self) -> Self:
-        created = await self._post('', janus='create')
-        self.session = f'/{created["data"]["id"]}'
-        attached = await self._post(self.session, janus='attach', plugin='janus.plugin.streaming')
-        self.handle = f'{self.session}/{attached["data"]["id"]}'
+        self.session = await self._create('', janus='create')
+        self.handle = await self._create(self.session, janus='attach', plugin='janus.plugin.streaming')
         return self
 
     async def __aexit__(
@@ -62,20 +110,30 @@ class Janus:
         await self._post(self.session, janus='destroy')
         await self.client.aclose()
 
-    async def request(self, body: Json, **extra: Json) -> Json | None:
+    async def request(self, body: dict[str, object], **extra: object) -> PluginReply | None:
         """Sends a message to the plugin, returns the data of its reply."""
         reply = await self._post(self.handle, janus='message', body=body, **extra)
         return reply.get('plugindata', {}).get('data')
 
-    async def event(self) -> Json:
+    async def event(self) -> Reply:
         """Waits up to 30 s for an event: requests reply right away and send their results, like offers, as events."""
-        return (await self.client.get(JANUS + self.session)).json()
+        event: Reply = (await self.client.get(JANUS + self.session)).json()
+        return event
 
-    async def _post(self, path: str, **message: object) -> Json:
-        reply: Json = (await self.client.post(JANUS + path, json={'transaction': uuid.uuid4().hex, **message})).json()
+    async def _post(self, path: str, **message: object) -> Reply:
+        reply: Reply = (await self.client.post(JANUS + path, json={'transaction': uuid.uuid4().hex, **message})).json()
         if reply['janus'] == 'error':
-            raise RuntimeError(reply['error']['reason'])
+            error = reply.get('error')
+            raise RuntimeError(error['reason'] if error is not None else reply)
         return reply
+
+    async def _create(self, path: str, **message: object) -> str:
+        """Creates a session or a handle under the path, returns its path."""
+        reply = await self._post(path, **message)
+        if 'data' not in reply:
+            msg = f'no id in {reply}'
+            raise RuntimeError(msg)
+        return f'{path}/{reply["data"]["id"]}'
 
 
 class Speakers:
@@ -86,7 +144,7 @@ class Speakers:
         self.stream = sounddevice.RawOutputStream(rate, channels=channels, dtype='int16', callback=self._on_need)
         self.stream.start()
 
-    def play(self, samples: bytes) -> None:
+    def play(self, samples: bytes | bytearray) -> None:
         """Queues samples, dropping the oldest ones over the limit."""
         with self.lock:
             self.buffer += samples
@@ -99,7 +157,7 @@ class Speakers:
         out[:] = chunk.ljust(len(out), b'\0')
 
 
-def draw(rgbx: bytes, width: int, height: int) -> None:
+def draw(rgbx: bytes | bytearray, width: int, height: int) -> None:
     """Draws a frame with ▀, whose foreground color is the upper pixel and background the lower one."""
     columns, rows = shutil.get_terminal_size()
     scale = max(width / columns, height / rows / 2)
@@ -117,7 +175,7 @@ def draw(rgbx: bytes, width: int, height: int) -> None:
 
 
 @contextlib.contextmanager
-def fullscreen() -> Iterator[None]:
+def fullscreen() -> Generator[None, None, None]:
     """Switches to the alternate screen, without the cursor."""
     sys.stdout.write('\033[?1049h\033[?25l')
     try:
@@ -132,33 +190,44 @@ async def watch(track: webrtc.MediaStreamTrack) -> None:
     async for frame in webrtc.MediaStreamTrackProcessor(
         webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=1)
     ).readable:
+        if not isinstance(frame, webrtc.VideoFrame):
+            msg = f'expected a video frame, not {frame!r}'
+            raise TypeError(msg)
         with frame:
             options = webrtc.VideoFrameCopyToOptions(format='RGBX')
             rgbx = bytearray(frame.allocation_size(options))
             await frame.copy_to(rgbx, options)
             size = frame.visible_rect
+        if size is None:
+            msg = 'the frame has no visible rect'
+            raise RuntimeError(msg)
         draw(rgbx, int(size.width), int(size.height))
 
 
 async def listen(track: webrtc.MediaStreamTrack) -> None:
     """Plays the audio track until it ends."""
-    speakers = None
+    speakers: Speakers | None = None
     try:
         async for data in webrtc.MediaStreamTrackProcessor(
             webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=50)
         ).readable:
+            if not isinstance(data, webrtc.AudioData):
+                msg = f'expected audio data, not {data!r}'
+                raise TypeError(msg)
             with data:
                 options = webrtc.AudioDataCopyToOptions(plane_index=0, format='s16')
                 samples = bytearray(data.allocation_size(options))
                 data.copy_to(samples, options)
-                speakers = speakers or Speakers(int(data.sample_rate), data.number_of_channels)
+                rate, channels = int(data.sample_rate), data.number_of_channels
+            if speakers is None:
+                speakers = Speakers(rate, channels)
             speakers.play(samples)
     finally:
         if speakers is not None:
             speakers.stream.close()
 
 
-async def answer(pc: webrtc.RTCPeerConnection, offer: dict[str, str]) -> dict[str, str]:
+async def answer(pc: webrtc.RTCPeerConnection, offer: Jsep) -> Jsep:
     """Answers with all the ICE candidates in the SDP, since there is no trickling."""
     gathered = asyncio.Event()
     pc.on('icegatheringstatechange', lambda _: pc.ice_gathering_state == 'complete' and gathered.set())
@@ -166,6 +235,9 @@ async def answer(pc: webrtc.RTCPeerConnection, offer: dict[str, str]) -> dict[st
     await pc.set_local_description(await pc.create_answer())
     with contextlib.suppress(asyncio.TimeoutError):
         await asyncio.wait_for(gathered.wait(), 5)
+    if pc.local_description is None:
+        msg = 'no local description'
+        raise RuntimeError(msg)
     return {'type': 'answer', 'sdp': pc.local_description.sdp}
 
 
@@ -177,7 +249,11 @@ async def keep_alive(janus: Janus) -> None:
 
 async def pick_stream(janus: Janus) -> int:
     """Lists the streams of the server, returns the first one."""
-    streams = (await janus.request({'request': 'list'}))['list']
+    reply = await janus.request({'request': 'list'})
+    if reply is None or 'list' not in reply:
+        msg = 'the server did not list its streams'
+        raise RuntimeError(msg)
+    streams = reply['list']
     for stream in streams:
         print(f'{stream["id"]}: {stream.get("description")}')
     return streams[0]['id']
@@ -197,7 +273,7 @@ async def main(stream_id: int | None) -> None:
         if stream_id is None:
             stream_id = await pick_stream(janus)
         await janus.request({'request': 'watch', 'id': stream_id})
-        event: Json = {}
+        event = await janus.event()
         while 'jsep' not in event:
             event = await janus.event()
         await janus.request({'request': 'start'}, jsep=await answer(pc, event['jsep']))

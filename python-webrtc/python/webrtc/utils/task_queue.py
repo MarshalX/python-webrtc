@@ -13,7 +13,10 @@ import asyncio
 import collections
 import threading
 import weakref
-from typing import Callable, NamedTuple
+from typing import TYPE_CHECKING, Callable, NamedTuple
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class _Item(NamedTuple):
@@ -54,6 +57,15 @@ class TaskQueue:
     def _loop(self) -> asyncio.AbstractEventLoop | None:
         return self._loop_ref()
 
+    @property
+    def _live_loop(self) -> asyncio.AbstractEventLoop:
+        """The loop, from a callback it runs, so alive."""
+        loop = self._loop_ref()
+        if loop is None:
+            msg = 'the loop of the queue is gone'
+            raise RuntimeError(msg)
+        return loop
+
     @classmethod
     def of(cls, loop: asyncio.AbstractEventLoop) -> TaskQueue:
         """Returns the queue of a loop.
@@ -70,8 +82,10 @@ class TaskQueue:
         except TypeError:
             attributes = None
         if attributes is not None:
-            queue = attributes.get(cls._ATTRIBUTE)
-            return queue if queue is not None else attributes.setdefault(cls._ATTRIBUTE, cls(loop))
+            queue: TaskQueue | None = attributes.get(cls._ATTRIBUTE)
+            if queue is None:
+                queue = attributes.setdefault(cls._ATTRIBUTE, cls(loop))
+            return queue
         queue = cls._queues.get(loop)
         if queue is None:
             # the loops closed meanwhile won't run what's queued
@@ -130,7 +144,7 @@ class TaskQueue:
             self._items.clear()
             return
         try:
-            loop.call_soon_threadsafe(self._run)
+            _ = loop.call_soon_threadsafe(self._run)
         except RuntimeError:
             self._items.clear()
 
@@ -138,8 +152,8 @@ class TaskQueue:
         """Whether the loop has microtask-like callbacks ready: coroutine steps and ``call_soon`` callbacks."""
         # rather than timers, the loop's own callbacks or the ones of this queue
         # CPython internals (loop._ready, handle._callback): other loops (like uvloop) never report any
-        ready = getattr(self._loop, '_ready', None) or ()
-        for handle in ready:
+        ready: Iterable[object] | None = getattr(self._loop, '_ready', None)
+        for handle in ready if ready is not None else ():
             callback = getattr(handle, '_callback', None)
             if isinstance(handle, asyncio.TimerHandle) or getattr(callback, '__self__', None) in {self, self._loop}:
                 continue
@@ -155,13 +169,13 @@ class TaskQueue:
         # the code a callback resumed runs until the loop has nothing else ready (a coroutine continues over
         # several iterations): from then on, callbacks don't wait for it anymore
         if self._defers(deferred, resumed=False):
-            self._loop.call_soon(self._settle, deferred + 1)
+            _ = self._live_loop.call_soon(self._settle, deferred + 1)
         else:
             self._resumed = False
 
     def _run(self, deferred: int = 0) -> None:
         if self._defers(deferred, resumed=self._resumed):
-            self._loop.call_soon(self._run, deferred + 1)
+            _ = self._live_loop.call_soon(self._run, deferred + 1)
             return
 
         more = True
@@ -174,7 +188,7 @@ class TaskQueue:
             raise
         finally:
             if more:
-                self._loop.call_soon(self._run)
+                _ = self._live_loop.call_soon(self._run)
 
     def _run_batch(self) -> bool:
         """Runs callbacks until one has to wait for the loop. Returns whether any are left."""
@@ -196,8 +210,8 @@ class TaskQueue:
             item = self._items.popleft()
         if item.resumes:
             self._resumed = True
-            self._loop.call_soon(self._settle)
-        item.callback(*item.args)
+            _ = self._live_loop.call_soon(self._settle)
+        _ = item.callback(*item.args)
         # the item is released on return, outside of the lock: the destructor of a native object may wait for
         # a libwebrtc thread, which may be posting here
         return item.resumes

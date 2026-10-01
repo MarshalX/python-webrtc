@@ -12,12 +12,22 @@ from __future__ import annotations
 import math
 import warnings
 from dataclasses import dataclass
-from typing import Any, ClassVar, NamedTuple
+from typing import TYPE_CHECKING, ClassVar, NamedTuple, cast
 
-from webrtc import AudioSampleFormat, InvalidRangeError, InvalidStateError, NotSupportedError, wrtc
+from webrtc import (
+    AudioSampleFormat,
+    AudioSampleFormatValue,
+    InvalidRangeError,
+    InvalidStateError,
+    NotSupportedError,
+    wrtc,
+)
 from webrtc.models.closable import Closable
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
+
+if TYPE_CHECKING:
+    from typing_extensions import Buffer
 
 _SAMPLE_BYTES = {'u8': 1, 's16': 2, 's32': 4, 'f32': 4}
 
@@ -51,12 +61,12 @@ class AudioDataInit(Dictionary):
         data: A bytes-like buffer of the samples, which is copied.
     """
 
-    format: AudioSampleFormat
+    format: AudioSampleFormat | AudioSampleFormatValue
     sample_rate: float
     number_of_frames: int
     number_of_channels: int
     timestamp: int
-    data: Any
+    data: Buffer
 
     #: Alias for :attr:`sample_rate`
     sampleRate: ClassVar[Alias[float]] = alias('sample_rate')
@@ -80,7 +90,7 @@ class AudioDataCopyToOptions(Dictionary):
     plane_index: int
     frame_offset: int = 0
     frame_count: int | None = None
-    format: AudioSampleFormat | None = None
+    format: AudioSampleFormat | AudioSampleFormatValue | None = None
 
     #: Alias for :attr:`plane_index`
     planeIndex: ClassVar[Alias[int]] = alias('plane_index')
@@ -107,7 +117,8 @@ def _sample_rate(value: object) -> float:
 def _buffer(data: object, size: int) -> bytes:
     """The first bytes of a bytes-like buffer."""
     try:
-        view = memoryview(data).cast('B')
+        # memoryview() is the check of the buffer protocol
+        view = memoryview(cast('Buffer', data)).cast('B')
     except TypeError:
         msg = 'data must be a bytes-like buffer'
         raise TypeError(msg) from None
@@ -125,6 +136,7 @@ class _Layout(NamedTuple):
 
 
 class _CopyPlan(NamedTuple):
+    data: bytes
     format: AudioSampleFormat
     plane_index: int
     frame_offset: int
@@ -157,6 +169,15 @@ class AudioData(Closable):
         )
     """
 
+    _data: bytes | None
+    _format: AudioSampleFormat
+    _sample_rate: float
+    _frames: int
+    _channels: int
+    _timestamp: int
+    #: Whether a data read from a track warns if garbage collected without being closed
+    _warn_unclosed: bool = False
+
     def __init__(self, init: AudioDataInit) -> None:
         format = _sample_format(init.format)
         sample_rate = _sample_rate(init.sample_rate)
@@ -172,7 +193,7 @@ class AudioData(Closable):
         self._set(data, _Layout(format, sample_rate, frames, channels), init.timestamp)
 
     def _set(self, data: bytes, layout: _Layout, timestamp: int) -> None:
-        self._data: bytes | None = data
+        self._data = data
         self._format, self._sample_rate, self._frames, self._channels = layout
         self._timestamp = timestamp
 
@@ -232,7 +253,8 @@ class AudioData(Closable):
         return self._timestamp
 
     def _plan_copy(self, options: AudioDataCopyToOptions) -> _CopyPlan:
-        if self._data is None:
+        data = self._data
+        if data is None:
             msg = 'The data is closed'
             raise InvalidStateError(msg)
         plane_index = _unsigned(options.plane_index, 'plane_index')
@@ -256,7 +278,9 @@ class AudioData(Closable):
                 msg = f'frame_count must be at most the {remaining} frames from frame_offset'
                 raise InvalidRangeError(msg)
         elements = frame_count if _is_planar(destination) else frame_count * self._channels
-        return _CopyPlan(destination, plane_index, frame_offset, frame_count, elements * _sample_bytes(destination))
+        return _CopyPlan(
+            data, destination, plane_index, frame_offset, frame_count, elements * _sample_bytes(destination)
+        )
 
     def allocation_size(self, options: AudioDataCopyToOptions) -> int:
         """Returns how many bytes :meth:`copy_to` needs.
@@ -288,7 +312,7 @@ class AudioData(Closable):
             raise InvalidRangeError(msg)
         try:
             wrtc.copyAudioSamples(
-                self._data,
+                plan.data,
                 self._format.value,
                 self._channels,
                 self._frames,

@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
+
+from typing_extensions import override
 
 from webrtc import AudioData, MediaStreamTrack, MediaType, VideoFrame, WebRTCObject, wrtc
 from webrtc.models.dictionary import Dictionary
@@ -26,6 +28,8 @@ DEFAULT_VIDEO_BUFFER_SIZE = 1
 #: How many 10 ms chunks of audio are queued for reads, as Chrome does
 DEFAULT_AUDIO_BUFFER_SIZE = 10
 _MAX_BUFFER_SIZE = 65535
+# the members of a native item of video: the buffer, timestamp, rotation and RTP timestamp (6 for audio)
+_VIDEO_ITEM_SIZE = 4
 
 
 @dataclass
@@ -52,12 +56,12 @@ class _TrackSource:
 
     def __init__(self, processor: MediaStreamTrackProcessor) -> None:
         self._processor = processor
-        self._controller: ReadableStreamDefaultController | None = None
+        self._controller: ReadableStreamDefaultController[VideoFrame | AudioData] | None = None
 
-    def start(self, controller: ReadableStreamDefaultController) -> None:
+    def start(self, controller: ReadableStreamDefaultController[VideoFrame | AudioData]) -> None:
         self._controller = controller
 
-    def pull(self, _controller: ReadableStreamDefaultController) -> None:
+    def pull(self, _controller: ReadableStreamDefaultController[VideoFrame | AudioData]) -> None:
         native = self._processor._native_obj
         created_outside_loop = native._listeners is None
         # the native events go to the loop reading
@@ -75,7 +79,10 @@ class _TrackSource:
         native = self._processor._native_obj
         stream = self._processor._readable
         controller = self._controller
-        while stream._state == 'readable' and stream._reader is not None and stream._reader._read_requests:
+        if controller is None:
+            msg = 'the stream of the processor has not started'
+            raise RuntimeError(msg)
+        while stream._state == 'readable' and stream._reader is not None and len(stream._reader._read_requests) > 0:
             item = native.read()
             if item is None:
                 break
@@ -123,26 +130,29 @@ class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], Ev
             msg = f'max_buffer_size must be from 0 to {_MAX_BUFFER_SIZE}, not {max_buffer_size}'
             raise TypeError(msg)
 
-        super().__init__(self._class(track._native_obj, max(1, max_buffer_size)))
+        super().__init__(wrtc.MediaStreamTrackProcessor(track._native_obj, max(1, max_buffer_size)))
         # the native processor doesn't keep the track, Python does
         self._track = track
-        self._video = video
         self._source = _TrackSource(self)
-        self._readable = ReadableStream(self._source, high_water_mark=0)
+        self._readable: ReadableStream[VideoFrame | AudioData] = ReadableStream(self._source, high_water_mark=0)
         self._attach()
 
+    @override
     def _on_event(self, name: str, *_args: object) -> None:
         if name == '_ready':
             self._native_obj._ackWakeup()
             self._source.deliver()
 
-    def _wrap_media(self, item: tuple[Any, ...]) -> VideoFrame | AudioData:
-        if self._video:
+    @staticmethod
+    def _wrap_media(
+        item: tuple[wrtc.VideoFrameBuffer, int, int, int] | tuple[bytes, int, int, int, int, int],
+    ) -> VideoFrame | AudioData:
+        if len(item) == _VIDEO_ITEM_SIZE:
             return VideoFrame._from_native(item)
         return AudioData._from_native(item)
 
     @property
-    def readable(self) -> ReadableStream:
+    def readable(self) -> ReadableStream[VideoFrame | AudioData]:
         """:obj:`webrtc.ReadableStream`: The media of the track."""
         return self._readable
 

@@ -79,5 +79,6 @@ def run(case: str) -> CaseResult:
 
     for line in proc.stdout.splitlines():
         if line.startswith(RESULT_PREFIX):
-            return json.loads(line[len(RESULT_PREFIX) :])
+            result: CaseResult = json.loads(line[len(RESULT_PREFIX) :])
+            return result
     return harness_result('CRASH', f'exit code {proc.returncode}\n{proc.stderr[-2000:]}')

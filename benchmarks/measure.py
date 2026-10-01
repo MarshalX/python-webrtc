@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 def percentile(values: Sequence[float], fraction: float) -> float:
     """The value below which the fraction of the values are, or NaN without values."""
-    if not values:
+    if len(values) == 0:
         return float('nan')
     ordered = sorted(values)
     return ordered[min(len(ordered) - 1, int(fraction * len(ordered)))]
@@ -46,7 +46,7 @@ class LoopLag:
         self.interval = interval
         # compact: a 5 ms probe collects 12000 a minute
         self.lags = array.array('d')
-        self._task: asyncio.Task | None = None
+        self._task: asyncio.Task[None] | None = None
 
     async def _probe(self) -> None:
         loop = asyncio.get_running_loop()
@@ -62,7 +62,7 @@ class LoopLag:
     def __exit__(
         self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None
     ) -> None:
-        if self._task:
+        if self._task is not None:
             self._task.cancel()
 
     @property
@@ -103,27 +103,29 @@ class Usage:
     @property
     def cpu_percent(self) -> float:
         """Of one core: the process uses several threads (encoders, decoders, network)."""
-        return self.cpu / self.wall * 100 if self.wall else float('nan')
+        return self.cpu / self.wall * 100 if self.wall != 0 else float('nan')
 
 
 def slope_mb_per_minute(samples: Sequence[tuple[float, int]]) -> float:
     """The trend of (seconds, bytes) samples, by least squares: NaN for less than two."""
-    if not samples:
+    if len(samples) == 0:
         return float('nan')
     xs = [t for t, _ in samples]
     ys = [b / 1e6 for _, b in samples]
     mean_x, mean_y = statistics.fmean(xs), statistics.fmean(ys)
     denominator = sum((x - mean_x) ** 2 for x in xs)
-    if not denominator:
+    if denominator == 0:
         return float('nan')
     return sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / denominator * 60
 
 
 def machine() -> str:
     """The CPU, the OS and Python of the machine."""
-    cpu = platform.processor() or platform.machine()
+    cpu = platform.processor()
+    if cpu == '':
+        cpu = platform.machine()
     sysctl = shutil.which('sysctl') if sys.platform == 'darwin' else None
-    if sysctl:
+    if sysctl is not None:
         with contextlib.suppress(OSError, subprocess.CalledProcessError):
             cpu = subprocess.check_output([sysctl, '-n', 'machdep.cpu.brand_string'], text=True).strip()
     return (

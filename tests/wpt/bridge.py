@@ -15,17 +15,33 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import enum
+import inspect
 import sys
 import time
-from typing import TYPE_CHECKING, Callable, Union
+from typing import TYPE_CHECKING, Callable, TypeVar, Union, cast
 
 import pythonmonkey as pm
+from typing_extensions import TypedDict
 
 import webrtc
 import webrtc.enums
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Awaitable, Coroutine
+
+    from _typeshed import DataclassInstance
+
+    from webrtc.models.media_track_constraints import ConstrainDouble, ConstrainULong
+
+    class _UserMediaOptions(TypedDict, total=False, closed=True):
+        audio: bool
+        video: bool
+        width: ConstrainULong | None
+        height: ConstrainULong | None
+        frame_rate: ConstrainDouble | None
+
+
+_T = TypeVar('_T')
 
 Result = dict[str, object]
 Buffer = Union[bytes, bytearray, memoryview]
@@ -60,33 +76,74 @@ def _event_to_js(event: webrtc.Event) -> dict[str, object]:
     return {'__event': type(event).__name__, 'type': event.type, 'init': init}
 
 
-def _dictionary_to_js(value: object) -> dict[str, object]:
+def _dictionary_to_js(value: DataclassInstance) -> dict[str, object]:
     # a dictionary in WebIDL, where missing members are left out
     members = ((f.name, getattr(value, f.name)) for f in dataclasses.fields(value))
     return {_camel_case(name): to_js(member) for name, member in members if member is not None}
 
 
+def _enum_to_js(value: enum.Enum) -> object:
+    # the values of the enums are the WebIDL ones
+    return value.value
+
+
+def _rect_to_js(value: webrtc.DOMRectReadOnly) -> object:
+    return {'__rect': [value.x, value.y, value.width, value.height]}
+
+
+def _blob_to_js(value: webrtc.Blob) -> object:
+    return {'__blob': bytearray(bytes(value)), 'type': value.type}
+
+
+def _description_to_js(value: webrtc.RTCSessionDescriptionInit) -> object:
+    # a dictionary in WebIDL, but a WebRTCObject (it holds a native one) here, not a dataclass
+    return value.to_json()
+
+
+def _wrapper_to_js(value: webrtc.WebRTCObject[object]) -> object:
+    # Wrappers are created per access, but they hash as the native object they share, which identifies it
+    return {'__type': type(value).__name__, '__id': hash(value), '__obj': value}
+
+
+def _plain_to_js(value: object) -> object:
+    return {'__type': type(value).__name__, '__id': id(value), '__obj': value}
+
+
+def _error_to_js(value: BaseException) -> object:
+    return {'__error': _error(value)['error']}
+
+
+def _stats_to_js(value: webrtc.RTCStatsReport) -> object:
+    return {'__statsReport': [[stats_id, dict(stats)] for stats_id, stats in value.items()]}
+
+
+def _bytes_to_js(value: bytes) -> object:
+    # PythonMonkey shares a bytearray as a Uint8Array, the shim copies it
+    return {'__bytes': bytearray(value)}
+
+
+def _dict_to_js(value: dict[object, object]) -> object:
+    return {k: to_js(v) for k, v in value.items()}
+
+
+def _sequence_to_js(value: list[object] | tuple[object, ...]) -> object:
+    return [to_js(v) for v in value]
+
+
 # in order: the first type that matches converts the value
 _CONVERTERS: list[tuple[type | tuple[type, ...], Callable[..., object]]] = [
-    # the values of the enums are the WebIDL ones
-    (enum.Enum, lambda value: value.value),
-    (webrtc.DOMRectReadOnly, lambda value: {'__rect': [value.x, value.y, value.width, value.height]}),
-    (webrtc.Blob, lambda value: {'__blob': bytearray(bytes(value)), 'type': value.type}),
-    # a dictionary in WebIDL, but a WebRTCObject (it holds a native one) here, not a dataclass
-    (webrtc.RTCSessionDescriptionInit, lambda value: value.to_json()),
-    # Wrappers are created per access, but they hash as the native object they share, which identifies it
-    (webrtc.WebRTCObject, lambda value: {'__type': type(value).__name__, '__id': hash(value), '__obj': value}),
-    (_PLAIN_INTERFACES, lambda value: {'__type': type(value).__name__, '__id': id(value), '__obj': value}),
-    (BaseException, lambda value: {'__error': _error(value)['error']}),
-    (
-        webrtc.RTCStatsReport,
-        lambda value: {'__statsReport': [[stats_id, dict(stats)] for stats_id, stats in value.items()]},
-    ),
-    # PythonMonkey shares a bytearray as a Uint8Array, the shim copies it
-    (bytes, lambda value: {'__bytes': bytearray(value)}),
+    (enum.Enum, _enum_to_js),
+    (webrtc.DOMRectReadOnly, _rect_to_js),
+    (webrtc.Blob, _blob_to_js),
+    (webrtc.RTCSessionDescriptionInit, _description_to_js),
+    (webrtc.WebRTCObject, _wrapper_to_js),
+    (_PLAIN_INTERFACES, _plain_to_js),
+    (BaseException, _error_to_js),
+    (webrtc.RTCStatsReport, _stats_to_js),
+    (bytes, _bytes_to_js),
     (webrtc.Event, _event_to_js),
-    (dict, lambda value: {k: to_js(v) for k, v in value.items()}),
-    ((list, tuple), lambda value: [to_js(v) for v in value]),
+    (dict, _dict_to_js),
+    ((list, tuple), _sequence_to_js),
 ]
 
 
@@ -106,7 +163,7 @@ def _to_enum(value: dict[str, object]) -> object:
     try:
         return enum_cls(value['value'])
     except ValueError:
-        if value.get('strict', True):
+        if bool(value.get('strict', True)):
             msg = f"'{value['value']}' is not a valid value for enumeration {value['__enum']}"
             raise TypeError(msg) from None
         # A DOMString in WebIDL rather than an enum, so it's up to the library to reject it
@@ -173,7 +230,7 @@ def _guard(func: Callable[[], object]) -> Result:
         return _error(e)
 
 
-async def _guard_async(awaitable: Callable[[], Coroutine[object, object, object]]) -> Result:
+async def _guard_async(awaitable: Callable[[], Awaitable[object]]) -> Result:
     try:
         return {'ok': to_js(await awaitable())}
     except BRIDGED_ERRORS as e:
@@ -196,10 +253,33 @@ def set_attr(obj: object, name: str, value: object) -> Result:
     return _guard(lambda: setattr(obj, name, from_js(value)))
 
 
+def _from_js_as(kind: type[_T], value: object) -> _T:
+    """A value from the shim that converts to a type, like a dictionary the library has a model of."""
+    result = from_js(value)
+    if not isinstance(result, kind):
+        msg = f'expected {kind.__name__} from JS, got {type(result).__name__}'
+        raise TypeError(msg)
+    return result
+
+
 def _call(obj: object, name: str, arguments: dict[str, object]) -> object:
     """Calls a method with {'args': [...], 'kwargs': {...}} from JS."""
     args, kwargs = arguments['args'], arguments.get('kwargs')
-    return getattr(obj, name)(*from_js(list(args)), **from_js(dict(kwargs or {})))
+    if not isinstance(args, list):
+        msg = f'args from JS is not an array: {args!r}'
+        raise TypeError(msg)
+    if kwargs is not None and not isinstance(kwargs, dict):
+        msg = f'kwargs from JS is not an object: {kwargs!r}'
+        raise TypeError(msg)
+    keywords: dict[object, object] = dict(kwargs) if kwargs is not None else {}
+    return getattr(obj, name)(*from_js(list(args)), **from_js(keywords))
+
+
+def _awaitable(value: object) -> Awaitable[object]:
+    if not inspect.isawaitable(value):
+        msg = f'{type(value).__name__} is not awaitable'
+        raise TypeError(msg)
+    return value
 
 
 def call_method(obj: object, name: str, arguments: dict[str, object]) -> Result:
@@ -207,7 +287,7 @@ def call_method(obj: object, name: str, arguments: dict[str, object]) -> Result:
 
 
 def call_async_method(obj: object, name: str, arguments: dict[str, object]) -> asyncio.Future[Result]:
-    return _start(_guard_async(lambda: _call(obj, name, arguments)))
+    return _start(_guard_async(lambda: _awaitable(_call(obj, name, arguments))))
 
 
 def await_attr(obj: object, name: str) -> asyncio.Future[Result]:
@@ -224,7 +304,7 @@ def video_frame_copy_to(frame: webrtc.VideoFrame, destination: Buffer, options: 
 
     async def copy() -> dict[str, object]:
         data = bytearray(destination)
-        layout = await frame.copy_to(data, from_js(options))
+        layout = await frame.copy_to(data, _from_js_as(webrtc.VideoFrameCopyToOptions, options))
         return {'layout': layout, 'data': bytes(data)}
 
     return _start(_guard_async(copy))
@@ -235,7 +315,7 @@ def audio_data_copy_to(audio: webrtc.AudioData, destination: Buffer, options: ob
 
     def copy() -> bytes:
         data = bytearray(destination)
-        audio.copy_to(data, from_js(options))
+        audio.copy_to(data, _from_js_as(webrtc.AudioDataCopyToOptions, options))
         return bytes(data)
 
     return _guard(copy)
@@ -246,7 +326,8 @@ def construct(name: str, kwargs: dict[str, object]) -> Result:
 
 
 def get_user_media(kwargs: dict[str, object]) -> Result:
-    return _guard(lambda: webrtc.get_user_media(**from_js(dict(kwargs))))
+    # the shim converts the constraints as WebIDL does, the library validates them
+    return _guard(lambda: webrtc.get_user_media(**cast('_UserMediaOptions', from_js(dict(kwargs)))))
 
 
 def call_static(class_name: str, name: str, args: list[object]) -> Result:

@@ -36,7 +36,7 @@ def _cases() -> list[str | ParameterSet]:
         return []
     return [
         pytest.param(case, marks=pytest.mark.skip(reason=reason))
-        if (reason := expectations.skip_reason(case))
+        if (reason := expectations.skip_reason(case)) is not None and reason != ''
         else case
         for case in discover()
     ]
@@ -45,5 +45,5 @@ def _cases() -> list[str | ParameterSet]:
 @pytest.mark.parametrize('case', _cases())
 def test_wpt(case: str) -> None:
     problems = expectations.mismatches(case, runner.run(case))
-    if problems:
+    if len(problems) > 0:
         pytest.fail('\n'.join(problems), pytrace=False)

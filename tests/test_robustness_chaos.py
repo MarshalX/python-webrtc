@@ -25,7 +25,7 @@ def run_chaos(seed: int, steps: int, timeout: float) -> None:
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, cwd=ROOT, check=False)
     except subprocess.TimeoutExpired as e:
-        pytest.fail(f'seed {seed} is stuck after:\n{(e.stdout or b"")[-3000:]}')
+        pytest.fail(f'seed {seed} is stuck after:\n{(e.stdout if e.stdout is not None else b"")[-3000:]}')
     output = result.stdout + result.stderr
     assert result.returncode == 0, f'seed {seed}, exit code {result.returncode}:\n{output[-5000:]}'
     assert 'done' in result.stdout, output[-3000:]

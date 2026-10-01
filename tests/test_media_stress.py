@@ -30,6 +30,12 @@ def frame(timestamp: int = 0, width: int = 16, height: int = 16) -> webrtc.Video
     )
 
 
+def close(media: object) -> None:
+    """Closes media read from a processor."""
+    assert isinstance(media, (webrtc.VideoFrame, webrtc.AudioData))
+    media.close()
+
+
 def collected(refs: list[weakref.ref[object]]) -> bool:
     gc.collect()
     return all(ref() is None for ref in refs)
@@ -46,7 +52,7 @@ async def test_cancel_during_pending_reads(video_stream: webrtc.MediaStream) -> 
         await reader.cancel()
         for result in await asyncio.wait_for(asyncio.gather(*reads), TIMEOUT):
             if not result.done:
-                result.value.close()
+                close(result.value)
 
 
 @pytest.mark.asyncio
@@ -54,12 +60,12 @@ async def test_stop_track_while_reading(video_stream: webrtc.MediaStream, audio_
     """Tracks stopped while tasks read them close their streams."""
     tracks = [*video_stream.get_tracks(), *audio_stream.get_tracks()]
 
-    read = []
+    read: list[webrtc.MediaStreamTrack] = []
 
     async def read_all(track: webrtc.MediaStreamTrack) -> int:
         count = 0
         async for media in webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable:
-            media.close()
+            close(media)
             count += 1
             if count == 1:
                 read.append(track)
@@ -82,7 +88,7 @@ async def test_many_processors_of_one_track(video_stream: webrtc.MediaStream) ->
         for _ in range(20)
     ]
     for result in await asyncio.wait_for(asyncio.gather(*(r.read() for r in readers)), TIMEOUT):
-        result.value.close()
+        close(result.value)
     track.stop()
     await asyncio.wait_for(asyncio.gather(*(r.closed for r in readers)), TIMEOUT)
 
@@ -91,7 +97,7 @@ async def test_many_processors_of_one_track(video_stream: webrtc.MediaStream) ->
 async def test_garbage_collected_with_pending_reads(video_stream: webrtc.MediaStream) -> None:
     """Processors dropped with reads pending are collected, while their track goes on."""
     track = video_stream.get_tracks()[0]
-    refs = []
+    refs: list[weakref.ref[object]] = []
     for _ in range(20):
         processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
         processor.readable.get_reader().read()
@@ -99,7 +105,7 @@ async def test_garbage_collected_with_pending_reads(video_stream: webrtc.MediaSt
         del processor
     await wait_until(lambda: collected(refs), 'the processors to be collected')
     reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
-    (await asyncio.wait_for(reader.read(), TIMEOUT)).value.close()
+    close((await asyncio.wait_for(reader.read(), TIMEOUT)).value)
 
 
 @pytest.mark.asyncio
@@ -114,14 +120,14 @@ async def test_close_connection_while_reading(
             webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(remote)).readable.get_reader()
             for _ in range(5)
         ]
-        (await asyncio.wait_for(readers[0].read(), TIMEOUT)).value.close()
+        close((await asyncio.wait_for(readers[0].read(), TIMEOUT)).value)
         pending = [r.read() for r in readers]
         callee.close()
         caller.close()
         await asyncio.wait_for(asyncio.gather(*(r.closed for r in readers)), TIMEOUT)
         for result in await asyncio.gather(*pending):
             if not result.done:
-                result.value.close()
+                close(result.value)
     generator.track.stop()
 
 
@@ -160,7 +166,7 @@ async def test_create_and_destroy_cycles_do_not_leak() -> None:
         )
         reader = processor.readable.get_reader()
         await generator.writable.get_writer().write(frame())
-        (await reader.read()).value.close()
+        close((await reader.read()).value)
         await reader.cancel()
         generator.track.stop()
         return weakref.ref(processor), weakref.ref(generator)
@@ -205,7 +211,8 @@ async def test_reader_that_never_yields_queues_nothing() -> None:
     for timestamp in range(2000):
         # both are done right away, so the loop never runs in between
         await writer.write(frame(timestamp))
-        (await reader.read()).value.close()
+        close((await reader.read()).value)
     assert len(TaskQueue.of(loop)._items) <= 2
-    assert len(loop._ready) < 100
+    # the callbacks ready to run, private to the loop
+    assert len(vars(loop)['_ready']) < 100
     generator.track.stop()

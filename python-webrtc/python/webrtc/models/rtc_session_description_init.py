@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from webrtc import wrtc
-from webrtc.enums import RTCSdpType
+from webrtc.enums import RTCSdpType, RTCSdpTypeValue
 from webrtc.models.dictionary import Dictionary
 
 
@@ -32,7 +32,7 @@ class RTCSessionDescriptionInit(Dictionary):
         TypeError: If the SDP is :obj:`None`.
     """
 
-    type: RTCSdpType
+    type: RTCSdpType | RTCSdpTypeValue
     sdp: str = ''
 
     def __post_init__(self) -> None:
@@ -50,10 +50,10 @@ class RTCSessionDescriptionInit(Dictionary):
         Returns:
             :obj:`dict`: ``type`` (like ``'offer'``) and ``sdp``.
         """
-        return {'type': self.type.value, 'sdp': self.sdp}
+        return {'type': RTCSdpType(self.type).value, 'sdp': self.sdp}
 
     def __repr__(self) -> str:
-        return f'RTCSessionDescriptionInit(type={self.type.value!r}, sdp={len(self.sdp)} characters)'
+        return f'RTCSessionDescriptionInit(type={RTCSdpType(self.type).value!r}, sdp={len(self.sdp)} characters)'
 
     #: Alias for :attr:`to_json`
     toJSON: ClassVar = to_json
@@ -74,7 +74,7 @@ class RTCLocalSessionDescriptionInit(Dictionary):
         TypeError: If the SDP is :obj:`None`.
     """
 
-    type: RTCSdpType | None = None
+    type: RTCSdpType | RTCSdpTypeValue | None = None
     sdp: str = ''
 
     def __post_init__(self) -> None:

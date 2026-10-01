@@ -24,7 +24,7 @@ async def test_posted_callbacks_run_before_later_timers() -> None:
     """Callbacks posted from another thread run before a timer set after they were posted."""
     loop = asyncio.get_running_loop()
     queue = TaskQueue.of(loop)
-    order = []
+    order: list[int | str] = []
 
     def post_many() -> None:
         for i in range(10):
@@ -49,7 +49,7 @@ async def test_microtasks_of_a_callback_run_before_the_next_one() -> None:
     """What a callback schedules with call_soon runs before the next posted callback."""
     loop = asyncio.get_running_loop()
     queue = TaskQueue.of(loop)
-    order = []
+    order: list[str] = []
     done = loop.create_future()
 
     def first() -> None:
@@ -71,7 +71,7 @@ async def test_resumed_code_runs_before_the_next_callback_only() -> None:
     """Code a callback resumes runs before the next callback; after it, callbacks don't wait for timers."""
     loop = asyncio.get_running_loop()
     queue = TaskQueue.of(loop)
-    order = []
+    order: list[str] = []
     resumed = asyncio.Event()
 
     async def awaiting() -> None:
@@ -102,9 +102,9 @@ def test_loops_are_collected_with_what_they_had_queued() -> None:
     """A closed loop is collected with what was still queued for it."""
 
     class Held:
-        pass
+        loop: asyncio.AbstractEventLoop
 
-    refs = []
+    refs: list[tuple[weakref.ref[asyncio.AbstractEventLoop], weakref.ref[Held]]] = []
     for _ in range(5):
         loop = asyncio.new_event_loop()
         held = Held()

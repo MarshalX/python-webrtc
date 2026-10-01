@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import math
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Union, cast
+
+from typing_extensions import override
 
 from webrtc import (
     ConstrainBooleanOrDOMStringParameters,
@@ -210,10 +212,11 @@ class MediaStreamTrack(WebRTCObject[wrtc.MediaStreamTrack], EventTarget):
     _class = wrtc.MediaStreamTrack
     _events = ('mute', 'unmute', 'ended')
 
+    @override
     def _on_event(self, name: str, *args: object) -> None:
         # muted changes along with the events
         if name in {'mute', 'unmute'}:
-            (muted,) = args
+            (muted,) = cast('tuple[bool]', args)
             self._native_obj._surfaceMuted(muted)
         elif name == 'ended':
             self._native_obj._surfaceEnded()
@@ -277,16 +280,18 @@ class MediaStreamTrack(WebRTCObject[wrtc.MediaStreamTrack], EventTarget):
         Returns:
             :obj:`webrtc.MediaTrackSettings`: The settings.
         """
-        native: dict[str, Any] = self._native_obj._settings()
+        native = self._native_obj._settings()
         settings = MediaTrackSettings()
-        if 'width' in native:
-            settings.width, settings.height = native['width'], native['height']
-            settings.aspect_ratio = native['width'] / native['height'] if native['height'] else None
+        # the size, and the format of the audio, come together
+        width, height = native.get('width'), native.get('height')
+        if width is not None and height is not None:
+            settings.width, settings.height = width, height
+            settings.aspect_ratio = width / height if height != 0 else None
             settings.frame_rate = native.get('frame_rate')
         if 'sample_rate' in native:
-            settings.sample_rate = native['sample_rate']
-            settings.sample_size = native['sample_size']
-            settings.channel_count = native['channel_count']
+            settings.sample_rate = native.get('sample_rate')
+            settings.sample_size = native.get('sample_size')
+            settings.channel_count = native.get('channel_count')
         device = native.get('device')
         if device == 'camera':
             settings.resize_mode = 'none'
@@ -343,7 +348,7 @@ class MediaStreamTrack(WebRTCObject[wrtc.MediaStreamTrack], EventTarget):
         return future
 
     def _apply_constraints(self, constraints: MediaTrackConstraints) -> None:
-        advanced = list(constraints.advanced or ())
+        advanced: list[MediaTrackConstraintSet] = list(constraints.advanced) if constraints.advanced is not None else []
         for constraint_set in [constraints, *advanced]:
             _check_numbers(constraint_set)
         if self.ready_state == 'ended':
@@ -364,7 +369,7 @@ class MediaStreamTrack(WebRTCObject[wrtc.MediaStreamTrack], EventTarget):
                 height = _selected(constraint_set.height, height, capabilities.height)
                 frame_rate = _selected(constraint_set.frame_rate, frame_rate, capabilities.frame_rate)
             if (width, height, frame_rate) != camera:
-                self._native_obj._reconfigureCamera(int(width), int(height), float(frame_rate))
+                _ = self._native_obj._reconfigureCamera(int(width), int(height), float(frame_rate))
         self._native_obj._constraints = constraints
 
     def clone(self) -> webrtc.MediaStreamTrack:

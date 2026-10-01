@@ -30,13 +30,13 @@ logger = logging.getLogger(__name__)
 
 def _print_result(case: str, result: runner.CaseResult) -> None:
     harness = result['harness']
-    message = f' ({harness["message"]})' if harness['message'] else ''
+    message = f' ({harness["message"]})' if harness['message'] not in {None, ''} else ''
     logger.info('%s: harness %s%s', case, harness['status'], message)
     for test in result['tests']:
         logger.info('  %-8s %s', test['status'], test['name'])
-        if test['status'] != 'PASS' and test['message']:
+        if test['status'] != 'PASS' and test['message'] not in {None, ''}:
             logger.info('           %s', test['message'])
-    if result['unsupported']:
+    if len(result['unsupported']) > 0:
         logger.info('  unsupported: %s', ', '.join(result['unsupported']))
 
 
@@ -47,7 +47,7 @@ def run(args: argparse.Namespace) -> None:
 
 def update(args: argparse.Namespace) -> None:
     expectations = Expectations.load()
-    cases = [c for c in args.cases or discover() if not expectations.skip_reason(c)]
+    cases = [c for c in args.cases or discover() if expectations.skip_reason(c) in {None, ''}]
 
     tests: Counter[str] = Counter()
     harness: Counter[str] = Counter()
@@ -70,7 +70,7 @@ def update(args: argparse.Namespace) -> None:
 
     logger.info('\nfiles: %s', dict(harness))
     logger.info('tests: %s', dict(tests))
-    if unsupported:
+    if len(unsupported) > 0:
         logger.info('unsupported members used by tests:')
         for name, count in unsupported.most_common():
             logger.info('  %4d  %s', count, name)

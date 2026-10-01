@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import array
 import asyncio
+from typing import TypeVar
 
 import pytest
 
@@ -32,8 +33,21 @@ def video_frame(timestamp: int, width: int = 4, height: int = 2) -> webrtc.Video
     )
 
 
-async def read(reader: webrtc.ReadableStreamDefaultReader) -> webrtc.ReadableStreamReadResult:
+_T = TypeVar('_T')
+
+
+async def read(reader: webrtc.ReadableStreamDefaultReader[_T]) -> webrtc.ReadableStreamReadResult[_T]:
     return await asyncio.wait_for(reader.read(), TIMEOUT)
+
+
+def as_video_frame(value: object) -> webrtc.VideoFrame:
+    assert isinstance(value, webrtc.VideoFrame)
+    return value
+
+
+def as_audio_data(value: object) -> webrtc.AudioData:
+    assert isinstance(value, webrtc.AudioData)
+    return value
 
 
 @pytest.mark.asyncio
@@ -95,7 +109,7 @@ async def test_full_buffer_drops_the_oldest_frames(video_stream: webrtc.MediaStr
     # the total first: frames keep arriving, and the discarded ones are the total less the 2 queued at any time
     total = processor.total_frames
     assert processor.discarded_frames >= total - 2
-    first, second = (await read(reader)).value, (await read(reader)).value
+    first, second = as_video_frame((await read(reader)).value), as_video_frame((await read(reader)).value)
     assert first.timestamp < second.timestamp
     first.close()
     second.close()
@@ -106,7 +120,7 @@ async def test_cancel_stops_reading(video_stream: webrtc.MediaStream) -> None:
     """Canceling the stream detaches the processor from the track."""
     processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(video_stream.get_tracks()[0]))
     reader = processor.readable.get_reader()
-    (await read(reader)).value.close()
+    as_video_frame((await read(reader)).value).close()
     await reader.cancel()
     total = processor.total_frames
     await asyncio.sleep(QUIET_PERIOD)
@@ -139,7 +153,7 @@ async def test_generator_forwards_frames_with_their_timestamps() -> None:
         frame = video_frame(timestamp * 1000)
         await writer.write(frame)
         assert frame.format is None, 'written frames are closed'
-    frames = [r.value for r in await asyncio.wait_for(asyncio.gather(*reads), TIMEOUT)]
+    frames = [as_video_frame(r.value) for r in await asyncio.wait_for(asyncio.gather(*reads), TIMEOUT)]
     assert [f.timestamp for f in frames] == [0, 1000, 2000, 3000]
     out = bytearray(12)
     await frames[0].copy_to(out)
@@ -195,7 +209,7 @@ async def test_muted_generator_drops_frames() -> None:
     generator.muted = False
     await unmuted
     await writer.write(video_frame(2))
-    frame = (await read(reader)).value
+    frame = as_video_frame((await read(reader)).value)
     assert frame.timestamp == 2
     frame.close()
     track.stop()
@@ -221,7 +235,7 @@ async def test_audio_generator_sends_10_ms_frames() -> None:
     )
     await writer.write(data)
     assert data.format is None, 'written data is closed'
-    received = [(await read(reader)).value for _ in range(2)]
+    received = [as_audio_data((await read(reader)).value) for _ in range(2)]
     for audio in received:
         assert (audio.number_of_frames, audio.sample_rate) == (480, 48000)
         out = array.array('h', [0] * 480)
@@ -265,7 +279,7 @@ async def test_pipe_processor_to_generator(video_stream: webrtc.MediaStream) -> 
         webrtc.MediaStreamTrackProcessorInit(video_stream.get_tracks()[0])
     ).readable
     pipe = asyncio.ensure_future(source.pipe_through(webrtc.TransformStream(Stamp())).pipe_to(generator.writable))
-    frame = (await read(reader)).value
+    frame = as_video_frame((await read(reader)).value)
     assert frame.timestamp == 42
     assert frame.coded_width == 640
     frame.close()
@@ -284,6 +298,6 @@ async def test_frames_wait_in_the_native_queue_only(video_stream: webrtc.MediaSt
     reader = processor.readable.get_reader()
     frames = await asyncio.wait_for(asyncio.gather(*(reader.read() for _ in range(4))), TIMEOUT)
     for result in frames:
-        result.value.close()
+        as_video_frame(result.value).close()
     await wait_until(lambda: processor.discarded_frames > 0, 'frames to be dropped')
-    assert not processor.readable._controller._queue
+    assert len(processor.readable._controller._queue) == 0

@@ -29,7 +29,7 @@ import wrtc
 from tests.helpers import connect
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Coroutine
 
 log = logging.getLogger('chaos')
 
@@ -50,16 +50,21 @@ class State:
         self.connections: list[webrtc.RTCPeerConnection] = []
         self.channels: list[webrtc.RTCDataChannel] = []
         self.tracks: list[webrtc.MediaStreamTrack] = []
-        self.processors: list[tuple[webrtc.MediaStreamTrackProcessor, webrtc.ReadableStreamDefaultReader]] = []
+        self.processors: list[
+            tuple[
+                webrtc.MediaStreamTrackProcessor,
+                webrtc.ReadableStreamDefaultReader[webrtc.VideoFrame | webrtc.AudioData],
+            ]
+        ] = []
         self.generators: list[tuple[webrtc.WritableStreamDefaultWriter, str]] = []
         self.frames: list[webrtc.VideoFrame] = []
         self.tasks: list[threading.Thread | asyncio.Future[None]] = []
 
     def pick(self, pool: list[T]) -> T | None:
-        return self.random.choice(pool) if pool else None
+        return self.random.choice(pool) if len(pool) > 0 else None
 
-    def drop(self, pool: list[object]) -> None:
-        if pool:
+    def drop(self, pool: list[T]) -> None:
+        if len(pool) > 0:
             pool.pop(self.random.randrange(len(pool)))
 
     def handler(self) -> Callable[[webrtc.Event], str | None]:
@@ -69,7 +74,7 @@ class State:
 
         def handle(_event: webrtc.Event) -> str | None:
             if action == 0 and target is not None:
-                target.close() if hasattr(target, 'close') else target.stop()
+                target.stop() if isinstance(target, webrtc.MediaStreamTrack) else target.close()
             elif action == 1:
                 msg = 'a handler raises'
                 raise RuntimeError(msg)
@@ -94,7 +99,7 @@ class ConnectionSteps(State):
 
     async def close_connection(self) -> None:
         pc = self.pick(self.connections)
-        if pc:
+        if pc is not None:
             pc.close()
 
     async def drop_connection(self) -> None:
@@ -107,17 +112,17 @@ class ConnectionSteps(State):
 
     async def add_track(self) -> None:
         pc, track = self.pick(self.connections), self.pick(self.tracks)
-        if pc and track:
+        if pc is not None and track is not None:
             pc.add_track(track)
 
     async def remove_track(self) -> None:
         pc = self.pick(self.connections)
-        if pc and pc.get_senders():
+        if pc is not None and len(pc.get_senders()) > 0:
             pc.remove_track(self.random.choice(pc.get_senders()))
 
     async def add_transceiver(self) -> None:
         pc = self.pick(self.connections)
-        if pc:
+        if pc is not None:
             transceiver = pc.add_transceiver(self.random.choice(['audio', 'video']))
             if self.random.random() < 0.3:
                 transceiver.stop()
@@ -126,49 +131,49 @@ class ConnectionSteps(State):
 
     async def negotiate(self) -> None:
         pc = self.pick(self.connections)
-        if pc:
+        if pc is not None:
             await pc.set_local_description()
 
     async def create_channel(self) -> None:
         pc = self.pick(self.connections)
-        if pc:
+        if pc is not None:
             channel = pc.create_data_channel(f'chaos{self.random.randrange(1000)}')
             channel.on(self.random.choice(['open', 'message', 'close']), self.handler())
             self.channels.append(channel)
 
     async def send(self) -> None:
         channel = self.pick(self.channels)
-        if channel:
+        if channel is not None:
             channel.send(self.random.choice(['text', b'\x00' * self.random.randrange(70000), bytearray(10)]))
 
     async def close_channel(self) -> None:
         channel = self.pick(self.channels)
-        if channel:
+        if channel is not None:
             channel.close()
 
     async def stats(self) -> None:
         pc = self.pick(self.connections)
-        if pc:
+        if pc is not None:
             await pc.get_stats()
 
     async def restart_ice(self) -> None:
         pc = self.pick(self.connections)
-        if pc:
+        if pc is not None:
             pc.restart_ice()
 
     async def handle_connection_event(self) -> None:
         pc = self.pick(self.connections)
-        if pc:
+        if pc is not None:
             pc.on(self.random.choice(['connectionstatechange', 'icecandidate', 'track', 'datachannel']), self.handler())
 
     async def replace_track(self) -> None:
         pc = self.pick(self.connections)
-        if pc and pc.get_senders():
+        if pc is not None and len(pc.get_senders()) > 0:
             await self.random.choice(pc.get_senders()).replace_track(self.pick([*self.tracks, None]))
 
     async def set_parameters(self) -> None:
         pc = self.pick(self.connections)
-        if pc and pc.get_senders():
+        if pc is not None and len(pc.get_senders()) > 0:
             sender = self.random.choice(pc.get_senders())
             parameters = sender.get_parameters()
             for encoding in parameters.encodings:
@@ -185,17 +190,17 @@ class MediaSteps(State):
 
     async def stop_track(self) -> None:
         track = self.pick(self.tracks)
-        if track:
+        if track is not None:
             track.stop()
 
     async def clone_track(self) -> None:
         track = self.pick(self.tracks)
-        if track:
+        if track is not None:
             self.tracks.append(track.clone())
 
     async def toggle_track(self) -> None:
         track = self.pick(self.tracks)
-        if track:
+        if track is not None:
             track.enabled = not track.enabled
 
     async def drop_track(self) -> None:
@@ -203,7 +208,7 @@ class MediaSteps(State):
 
     async def new_processor(self) -> None:
         track = self.pick(self.tracks)
-        if track:
+        if track is not None:
             processor = webrtc.MediaStreamTrackProcessor(
                 webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=self.random.randrange(4))
             )
@@ -211,18 +216,20 @@ class MediaSteps(State):
             self.processors.append((processor, processor.readable.get_reader()))
 
     async def read(self) -> None:
-        if self.processors:
-            _, reader = self.pick(self.processors)
+        if len(self.processors) > 0:
+            _, reader = self.random.choice(self.processors)
             try:
                 result = await asyncio.wait_for(reader.read(), 0.2)
             except asyncio.TimeoutError:
                 return
             if not result.done:
+                # the processor's readable is typed ReadableStream[object]
+                assert isinstance(result.value, (webrtc.VideoFrame, webrtc.AudioData))
                 result.value.close()
 
     async def cancel_processor(self) -> None:
-        if self.processors:
-            _, reader = self.pick(self.processors)
+        if len(self.processors) > 0:
+            _, reader = self.random.choice(self.processors)
             await reader.cancel()
 
     async def drop_processor(self) -> None:
@@ -239,9 +246,9 @@ class MediaSteps(State):
             self.tracks.append(generator)
 
     async def write(self) -> None:
-        if not self.generators:
+        if len(self.generators) == 0:
             return
-        writer, kind = self.pick(self.generators)
+        writer, kind = self.random.choice(self.generators)
         if kind == 'video':
             width, height = self.random.choice([(2, 2), (33, 17), (320, 240)])
             chunk = webrtc.VideoFrame(
@@ -264,8 +271,8 @@ class MediaSteps(State):
         await writer.write(chunk)
 
     async def close_generator(self) -> None:
-        if self.generators:
-            writer, _ = self.pick(self.generators)
+        if len(self.generators) > 0:
+            writer, _ = self.random.choice(self.generators)
             await writer.close()
 
     async def drop_generator(self) -> None:
@@ -284,12 +291,12 @@ class MediaSteps(State):
 
     async def use_frame(self) -> None:
         frame = self.pick(self.frames)
-        if frame:
+        if frame is not None:
             self.random.choice([frame.close, lambda: self.frames.append(frame.clone())])()
 
     async def pipe(self) -> None:
-        track = self.pick([track for track in self.tracks if track.kind == 'video'])
-        if track:
+        track = self.pick([video for video in self.tracks if video.kind == 'video'])
+        if track is not None:
             processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
             generator = webrtc.VideoTrackGenerator()
             self.tracks.append(generator.track)
@@ -297,7 +304,7 @@ class MediaSteps(State):
 
     async def constraints(self) -> None:
         track = self.pick(self.tracks)
-        if track:
+        if track is not None:
             track.get_settings()
             track.apply_constraints(
                 self.random.choice([
@@ -310,7 +317,7 @@ class MediaSteps(State):
     async def stream(self) -> None:
         tracks = self.random.sample(self.tracks, min(len(self.tracks), 2))
         stream = webrtc.MediaStream(tracks)
-        if tracks and self.random.random() < 0.5:
+        if len(tracks) > 0 and self.random.random() < 0.5:
             stream.remove_track(tracks[0])
         stream.get_tracks()
 
@@ -366,7 +373,8 @@ class Chaos(ConnectionSteps, MediaSteps, LoopSteps):
         log.info('%d %s', index, name)
         started = time.monotonic()
         try:
-            await asyncio.wait_for(getattr(self, name)(), STEP_TIMEOUT)
+            run: Callable[[], Coroutine[object, object, None]] = getattr(self, name)
+            await asyncio.wait_for(run(), STEP_TIMEOUT)
         # a step timing out, or connect_two's wait (a builtin TimeoutError before 3.11)
         except (asyncio.TimeoutError, TimeoutError):
             if time.monotonic() - started >= STEP_TIMEOUT:
@@ -387,10 +395,10 @@ def main() -> None:
     asyncio.run(Chaos(args.seed).run(args.steps))
     # the last references may be released on helper threads
     deadline = time.monotonic() + 1
-    while wrtc._alive_factories() and time.monotonic() < deadline:
+    while wrtc._alive_factories() != 0 and time.monotonic() < deadline:
         gc.collect()
         time.sleep(0.05)
-    alive = {name: count for name, count in wrtc._alive().items() if count}
+    alive = {name: count for name, count in wrtc._alive().items() if count != 0}
     log.info('done, %d factories alive, native objects alive: %s', wrtc._alive_factories(), alive)
 
 

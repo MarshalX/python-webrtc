@@ -26,7 +26,8 @@ async def test_remote_tracks_have_their_own_id_and_label(
     caller.add_transceiver(webrtc.MediaType.video)
     await caller.set_local_description()
 
-    tracks = []
+    tracks: list[list[webrtc.MediaStreamTrack]] = []
+    assert caller.local_description is not None
     for pc in (callee, callee2):
         await pc.set_remote_description(caller.local_description)
         tracks.append([t.receiver.track for t in pc.get_transceivers()])
@@ -77,7 +78,7 @@ async def test_track_event_when_remote_streams_change(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:
     """A track event fires again for the same track when its remote streams change, before the description is set."""
-    events = []
+    events: list[webrtc.RTCTrackEvent] = []
     callee.on('track', events.append)
     transceiver = caller.add_transceiver(webrtc.MediaType.audio)
     await exchange_offer_answer(caller, callee)
@@ -119,7 +120,7 @@ async def test_remote_track_mute_and_stream_events(
     stream = webrtc.MediaStream([audio, video])
     caller.add_track(audio, stream)
     transceiver = caller.add_transceiver(video, webrtc.RTCRtpTransceiverInit(streams=[stream]))
-    events = []
+    events: list[webrtc.RTCTrackEvent] = []
     callee.on('track', events.append)
     await connect(caller, callee)
 
@@ -134,6 +135,8 @@ async def test_remote_track_mute_and_stream_events(
     transceiver.direction = webrtc.TransceiverDirection.inactive
     await exchange_offer(caller, callee)
 
-    assert (await removed).track == remote_video
+    removed_event = await removed
+    assert isinstance(removed_event, webrtc.MediaStreamTrackEvent)
+    assert removed_event.track == remote_video
     await muted
     assert remote_video.muted

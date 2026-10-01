@@ -23,9 +23,13 @@ from tests.idl.spec import WPT_ROOT
 def main() -> None:
     pm.eval((WPT_ROOT / 'resources' / 'webidl2' / 'lib' / 'webidl2.js').read_text())
     parse = pm.eval('(text) => JSON.stringify(globalThis.WebIDL2.parse(text))')
-    definitions = []
+    definitions: list[dict[str, object]] = []
     for name, text in json.load(sys.stdin).items():
-        for definition in json.loads(parse(text)):
+        ast: object = parse(text)
+        if not isinstance(ast, str):
+            msg = f'JSON.stringify returned {ast!r}'
+            raise TypeError(msg)
+        for definition in json.loads(ast):
             definition['file'] = name
             definitions.append(definition)
     json.dump(definitions, sys.stdout)

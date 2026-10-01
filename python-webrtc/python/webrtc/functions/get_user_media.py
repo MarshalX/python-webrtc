@@ -64,10 +64,12 @@ def get_user_media(
             raise OverconstrainedError(failed, f"The constraint {failed} can't be satisfied")
     # the camera's defaults, within the constraints and the camera's capabilities
     capabilities = _CAMERA_CAPABILITIES
-    width = _selected(width, 640, capabilities.width)
-    height = _selected(height, 480, capabilities.height)
-    frame_rate = _selected(frame_rate, 30.0, capabilities.frame_rate)
-    stream = MediaStream._wrap(wrtc.getUserMedia(bool(audio), bool(video), width, height, float(frame_rate)))
+    selected_width = _selected(width, 640, capabilities.width)
+    selected_height = _selected(height, 480, capabilities.height)
+    selected_frame_rate = _selected(frame_rate, 30.0, capabilities.frame_rate)
+    stream = MediaStream._wrap(
+        wrtc.getUserMedia(bool(audio), bool(video), selected_width, selected_height, float(selected_frame_rate))
+    )
     for track in stream.get_video_tracks():
         track._native_obj._constraints = constraints
     return stream

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import pathlib
 import sys
 
 import atheris
@@ -18,6 +19,9 @@ with atheris.instrument_imports():
 
     import webrtc
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
+from tests.helpers import mistyped
+
 FORMATS = list(webrtc.AudioSampleFormat)
 EXPECTED = (TypeError, ValueError, BufferError, webrtc.NotSupportedError, webrtc.InvalidStateError)
 SAMPLE_BYTES = {'u8': 1, 's16': 2, 's32': 4, 'f32': 4}
@@ -25,6 +29,7 @@ SAMPLE_BYTES = {'u8': 1, 's16': 2, 's32': 4, 'f32': 4}
 
 def check_identity(audio: webrtc.AudioData, data: bytes) -> None:
     """Interleaved samples copied out in their own format are the same bytes."""
+    assert audio.format is not None
     if audio.format.value.endswith('-planar'):
         return
     out = bytearray(audio.allocation_size(webrtc.AudioDataCopyToOptions(plane_index=0)))
@@ -48,9 +53,9 @@ def test_one_input(data: bytes) -> None:
             webrtc.AudioDataInit(
                 format=format,
                 sample_rate=sample_rate,
-                number_of_frames=frames,
-                number_of_channels=channels,
-                timestamp=inp.integer(),
+                number_of_frames=mistyped(frames),
+                number_of_channels=mistyped(channels),
+                timestamp=mistyped(inp.integer()),
                 data=source,
             )
         )
@@ -62,16 +67,16 @@ def test_one_input(data: bytes) -> None:
 
 def exercise(inp: Input, audio: webrtc.AudioData) -> None:
     for _ in range(inp.small(4)):
-        options = webrtc.AudioDataCopyToOptions(plane_index=inp.integer(8))
+        options = webrtc.AudioDataCopyToOptions(plane_index=mistyped(inp.integer(8)))
         if inp.flag():
-            options.frame_offset = inp.integer(512)
+            options.frame_offset = mistyped(inp.integer(512))
         if inp.flag():
-            options.frame_count = inp.integer(512)
+            options.frame_count = mistyped(inp.integer(512))
         if inp.flag():
             options.format = inp.choice(FORMATS)
         try:
             size = audio.allocation_size(options)
-            audio.copy_to(inp.destination(min(size, 1 << 20)), options)
+            audio.copy_to(mistyped(inp.destination(min(size, 1 << 20))), options)
         except EXPECTED:
             pass
         if inp.small(8) == 0:

@@ -23,7 +23,7 @@ from benchmarks.measure import LoopLag, Usage, percentile, slope_mb_per_minute
 from tests.helpers import connect, rss_bytes, wait_for_event
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Iterable, Sequence
+    from collections.abc import AsyncGenerator, Awaitable, Iterable, Sequence
 
 # the frame number, drawn as bits in blocks of luma at the top left of each frame
 BITS = 16
@@ -85,7 +85,7 @@ class VideoResult:
 
 def _frames(width: int, height: int, count: int = 10) -> list[bytearray]:
     """I420 frames of a gradient with a bar moving across, so the encoder has motion to encode."""
-    frames = []
+    frames: list[bytearray] = []
     chroma = (width // 2) * (height // 2)
     row = bytes((x * 255 // width) for x in range(width))
     base = bytearray(row * height + bytes([128]) * (2 * chroma))
@@ -101,14 +101,14 @@ def _frames(width: int, height: int, count: int = 10) -> list[bytearray]:
 
 def _draw_number(frame: bytearray, width: int, number: int) -> None:
     for bit in range(BITS):
-        value = LUMA_ONE if number >> bit & 1 else LUMA_ZERO
+        value = LUMA_ONE if number >> bit & 1 != 0 else LUMA_ZERO
         block = bytes([value]) * BLOCK
         for y in range(BLOCK):
             start = y * width + bit * BLOCK
             frame[start : start + BLOCK] = block
 
 
-def _read_number(luma: bytes, stride: int) -> int:
+def _read_number(luma: bytes | bytearray, stride: int) -> int:
     number = 0
     for bit in range(BITS):
         # the center of the block, away from the blur of compression at its edges
@@ -118,8 +118,24 @@ def _read_number(luma: bytes, stride: int) -> int:
     return number
 
 
+def _video(media: object) -> webrtc.VideoFrame:
+    """The media a processor of a video track reads, as a video frame."""
+    if not isinstance(media, webrtc.VideoFrame):
+        msg = f'expected a video frame, not {media!r}'
+        raise TypeError(msg)
+    return media
+
+
+def _audio(media: object) -> webrtc.AudioData:
+    """The media a processor of an audio track reads, as audio data."""
+    if not isinstance(media, webrtc.AudioData):
+        msg = f'expected audio data, not {media!r}'
+        raise TypeError(msg)
+    return media
+
+
 @contextlib.asynccontextmanager
-async def _connection() -> AsyncIterator[tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]]:
+async def _connection() -> AsyncGenerator[tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection], None]:
     caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
     try:
         yield caller, callee
@@ -138,12 +154,16 @@ async def _remote_track(
     sender = caller.add_track(track)
     track_event = wait_for_event(callee, 'track', 30)
     await connect(caller, callee, 30)
-    if max_bitrate:
+    if max_bitrate is not None and max_bitrate != 0:
         parameters = sender.get_parameters()
         for encoding in parameters.encodings:
             encoding.max_bitrate = max_bitrate
         await sender.set_parameters(parameters)
-    return (await track_event).track
+    event = await track_event
+    if not isinstance(event, webrtc.RTCTrackEvent):
+        msg = f'expected a track event, not {event!r}'
+        raise TypeError(msg)
+    return event.track
 
 
 @dataclass
@@ -207,11 +227,15 @@ class VideoLoopback:
             processor = webrtc.MediaStreamTrackProcessor(
                 webrtc.MediaStreamTrackProcessorInit(remote, max_buffer_size=self.max_buffer_size)
             )
-            sampling = asyncio.ensure_future(run.sample_rss(self.rss_every)) if self.rss_every else None
+            sampling = (
+                asyncio.ensure_future(run.sample_rss(self.rss_every))
+                if self.rss_every is not None and self.rss_every != 0
+                else None
+            )
             lag = await run.phases.measure(
                 run.result, processor, write=lambda: run.write(generator), read=lambda: run.read(processor)
             )
-            if sampling:
+            if sampling is not None:
                 await sampling
             run.result.lag_p95_ms, run.result.lag_max_ms = lag.p95_ms, lag.max_ms
             generator.track.stop()
@@ -258,15 +282,16 @@ class _VideoRun:
     async def read(self, processor: webrtc.MediaStreamTrackProcessor) -> None:
         header = webrtc.VideoFrameCopyToOptions(rect=webrtc.DOMRectInit(x=0, y=0, width=BITS * BLOCK, height=BLOCK))
         loop = asyncio.get_running_loop()
-        async for frame in processor.readable:
+        async for media in processor.readable:
             now = loop.time()
+            frame = _video(media)
             luma = bytearray(frame.allocation_size(header))
             await frame.copy_to(luma, header)
             size = (frame.coded_width, frame.coded_height)
             frame.close()
             if self.phases.measuring.is_set():
                 self._count(size, _read_number(luma, BITS * BLOCK), now)
-            if self.options.consumer_delay:
+            if self.options.consumer_delay != 0:
                 await asyncio.sleep(self.options.consumer_delay)
             if self.phases.done.is_set():
                 break
@@ -342,7 +367,8 @@ async def audio_loopback(channels: int = 2, seconds: float = 60, warmup: float =
                 await asyncio.sleep(max(0.0, start + written / 100 - loop.time()))
 
         async def read() -> None:
-            async for audio in processor.readable:
+            async for media in processor.readable:
+                audio = _audio(media)
                 if phases.measuring.is_set():
                     result.received += 1
                     result.received_frames += audio.number_of_frames
@@ -372,10 +398,12 @@ class CopyResult:
 
 
 async def copy_costs(
-    sizes: Iterable[tuple[int, int]], formats: Sequence[str] = ('I420', 'RGBA', 'BGRA'), budget: float = 1.0
+    sizes: Iterable[tuple[int, int]],
+    formats: Sequence[webrtc.VideoPixelFormatValue] = ('I420', 'RGBA', 'BGRA'),
+    budget: float = 1.0,
 ) -> list[CopyResult]:
     """How long VideoFrame.copy_to takes: a copy of the planes, or a conversion to RGB."""
-    results = []
+    results: list[CopyResult] = []
     for width, height in sizes:
         chroma = (width // 2) * (height // 2)
         frame = webrtc.VideoFrame(

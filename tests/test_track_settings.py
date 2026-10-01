@@ -10,11 +10,19 @@
 from __future__ import annotations
 
 import pytest
+from typing_extensions import TypedDict
 
 import webrtc
 from tests.helpers import capture_mode, connect_track, run_isolated, wait_until
 
 C = webrtc.MediaTrackConstraints
+
+
+class VideoConstraints(TypedDict, total=False, closed=True):
+    """Constraints taken by both MediaTrackConstraints and get_user_media."""
+
+    width: int | webrtc.ConstrainULongRange
+    frame_rate: float | webrtc.ConstrainDoubleRange
 
 
 @pytest.mark.asyncio
@@ -26,12 +34,15 @@ async def test_camera_settings_and_capabilities() -> None:
     await wait_until(lambda: track.get_settings().frame_rate is not None, 'the frame rate')
     settings = track.get_settings()
     assert (settings.width, settings.height, settings.aspect_ratio) == (320, 240, 320 / 240)
+    assert settings.frame_rate is not None
     assert abs(settings.frame_rate - 30) < 5
     assert settings.device_id == 'synthetic-camera'
     assert settings.resize_mode == 'none'
 
     capabilities = track.get_capabilities()
     assert capabilities.width == webrtc.ULongRange(1, 4096)
+    assert capabilities.frame_rate is not None
+    assert capabilities.frame_rate.max is not None
     assert capabilities.frame_rate.max >= 60
     assert track.get_constraints() == webrtc.MediaTrackConstraints(width=320, height=240, frame_rate=30)
     track.stop()
@@ -58,7 +69,12 @@ async def test_apply_constraints_to_the_camera(video_stream: webrtc.MediaStream)
         C(width=160, height=webrtc.ConstrainULongRange(exact=120), frame_rate=webrtc.ConstrainDoubleRange(max=10))
     )
     await wait_until(lambda: track.get_settings().width == 160, 'the new size')
-    await wait_until(lambda: (track.get_settings().frame_rate or 0) < 12, 'the new frame rate')
+
+    def slowed() -> bool:
+        frame_rate = track.get_settings().frame_rate
+        return frame_rate is None or frame_rate < 12
+
+    await wait_until(slowed, 'the new frame rate')
     assert track.get_settings().height == 120
     assert track.getConstraints().height == webrtc.ConstrainULongRange(exact=120)
 
@@ -104,15 +120,15 @@ async def test_remote_track_settings(
 def test_content_hint(audio_stream: webrtc.MediaStream, video_stream: webrtc.MediaStream) -> None:
     """Hints of the kind of the track are kept, others are ignored."""
     video, audio = video_stream.get_tracks()[0], audio_stream.get_tracks()[0]
-    assert not video.content_hint
-    assert not audio.contentHint
+    assert video.content_hint == ''
+    assert audio.contentHint == ''
     video.content_hint = 'text'
     audio.content_hint = 'music'
     video.content_hint = 'speech'
     audio.content_hint = 'detail'
     assert (video.content_hint, audio.content_hint) == ('text', 'music')
     video.content_hint = ''
-    assert not video.content_hint
+    assert video.content_hint == ''
 
 
 @pytest.mark.asyncio
@@ -129,7 +145,7 @@ async def test_constraints_of_an_ended_track(video_stream: webrtc.MediaStream) -
     [{'frame_rate': float('nan')}, {'frame_rate': float('inf')}, {'width': '1'}],
 )
 async def test_constraints_have_their_webidl_types(
-    video_stream: webrtc.MediaStream, constraints: dict[str, object]
+    video_stream: webrtc.MediaStream, constraints: VideoConstraints
 ) -> None:
     """Unsigned longs and restricted doubles: other values are a TypeError."""
     with pytest.raises(TypeError):
@@ -148,7 +164,7 @@ async def test_constraints_have_their_webidl_types(
     ],
 )
 async def test_camera_stays_within_its_capabilities(
-    video_stream: webrtc.MediaStream, constraints: dict[str, object], expected: tuple[int, int, float]
+    video_stream: webrtc.MediaStream, constraints: VideoConstraints, expected: tuple[int, int, float]
 ) -> None:
     """Ideal values beyond the capabilities select the nearest ones."""
     track = video_stream.get_tracks()[0]

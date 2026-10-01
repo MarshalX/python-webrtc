@@ -72,7 +72,7 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         if self.kind == MediaType.video:
             _default_scale_resolution_down_by(parameters.encodings)
         # they expire when the current task (with the code it resumed) is over, never without a loop
-        TaskQueue.post_to_running(self._native_obj._expireParameters, parameters.transaction_id, after_ready=True)
+        _ = TaskQueue.post_to_running(self._native_obj._expireParameters, parameters.transaction_id, after_ready=True)
         return parameters
 
     async def set_parameters(
@@ -108,8 +108,8 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         # a copy (pybind returns one): changed, then set back
         encodings = last.encodings
         for native, encoding in zip(encodings, parameters.encodings):
-            encoding._for_kind(kind)._apply(native)
-        for native, key_frame in zip(encodings, key_frames or ()):
+            _ = encoding._for_kind(kind)._apply(native)
+        for native, key_frame in zip(encodings, key_frames if key_frames is not None else ()):
             native.requestKeyFrame = bool(key_frame)
         last.encodings = encodings
         last.degradationPreference = parameters.degradation_preference
@@ -155,14 +155,14 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         Args:
             *streams (:obj:`webrtc.MediaStream`): The streams, none to associate the track with no stream.
         """
-        ids = []
+        ids: list[str] = []
         for stream in streams:
             if stream.id not in ids:
                 ids.append(stream.id)
         self._native_obj.setStreams(ids)
 
     @staticmethod
-    def get_capabilities(kind: webrtc.MediaType) -> webrtc.RTCRtpCapabilities | None:
+    def get_capabilities(kind: webrtc.MediaType | webrtc.MediaTypeValue) -> webrtc.RTCRtpCapabilities | None:
         """Returns the codecs and header extensions senders of a kind support.
 
         Args:

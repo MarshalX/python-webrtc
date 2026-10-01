@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import fields
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from webrtc.utils.names import members
 
@@ -28,10 +28,10 @@ class Dictionary:
     _dictionaries: ClassVar[Mapping[str, type[Dictionary]]] = {}
 
     if TYPE_CHECKING:  # every subclass is a dataclass
-        __dataclass_fields__: ClassVar[dict[str, Field[Any]]]
+        __dataclass_fields__: ClassVar[dict[str, Field[object]]]
 
     @classmethod
-    def from_json(cls, value: Mapping[str, Any]) -> Self:
+    def from_json(cls, value: Mapping[str, object]) -> Self:
         """Creates the dictionary from its JSON form, like a message from the remote peer.
 
         Keys are the camelCase names of the specification or the snake_case ones, unknown keys are ignored, and

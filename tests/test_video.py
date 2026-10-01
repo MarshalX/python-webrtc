@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import functools
+
 import pytest
 
 import webrtc
@@ -31,18 +33,26 @@ def test_get_user_media_needs_audio_or_video() -> None:
 
 
 @pytest.mark.parametrize(
-    ('constraints', 'error'),
+    ('get_user_media', 'error'),
     [
-        ({'width': webrtc.ConstrainULongRange(exact=0)}, webrtc.OverconstrainedError),
-        ({'frame_rate': webrtc.ConstrainDoubleRange(max=0)}, webrtc.OverconstrainedError),
-        ({'width': webrtc.ConstrainULongRange(min=0, max=-1)}, TypeError),
+        (
+            functools.partial(webrtc.get_user_media, width=webrtc.ConstrainULongRange(exact=0)),
+            webrtc.OverconstrainedError,
+        ),
+        (
+            functools.partial(webrtc.get_user_media, frame_rate=webrtc.ConstrainDoubleRange(max=0)),
+            webrtc.OverconstrainedError,
+        ),
+        (functools.partial(webrtc.get_user_media, width=webrtc.ConstrainULongRange(min=0, max=-1)), TypeError),
     ],
     ids=['exact', 'max', 'negative'],
 )
-def test_get_user_media_constraint_beyond_the_camera(constraints: dict[str, object], error: type[Exception]) -> None:
+def test_get_user_media_constraint_beyond_the_camera(
+    get_user_media: functools.partial[webrtc.MediaStream], error: type[Exception]
+) -> None:
     """A required value the camera can't have is overconstrained, a negative size isn't an unsigned long."""
     with pytest.raises(error):
-        webrtc.get_user_media(audio=False, video=True, **constraints)
+        get_user_media(audio=False, video=True)
 
 
 def test_get_user_media_ideal_beyond_the_camera() -> None:
@@ -85,6 +95,7 @@ async def test_remote_video_track(
     track_event = wait_for_event(callee, 'track')
     await connect(caller, callee)
     event = await track_event
+    assert isinstance(event, webrtc.RTCTrackEvent)
 
     assert event.track.kind == webrtc.MediaType.video
     assert [s.id for s in event.streams] == [video_stream.id]

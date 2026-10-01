@@ -9,6 +9,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing_extensions import Self
+
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -38,7 +43,7 @@ class RTCRtpContributingSource(Dictionary):
     audio_level: float | None = None
 
     @classmethod
-    def _from_native(cls, native: tuple[bool, int, float, int, int | None]) -> RTCRtpContributingSource:
+    def _from_native(cls, native: tuple[bool, int, float, int, int | None]) -> Self:
         """A source from the native one: whether it's an SSRC, the source, timestamp, RTP timestamp and level."""
         _, source, timestamp, rtp_timestamp, level = native
         if level is not None:

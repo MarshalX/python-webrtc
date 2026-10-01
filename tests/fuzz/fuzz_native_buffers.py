@@ -46,7 +46,8 @@ def video(inp: Input) -> None:
     for _ in range(inp.small(4)):
         action = inp.small(2)
         if action == 0:
-            copies = [tuple(inp.unsigned(256) for _ in range(6)) for _ in range(inp.small(4))]
+            u = inp.unsigned
+            copies = [(u(256), u(256), u(256), u(256), u(256), u(256)) for _ in range(inp.small(4))]
             buffer.copyPlanes(inp.destination(inp.small(1 << 15)), copies)
         elif action == 1:
             buffer.convertTo(
@@ -81,7 +82,7 @@ def audio(inp: Input) -> None:
 
 def test_one_input(data: bytes) -> None:
     inp = Input(data)
-    with contextlib.suppress(EXPECTED):
+    with contextlib.suppress(*EXPECTED):
         video(inp) if inp.flag() else audio(inp)
 
 

@@ -24,7 +24,9 @@ async def send_audio(
     caller.add_track(stream.get_tracks()[0], stream)
     track_event = wait_for_event(callee, 'track')
     await connect(caller, callee)
-    remote = (await track_event).track
+    event = await track_event
+    assert isinstance(event, webrtc.RTCTrackEvent)
+    remote = event.track
     await wait_until_unmuted(remote)
     return remote
 
@@ -38,7 +40,7 @@ async def test_connection_stats(
 
     report = await caller.get_stats()
     assert isinstance(report, webrtc.RTCStatsReport)
-    assert report.of_type('peer-connection')
+    assert len(report.of_type('peer-connection')) > 0
     outbound = report.of_type('outbound-rtp')[0]
     assert outbound['kind'] == outbound.kind == 'audio'
     assert abs(outbound.timestamp - time.time() * 1000) < 60_000
@@ -52,8 +54,8 @@ async def test_sender_stats(
     await send_audio(caller, callee, audio_stream)
 
     sender_report = await caller.get_senders()[0].get_stats()
-    assert sender_report.of_type('outbound-rtp')
-    assert not sender_report.of_type('inbound-rtp')
+    assert len(sender_report.of_type('outbound-rtp')) > 0
+    assert len(sender_report.of_type('inbound-rtp')) == 0
     assert len(await caller.get_stats(audio_stream.get_tracks()[0])) == len(sender_report)
 
 
@@ -88,7 +90,7 @@ async def test_closed_connection_has_stats(
     """A closed connection still has stats."""
     await send_audio(caller, callee, audio_stream)
     caller.close()
-    assert (await caller.get_stats()).of_type('peer-connection')
+    assert len((await caller.get_stats()).of_type('peer-connection')) > 0
 
 
 @pytest.mark.asyncio
@@ -101,6 +103,10 @@ async def test_remote_audio_is_played_out(
 
     async def decoded() -> bool:
         inbound = (await receiver.get_stats()).of_type('inbound-rtp')
-        return bool(inbound) and inbound[0].get('totalSamplesReceived', 0) > 0
+        if len(inbound) == 0:
+            return False
+        received = inbound[0].get('totalSamplesReceived', 0)
+        assert isinstance(received, int)
+        return received > 0
 
     await wait_until(decoded, 'decoded remote audio')

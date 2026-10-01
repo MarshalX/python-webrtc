@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import pathlib
 import sys
 
 import atheris
@@ -18,6 +19,9 @@ with atheris.instrument_imports():
     from inputs import Buffer, Input
 
     import webrtc
+
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
+from tests.helpers import mistyped
 
 FORMATS = list(webrtc.VideoPixelFormat)
 # what the specification lets these raise, and BufferError for read-only buffers; anything else is a bug
@@ -29,7 +33,7 @@ loop = asyncio.new_event_loop()
 async def _copy_to(
     frame: webrtc.VideoFrame, destination: Buffer, options: webrtc.VideoFrameCopyToOptions | None
 ) -> None:
-    await frame.copy_to(destination, options)
+    await frame.copy_to(mistyped(destination), options)
 
 
 def copy_to(frame: webrtc.VideoFrame, destination: Buffer, options: webrtc.VideoFrameCopyToOptions | None) -> None:
@@ -41,7 +45,7 @@ def rect(inp: Input) -> webrtc.DOMRectInit:
 
 
 def layout(inp: Input) -> list[webrtc.PlaneLayout]:
-    return [webrtc.PlaneLayout(inp.integer(4096), inp.integer(256)) for _ in range(inp.small(4))]
+    return [webrtc.PlaneLayout(mistyped(inp.integer(4096)), mistyped(inp.integer(256))) for _ in range(inp.small(4))]
 
 
 def copy_options(inp: Input) -> webrtc.VideoFrameCopyToOptions:
@@ -63,7 +67,7 @@ def frame_of_frame(inp: Input, frame: webrtc.VideoFrame) -> webrtc.VideoFrame:
         init.rotation = inp.number(360)
         init.flip = inp.flag()
     if inp.flag():
-        init.display_width, init.display_height = inp.integer(), inp.integer()
+        init.display_width, init.display_height = mistyped(inp.integer()), mistyped(inp.integer())
     return webrtc.VideoFrame(frame, init)
 
 
@@ -88,12 +92,12 @@ def check_identity(format: webrtc.VideoPixelFormat, size: tuple[int, int], data:
     """A packed frame copied out as it is gives the same bytes."""
     width, height = size
     init = webrtc.VideoFrameBufferInit(format=format, coded_width=width, coded_height=height, timestamp=0)
-    size = webrtc.VideoFrame(bytes(1 << 16), init).allocation_size() if width * height <= 1024 else 0
-    if not size:
+    allocation = webrtc.VideoFrame(bytes(1 << 16), init).allocation_size() if width * height <= 1024 else 0
+    if allocation == 0:
         return
-    packed = bytes(data)[:size] + bytes(max(0, size - len(data)))
+    packed = bytes(data)[:allocation] + bytes(max(0, allocation - len(data)))
     with webrtc.VideoFrame(packed, init) as frame:
-        out = bytearray(size)
+        out = bytearray(allocation)
         copy_to(frame, out, None)
         assert bytes(out) == packed, f'{format} {width}x{height} copied out differently'
 
@@ -106,7 +110,9 @@ def test_one_input(data: bytes) -> None:
         check_identity(format, (width, height), inp.buffer(width * height * 8))
         return
     width, height = inp.integer(), inp.integer()
-    init = webrtc.VideoFrameBufferInit(format=format, coded_width=width, coded_height=height, timestamp=inp.integer())
+    init = webrtc.VideoFrameBufferInit(
+        format=format, coded_width=mistyped(width), coded_height=mistyped(height), timestamp=mistyped(inp.integer())
+    )
     if inp.flag():
         init.layout = layout(inp)
     if inp.flag():
@@ -114,7 +120,7 @@ def test_one_input(data: bytes) -> None:
     if inp.flag():
         init.rotation = inp.number(360)
     if inp.flag():
-        init.display_width, init.display_height = inp.integer(), inp.integer()
+        init.display_width, init.display_height = mistyped(inp.integer()), mistyped(inp.integer())
     try:
         frame = webrtc.VideoFrame(inp.buffer(inp.small(1 << 15)), init)
         exercise(inp, frame)

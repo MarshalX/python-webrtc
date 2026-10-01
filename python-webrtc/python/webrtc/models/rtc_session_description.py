@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     import webrtc
 
 
-class RTCSessionDescription(WebRTCObject):
+class RTCSessionDescription(WebRTCObject[wrtc.RTCSessionDescription]):
     """One end of a connection or potential connection and how it's configured.
 
     Each :obj:`webrtc.RTCSessionDescription` consists of
@@ -51,11 +51,11 @@ class RTCSessionDescription(WebRTCObject):
 
     def __init__(
         self,
-        type: webrtc.RTCSdpType | webrtc.RTCSessionDescriptionInit,
+        type: webrtc.RTCSdpType | webrtc.RTCSdpTypeValue | webrtc.RTCSessionDescriptionInit,
         sdp: str = '',
     ) -> None:
         init = type if isinstance(type, RTCSessionDescriptionInit) else RTCSessionDescriptionInit(type, sdp)
-        super().__init__(self._class(init._to_native()))
+        super().__init__(wrtc.RTCSessionDescription(init._to_native()))
 
     def to_json(self) -> dict[str, str]:
         """The description as a JSON-serializable dictionary, to send to the remote peer.

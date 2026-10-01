@@ -1512,6 +1512,9 @@ wheels = [
 name = "wrtc"
 version = "0.0.0.dev10"
 source = { editable = "." }
+dependencies = [
+    { name = "typing-extensions" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1539,6 +1542,7 @@ wpt = [
 ]
 
 [package.metadata]
+requires-dist = [{ name = "typing-extensions", specifier = ">=4.10" }]
 
 [package.metadata.requires-dev]
 dev = [

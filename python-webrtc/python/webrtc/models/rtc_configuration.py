@@ -31,6 +31,13 @@ from webrtc.utils.names import Alias, alias
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from webrtc.enums import (
+        RTCBundlePolicyValue,
+        RTCIceTransportPolicyValue,
+        RTCRtcpMuxPolicyValue,
+        RTCRtpHeaderEncryptionPolicyValue,
+    )
+
 # the longest TURN username, as browsers limit it
 _MAX_USERNAME_LENGTH = 509
 _MAX_PORT = 65535
@@ -51,22 +58,24 @@ def _check_url(url: str) -> str:
         webrtc.InvalidSyntaxError: If the URL doesn't match RFC 7064 or RFC 7065.
     """
     match = _URL.fullmatch(url)
-    if not match or match['scheme'] not in {'stun', 'stuns', 'turn', 'turns'}:
+    if match is None or match['scheme'] not in {'stun', 'stuns', 'turn', 'turns'}:
         msg = f'{url!r} is not a valid STUN or TURN URL'
         raise InvalidSyntaxError(msg)
 
-    host, port, transport = match['host'], match['port'], match['transport']
+    host: str = match['host']
+    port: str | None = match['port']
+    transport: str | None = match['transport']
     if host.startswith('['):
         try:
-            ipaddress.IPv6Address(host[1:-1])
+            _ = ipaddress.IPv6Address(host[1:-1])
         except ValueError:
             msg = f'{url!r} has an invalid IPv6 address'
             raise InvalidSyntaxError(msg) from None
-    elif not _REG_NAME.fullmatch(host):
+    elif _REG_NAME.fullmatch(host) is None:
         msg = f'{url!r} has an invalid host'
         raise InvalidSyntaxError(msg)
 
-    if port is not None and (not port or int(port) > _MAX_PORT):
+    if port is not None and (port == '' or int(port) > _MAX_PORT):
         msg = f'{url!r} has an invalid port'
         raise InvalidSyntaxError(msg)
     if transport is not None and (match['scheme'].startswith('stun') or transport not in {'udp', 'tcp'}):
@@ -121,7 +130,7 @@ class RTCIceServer(Dictionary):
 
     def _to_native(self) -> wrtc.IceServerInit:
         urls = [self.urls] if isinstance(self.urls, str) else list(self.urls)
-        if not urls:
+        if len(urls) == 0:
             msg = 'urls of an ICE server must not be empty'
             raise InvalidSyntaxError(msg)
 
@@ -137,7 +146,7 @@ class RTCIceServer(Dictionary):
                     raise InvalidAccessError(msg)
                 msg = 'libwebrtc does not support OAuth credentials of TURN servers'
                 raise NotSupportedError(msg)
-            if self.username is None or not self.credential:
+            if self.username is None or self.credential is None or self.credential == '':
                 msg = 'a TURN server needs a username and a credential'
                 raise InvalidAccessError(msg)
             if len(self.username) > _MAX_USERNAME_LENGTH:
@@ -147,8 +156,14 @@ class RTCIceServer(Dictionary):
         native = wrtc.IceServerInit()
         native.urls = urls
         native.username = self.username
-        native.credential = self.credential
+        native.credential = self._password()
         return native
+
+    def _password(self) -> str | None:
+        if isinstance(self.credential, RTCOAuthCredential):
+            msg = 'the credential of a server other than an OAuth TURN one is a str'
+            raise TypeError(msg)
+        return self.credential
 
     #: Alias for :attr:`credential_type`
     credentialType: ClassVar[Alias[str]] = alias('credential_type')
@@ -181,14 +196,16 @@ class RTCConfiguration(Dictionary):
     """
 
     ice_servers: list[RTCIceServer] = field(default_factory=list)
-    ice_transport_policy: RTCIceTransportPolicy = RTCIceTransportPolicy.all
-    bundle_policy: RTCBundlePolicy = RTCBundlePolicy.balanced
-    rtcp_mux_policy: RTCRtcpMuxPolicy = RTCRtcpMuxPolicy.require
+    ice_transport_policy: RTCIceTransportPolicy | RTCIceTransportPolicyValue = RTCIceTransportPolicy.all
+    bundle_policy: RTCBundlePolicy | RTCBundlePolicyValue = RTCBundlePolicy.balanced
+    rtcp_mux_policy: RTCRtcpMuxPolicy | RTCRtcpMuxPolicyValue = RTCRtcpMuxPolicy.require
     ice_candidate_pool_size: int = 0
     port_range: tuple[int, int] | None = None
     certificates: list[RTCCertificate] | None = None
     always_negotiate_data_channels: bool = False
-    rtp_header_encryption_policy: RTCRtpHeaderEncryptionPolicy = RTCRtpHeaderEncryptionPolicy.negotiate
+    rtp_header_encryption_policy: RTCRtpHeaderEncryptionPolicy | RTCRtpHeaderEncryptionPolicyValue = (
+        RTCRtpHeaderEncryptionPolicy.negotiate
+    )
 
     _dictionaries: ClassVar = {'ice_servers': RTCIceServer}
 
@@ -246,8 +263,8 @@ class RTCConfiguration(Dictionary):
             bundle_policy=native.bundlePolicy,
             rtcp_mux_policy=native.rtcpMuxPolicy,
             ice_candidate_pool_size=native.iceCandidatePoolSize,
-            port_range=tuple(native.portRange) if native.portRange else None,
-            certificates=RTCCertificate._wrap_many(native.certificates) if native.certificates else [],
+            port_range=tuple(native.portRange) if native.portRange is not None else None,
+            certificates=RTCCertificate._wrap_many(native.certificates) if native.certificates is not None else [],
             always_negotiate_data_channels=native.alwaysNegotiateDataChannels,
             rtp_header_encryption_policy=native.rtpHeaderEncryptionPolicy,
         )
@@ -255,11 +272,13 @@ class RTCConfiguration(Dictionary):
     #: Alias for :attr:`ice_servers`
     iceServers: ClassVar[Alias[list[RTCIceServer]]] = alias('ice_servers')
     #: Alias for :attr:`ice_transport_policy`
-    iceTransportPolicy: ClassVar[Alias[RTCIceTransportPolicy]] = alias('ice_transport_policy')
+    iceTransportPolicy: ClassVar[Alias[RTCIceTransportPolicy | RTCIceTransportPolicyValue]] = alias(
+        'ice_transport_policy'
+    )
     #: Alias for :attr:`bundle_policy`
-    bundlePolicy: ClassVar[Alias[RTCBundlePolicy]] = alias('bundle_policy')
+    bundlePolicy: ClassVar[Alias[RTCBundlePolicy | RTCBundlePolicyValue]] = alias('bundle_policy')
     #: Alias for :attr:`rtcp_mux_policy`
-    rtcpMuxPolicy: ClassVar[Alias[RTCRtcpMuxPolicy]] = alias('rtcp_mux_policy')
+    rtcpMuxPolicy: ClassVar[Alias[RTCRtcpMuxPolicy | RTCRtcpMuxPolicyValue]] = alias('rtcp_mux_policy')
     #: Alias for :attr:`ice_candidate_pool_size`
     iceCandidatePoolSize: ClassVar[Alias[int]] = alias('ice_candidate_pool_size')
     #: Alias for :attr:`port_range`
@@ -267,4 +286,6 @@ class RTCConfiguration(Dictionary):
     #: Alias for :attr:`always_negotiate_data_channels`
     alwaysNegotiateDataChannels: ClassVar[Alias[bool]] = alias('always_negotiate_data_channels')
     #: Alias for :attr:`rtp_header_encryption_policy`
-    rtpHeaderEncryptionPolicy: ClassVar[Alias[RTCRtpHeaderEncryptionPolicy]] = alias('rtp_header_encryption_policy')
+    rtpHeaderEncryptionPolicy: ClassVar[Alias[RTCRtpHeaderEncryptionPolicy | RTCRtpHeaderEncryptionPolicyValue]] = (
+        alias('rtp_header_encryption_policy')
+    )

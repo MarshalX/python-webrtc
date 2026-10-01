@@ -28,7 +28,7 @@ VIEWS: list[Callable[[bytes], Buffer]] = [
     bytearray,
     lambda data: memoryview(bytearray(data * 2))[::2],
     lambda data: memoryview(bytearray(data))[::-1],
-    lambda data: memoryview(bytearray(data)).cast('B', [len(data), 1]) if data else memoryview(bytearray()),
+    lambda data: memoryview(bytearray(data)).cast('B', [len(data), 1]) if len(data) > 0 else memoryview(bytearray()),
 ]
 
 

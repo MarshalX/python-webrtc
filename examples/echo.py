@@ -40,14 +40,22 @@ async def grayscale(frame: webrtc.VideoFrame, controller: webrtc.TransformStream
     frame.close()
 
 
+def video_frame(media: object) -> webrtc.VideoFrame:
+    """The media a processor of a video track reads, as a video frame."""
+    if not isinstance(media, webrtc.VideoFrame):
+        msg = f'expected a video frame, not {media!r}'
+        raise TypeError(msg)
+    return media
+
+
 async def watch(track: webrtc.MediaStreamTrack) -> None:
     """Reads the echoed frames for a while, then prints whether the last one is gray."""
     reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
     loop = asyncio.get_running_loop()
     end = loop.time() + SECONDS
-    frames = 0
+    frames, rgba = 0, bytearray()
     while loop.time() < end:
-        frame = (await reader.read()).value
+        frame = video_frame((await reader.read()).value)
         options = webrtc.VideoFrameCopyToOptions(format='RGBA')
         rgba = bytearray(frame.allocation_size(options))
         await frame.copy_to(rgba, options)
@@ -64,7 +72,7 @@ def trickle(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) 
         async def on_candidate(
             event: webrtc.RTCPeerConnectionIceEvent, other: webrtc.RTCPeerConnection = other
         ) -> None:
-            if event.candidate:
+            if event.candidate is not None:
                 await other.add_ice_candidate(event.candidate)
 
         pc.on('icecandidate', on_candidate)

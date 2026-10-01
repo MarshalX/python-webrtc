@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Generic, TypeVar
+from typing import TYPE_CHECKING, Callable, Generic, TypeVar
 
 from webrtc.utils.events import EventTarget
 
@@ -29,13 +29,19 @@ class WebRTCObject(Generic[_NativeT]):
     """
 
     #: The native class, created with no arguments when no native object is given
-    _class: ClassVar[Callable[[], Any] | None] = None
+    _class: Callable[..., _NativeT] | None = None
+    __obj: _NativeT
 
     def __init__(self, native_obj: _NativeT | None = None) -> None:
         self._init_native(native_obj)
 
     def _init_native(self, native_obj: _NativeT | None) -> None:
-        self.__obj = native_obj or self._class()
+        if native_obj is None:
+            if self._class is None:
+                msg = f'{type(self).__name__} has no native class'
+                raise TypeError(msg)
+            native_obj = self._class()
+        self.__obj = native_obj
 
     @property
     def _native_obj(self) -> _NativeT:
@@ -64,7 +70,8 @@ class WebRTCObject(Generic[_NativeT]):
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, WebRTCObject):
-            return self._native_obj is other._native_obj
+            other_obj: object = other._native_obj
+            return self._native_obj is other_obj
         return NotImplemented
 
     def __hash__(self) -> int:

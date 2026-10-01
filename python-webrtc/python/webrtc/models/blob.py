@@ -16,6 +16,7 @@ import asyncio
 from typing import TYPE_CHECKING, TypeVar, Union
 
 if TYPE_CHECKING:
+    import builtins
     from collections.abc import Iterable
 
 BlobPart = Union[str, bytes, bytearray, memoryview, 'Blob']
@@ -41,8 +42,8 @@ class Blob:
     """
 
     def __init__(self, parts: Iterable[BlobPart] | None = None, type: str = '') -> None:
-        chunks = []
-        for part in parts or ():
+        chunks: list[bytes] = []
+        for part in parts if parts is not None else ():
             if isinstance(part, Blob):
                 chunks.append(part._bytes)
             elif isinstance(part, str):
@@ -89,7 +90,8 @@ class Blob:
         """Returns a future of the bytes decoded as UTF-8."""
         return _done(self._bytes.decode('utf-8', 'replace'))
 
-    def __bytes__(self) -> bytes:
+    # the bytes() method hides the builtin in the class
+    def __bytes__(self) -> builtins.bytes:
         return self._bytes
 
     def __len__(self) -> int:

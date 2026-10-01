@@ -21,12 +21,24 @@ import functools
 import inspect
 import re
 import textwrap
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from typing_extensions import TypeGuard
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
-    from tests.idl.spec import Definition, Node, Spec
+    from tests.idl.spec import (
+        Argument,
+        Attribute,
+        Constructor,
+        Definition,
+        Field,
+        IdlType,
+        Member,
+        Operation,
+        Spec,
+    )
 
 _BOUNDARY = re.compile(r'(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])')
 _AWAITABLE = re.compile(r'\b(Future|Awaitable|Coroutine|Task)\b')
@@ -78,19 +90,25 @@ def _text(annotation: object) -> str | None:
     return annotation if isinstance(annotation, str) else getattr(annotation, '__name__', str(annotation))
 
 
-def _is_async(function: Callable[..., Any]) -> bool:
+def _mentions(pattern: str | re.Pattern[str], annotation: object) -> bool:
+    """Whether the text of an annotation matches a pattern."""
+    text = _text(annotation)
+    return re.search(pattern, text if text is not None else '') is not None
+
+
+def _is_async(function: Callable[..., object]) -> bool:
     """Whether a function is a coroutine function or returns an awaitable, like a future."""
     if inspect.iscoroutinefunction(function):
         return True
-    return _AWAITABLE.search(_text(inspect.signature(function).return_annotation) or '') is not None
+    return _mentions(_AWAITABLE, inspect.signature(function).return_annotation)
 
 
-def _type_names(idl_type: Node) -> str:
+def _type_names(idl_type: IdlType) -> str:
     inner = idl_type['idlType']
     return inner if isinstance(inner, str) else ' '.join(_type_names(item) for item in inner)
 
 
-def _is_handler(member: Node) -> bool:
+def _is_handler(member: Member) -> TypeGuard[Attribute]:
     """Whether a member is an event handler attribute, which the package replaces with ``on(name)``."""
     return (
         member['type'] == 'attribute'
@@ -111,7 +129,7 @@ class _Types:
     def __init__(self, spec: Spec) -> None:
         self.spec = spec
 
-    def lacks(self, label: str, idl_type: Node, annotation: object) -> list[str]:
+    def lacks(self, label: str, idl_type: IdlType, annotation: object) -> list[str]:
         """Checks that an annotation names the definitions the IDL type refers to."""
         text = _text(annotation)
         if text is None:
@@ -121,7 +139,7 @@ class _Types:
             return re.search(rf'\b{name}\b', text) is not None
 
         missing = sorted(name for name in self.spec.named_types(idl_type, named) if not named(name))
-        return [f'{label}: type lacks {", ".join(missing)}'] if missing else []
+        return [f'{label}: type lacks {", ".join(missing)}'] if len(missing) > 0 else []
 
 
 class _Arguments(_Types):
@@ -135,20 +153,21 @@ class _Arguments(_Types):
         self.order: list[int] = []
         self.found: list[str] = []
 
-    def check(self, arguments: list[Node]) -> list[str]:
+    def check(self, arguments: list[Argument]) -> list[str]:
         for index, argument in enumerate(arguments):
             self.argument(index, argument)
         if self.order != sorted(self.order):
             self.found.append(f'{self.label}: arguments out of order')
         for parameter in self.unused.values():
-            prefix = {_P.VAR_POSITIONAL: '*', _P.VAR_KEYWORD: '**'}.get(parameter.kind, '')
+            prefix = '*' if parameter.kind is _P.VAR_POSITIONAL else '**' if parameter.kind is _P.VAR_KEYWORD else ''
             self.found.append(f'{self.label}({prefix}{parameter.name}): extra argument')
         return self.found
 
     def take(self, name: str) -> inspect.Parameter | None:
-        return self.unused.pop(snake_case(name), None) or self.unused.pop(name, None)
+        parameter = self.unused.pop(snake_case(name), None)
+        return parameter if parameter is not None else self.unused.pop(name, None)
 
-    def argument(self, index: int, argument: Node) -> None:
+    def argument(self, index: int, argument: Argument) -> None:
         path = f'{self.label}({argument["name"]})'
         parameter = self.take(argument['name'])
         if parameter is None:
@@ -182,12 +201,12 @@ class _Arguments(_Types):
             return None
         return self.unused.pop(parameter.name)
 
-    def flattened(self, argument: Node) -> list[Node] | None:
+    def flattened(self, argument: Argument) -> list[Field] | None:
         """The members of a dictionary argument, if the signature takes them as parameters of their own."""
         dictionary = self.spec.dictionary(argument['idlType'])
         if dictionary is None:
             return None
-        members = self.spec.members(dictionary.name)
+        members = self.spec.fields(dictionary.name)
         matched = [
             self.unused[name]
             for member in members
@@ -195,20 +214,18 @@ class _Arguments(_Types):
         ]
         # a lone positional parameter named like a member but annotated as a dictionary is the argument, renamed
         lone = len(matched) == 1 and matched[0].kind is not _P.KEYWORD_ONLY
-        if not matched or (
-            lone and re.search(rf'\b(dict|Mapping|{dictionary.name})\b', _text(matched[0].annotation) or '')
-        ):
+        if len(matched) == 0 or (lone and _mentions(rf'\b(dict|Mapping|{dictionary.name})\b', matched[0].annotation)):
             return None
         return members
 
-    def members(self, prefix: str, members: list[Node]) -> None:
+    def members(self, prefix: str, members: list[Field]) -> None:
         for member in members:
             path = f'{prefix}.{member["name"]})'
             parameter = self.take(member['name'])
             if parameter is None:
                 self.found.append(f'{path}: missing member')
                 continue
-            has_default = parameter.default is not _P.empty
+            has_default: bool = parameter.default is not _P.empty
             self.found += _default(path, required=member['required'], has_default=has_default)
             self.found += self.lacks(path, member['idlType'], parameter.annotation)
 
@@ -263,10 +280,10 @@ class _Class(_Types):
         ]
 
     def check_dictionary(self) -> list[str]:
-        fields = (
+        fields: dict[str, dataclasses.Field[object]] = (
             {field.name: field for field in dataclasses.fields(self.cls)} if dataclasses.is_dataclass(self.cls) else {}
         )
-        for member in self.spec.members(self.definition.name):
+        for member in self.spec.fields(self.definition.name):
             name = self.resolve(member['name'], 'member')
             if name is None:
                 continue
@@ -281,33 +298,34 @@ class _Class(_Types):
 
     def check_interface(self) -> list[str]:
         members = self.spec.members(self.definition.name)
-        operations: dict[str, list[Node]] = {}
+        operations: dict[str, list[Operation]] = {}
         for member in members:
-            if member['type'] == 'operation' and member['name']:
+            if member['type'] == 'operation' and member['name'] != '':
                 operations.setdefault(member['name'], []).append(member)
             else:
                 self.check_member(member)
 
         self.check_events({member['name'][2:] for member in members if _is_handler(member)})
         constructors = [member for member in members if member['type'] == 'constructor']
-        if constructors:
+        if len(constructors) > 0:
             self.check_overloads('constructor', constructors, lambda: inspect.signature(self.cls))
         for name, overloads in operations.items():
             self.check_operation(name, overloads)
         return self.found + self.extras()
 
-    def check_member(self, member: Node) -> None:
-        kind, name = member['type'], member.get('name')
+    def check_member(self, member: Member) -> None:
+        kind = member['type']
         if kind in _PROTOCOLS:
             self.expected |= set(_PROTOCOLS[kind])
             self.found += [f'{kind}: missing {method}' for method in _PROTOCOLS[kind] if not hasattr(self.cls, method)]
-        elif kind == 'const':
+        elif member['type'] == 'const':
+            name = member['name']
             self.expected.add(name)
             if name not in self.names:
                 self.found.append(f'{name}: missing constant')
         elif _is_handler(member):
-            self.expected |= {name, snake_case(name)}
-        elif kind == 'attribute':
+            self.expected |= {member['name'], snake_case(member['name'])}
+        elif member['type'] == 'attribute':
             self.check_attribute(member)
 
     def check_events(self, events: set[str]) -> None:
@@ -315,7 +333,7 @@ class _Class(_Types):
         self.found += [f'on{event}: missing event' for event in events - actual]
         self.found += [f'on{event}: extra event' for event in actual - events]
 
-    def check_attribute(self, member: Node) -> None:
+    def check_attribute(self, member: Attribute) -> None:
         idl_name = member['name']
         name = self.resolve(idl_name, 'attribute')
         if name is None:
@@ -330,10 +348,11 @@ class _Class(_Types):
                 self.found.append(f'{idl_name}: should be read-only')
             elif not member['readonly'] and attribute.fset is None:
                 self.found.append(f'{idl_name}: should be writable')
+            assert attribute.fget is not None  # a property without a getter has no type
             annotation = inspect.get_annotations(attribute.fget).get('return', _P.empty)
         self.found += self.lacks(idl_name, member['idlType'], annotation)
 
-    def check_operation(self, idl_name: str, overloads: list[Node]) -> None:
+    def check_operation(self, idl_name: str, overloads: list[Operation]) -> None:
         name = self.resolve(idl_name, 'method')
         if name is None:
             return
@@ -359,7 +378,9 @@ class _Class(_Types):
         self.check_overloads(idl_name, overloads, signature)
         self.found += self.lacks(f'{idl_name}()', overloads[0]['idlType'], signature().return_annotation)
 
-    def check_overloads(self, label: str, overloads: list[Node], signature: Callable[[], inspect.Signature]) -> None:
+    def check_overloads(
+        self, label: str, overloads: Sequence[Operation | Constructor], signature: Callable[[], inspect.Signature]
+    ) -> None:
         """Checks the arguments against the overload the signature matches best."""
         try:
             parameters = list(signature().parameters.values())
@@ -382,9 +403,9 @@ def _differences(spec: Spec, definition: Definition, module: object) -> list[str
 
 def compare(spec: Spec, module: object) -> dict[str, list[str]]:
     """The differences of every definition that has some, by the name of the definition."""
-    differences = {}
+    differences: dict[str, list[str]] = {}
     for name, definition in spec.definitions.items():
         found = sorted(set(_differences(spec, definition, module)))
-        if found:
+        if len(found) > 0:
             differences[name] = found
     return differences

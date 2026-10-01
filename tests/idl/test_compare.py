@@ -89,14 +89,15 @@ class Thing:
 
     def send_dtmf(self, tones: str) -> None: ...
 
-    def create(self) -> Thing: ...
+    def create(self) -> Thing:
+        raise NotImplementedError
 
 
 Thing.sharedName = Thing.shared_name
 Thing.sendDTMF = Thing.send_dtmf
 
 
-class Report(UserDict):
+class Report(UserDict[str, object]):
     pass
 
 
@@ -161,6 +162,7 @@ def test_maplike() -> None:
 
 def test_future_counts_as_async() -> None:
     class Thing:
-        def start(self) -> asyncio.Future[None]: ...
+        def start(self) -> asyncio.Future[None]:
+            raise NotImplementedError
 
     assert 'start: should be async' not in differences(Thing=Thing)['Thing']

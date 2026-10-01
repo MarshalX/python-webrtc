@@ -33,13 +33,17 @@ async def record(track: webrtc.MediaStreamTrack, file: BinaryIO) -> None:
         async for media in webrtc.MediaStreamTrackProcessor(
             webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=30)
         ).readable:
-            if track.kind == 'audio':
+            # audio data for an audio track, video frames for a video one
+            if isinstance(media, webrtc.AudioData):
                 options = webrtc.AudioDataCopyToOptions(plane_index=0)
                 data = bytearray(media.allocation_size(options))
                 media.copy_to(data, options)
-            else:
+            elif isinstance(media, webrtc.VideoFrame):
                 data = bytearray(media.allocation_size())
                 await media.copy_to(data)
+            else:
+                msg = f'unexpected media: {media!r}'
+                raise TypeError(msg)
             media.close()
             file.write(data)
             frames += 1
@@ -53,7 +57,7 @@ def trickle(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) 
         async def on_candidate(
             event: webrtc.RTCPeerConnectionIceEvent, other: webrtc.RTCPeerConnection = other
         ) -> None:
-            if event.candidate:
+            if event.candidate is not None:
                 await other.add_ice_candidate(event.candidate)
 
         pc.on('icecandidate', on_candidate)

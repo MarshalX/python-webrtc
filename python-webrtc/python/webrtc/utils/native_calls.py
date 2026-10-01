@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Callable, TypeVar
+from typing import TYPE_CHECKING, Callable, TypeVar, overload
 
 from webrtc.utils.task_queue import TaskQueue
 
@@ -20,15 +20,29 @@ if TYPE_CHECKING:
     import wrtc
 
     _P = ParamSpec('_P')
+    _OnFailure = Callable[[wrtc.RTCCallbackException], None]
 
 _T = TypeVar('_T')
 
 
+@overload
 async def call_native(
-    method: Callable[Concatenate[Callable[[_T], None], Callable[[wrtc.RTCCallbackException], None], _P], None],
+    method: Callable[Concatenate[Callable[[], None], _OnFailure, _P], None], *args: _P.args, **kwargs: _P.kwargs
+) -> None: ...
+
+
+@overload
+async def call_native(
+    method: Callable[Concatenate[Callable[[_T], None], _OnFailure, _P], None], *args: _P.args, **kwargs: _P.kwargs
+) -> _T: ...
+
+
+async def call_native(
+    method: Callable[Concatenate[Callable[[], None], _OnFailure, _P], None]
+    | Callable[Concatenate[Callable[[_T], None], _OnFailure, _P], None],
     *args: _P.args,
     **kwargs: _P.kwargs,
-) -> _T:
+) -> _T | None:
     """Calls a native method taking success and failure callbacks, called from a libwebrtc thread, and awaits them.
 
     The result goes through the task queue of the loop, so the code awaiting it runs after the handlers of the events
@@ -46,7 +60,7 @@ async def call_native(
         The error passed to ``on_failure``, as a Python exception.
     """
     loop = asyncio.get_running_loop()
-    future = loop.create_future()
+    future: asyncio.Future[_T | None] = loop.create_future()
 
     def settle(result: _T | None, error: wrtc.RTCCallbackException | None) -> None:
         # the caller may have been canceled meanwhile

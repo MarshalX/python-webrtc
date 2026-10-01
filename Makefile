@@ -1,4 +1,4 @@
-.PHONY: dev test asan tsan fuzz lint format format-check tidy stub wheels doc clean
+.PHONY: dev test asan tsan fuzz lint typecheck format format-check tidy stub wheels doc clean
 
 # pinned to the clang-tidy of .github/scripts/tidy.sh
 CLANG_FORMAT := uvx clang-format==22.1.8
@@ -30,6 +30,9 @@ lint: format-check
 	uvx ruff check
 	uvx ruff format --check
 
+typecheck:
+	uvx pyrefly check
+
 format:
 	uvx ruff check --fix
 	uvx ruff format
@@ -45,6 +48,8 @@ tidy:
 stub:
 	uv run --no-sync pybind11-stubgen wrtc -o build/stubs
 	cp build/stubs/wrtc.pyi stubs/wrtc/__init__.pyi
+	# collections.abc.Buffer is 3.12+
+	perl -pi -e 's/collections\.abc\.Buffer/typing_extensions.Buffer/g; s/^import typing$$/import typing\nimport typing_extensions/' stubs/wrtc/__init__.pyi
 
 # wheels for the current platform, exactly as CI builds them
 wheels:

@@ -23,6 +23,10 @@ _CANDIDATE_TYPES = frozenset({'local-candidate', 'remote-candidate'})
 StatsValue = Union[str, int, float, bool, None, list['StatsValue'], dict[str, 'StatsValue']]
 
 
+def _is_empty(value: StatsValue) -> bool:
+    return value is None or value == ''
+
+
 class RTCStats(dict[str, StatsValue]):
     """Stats of one object, like an outbound RTP stream.
 
@@ -44,20 +48,31 @@ class RTCStats(dict[str, StatsValue]):
             msg = f'{type(self).__name__} of type {self.get("type")!r} has no {name!r}'
             raise AttributeError(msg) from None
 
+    def _string(self, key: str) -> str:
+        value = self[key]
+        if not isinstance(value, str):
+            msg = f'{key} of stats is a {type(value).__name__}, not a str'
+            raise TypeError(msg)
+        return value
+
     @property
     def id(self) -> str:
         """:obj:`str`: Identifies the stats in its report."""
-        return self['id']
+        return self._string('id')
 
     @property
     def type(self) -> str:
         """:obj:`str`: The type of the stats, like ``'outbound-rtp'``."""
-        return self['type']
+        return self._string('type')
 
     @property
     def timestamp(self) -> float:
         """:obj:`float`: When the stats were collected, in milliseconds since the epoch."""
-        return self['timestamp']
+        value = self['timestamp']
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            msg = f'timestamp of stats is a {type(value).__name__}, not a number'
+            raise TypeError(msg)
+        return value
 
 
 class RTCStatsReport(Mapping[str, RTCStats]):
@@ -74,20 +89,21 @@ class RTCStatsReport(Mapping[str, RTCStats]):
         """The report from the JSON libwebrtc serializes it to, with the receivers whose tracks it refers to."""
         # remote tracks have their own ids, rather than the libwebrtc ones in the stats
         track_ids = {receiver.track._native_obj._nativeId: receiver.track.id for receiver in receivers}
-        stats = [RTCStats(entry) for entry in json.loads(report or '[]')]
+        entries: list[dict[str, StatsValue]] = json.loads(report if report != '' else '[]')
+        stats = [RTCStats(entry) for entry in entries]
         for entry in stats:
             # libwebrtc serializes microseconds
-            entry['timestamp'] /= 1000
+            entry['timestamp'] = entry.timestamp / 1000
             if entry.get('type') == 'inbound-rtp' and entry.get('trackIdentifier') in track_ids:
                 entry['trackIdentifier'] = track_ids[entry['trackIdentifier']]
             # libwebrtc leaves the addresses of candidates it doesn't expose (like peer-reflexive ones) empty
             if (
                 entry.get('type') in {'local-candidate', 'remote-candidate'}
                 and 'address' in entry
-                and not entry['address']
+                and _is_empty(entry['address'])
             ):
                 entry['address'] = None
-        return cls({entry['id']: entry for entry in stats})
+        return cls({entry.id: entry for entry in stats})
 
     def __getitem__(self, stats_id: str) -> RTCStats:
         return self._stats[stats_id]

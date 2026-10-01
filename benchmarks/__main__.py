@@ -44,7 +44,7 @@ def _commit() -> str:
     try:
         commit = subprocess.check_output([git, 'rev-parse', '--short', 'HEAD'], text=True).strip()
         dirty = subprocess.check_output([git, 'status', '--porcelain'], text=True).strip()
-        return commit + (' with uncommitted changes' if dirty else '')
+        return commit + (' with uncommitted changes' if dirty != '' else '')
     except (OSError, subprocess.CalledProcessError):
         return 'unknown'
 
