@@ -85,6 +85,7 @@ class _Listeners:
         event = self.target._create_event(name, *args)
         if event is None:
             return
+        event.target = self.target
 
         for registration in registrations:
             if registration.once:
@@ -202,9 +203,10 @@ class EventTarget:
         method, never handlers.
         """
 
-    def _create_event(self, name: str, *_args: object) -> webrtc.Event | None:
+    @staticmethod
+    def _create_event(name: str, *_args: object) -> webrtc.Event | None:
         """Creates the event object from the native arguments of an event, or returns :obj:`None` to drop it."""
-        return webrtc.Event(name, self)
+        return webrtc.Event(name)
 
     @overload
     def on(self, name: str, handler: None = None) -> Callable[[_H], _H]: ...

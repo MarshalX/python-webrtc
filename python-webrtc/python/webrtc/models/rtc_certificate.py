@@ -78,12 +78,12 @@ class RTCDtlsFingerprint(Dictionary):
     """A fingerprint of a certificate, as in the ``a=fingerprint`` line of SDP.
 
     Args:
-        algorithm (:obj:`str`): The hash function, like ``'sha-256'``.
-        value (:obj:`str`): The hash in lowercase hex bytes separated with colons.
+        algorithm (:obj:`str`, optional): The hash function, like ``'sha-256'``.
+        value (:obj:`str`, optional): The hash in lowercase hex bytes separated with colons.
     """
 
-    algorithm: str
-    value: str
+    algorithm: str | None = None
+    value: str | None = None
 
 
 _KeyParams = tuple[str, int, int]

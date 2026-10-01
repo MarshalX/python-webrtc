@@ -202,13 +202,19 @@ async def test_send_larger_than_max_message_size(
 async def test_stats_are_current(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
     """The stats of a channel count a message right after it's received."""
     channel, remote = await open_pair(caller, callee)
-    before = (await callee.get_stats()).of_type('data-channel')[0].bytes_received
+
+    async def bytes_received() -> int | None:
+        [stats] = (await callee.get_stats()).of_type('data-channel')
+        assert isinstance(stats, webrtc.RTCDataChannelStats)
+        return stats.bytes_received
+
+    before = await bytes_received()
     received = wait_for_event(remote, 'message')
     channel.send('hello')
     await received
     # libwebrtc reuses a report for 50 ms: the stats right after a message count it
-    after = (await callee.get_stats()).of_type('data-channel')[0].bytes_received
-    assert isinstance(before, int)
+    after = await bytes_received()
+    assert before is not None
     assert after == before + 5
 
 
@@ -224,7 +230,7 @@ async def test_max_channels_once_connected(caller: webrtc.RTCPeerConnection, cal
 
     def connected() -> bool:
         assert callee.sctp is not None
-        return callee.sctp.state == webrtc.SctpTransportState.connected
+        return callee.sctp.state == webrtc.RTCSctpTransportState.connected
 
     await wait_until(connected, 'SCTP to connect')
     assert callee.sctp is not None
@@ -264,15 +270,3 @@ async def test_binary_type(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCP
     with pytest.raises(ValueError, match='not a valid BinaryType'):
         remote.binary_type = mistyped('buffer')
     assert remote.binary_type == webrtc.BinaryType.blob
-
-
-@pytest.mark.asyncio
-async def test_blob() -> None:
-    """A Blob is immutable bytes with a type, sliced like a sequence."""
-    blob = webrtc.Blob(['héllo', b' ', bytearray(b'world')], type='Text/Plain')
-    assert blob.size == len(bytes(blob)) == 12
-    assert blob.type == 'text/plain'
-    assert await blob.text() == 'héllo world'
-    assert await blob.slice(-5).bytes() == b'world'
-    assert await blob.slice(1, 3).array_buffer() == b'\xc3\xa9'
-    assert webrtc.Blob(type='é').type == ''

@@ -77,7 +77,7 @@ async def main() -> None:
     """Records the camera and the microphone for a few seconds."""
     sender, receiver = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
     trickle(sender, receiver)
-    stream = webrtc.get_user_media(audio=True, video=True)
+    stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True, video=True))
     for track in stream.get_tracks():
         sender.add_track(track, stream)
 

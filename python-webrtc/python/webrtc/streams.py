@@ -16,19 +16,31 @@ from __future__ import annotations
 import asyncio
 import collections
 import inspect
+import math
+from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Generator, Iterable, Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Generic, NamedTuple, Protocol, cast
+from typing import TYPE_CHECKING, Callable, ClassVar, Generic, Protocol, cast
 
 from typing_extensions import TypeVar
 
+from webrtc.enums import ReadableStreamReaderMode
+from webrtc.exceptions import InvalidRangeError
+from webrtc.models.dictionary import Dictionary
+from webrtc.utils.names import Alias, alias
+
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from webrtc.enums import ReadableStreamReaderModeValue
 
 __all__ = [
+    'QueuingStrategy',
     'ReadableStream',
     'ReadableStreamDefaultController',
     'ReadableStreamDefaultReader',
+    'ReadableStreamGetReaderOptions',
+    'ReadableStreamIteratorOptions',
     'ReadableStreamReadResult',
+    'ReadableWritablePair',
+    'StreamPipeOptions',
     'TransformStream',
     'TransformStreamDefaultController',
     'WritableStream',
@@ -105,12 +117,11 @@ def _reject(future: asyncio.Future[_R], error: BaseException) -> asyncio.Future[
     return future
 
 
-def _error_or_default(error: BaseException | None) -> BaseException:
-    return error if error is not None else TypeError('The stream errored')
-
-
-def _reason_error(reason: object) -> BaseException:
-    return reason if isinstance(reason, BaseException) else TypeError(str(reason))
+def _error_of(e: object) -> BaseException:
+    """The exception for the error of a stream, which may be any value as in the specification."""
+    if isinstance(e, BaseException):
+        return e
+    return TypeError('The stream errored' if e is None else str(e))
 
 
 def _member(obj: object, name: str) -> Callable[..., object] | None:
@@ -177,7 +188,9 @@ def _run(
     _then(result, on_done, on_error)
 
 
-class _ReadableWritablePair(Protocol[_T, _O]):
+class _GenericTransformStream(Protocol[_T, _O]):
+    """A pair of streams like :obj:`TransformStream`."""
+
     @property
     def readable(self) -> ReadableStream[_O]: ...
 
@@ -185,37 +198,141 @@ class _ReadableWritablePair(Protocol[_T, _O]):
     def writable(self) -> WritableStream[_T]: ...
 
 
-class _PipeOptions(NamedTuple):
-    prevent_close: bool
-    prevent_abort: bool
-    prevent_cancel: bool
+@dataclass
+class QueuingStrategy(Dictionary, Generic[_T]):
+    """How a stream counts its queue, for the constructors of streams.
+
+    Args:
+        high_water_mark (:obj:`float`, optional): The total size of the chunks queued until the stream applies
+            backpressure, which depends on the stream by default.
+        size (optional): The size of a chunk, 1 for each by default.
+    """
+
+    high_water_mark: float | None = None
+    size: Callable[[_T], float] | None = None
+
+    #: Alias for :attr:`high_water_mark`
+    highWaterMark: ClassVar[Alias[float | None]] = alias('high_water_mark')
+
+
+@dataclass(frozen=True)
+class _Strategy(Generic[_T]):
+    high_water_mark: float
+    size: Callable[[_T], float] | None
+
+
+def _extract_strategy(strategy: QueuingStrategy[_T] | None, default: float) -> _Strategy[_T]:
+    """The strategy with its default high water mark, which must be a non-negative number."""
+    if strategy is None:
+        strategy = QueuingStrategy()
+    high_water_mark = default if strategy.high_water_mark is None else float(strategy.high_water_mark)
+    if math.isnan(high_water_mark) or high_water_mark < 0:
+        msg = 'The high water mark is negative or NaN'
+        raise InvalidRangeError(msg)
+    return _Strategy(high_water_mark, strategy.size)
+
+
+def _chunk_size(strategy: _Strategy[_T], chunk: _T) -> float:
+    """The size of a chunk, which must be a finite non-negative number."""
+    if strategy.size is None:
+        return 1
+    size = float(strategy.size(chunk))
+    if not math.isfinite(size) or size < 0:
+        msg = 'The size of a chunk is negative, NaN or infinite'
+        raise InvalidRangeError(msg)
+    return size
 
 
 @dataclass
-class ReadableStreamReadResult(Generic[_T]):
+class ReadableStreamGetReaderOptions(Dictionary):
+    """The options of :meth:`ReadableStream.get_reader`.
+
+    Args:
+        mode (:obj:`webrtc.ReadableStreamReaderMode`, optional): The type of reader, a default one if :obj:`None`.
+
+    Raises:
+        ValueError: If the mode isn't a member of :obj:`webrtc.ReadableStreamReaderMode`.
+    """
+
+    mode: ReadableStreamReaderMode | ReadableStreamReaderModeValue | None = None
+
+    def __post_init__(self) -> None:
+        if self.mode is not None:
+            self.mode = ReadableStreamReaderMode(self.mode)
+
+
+@dataclass
+class ReadableStreamIteratorOptions(Dictionary):
+    """The options of :meth:`ReadableStream.values`.
+
+    Args:
+        prevent_cancel (:obj:`bool`, optional): Whether the stream is left open when the iteration stops early.
+    """
+
+    prevent_cancel: bool = False
+
+    #: Alias for :attr:`prevent_cancel`
+    preventCancel: ClassVar[Alias[bool]] = alias('prevent_cancel')
+
+
+@dataclass
+class ReadableWritablePair(Dictionary, Generic[_T, _O]):
+    """A writable stream and the readable one its chunks come out of, for :meth:`ReadableStream.pipe_through`.
+
+    Args:
+        readable (:obj:`ReadableStream`): The stream to read.
+        writable (:obj:`WritableStream`): The stream to write.
+    """
+
+    readable: ReadableStream[_O]
+    writable: WritableStream[_T]
+
+
+@dataclass
+class StreamPipeOptions(Dictionary):
+    """The options of :meth:`ReadableStream.pipe_to` and :meth:`ReadableStream.pipe_through`.
+
+    Args:
+        prevent_close (:obj:`bool`, optional): Whether the destination is left open when the source closes.
+        prevent_abort (:obj:`bool`, optional): Whether the destination is left as it is when the source errors.
+        prevent_cancel (:obj:`bool`, optional): Whether the source is left as it is when the destination errors.
+    """
+
+    prevent_close: bool = False
+    prevent_abort: bool = False
+    prevent_cancel: bool = False
+
+    #: Alias for :attr:`prevent_close`
+    preventClose: ClassVar[Alias[bool]] = alias('prevent_close')
+    #: Alias for :attr:`prevent_abort`
+    preventAbort: ClassVar[Alias[bool]] = alias('prevent_abort')
+    #: Alias for :attr:`prevent_cancel`
+    preventCancel: ClassVar[Alias[bool]] = alias('prevent_cancel')
+
+
+@dataclass
+class ReadableStreamReadResult(Dictionary, Generic[_T]):
     """The result of :meth:`ReadableStreamDefaultReader.read`.
 
     Args:
-        value: The chunk, :obj:`None` once done.
-        done (:obj:`bool`): Whether the stream is closed and has no more chunks.
+        value (optional): The chunk, :obj:`None` once done.
+        done (:obj:`bool`, optional): Whether the stream is closed and has no more chunks.
     """
 
-    value: _T | None
-    done: bool
-
-
-#: The result of a read, by another name: tests/idl/expectations.json expects read() not to name it yet
-_ReadResult = ReadableStreamReadResult
+    value: _T | None = None
+    done: bool = False
 
 
 class ReadableStreamDefaultController(Generic[_T]):
     """Lets an underlying source enqueue chunks, close or error its stream."""
 
-    def __init__(self, stream: ReadableStream[_T], source: object, high_water_mark: float) -> None:
+    def __init__(self, stream: ReadableStream[_T], source: object, strategy: _Strategy[_T]) -> None:
         self._stream = stream
         self._source = source
-        self._high_water_mark = high_water_mark
-        self._queue: collections.deque[_T] = collections.deque()
+        self._strategy = strategy
+        # (chunk, size) of the queued chunks
+        self._queue: collections.deque[tuple[_T, float]] = collections.deque()
+        self._queue_total_size = 0.0
         self._close_requested = False
         self._started = False
         self._pulling = False
@@ -223,29 +340,26 @@ class ReadableStreamDefaultController(Generic[_T]):
 
     @property
     def desired_size(self) -> float | None:
-        """:obj:`float`, optional: How many chunks the queue can take until it's full, :obj:`None` if errored."""
+        """:obj:`float`, optional: The size of the chunks the queue takes until it's full, :obj:`None` if errored."""
         state = self._stream._state
         if state == 'errored':
             return None
         if state == 'closed':
             return 0
-        return self._high_water_mark - len(self._queue)
+        return self._strategy.high_water_mark - self._queue_total_size
 
-    def enqueue(self, chunk: _T) -> None:
+    def enqueue(self, chunk: _T | None = None) -> None:
         """Enqueues a chunk, which fulfills a pending read if there's one.
 
         Raises:
             TypeError: If the stream is closed or closing.
+            webrtc.InvalidRangeError: If the size of the chunk isn't a finite non-negative number, which errors the
+                stream, as anything the size function raises does.
         """
-        if self._close_requested or self._stream._state != 'readable':
+        if not self._can_close_or_enqueue():
             msg = 'The stream is closed or closing'
             raise TypeError(msg)
-        reader = self._stream._reader
-        if reader is not None and len(reader._read_requests) > 0:
-            _settle(reader._read_requests.popleft(), ReadableStreamReadResult(chunk, done=False))
-        else:
-            self._queue.append(chunk)
-        self._call_pull_if_needed()
+        self._enqueue(cast('_T', chunk))
 
     def close(self) -> None:
         """Closes the stream once its queue is read.
@@ -253,19 +367,43 @@ class ReadableStreamDefaultController(Generic[_T]):
         Raises:
             TypeError: If the stream is closed or closing.
         """
-        if self._close_requested or self._stream._state != 'readable':
+        if not self._can_close_or_enqueue():
             msg = 'The stream is closed or closing'
             raise TypeError(msg)
+        self._close()
+
+    def error(self, e: object = None) -> None:
+        """Errors the stream: pending and later reads fail with the error."""
+        if self._stream._state != 'readable':
+            return
+        self._reset_queue()
+        self._stream._error(_error_of(e))
+
+    def _can_close_or_enqueue(self) -> bool:
+        return not self._close_requested and self._stream._state == 'readable'
+
+    def _enqueue(self, chunk: _T) -> None:
+        reader = self._stream._reader
+        if reader is not None and len(reader._read_requests) > 0:
+            _settle(reader._read_requests.popleft(), ReadableStreamReadResult(chunk, done=False))
+        else:
+            try:
+                size = _chunk_size(self._strategy, chunk)
+            except Exception as e:
+                self.error(e)
+                raise
+            self._queue.append((chunk, size))
+            self._queue_total_size += size
+        self._call_pull_if_needed()
+
+    def _close(self) -> None:
         self._close_requested = True
         if len(self._queue) == 0:
             self._stream._close()
 
-    def error(self, error: BaseException | None = None) -> None:
-        """Errors the stream: pending and later reads fail with the error."""
-        if self._stream._state != 'readable':
-            return
+    def _reset_queue(self) -> None:
         self._queue.clear()
-        self._stream._error(_error_or_default(error))
+        self._queue_total_size = 0.0
 
     def _start(self) -> None:
         def started() -> None:
@@ -299,9 +437,13 @@ class ReadableStreamDefaultController(Generic[_T]):
 
         _run(self._source, 'pull', self, on_done=pulled, on_error=self.error)
 
-    def _read(self, reader: ReadableStreamDefaultReader[_T], request: asyncio.Future[_ReadResult[_T]]) -> None:
+    def _read(
+        self, reader: ReadableStreamDefaultReader[_T], request: asyncio.Future[ReadableStreamReadResult[_T]]
+    ) -> None:
         if len(self._queue) > 0:
-            chunk = self._queue.popleft()
+            chunk, size = self._queue.popleft()
+            # rounding errors could leave it below 0
+            self._queue_total_size = max(0.0, self._queue_total_size - size)
             if self._close_requested and len(self._queue) == 0:
                 self._stream._close()
             else:
@@ -312,7 +454,7 @@ class ReadableStreamDefaultController(Generic[_T]):
             self._call_pull_if_needed()
 
     def _cancel(self, reason: object) -> object:
-        self._queue.clear()
+        self._reset_queue()
         return _call(self._source, 'cancel', reason)
 
     #: Alias for :attr:`desired_size`
@@ -325,26 +467,62 @@ class ReadableStream(Generic[_T]):
     Args:
         underlying_source (optional): An object with optional ``start(controller)``, ``pull(controller)`` and
             ``cancel(reason)`` methods (or a :obj:`dict` of them), which may be coroutine functions.
-        high_water_mark (:obj:`float`, optional): How many chunks are queued ahead of reads, 1 by default.
+        strategy (:obj:`QueuingStrategy`, optional): How the queue is counted, a chunk each up to 1 by default.
+
+    Raises:
+        webrtc.InvalidRangeError: If the high water mark of the strategy is negative or NaN.
     """
 
-    def __init__(self, underlying_source: object = None, high_water_mark: float = 1) -> None:
+    def __init__(self, underlying_source: object = None, strategy: QueuingStrategy[_T] | None = None) -> None:
+        extracted = _extract_strategy(strategy, 1)
         self._state = 'readable'
         self._stored_error: BaseException | None = None
         self._reader: ReadableStreamDefaultReader[_T] | None = None
-        self._controller = ReadableStreamDefaultController(self, underlying_source, high_water_mark)
+        self._controller = ReadableStreamDefaultController(self, underlying_source, extracted)
         self._controller._start()
+
+    @staticmethod
+    def from_(async_iterable: AsyncIterable[_R] | Iterable[_R]) -> ReadableStream[_R]:
+        """Returns a stream of the items of an iterable, asynchronous or not (``ReadableStream.from`` in browsers).
+
+        Canceling the stream closes the iterator, like a generator, if it can be closed.
+
+        Args:
+            async_iterable: The iterable.
+
+        Returns:
+            :obj:`ReadableStream`: The stream.
+
+        Raises:
+            TypeError: If the object isn't iterable.
+        """
+        iterator: AsyncIterator[_R] | Iterator[_R]
+        if isinstance(async_iterable, AsyncIterable):
+            iterator = async_iterable.__aiter__()
+        elif isinstance(async_iterable, Iterable):
+            iterator = iter(async_iterable)
+        else:
+            msg = f'{type(async_iterable).__name__} is not iterable'
+            raise TypeError(msg)
+        return ReadableStream(_IteratorSource(iterator), QueuingStrategy(high_water_mark=0))
 
     @property
     def locked(self) -> bool:
         """:obj:`bool`: Whether a reader holds the stream."""
         return self._reader is not None
 
-    def get_reader(self) -> ReadableStreamDefaultReader[_T]:
+    def get_reader(self, options: ReadableStreamGetReaderOptions | None = None) -> ReadableStreamDefaultReader[_T]:
         """Returns a reader, which holds the stream until it's released.
 
-        Raises :obj:`TypeError` if the stream is locked.
+        Args:
+            options (:obj:`ReadableStreamGetReaderOptions`, optional): The type of reader, a default one if not set.
+
+        Raises:
+            TypeError: If the stream is locked, or the mode is ``byob``, which only byte streams support.
         """
+        if options is not None and options.mode == ReadableStreamReaderMode.byob:
+            msg = 'Only byte streams have BYOB readers'
+            raise TypeError(msg)
         return ReadableStreamDefaultReader(self)
 
     def cancel(self, reason: object = None) -> asyncio.Future[None]:
@@ -358,20 +536,15 @@ class ReadableStream(Generic[_T]):
         return self._cancel(reason)
 
     def pipe_to(
-        self,
-        destination: WritableStream[_T],
-        *,
-        prevent_close: bool = False,
-        prevent_abort: bool = False,
-        prevent_cancel: bool = False,
+        self, destination: WritableStream[_T], options: StreamPipeOptions | None = None
     ) -> asyncio.Future[None]:
         """Writes every chunk of the stream to a writable stream, waiting for it when it's full.
 
+        Canceling the returned future stops the pipe like an abort signal in browsers.
+
         Args:
             destination (:obj:`WritableStream`): The stream to write to.
-            prevent_close (:obj:`bool`, optional): Whether the destination is left open when this stream closes.
-            prevent_abort (:obj:`bool`, optional): Whether the destination is left as it is when this stream errors.
-            prevent_cancel (:obj:`bool`, optional): Whether this stream is left as it is when the destination errors.
+            options (:obj:`StreamPipeOptions`, optional): What the pipe leaves as it is when it stops.
 
         Returns:
             :obj:`asyncio.Future`: Done once every chunk is written, or failed with the error that stopped it.
@@ -380,8 +553,9 @@ class ReadableStream(Generic[_T]):
             return _rejected(TypeError('A stream is locked'))
         reader = self.get_reader()
         writer = destination.get_writer()
-        options = _PipeOptions(prevent_close, prevent_abort, prevent_cancel)
-        pipe = asyncio.ensure_future(self._pipe(reader, writer, options))
+        pipe = asyncio.ensure_future(
+            self._pipe(reader, writer, options if options is not None else StreamPipeOptions())
+        )
         # kept until done, as in browsers: asyncio keeps tasks weakly
         _running_pipes.add(pipe)
         pipe.add_done_callback(_running_pipes.discard)
@@ -389,7 +563,7 @@ class ReadableStream(Generic[_T]):
 
     @staticmethod
     async def _pipe(
-        reader: ReadableStreamDefaultReader[_T], writer: WritableStreamDefaultWriter[_T], options: _PipeOptions
+        reader: ReadableStreamDefaultReader[_T], writer: WritableStreamDefaultWriter[_T], options: StreamPipeOptions
     ) -> None:
         try:
             await _pipe_chunks(reader, writer, prevent_close=options.prevent_close)
@@ -403,31 +577,56 @@ class ReadableStream(Generic[_T]):
             reader.release_lock()
             writer.release_lock()
 
-    def pipe_through(self, transform: _ReadableWritablePair[_T, _O], **options: bool) -> ReadableStream[_O]:
+    def pipe_through(
+        self,
+        transform: ReadableWritablePair[_T, _O] | _GenericTransformStream[_T, _O],
+        options: StreamPipeOptions | None = None,
+    ) -> ReadableStream[_O]:
         """Pipes the stream into the writable side of a transform (like :obj:`TransformStream`).
 
         Args:
-            transform: An object with ``writable`` and ``readable`` streams.
-            **options: The options of :meth:`pipe_to`.
+            transform (:obj:`ReadableWritablePair`): The streams, or an object with ``writable`` and ``readable``
+                ones, like :obj:`TransformStream`.
+            options (:obj:`StreamPipeOptions`, optional): The options of :meth:`pipe_to`.
 
         Returns:
             :obj:`ReadableStream`: The readable side of the transform.
+
+        Raises:
+            TypeError: If this stream or the writable side is locked.
         """
-        _ = _handled(self.pipe_to(transform.writable, **options))
+        if self.locked or transform.writable.locked:
+            msg = 'A stream is locked'
+            raise TypeError(msg)
+        _ = _handled(self.pipe_to(transform.writable, options))
         return transform.readable
 
-    def values(self, *, prevent_cancel: bool = False) -> AsyncIterator[_T]:
+    def tee(self) -> list[ReadableStream[_T]]:
+        """Splits the stream into two branches, each reading every chunk, which locks the stream.
+
+        The stream is canceled once both branches are, and the branches error when it does.
+
+        Returns:
+            :obj:`list` of :obj:`ReadableStream`: The two branches.
+
+        Raises:
+            TypeError: If the stream is locked.
+        """
+        return _Tee(self).branches
+
+    def values(self, options: ReadableStreamIteratorOptions | None = None) -> AsyncIterator[_T]:
         """Iterates over the chunks, like ``async for``.
 
         Stopping early cancels the stream once the iterator is finalized, right away with
         :func:`contextlib.aclosing`.
 
         Args:
-            prevent_cancel (:obj:`bool`, optional): Whether the stream is left open when the iteration stops early.
+            options (:obj:`ReadableStreamIteratorOptions`, optional): Whether stopping early leaves the stream open.
 
         Returns:
             An asynchronous iterator of the chunks.
         """
+        prevent_cancel = options is not None and options.prevent_cancel
         return _iterate(self.get_reader(), prevent_cancel=prevent_cancel)
 
     def __aiter__(self) -> AsyncIterator[_T]:
@@ -455,7 +654,7 @@ class ReadableStream(Generic[_T]):
 
     def _error_stored(self) -> BaseException:
         """The error of an errored stream."""
-        return _error_or_default(self._stored_error)
+        return _error_of(self._stored_error)
 
     def _cancel(self, reason: object) -> asyncio.Future[None]:
         if self._state == 'closed':
@@ -488,7 +687,7 @@ class ReadableStreamDefaultReader(Generic[_T]):
             msg = 'The stream is locked'
             raise TypeError(msg)
         self._stream: ReadableStream[_T] | None = stream
-        self._read_requests: collections.deque[asyncio.Future[_ReadResult[_T]]] = collections.deque()
+        self._read_requests: collections.deque[asyncio.Future[ReadableStreamReadResult[_T]]] = collections.deque()
         self._closed: asyncio.Future[None] = _handled(_pending())
         stream._reader = self
         if stream._state == 'closed':
@@ -501,7 +700,7 @@ class ReadableStreamDefaultReader(Generic[_T]):
         """:obj:`asyncio.Future`: Done once the stream is closed, failed if it errors or the lock is released."""
         return self._closed
 
-    def read(self) -> asyncio.Future[_ReadResult[_T]]:
+    def read(self) -> asyncio.Future[ReadableStreamReadResult[_T]]:
         """Reads the next chunk.
 
         Returns:
@@ -515,7 +714,7 @@ class ReadableStreamDefaultReader(Generic[_T]):
             return _resolved(ReadableStreamReadResult(None, done=True))
         if stream._state == 'errored':
             return _rejected(stream._error_stored())
-        request: asyncio.Future[_ReadResult[_T]] = _pending()
+        request: asyncio.Future[ReadableStreamReadResult[_T]] = _pending()
         stream._controller._read(self, request)
         return request
 
@@ -575,7 +774,7 @@ async def _stop_pipe(
     writer: WritableStreamDefaultWriter[_T],
     error: BaseException,
     *,
-    options: _PipeOptions,
+    options: StreamPipeOptions,
 ) -> None:
     """Cancels the source or aborts the destination of a pipe that failed, unless the options prevent it."""
     stream = writer._stream
@@ -606,6 +805,111 @@ async def _iterate(reader: ReadableStreamDefaultReader[_T], *, prevent_cancel: b
             reader.release_lock()
 
 
+class _Tee(Generic[_T]):
+    """Reads a stream for two branches, as ReadableStreamDefaultTee in the specification."""
+
+    def __init__(self, stream: ReadableStream[_T]) -> None:
+        self._stream = stream
+        self._reader = ReadableStreamDefaultReader(stream)
+        self._reading = False
+        self._read_again = False
+        self._canceled = [False, False]
+        self._reasons: list[object] = [None, None]
+        self._canceled_future: asyncio.Future[None] = _handled(_pending())
+        self.branches: list[ReadableStream[_T]] = [ReadableStream(_TeeBranch(self, i)) for i in range(2)]
+        self._reader.closed.add_done_callback(self._closed)
+
+    def _pull(self) -> None:
+        if self._reading:
+            self._read_again = True
+            return
+        self._reading = True
+        self._reader.read().add_done_callback(self._read)
+
+    def _open_branches(self) -> list[ReadableStreamDefaultController[_T]]:
+        controllers = [branch._controller for i, branch in enumerate(self.branches) if not self._canceled[i]]
+        return [controller for controller in controllers if controller._can_close_or_enqueue()]
+
+    def _read(self, read: asyncio.Future[ReadableStreamReadResult[_T]]) -> None:
+        if read.cancelled() or read.exception() is not None:
+            # the closed future errors the branches
+            self._reading = False
+            return
+        result = read.result()
+        if result.done:
+            self._reading = False
+            for controller in self._open_branches():
+                controller._close()
+            if not all(self._canceled):
+                _settle(self._canceled_future, None)
+            return
+        self._read_again = False
+        for controller in self._open_branches():
+            controller._enqueue(_chunk(result))
+        self._reading = False
+        if self._read_again:
+            self._pull()
+
+    def _cancel(self, index: int, reason: object) -> asyncio.Future[None]:
+        self._canceled[index] = True
+        self._reasons[index] = reason
+        if all(self._canceled):
+            # the stream is canceled with the reasons of both branches
+            canceled = self._stream._cancel(list(self._reasons))
+
+            def settle(future: asyncio.Future[None]) -> None:
+                error = asyncio.CancelledError() if future.cancelled() else future.exception()
+                _settle(self._canceled_future, None, error)
+
+            canceled.add_done_callback(settle)
+        return self._canceled_future
+
+    def _closed(self, closed: asyncio.Future[None]) -> None:
+        error = None if closed.cancelled() else closed.exception()
+        if error is None:
+            return
+        for branch in self.branches:
+            branch._controller.error(error)
+        if not all(self._canceled):
+            _settle(self._canceled_future, None)
+
+
+class _TeeBranch(Generic[_T]):
+    def __init__(self, tee: _Tee[_T], index: int) -> None:
+        self._tee = tee
+        self._index = index
+
+    def pull(self, _controller: ReadableStreamDefaultController[_T]) -> None:
+        self._tee._pull()
+
+    def cancel(self, reason: object) -> asyncio.Future[None]:
+        return self._tee._cancel(self._index, reason)
+
+
+class _IteratorSource(Generic[_T]):
+    """The underlying source of :meth:`ReadableStream.from_`."""
+
+    def __init__(self, iterator: AsyncIterator[_T] | Iterator[_T]) -> None:
+        self._iterator = iterator
+
+    async def pull(self, controller: ReadableStreamDefaultController[_T]) -> None:
+        iterator = self._iterator
+        try:
+            chunk = await iterator.__anext__() if isinstance(iterator, AsyncIterator) else next(iterator)
+        except (StopAsyncIteration, StopIteration):
+            controller.close()
+            return
+        controller.enqueue(chunk)
+
+    async def cancel(self, _reason: object) -> None:
+        # the return() of an iterator in the specification
+        iterator = self._iterator
+        if isinstance(iterator, AsyncGenerator):
+            await iterator.aclose()
+        elif isinstance(iterator, Generator):
+            iterator.close()
+
+
 # the close request queued after the writes
 _CLOSE = object()
 
@@ -613,22 +917,22 @@ _CLOSE = object()
 class WritableStreamDefaultController(Generic[_T]):
     """Lets an underlying sink error its stream."""
 
-    def __init__(self, stream: WritableStream[_T], sink: object, high_water_mark: float) -> None:
+    def __init__(self, stream: WritableStream[_T], sink: object, strategy: _Strategy[_T]) -> None:
         self._stream = stream
         self._sink = sink
-        self._high_water_mark = high_water_mark
-        # (chunk, future) of the writes, then (_CLOSE, future)
-        self._queue: collections.deque[tuple[object, asyncio.Future[None]]] = collections.deque()
+        self._strategy = strategy
+        # (chunk, future, size) of the writes, then (_CLOSE, future, 0)
+        self._queue: collections.deque[tuple[object, asyncio.Future[None], float]] = collections.deque()
         self._started = False
         self._in_flight = False
 
-    def error(self, error: BaseException | None = None) -> None:
+    def error(self, e: object = None) -> None:
         """Errors the stream: pending and later writes fail with the error."""
         if self._stream._state == 'writable':
-            self._stream._start_erroring(_error_or_default(error))
+            self._stream._start_erroring(_error_of(e))
 
     def _desired_size(self) -> float:
-        return self._high_water_mark - sum(1 for chunk, _ in self._queue if chunk is not _CLOSE)
+        return self._strategy.high_water_mark - sum(size for _, _, size in self._queue)
 
     def _start(self) -> None:
         def started() -> None:
@@ -642,13 +946,20 @@ class WritableStreamDefaultController(Generic[_T]):
         _then(_call(self._sink, 'start', self), started, failed)
 
     def _write(self, chunk: _T, future: asyncio.Future[None]) -> None:
-        self._queue.append((chunk, future))
+        try:
+            size = _chunk_size(self._strategy, chunk)
+        except Exception as e:
+            # queued to be rejected once the stream errors
+            self._queue.append((chunk, future, 0))
+            self.error(e)
+            return
+        self._queue.append((chunk, future, size))
         # advance first: a sink done right away leaves no backpressure to signal
         self._advance()
         self._stream._update_backpressure()
 
     def _close(self, future: asyncio.Future[None]) -> None:
-        self._queue.append((_CLOSE, future))
+        self._queue.append((_CLOSE, future, 0))
         self._advance()
 
     def _advance(self) -> None:
@@ -660,7 +971,7 @@ class WritableStreamDefaultController(Generic[_T]):
             return
         if stream._state != 'writable':
             return
-        chunk, future = self._queue[0]
+        chunk, future, _ = self._queue[0]
         self._in_flight = True
 
         def failed(error: BaseException) -> None:
@@ -692,7 +1003,7 @@ class WritableStreamDefaultController(Generic[_T]):
     def _reject_queue(self, error: BaseException) -> None:
         """Rejects the queued requests but the one in flight."""
         in_flight = self._queue.popleft() if self._in_flight else None
-        for _, future in self._queue:
+        for _, future, _ in self._queue:
             _fail(future, error)
         self._queue.clear()
         if in_flight is not None:
@@ -705,16 +1016,19 @@ class WritableStream(Generic[_T]):
     Args:
         underlying_sink (optional): An object with optional ``start(controller)``, ``write(chunk, controller)``,
             ``close()`` and ``abort(reason)`` methods (or a :obj:`dict` of them), which may be coroutine functions.
-        high_water_mark (:obj:`float`, optional): How many chunks are queued until writers see backpressure,
-            1 by default.
+        strategy (:obj:`QueuingStrategy`, optional): How the queue is counted, a chunk each up to 1 by default.
+
+    Raises:
+        webrtc.InvalidRangeError: If the high water mark of the strategy is negative or NaN.
     """
 
-    def __init__(self, underlying_sink: object = None, high_water_mark: float = 1) -> None:
+    def __init__(self, underlying_sink: object = None, strategy: QueuingStrategy[_T] | None = None) -> None:
+        extracted = _extract_strategy(strategy, 1)
         self._state = 'writable'
         self._stored_error: BaseException | None = None
         self._writer: WritableStreamDefaultWriter[_T] | None = None
         self._close_requested = False
-        self._controller = WritableStreamDefaultController(self, underlying_sink, high_water_mark)
+        self._controller = WritableStreamDefaultController(self, underlying_sink, extracted)
         self._controller._start()
 
     @property
@@ -779,7 +1093,7 @@ class WritableStream(Generic[_T]):
 
     def _finish_erroring(self) -> None:
         self._state = 'errored'
-        error = _error_or_default(self._stored_error)
+        error = _error_of(self._stored_error)
         self._controller._reject_queue(error)
         self._reject_writer(error)
         _ = _call(self._controller._sink, 'abort', self._stored_error)
@@ -867,21 +1181,22 @@ class WritableStreamDefaultWriter(Generic[_T]):
             return 0
         return stream._controller._desired_size()
 
-    def write(self, chunk: _T) -> asyncio.Future[None]:
+    def write(self, chunk: _T | None = None) -> asyncio.Future[None]:
         """Writes a chunk.
 
         Returns:
-            :obj:`asyncio.Future`: Done once the sink took it, failed if it didn't.
+            :obj:`asyncio.Future`: Done once the sink took it, failed if it didn't, or if the size of the chunk
+            errored the stream.
         """
         stream = self._stream
         if stream is None:
             return _rejected(TypeError('The writer is released'))
         if stream._state in {'errored', 'erroring'}:
-            return _rejected(_error_or_default(stream._stored_error))
+            return _rejected(_error_of(stream._stored_error))
         if stream._close_requested or stream._state == 'closed':
             return _rejected(TypeError('The stream is closed or closing'))
         future: asyncio.Future[None] = _pending()
-        stream._controller._write(chunk, future)
+        stream._controller._write(cast('_T', chunk), future)
         return future
 
     def close(self) -> asyncio.Future[None]:
@@ -924,13 +1239,13 @@ class TransformStreamDefaultController(Generic[_T, _O]):
         """:obj:`float`, optional: The desired size of the readable side."""
         return self._stream._readable._controller.desired_size
 
-    def enqueue(self, chunk: _O) -> None:
+    def enqueue(self, chunk: _O | None = None) -> None:
         """Enqueues a chunk to the readable side."""
         self._stream._readable._controller.enqueue(chunk)
 
-    def error(self, error: BaseException | None = None) -> None:
+    def error(self, reason: object = None) -> None:
         """Errors both sides."""
-        error = _error_or_default(error)
+        error = _error_of(reason)
         self._stream._readable._controller.error(error)
         self._stream._writable._controller.error(error)
 
@@ -954,15 +1269,33 @@ class TransformStream(Generic[_T, _O]):
         transformer (optional): An object with optional ``start(controller)``, ``transform(chunk, controller)`` and
             ``flush(controller)`` methods (or a :obj:`dict` of them), which may be coroutine functions. Chunks pass
             unchanged without ``transform``.
+        writable_strategy (:obj:`QueuingStrategy`, optional): How the queue of the writable side is counted, a chunk
+            each up to 1 by default.
+        readable_strategy (:obj:`QueuingStrategy`, optional): How the queue of the readable side is counted, a chunk
+            each up to 0 by default.
+
+    Raises:
+        webrtc.InvalidRangeError: If the high water mark of a strategy is negative or NaN.
     """
 
-    def __init__(self, transformer: object = None) -> None:
+    def __init__(
+        self,
+        transformer: object = None,
+        writable_strategy: QueuingStrategy[_T] | None = None,
+        readable_strategy: QueuingStrategy[_O] | None = None,
+    ) -> None:
+        writable = _extract_strategy(writable_strategy, 1)
+        readable = _extract_strategy(readable_strategy, 0)
         self._transformer = transformer
         self._controller: TransformStreamDefaultController[_T, _O] = TransformStreamDefaultController(self)
         # settled by a pull of the readable side, which relieves backpressure
         self._pull_waiter: asyncio.Future[None] | None = None
-        self._readable: ReadableStream[_O] = ReadableStream(_TransformSource(self), high_water_mark=0)
-        self._writable: WritableStream[_T] = WritableStream(_TransformSink(self), high_water_mark=1)
+        self._readable: ReadableStream[_O] = ReadableStream(
+            _TransformSource(self), QueuingStrategy(readable.high_water_mark, readable.size)
+        )
+        self._writable: WritableStream[_T] = WritableStream(
+            _TransformSink(self), QueuingStrategy(writable.high_water_mark, writable.size)
+        )
         _ = _call(transformer, 'start', self._controller)
 
     @property
@@ -1006,7 +1339,7 @@ class _TransformSink(Generic[_T, _O]):
             stream._readable._controller.close()
 
     def abort(self, reason: object) -> None:
-        self._stream._readable._controller.error(_reason_error(reason))
+        self._stream._readable._controller.error(_error_of(reason))
 
 
 class _TransformSource(Generic[_T, _O]):
@@ -1017,4 +1350,4 @@ class _TransformSource(Generic[_T, _O]):
         _settle(self._stream._pull_waiter, None)
 
     def cancel(self, reason: object) -> None:
-        self._stream._writable._controller.error(_reason_error(reason))
+        self._stream._writable._controller.error(_error_of(reason))

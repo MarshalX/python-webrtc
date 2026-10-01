@@ -38,6 +38,7 @@ FILES: dict[str, set[str] | None] = {
     'webrtc-encoded-transform.idl': None,
     'mediacapture-streams.idl': None,
     'mediacapture-transform.idl': None,
+    'mst-content-hint.idl': None,
     'webcodecs.idl': {'VideoFrame', 'AudioData'},
     'streams.idl': {
         'ReadableStream',

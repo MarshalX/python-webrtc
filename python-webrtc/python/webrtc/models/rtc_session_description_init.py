@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar
 
 from webrtc import wrtc
 from webrtc.enums import RTCSdpType, RTCSdpTypeValue
@@ -44,19 +43,8 @@ class RTCSessionDescriptionInit(Dictionary):
     def _to_native(self) -> wrtc.RTCSessionDescriptionInit:
         return wrtc.RTCSessionDescriptionInit(self.type, self.sdp)
 
-    def to_json(self) -> dict[str, str]:
-        """The description as a JSON-serializable dictionary, to send to the remote peer.
-
-        Returns:
-            :obj:`dict`: ``type`` (like ``'offer'``) and ``sdp``.
-        """
-        return {'type': RTCSdpType(self.type).value, 'sdp': self.sdp}
-
     def __repr__(self) -> str:
         return f'RTCSessionDescriptionInit(type={RTCSdpType(self.type).value!r}, sdp={len(self.sdp)} characters)'
-
-    #: Alias for :attr:`to_json`
-    toJSON: ClassVar = to_json
 
 
 @dataclass

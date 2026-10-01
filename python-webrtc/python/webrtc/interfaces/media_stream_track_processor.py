@@ -16,7 +16,7 @@ from typing_extensions import override
 
 from webrtc import AudioData, MediaStreamTrack, MediaType, VideoFrame, WebRTCObject, wrtc
 from webrtc.models.dictionary import Dictionary
-from webrtc.streams import ReadableStream
+from webrtc.streams import QueuingStrategy, ReadableStream
 from webrtc.utils.events import EventTarget
 from webrtc.utils.names import Alias, alias
 
@@ -134,7 +134,9 @@ class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], Ev
         # the native processor doesn't keep the track, Python does
         self._track = track
         self._source = _TrackSource(self)
-        self._readable: ReadableStream[VideoFrame | AudioData] = ReadableStream(self._source, high_water_mark=0)
+        self._readable: ReadableStream[VideoFrame | AudioData] = ReadableStream(
+            self._source, QueuingStrategy(high_water_mark=0)
+        )
         self._attach()
 
     @override

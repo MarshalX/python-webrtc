@@ -12,6 +12,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   webrtc.interfaces.media_devices
    webrtc.interfaces.media_stream
    webrtc.interfaces.media_stream_track
    webrtc.interfaces.media_stream_track_processor

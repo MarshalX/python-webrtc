@@ -104,6 +104,7 @@
     OperationError: 'OperationError',
     NotSupportedError: 'NotSupportedError',
     NetworkError: 'NetworkError',
+    DataCloneError: 'DataCloneError',
     InvalidSyntaxError: 'SyntaxError',
     InvalidCharacterError: 'InvalidCharacterError',
   };
@@ -128,8 +129,9 @@
     return fromPy(result.ok);
   }
 
-  function construct(name, kwargs = {}) {
-    const result = bridge.construct(name, kwargs);
+  // positional-only parameters take args
+  function construct(name, kwargs = {}, args = []) {
+    const result = bridge.construct(name, kwargs, args);
     if (result.error) throw toJsError(result.error);
     return result.ok;
   }
@@ -444,7 +446,7 @@
         if (init.iceServers === null) throw new TypeError('iceServers is not a sequence');
         kwargs.ice_servers = Array.from(init.iceServers, toIceServer);
       }
-      callMethodWithKeywords(this, 'gather', [], kwargs);
+      callMethod(this, 'gather', pyModel('RTCIceGatherOptions', kwargs));
     }
 
     start(remoteParameters, role = 'controlled') {
@@ -563,8 +565,10 @@
       const converted = toSendParameters(parameters);
       const {encodingOptions} = requireDictionary(options, 'RTCSetParameterOptions');
       if (encodingOptions === undefined) return callAsyncMethod(this, 'set_parameters', converted);
-      const keyFrames = Array.from(encodingOptions, (option) => Boolean(option?.keyFrame));
-      return callAsyncMethodWithKeywords(this, 'set_parameters', [converted], {key_frames: keyFrames});
+      const encodingOptionsList = Array.from(encodingOptions,
+        (option) => pyModel('RTCEncodingOptions', {key_frame: Boolean(option?.keyFrame)}));
+      return callAsyncMethod(this, 'set_parameters', converted,
+        pyModel('RTCSetParameterOptions', {encoding_options: encodingOptionsList}));
     }
 
     async replaceTrack(track) {
@@ -623,7 +627,7 @@
         requireMembers(e, 'RTCRtpHeaderExtensionCapability', ['uri']);
         return pyModel('RTCRtpHeaderExtensionCapability', {
           uri: String(e.uri),
-          ...(e.direction === undefined ? {} : {direction: pyEnum('TransceiverDirection', e.direction)}),
+          ...(e.direction === undefined ? {} : {direction: pyEnum('RTCRtpTransceiverDirection', e.direction)}),
         });
       }));
     }
@@ -632,9 +636,9 @@
     ['mid', 'mid'],
     ['sender', 'sender'],
     ['receiver', 'receiver'],
-    ['stopped', 'stopped'],
-    ['direction', 'direction', (v) => pyEnum('TransceiverDirection', v)],
+    ['direction', 'direction', (v) => pyEnum('RTCRtpTransceiverDirection', v)],
     ['currentDirection', 'current_direction'],
+    ['stopped', 'stopped'],
   ]);
 
   class RTCDataChannel extends Interface {
@@ -698,7 +702,7 @@
     convertDictionary(e, 'RTCRtpEncodingParameters', ENCODING_PARAMETERS)));
 
   const TRANSCEIVER_INIT = {
-    direction: ['direction', (v) => pyEnum('TransceiverDirection', v)],
+    direction: ['direction', (v) => pyEnum('RTCRtpTransceiverDirection', v)],
     streams: ['streams', (v) => Array.from(v, toPy)],
     sendEncodings: ['send_encodings', (v) => toEncodings(v)],
   };
@@ -765,13 +769,13 @@
 
     async createOffer(options) {
       const kwargs = convertDictionary(requireDictionary(options, 'RTCOfferOptions'), 'RTCOfferOptions', OFFER_OPTIONS);
-      return callAsyncMethodWithKeywords(this, 'create_offer', [], kwargs);
+      return callAsyncMethod(this, 'create_offer', pyModel('RTCOfferOptions', kwargs));
     }
 
     async createAnswer(options) {
       const kwargs = convertDictionary(requireDictionary(options, 'RTCAnswerOptions'), 'RTCAnswerOptions',
         ANSWER_OPTIONS);
-      return callAsyncMethodWithKeywords(this, 'create_answer', [], kwargs);
+      return callAsyncMethod(this, 'create_answer', pyModel('RTCAnswerOptions', kwargs));
     }
 
     async setLocalDescription(description) {
@@ -785,7 +789,7 @@
     addTrack(track, ...streams) {
       requireInterface(track, MediaStreamTrack, 'RTCPeerConnection.addTrack');
       streams.forEach((stream) => requireInterface(stream, MediaStream, 'RTCPeerConnection.addTrack'));
-      return callMethod(this, 'add_track', track, streams.length ? streams : null);
+      return callMethod(this, 'add_track', track, ...streams);
     }
 
     addTransceiver(trackOrKind, init) {
@@ -923,20 +927,23 @@
   // write them, but can't construct them with a JS underlying source.
   class ReadableStream extends Interface {
     getReader(options) {
-      if (options?.mode !== undefined) throw new TypeError('ReadableStream.getReader: only default readers exist');
-      return callMethod(this, 'get_reader');
+      const dict = requireDictionary(options, 'ReadableStreamGetReaderOptions');
+      return callMethod(this, 'get_reader', pyJson('ReadableStreamGetReaderOptions', pick(dict, ['mode'])));
     }
 
     cancel() { return callAsyncMethod(this, 'cancel'); }
 
-    pipeTo(destination, options = {}) {
+    pipeTo(destination, options) {
       requireInterface(destination, WritableStream, 'ReadableStream.pipeTo');
-      return callAsyncMethodWithKeywords(this, 'pipe_to', [destination], {
-        prevent_close: Boolean(options.preventClose),
-        prevent_abort: Boolean(options.preventAbort),
-        prevent_cancel: Boolean(options.preventCancel),
-      });
+      const dict = requireDictionary(options, 'StreamPipeOptions');
+      return callAsyncMethod(this, 'pipe_to', destination, pyJson('StreamPipeOptions', {
+        preventClose: Boolean(dict.preventClose),
+        preventAbort: Boolean(dict.preventAbort),
+        preventCancel: Boolean(dict.preventCancel),
+      }));
     }
+
+    tee() { return callMethod(this, 'tee'); }
 
     async* [Symbol.asyncIterator]() {
       const reader = this.getReader();
@@ -993,13 +1000,13 @@
   };
   const VIDEO_FRAME_BUFFER_INIT = [
     'format', 'codedWidth', 'codedHeight', 'timestamp', 'duration', 'layout', 'visibleRect', 'rotation', 'flip',
-    'displayWidth', 'displayHeight', 'colorSpace',
+    'displayWidth', 'displayHeight', 'colorSpace', 'metadata',
   ];
   const VIDEO_FRAME_INIT = [
-    'duration', 'timestamp', 'alpha', 'visibleRect', 'rotation', 'flip', 'displayWidth', 'displayHeight',
+    'duration', 'timestamp', 'alpha', 'visibleRect', 'rotation', 'flip', 'displayWidth', 'displayHeight', 'metadata',
   ];
   const copyToOptions = (options) =>
-    pyJson('VideoFrameCopyToOptions', nested(pick(requireDictionary(options, 'VideoFrameCopyToOptions'), ['rect', 'layout', 'format'])));
+    pyJson('VideoFrameCopyToOptions', nested(pick(requireDictionary(options, 'VideoFrameCopyToOptions'), ['rect', 'layout', 'format', 'colorSpace'])));
 
   class VideoFrame extends Interface {
     constructor(...args) {
@@ -1008,11 +1015,11 @@
         const dict = requireDictionary(init, 'VideoFrameInit');
         if (image instanceof VideoFrame) {
           const init = pyJson('VideoFrameInit', nested(pick(dict, VIDEO_FRAME_INIT)));
-          return construct('VideoFrame', {source: toPy(image), init});
+          return construct('VideoFrame', {init}, [toPy(image)]);
         }
         if (image instanceof ArrayBuffer || ArrayBuffer.isView(image)) {
           const init = pyJson('VideoFrameBufferInit', nested(pick(dict, VIDEO_FRAME_BUFFER_INIT)));
-          return construct('VideoFrame', {source: bytesOf(image), init});
+          return construct('VideoFrame', {init}, [bytesOf(image)]);
         }
         // images, canvases and video elements are the browser's
         throw new TypeError('VideoFrame: the source is not a VideoFrame nor a BufferSource');
@@ -1194,11 +1201,11 @@
   globalThis.navigator = {
     mediaDevices: {
       async getUserMedia(constraints = {}) {
-        const kwargs = {audio: Boolean(constraints.audio), video: Boolean(constraints.video)};
-        if (typeof constraints.video === 'object' && constraints.video !== null) {
-          Object.assign(kwargs, convertDictionary(constraints.video, 'MediaTrackConstraints', VIDEO_CONSTRAINTS));
-        }
-        return unwrap(bridge.get_user_media(kwargs));
+        const video = typeof constraints.video === 'object' && constraints.video !== null
+          ? pyModel('MediaTrackConstraints', convertDictionary(constraints.video, 'MediaTrackConstraints', VIDEO_CONSTRAINTS))
+          : Boolean(constraints.video);
+        return unwrap(await bridge.get_user_media(
+          pyModel('MediaStreamConstraints', {audio: Boolean(constraints.audio), video})));
       },
     },
   };

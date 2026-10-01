@@ -20,6 +20,7 @@ from webrtc import (
     MessageEvent,
     RTCDataChannelState,
     RTCErrorEvent,
+    RTCErrorEventInit,
     RTCPriorityType,
     WebRTCObject,
     wrtc,
@@ -149,10 +150,10 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget):
             # binary_type as of delivery, per the specification
             if isinstance(data, bytes) and self._native_obj.binaryType == BinaryType.blob:
                 data = Blob([data])
-            return MessageEvent(name, data, target=self)
+            return MessageEvent(name, data)
         if name == 'error':
             (error,) = cast('tuple[wrtc.RTCCallbackException]', args)
-            return RTCErrorEvent(name, _event_error(error), target=self)
+            return RTCErrorEvent(name, RTCErrorEventInit(_event_error(error)))
         return super()._create_event(name, *args)
 
     @property

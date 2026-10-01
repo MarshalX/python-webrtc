@@ -10,17 +10,21 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import math
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, ClassVar, NamedTuple, TypeVar, cast, overload
 
 from webrtc import (
     AlphaOption,
     AlphaOptionValue,
+    DataCloneError,
     InvalidStateError,
     NotSupportedError,
+    PredefinedColorSpace,
+    PredefinedColorSpaceValue,
     RTCException,
     VideoColorPrimaries,
     VideoColorPrimariesValue,
@@ -35,6 +39,7 @@ from webrtc import (
 from webrtc.models.closable import Closable
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
+from webrtc.utils.transfer import Transfer
 
 if TYPE_CHECKING:
     from typing_extensions import Buffer, TypeGuard
@@ -80,6 +85,35 @@ class DOMRectReadOnly:
     def left(self) -> float:
         """:obj:`float`: The left edge."""
         return min(self.x, self.x + self.width)
+
+    @classmethod
+    def from_rect(cls, other: DOMRectInit | DOMRectReadOnly | None = None) -> DOMRectReadOnly:
+        """Returns a rectangle of the members of another one.
+
+        Args:
+            other (:obj:`DOMRectInit`, optional): The rectangle, empty by default.
+        """
+        if other is None:
+            return cls()
+        return cls(other.x, other.y, other.width, other.height)
+
+    def to_json(self) -> dict[str, float]:
+        """Returns the attributes as a dictionary, like ``toJSON()``."""
+        return {
+            'x': self.x,
+            'y': self.y,
+            'width': self.width,
+            'height': self.height,
+            'top': self.top,
+            'right': self.right,
+            'bottom': self.bottom,
+            'left': self.left,
+        }
+
+    #: Alias for :meth:`from_rect`
+    fromRect: ClassVar = from_rect
+    #: Alias for :meth:`to_json`
+    toJSON: ClassVar = to_json
 
 
 @dataclass
@@ -210,9 +244,17 @@ class VideoFrameBufferInit(Dictionary):
         display_width (:obj:`int`, optional): The width to show the frame at, with ``display_height``.
         display_height (:obj:`int`, optional): The height to show the frame at, with ``display_width``.
         color_space (:obj:`VideoColorSpaceInit`, optional): The color space.
+        metadata (:obj:`VideoFrameMetadata`, optional): What else is known of the frame, copied.
+        transfer (:obj:`list` of bytes-like buffers, optional): Buffers given up to the frame. The pixels are copied
+            all the same; transferred :obj:`memoryview` objects are released, and Python can't detach other buffers.
     """
 
-    _dictionaries: ClassVar = {'layout': PlaneLayout, 'visible_rect': DOMRectInit, 'color_space': VideoColorSpaceInit}
+    _dictionaries: ClassVar = {
+        'layout': PlaneLayout,
+        'visible_rect': DOMRectInit,
+        'color_space': VideoColorSpaceInit,
+        'metadata': VideoFrameMetadata,
+    }
 
     format: VideoPixelFormat | VideoPixelFormatValue
     coded_width: int
@@ -226,6 +268,8 @@ class VideoFrameBufferInit(Dictionary):
     display_width: int | None = None
     display_height: int | None = None
     color_space: VideoColorSpaceInit | VideoColorSpace | None = None
+    metadata: VideoFrameMetadata | None = None
+    transfer: list[Buffer] = field(default_factory=list)
 
     #: Alias for :attr:`coded_width`
     codedWidth: ClassVar[Alias[int]] = alias('coded_width')
@@ -254,9 +298,10 @@ class VideoFrameInit(Dictionary):
         flip (:obj:`bool`, optional): Whether to mirror the frame, in addition to the frame's own flip.
         display_width (:obj:`int`, optional): The width to show the frame at, with ``display_height``.
         display_height (:obj:`int`, optional): The height to show the frame at, with ``display_width``.
+        metadata (:obj:`VideoFrameMetadata`, optional): What else is known of the frame, copied.
     """
 
-    _dictionaries: ClassVar = {'visible_rect': DOMRectInit}
+    _dictionaries: ClassVar = {'visible_rect': DOMRectInit, 'metadata': VideoFrameMetadata}
 
     timestamp: int | None = None
     duration: int | None = None
@@ -266,6 +311,7 @@ class VideoFrameInit(Dictionary):
     flip: bool = False
     display_width: int | None = None
     display_height: int | None = None
+    metadata: VideoFrameMetadata | None = None
 
     #: Alias for :attr:`visible_rect`
     visibleRect: ClassVar[Alias[DOMRectInit | DOMRectReadOnly | None]] = alias('visible_rect')
@@ -284,6 +330,8 @@ class VideoFrameCopyToOptions(Dictionary):
         layout (:obj:`list` of :obj:`PlaneLayout`, optional): Where to put the planes, one after another by default.
         format (:obj:`webrtc.VideoPixelFormat`, optional): The format to convert to: the frame's own one, or one of
             ``RGBA``, ``RGBX``, ``BGRA`` and ``BGRX``.
+        color_space (:obj:`webrtc.PredefinedColorSpace`, optional): The color space to convert to an RGB format in,
+            ``srgb`` by default and the only one supported.
     """
 
     _dictionaries: ClassVar = {'rect': DOMRectInit, 'layout': PlaneLayout}
@@ -291,6 +339,10 @@ class VideoFrameCopyToOptions(Dictionary):
     rect: DOMRectInit | DOMRectReadOnly | None = None
     layout: list[PlaneLayout] | None = None
     format: VideoPixelFormat | VideoPixelFormatValue | None = None
+    color_space: PredefinedColorSpace | PredefinedColorSpaceValue | None = None
+
+    #: Alias for :attr:`color_space`
+    colorSpace: ClassVar[Alias[PredefinedColorSpace | PredefinedColorSpaceValue | None]] = alias('color_space')
 
 
 class _Plane(NamedTuple):
@@ -510,6 +562,19 @@ def _color_space(value: VideoColorSpaceInit | VideoColorSpace | None) -> VideoCo
     )
 
 
+def _copy_metadata(metadata: VideoFrameMetadata | None) -> VideoFrameMetadata:
+    """Copy VideoFrame metadata: a deep copy, as structured cloning makes."""
+    if metadata is None:
+        return VideoFrameMetadata()
+    if not isinstance(metadata, VideoFrameMetadata):
+        msg = f'metadata is a VideoFrameMetadata, not {type(metadata).__name__}'
+        raise TypeError(msg)
+    try:
+        return copy.deepcopy(metadata)
+    except (TypeError, copy.Error) as e:
+        raise DataCloneError(str(e)) from None
+
+
 def _coded_size(init: VideoFrameBufferInit) -> tuple[int, int]:
     size = _dimension(init.coded_width, 'coded_width'), _dimension(init.coded_height, 'coded_height')
     if 0 in size:
@@ -586,14 +651,15 @@ class VideoFrame(Closable):
     _metadata: VideoFrameMetadata
 
     @overload
-    def __init__(self, source: VideoFrame, init: VideoFrameInit | None = None) -> None: ...
+    def __init__(self, image: VideoFrame, /, init: VideoFrameInit | None = None) -> None: ...
 
     @overload
-    def __init__(self, source: Buffer, init: VideoFrameBufferInit) -> None: ...
+    def __init__(self, data: Buffer, /, init: VideoFrameBufferInit) -> None: ...
 
     def __init__(
         self,
         source: Buffer | VideoFrame,
+        /,
         init: VideoFrameBufferInit | VideoFrameInit | None = None,
     ) -> None:
         self._resource = None
@@ -619,11 +685,13 @@ class VideoFrame(Closable):
             msg = 'The timestamp is an integer of microseconds'
             raise TypeError(msg)
 
+        transfer = Transfer(init.transfer)
         resource, (width, height) = _visible_resource(data, init, format, coded_size=coded_size)
         rotation = _rotation(init.rotation)
         color_space = _color_space(init.color_space)
         if color_space is None:
             color_space = _SRGB if format in _RGB_FORMATS else _REC709
+        transfer.detach()
         self._set(
             resource,
             format,
@@ -633,7 +701,7 @@ class VideoFrame(Closable):
                 rotation,
                 flip=bool(init.flip),
             ),
-            info=_FrameInfo(init.timestamp, init.duration, color_space, VideoFrameMetadata()),
+            info=_FrameInfo(init.timestamp, init.duration, color_space, _copy_metadata(init.metadata)),
         )
 
     def _init_from_frame(self, other: VideoFrame, init: VideoFrameInit) -> None:
@@ -660,7 +728,7 @@ class VideoFrame(Closable):
                 init.timestamp if init.timestamp is not None else other._timestamp,
                 init.duration if init.duration is not None else other._duration,
                 other._color_space,
-                other._metadata,
+                other._metadata if init.metadata is None else _copy_metadata(init.metadata),
             ),
         )
 
@@ -789,7 +857,7 @@ class VideoFrame(Closable):
         if self._resource is None:
             msg = 'The frame is closed'
             raise InvalidStateError(msg)
-        return VideoFrameMetadata(self._metadata.rtp_timestamp)
+        return _copy_metadata(self._metadata)
 
     def _plan_copy(self, options: VideoFrameCopyToOptions | None) -> _CopyPlan:
         resource = self._resource
@@ -803,6 +871,12 @@ class VideoFrame(Closable):
             format = _enum(VideoPixelFormat, options.format)
             if format != self._format and format not in _RGB_FORMATS:
                 msg = f'Frames are converted to RGB formats only, not {format.value}'
+                raise NotSupportedError(msg)
+        if options.color_space is not None:
+            color_space = _enum(PredefinedColorSpace, options.color_space)
+            # libyuv keeps the primaries and transfer of the frame, which is sRGB as far as it can tell
+            if options.format is not None and format in _RGB_FORMATS and color_space != PredefinedColorSpace.srgb:
+                msg = f'Frames are converted to RGB in srgb only, not {color_space.value}'
                 raise NotSupportedError(msg)
         coded_size = (self.coded_width, self.coded_height)
         rect = _parse_visible_rect(self._visible_rect, _rect(options.rect), coded_size=coded_size, format=self._format)

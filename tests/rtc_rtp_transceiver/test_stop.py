@@ -16,7 +16,7 @@ from tests.helpers import exchange_offer_answer
 @pytest.mark.asyncio
 async def test_1(pc: webrtc.RTCPeerConnection) -> None:
     """A transceiver added and stopped before the initial offer should not get an m-section in it."""
-    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
+    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.RTCRtpTransceiverDirection.sendonly)
     pc.add_transceiver(webrtc.MediaType.audio, init)
     pc.add_transceiver(webrtc.MediaType.video)
     pc.get_transceivers()[0].stop()
@@ -29,7 +29,7 @@ async def test_1(pc: webrtc.RTCPeerConnection) -> None:
 
 def test_2(pc: webrtc.RTCPeerConnection) -> None:
     """A transceiver added and stopped should not crash when getting receiver's transport."""
-    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
+    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.RTCRtpTransceiverDirection.sendonly)
     pc.add_transceiver(webrtc.MediaType.audio, init)
     pc.add_transceiver(webrtc.MediaType.video)
 
@@ -59,7 +59,7 @@ async def test_3(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnect
 
 
 async def _test_inactive_m_section(
-    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, direction: webrtc.TransceiverDirection
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, direction: webrtc.RTCRtpTransceiverDirection
 ) -> None:
     caller.add_transceiver(webrtc.MediaType.audio)
 
@@ -76,13 +76,13 @@ async def _test_inactive_m_section(
 @pytest.mark.asyncio
 async def test_4(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
     """A stopped sendonly transceiver should generate an inactive m-section in the offer."""
-    await _test_inactive_m_section(caller, callee, webrtc.TransceiverDirection.sendonly)
+    await _test_inactive_m_section(caller, callee, webrtc.RTCRtpTransceiverDirection.sendonly)
 
 
 @pytest.mark.asyncio
 async def test_5(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
     """A stopped inactive transceiver should generate an inactive m-section in the offer."""
-    await _test_inactive_m_section(caller, callee, webrtc.TransceiverDirection.inactive)
+    await _test_inactive_m_section(caller, callee, webrtc.RTCRtpTransceiverDirection.inactive)
 
 
 @pytest.mark.asyncio
@@ -150,5 +150,5 @@ async def test_9(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnect
 
     await exchange_offer_answer(caller, callee)
 
-    assert caller_transceiver.direction == webrtc.TransceiverDirection.stopped
-    assert callee_transceiver.direction == webrtc.TransceiverDirection.stopped
+    assert caller_transceiver.direction == webrtc.RTCRtpTransceiverDirection.stopped
+    assert callee_transceiver.direction == webrtc.RTCRtpTransceiverDirection.stopped

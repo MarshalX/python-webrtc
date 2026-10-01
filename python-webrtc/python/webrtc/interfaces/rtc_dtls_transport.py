@@ -14,7 +14,7 @@ from typing import cast
 from typing_extensions import override
 
 import webrtc
-from webrtc import DtlsTransportState, RTCErrorEvent, WebRTCObject, wrtc
+from webrtc import RTCDtlsTransportState, RTCErrorEvent, RTCErrorEventInit, WebRTCObject, wrtc
 from webrtc.exceptions import _event_error
 from webrtc.utils.events import EventTarget
 
@@ -37,14 +37,14 @@ class RTCDtlsTransport(WebRTCObject[wrtc.RTCDtlsTransport], EventTarget):
     def _on_event(self, name: str, *args: object) -> None:
         # the state changes along with its event
         if name == 'statechange':
-            (state,) = cast('tuple[DtlsTransportState]', args)
+            (state,) = cast('tuple[RTCDtlsTransportState]', args)
             self._native_obj._surfaceState(state)
 
     @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
         if name == 'error':
             (error,) = cast('tuple[wrtc.RTCCallbackException]', args)
-            return RTCErrorEvent(name, _event_error(error), target=self)
+            return RTCErrorEvent(name, RTCErrorEventInit(_event_error(error)))
         return super()._create_event(name, *args)
 
     @property
@@ -53,8 +53,8 @@ class RTCDtlsTransport(WebRTCObject[wrtc.RTCDtlsTransport], EventTarget):
         return webrtc.RTCIceTransport._wrap(self._native_obj.iceTransport)
 
     @property
-    def state(self) -> webrtc.DtlsTransportState:
-        """:obj:`webrtc.DtlsTransportState`: The state of the DTLS transport."""
+    def state(self) -> webrtc.RTCDtlsTransportState:
+        """:obj:`webrtc.RTCDtlsTransportState`: The state of the DTLS transport."""
         return self._native_obj.state
 
     def get_remote_certificates(self) -> list[bytes]:

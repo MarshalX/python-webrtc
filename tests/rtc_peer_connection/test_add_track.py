@@ -65,7 +65,7 @@ def test_4(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> No
 
     stream2 = audio_stream.clone()
     stream2.add_track(track)
-    sender = pc.add_track(track, [audio_stream, stream2])
+    sender = pc.add_track(track, audio_stream, stream2)
 
     assert isinstance(sender, webrtc.RTCRtpSender), 'Expect sender to be instance of RTCRtpSender'
 
@@ -84,18 +84,18 @@ def test_5(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> No
 
 def test_6(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
     """add_track with existing sender with None track, same kind, and recvonly direction should reuse sender."""
-    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.TransceiverDirection.recvonly)
+    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.RTCRtpTransceiverDirection.recvonly)
     transceiver = pc.add_transceiver(webrtc.MediaType.audio, init)
 
     assert transceiver.sender.track is None
-    assert transceiver.direction == webrtc.TransceiverDirection.recvonly
+    assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.recvonly
 
     track, *_ = audio_stream.get_tracks()
     sender = pc.add_track(track)
 
     assert sender == transceiver.sender
     assert sender.track == track
-    assert transceiver.direction == webrtc.TransceiverDirection.sendrecv
+    assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.sendrecv
     assert [sender] == pc.get_senders()
 
 
@@ -103,7 +103,7 @@ def test_7(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> No
     """add_track with existing sender that has not been used to send should reuse the sender."""
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
     assert transceiver.sender.track is None
-    assert transceiver.direction == webrtc.TransceiverDirection.sendrecv
+    assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.sendrecv
 
     track, *_ = audio_stream.get_tracks()
     sender = pc.add_track(track)
@@ -122,14 +122,14 @@ async def test_8(
 
     await exchange_offer_answer(caller, callee)
 
-    assert transceiver.current_direction == webrtc.TransceiverDirection.sendonly
+    assert transceiver.current_direction == webrtc.RTCRtpTransceiverDirection.sendonly
 
     caller.remove_track(transceiver.sender)
 
     await exchange_offer_answer(caller, callee)
 
-    assert transceiver.direction == webrtc.TransceiverDirection.recvonly
-    assert transceiver.current_direction == webrtc.TransceiverDirection.inactive
+    assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.recvonly
+    assert transceiver.current_direction == webrtc.RTCRtpTransceiverDirection.inactive
 
     # transceiver.sender is currently not used for sending,
     # but it should not be reused because it has been used for sending before
@@ -141,11 +141,11 @@ async def test_8(
 
 def test_9(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
     """add_track with existing recvonly sender with null track of a different kind should create new sender."""
-    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.TransceiverDirection.recvonly)
+    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.RTCRtpTransceiverDirection.recvonly)
     transceiver = pc.add_transceiver(webrtc.MediaType.video, init)
 
     assert transceiver.sender.track is None
-    assert transceiver.direction == webrtc.TransceiverDirection.recvonly
+    assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.recvonly
 
     track, *_ = audio_stream.get_tracks()
     sender = pc.add_track(track)
@@ -174,7 +174,7 @@ async def test_10(
 
     await exchange_offer_answer(caller, callee)
 
-    assert transceiver.current_direction == webrtc.TransceiverDirection.sendonly
+    assert transceiver.current_direction == webrtc.RTCRtpTransceiverDirection.sendonly
 
     await wait_for_ice_gathering_complete(caller)
     await wait_for_ice_gathering_complete(callee)

@@ -25,7 +25,12 @@ SdpParseException = wrtc.SdpParseException
 
 
 class RTCException(PythonWebRTCException):
-    """Base class of the errors reported by libwebrtc."""
+    """Base class of the errors reported by libwebrtc, the ``DOMException`` of the specification."""
+
+    @property
+    def message(self) -> str:
+        """:obj:`str`: A description of the error."""
+        return str(self.args[0]) if len(self.args) > 0 else ''
 
 
 class InvalidStateError(RTCException):
@@ -50,6 +55,10 @@ class NotSupportedError(RTCException):
 
 class NetworkError(RTCException):
     """An error of an underlying network protocol."""
+
+
+class DataCloneError(RTCException):
+    """An object can't be transferred, like a buffer listed twice in ``transfer``."""
 
 
 class InvalidSyntaxError(RTCException, ValueError):
@@ -127,7 +136,6 @@ class RTCError(OperationError):
 
     def __init__(self, init: RTCErrorInit, message: str = '') -> None:
         super().__init__(message)
-        self.message = message
         self.error_detail = RTCErrorDetailType(init.error_detail)
         self.sdp_line_number = init.sdp_line_number
         self.sctp_cause_code = init.sctp_cause_code

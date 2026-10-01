@@ -22,7 +22,7 @@ BUSY_AT_EXIT = """
     from tests.helpers import connect
 
     async def main():
-        stream = webrtc.get_user_media(audio=True, video=True)
+        stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True, video=True))
         caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
         for track in stream.get_tracks():
             caller.add_track(track, stream)
@@ -97,7 +97,8 @@ def test_forked_child_leaves_the_objects_of_its_parent_alone() -> None:
 
         async def use():
             caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
-            track = webrtc.get_user_media(audio=False, video=True).get_tracks()[0]
+            constraints = webrtc.MediaStreamConstraints(video=True)
+            track = (await webrtc.media_devices.get_user_media(constraints)).get_tracks()[0]
             caller.add_track(track)
             await asyncio.wait_for(connect(caller, callee), 10)
             reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
@@ -106,7 +107,8 @@ def test_forked_child_leaves_the_objects_of_its_parent_alone() -> None:
             caller.close()
             callee.close()
 
-        parent = [webrtc.RTCPeerConnection(), webrtc.get_user_media(audio=True, video=True)]
+        constraints = webrtc.MediaStreamConstraints(audio=True, video=True)
+        parent = [webrtc.RTCPeerConnection(), asyncio.run(webrtc.media_devices.get_user_media(constraints))]
         asyncio.run(use())
         pid = os.fork()
         if pid == 0:

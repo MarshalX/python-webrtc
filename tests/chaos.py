@@ -127,7 +127,7 @@ class ConnectionSteps(State):
             if self.random.random() < 0.3:
                 transceiver.stop()
             elif self.random.random() < 0.3:
-                transceiver.direction = self.random.choice(list(webrtc.TransceiverDirection)[:4])
+                transceiver.direction = self.random.choice(list(webrtc.RTCRtpTransceiverDirection)[:4])
 
     async def negotiate(self) -> None:
         pc = self.pick(self.connections)
@@ -186,7 +186,11 @@ class MediaSteps(State):
     """Steps of tracks, processors, generators and frames."""
 
     async def get_user_media(self) -> None:
-        self.tracks.extend(webrtc.get_user_media(audio=True, video=True).get_tracks())
+        self.tracks.extend(
+            (
+                await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True, video=True))
+            ).get_tracks()
+        )
 
     async def stop_track(self) -> None:
         track = self.pick(self.tracks)

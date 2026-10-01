@@ -170,6 +170,26 @@ class RTCIceServer(Dictionary):
 
 
 @dataclass
+class RTCIceGatherOptions(Dictionary):
+    """How a standalone :obj:`webrtc.RTCIceTransport` gathers candidates, for :meth:`webrtc.RTCIceTransport.gather`.
+
+    Args:
+        gather_policy (:obj:`webrtc.RTCIceTransportPolicy`, optional): All candidates, or only relay ones.
+        ice_servers (:obj:`list` of :obj:`webrtc.RTCIceServer`, optional): STUN and TURN servers to gather with.
+    """
+
+    gather_policy: RTCIceTransportPolicy | RTCIceTransportPolicyValue = RTCIceTransportPolicy.all
+    ice_servers: list[RTCIceServer] | None = None
+
+    _dictionaries: ClassVar = {'ice_servers': RTCIceServer}
+
+    #: Alias for :attr:`gather_policy`
+    gatherPolicy: ClassVar[Alias[RTCIceTransportPolicy | RTCIceTransportPolicyValue]] = alias('gather_policy')
+    #: Alias for :attr:`ice_servers`
+    iceServers: ClassVar[Alias[list[RTCIceServer] | None]] = alias('ice_servers')
+
+
+@dataclass
 class RTCConfiguration(Dictionary):
     """The configuration of a :obj:`webrtc.RTCPeerConnection`.
 

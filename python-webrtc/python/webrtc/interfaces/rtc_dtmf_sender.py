@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, cast
 
 from typing_extensions import override
 
-from webrtc import InvalidCharacterError, RTCDTMFToneChangeEvent, WebRTCObject, wrtc
+from webrtc import InvalidCharacterError, RTCDTMFToneChangeEvent, RTCDTMFToneChangeEventInit, WebRTCObject, wrtc
 from webrtc.utils.events import EventTarget
 
 if TYPE_CHECKING:
@@ -43,7 +43,7 @@ class RTCDTMFSender(WebRTCObject[wrtc.RTCDTMFSender], EventTarget):
     @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
         tone, _, _ = cast('tuple[str, str, int]', args)
-        return RTCDTMFToneChangeEvent(name, tone, target=self)
+        return RTCDTMFToneChangeEvent(name, RTCDTMFToneChangeEventInit(tone))
 
     def insert_dtmf(self, tones: str, duration: int = 100, inter_tone_gap: int = 70) -> None:
         """Plays tones, replacing the ones not played yet.

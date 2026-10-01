@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import inspect
 import pathlib
 import subprocess
 import sys
@@ -93,7 +94,7 @@ def test_factories_return_to_baseline_when_everything_is_gone() -> None:
     baseline = alive_factories()
 
     pc = webrtc.RTCPeerConnection()
-    stream = webrtc.get_user_media()
+    stream = asyncio.run(webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True)))
     generator = webrtc.MediaStreamTrackGenerator('audio')
     pc.add_track(stream.get_tracks()[0])
     pc.add_track(generator)
@@ -110,7 +111,7 @@ def test_factories_return_to_baseline_when_everything_is_gone() -> None:
 
 def test_everything_alive_shares_one_factory() -> None:
     """New connections use the factory of the media alive."""
-    stream = webrtc.get_user_media()
+    stream = asyncio.run(webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True)))
     source_track = webrtc.MediaStreamTrackGenerator('audio')
     before = alive_factories()
 
@@ -140,7 +141,9 @@ def test_closed_connection_keeps_its_factory_shared() -> None:
 
 def test_dropped_track_wrappers_are_not_notified() -> None:
     """Toggling a track notifies its observers, a dropped wrapper must not be one of them."""
-    streams = [webrtc.get_user_media() for _ in range(50)]
+    streams = [
+        asyncio.run(webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))) for _ in range(50)
+    ]
     tracks = [stream.get_tracks()[0] for stream in streams]
     del tracks
     collect()
@@ -153,7 +156,7 @@ def test_dropped_track_wrappers_are_not_notified() -> None:
 def test_destroyed_track_wrapper_is_not_notified() -> None:
     """A track wrapper dies while libwebrtc keeps the track alive in a sender."""
     pc = webrtc.RTCPeerConnection()
-    stream = webrtc.get_user_media()
+    stream = asyncio.run(webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True)))
     pc.add_track(stream.get_tracks()[0])
     del stream
     collect()
@@ -170,7 +173,7 @@ def test_destroyed_track_wrapper_is_not_notified() -> None:
 
 def test_track_state_survives_gc() -> None:
     """The state of a track is kept by its native object, not by its wrapper."""
-    stream = webrtc.get_user_media()
+    stream = asyncio.run(webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True)))
     track = stream.get_tracks()[0]
     track.enabled = False
     track.stop()
@@ -279,7 +282,7 @@ async def test_transports_outlive_closed_connection(
     callee.close()
     collect()
 
-    assert transport.state == webrtc.DtlsTransportState.closed
+    assert transport.state == webrtc.RTCDtlsTransportState.closed
     assert ice_transport.state == webrtc.RTCIceTransportState.closed
 
 
@@ -542,16 +545,16 @@ def test_generator_track_stays_ended_without_its_wrapper() -> None:
     assert webrtc.MediaStreamTrack._wrap(generator.track).ready_state == webrtc.MediaStreamTrackState.ended
 
 
-def processor_with_handler_on_its_track() -> webrtc.MediaStreamTrackProcessor:
-    track = webrtc.get_user_media(audio=False, video=True).get_tracks()[0]
+async def processor_with_handler_on_its_track() -> webrtc.MediaStreamTrackProcessor:
+    track = (await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=True))).get_tracks()[0]
     processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
     track.on('ended', lambda _: processor.readable)
     track.stop()
     return processor
 
 
-def stream_with_handler_on_its_track() -> webrtc.MediaStream:
-    stream = webrtc.get_user_media(audio=True, video=False)
+async def stream_with_handler_on_its_track() -> webrtc.MediaStream:
+    stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))
     stream.get_tracks()[0].on('ended', lambda _: stream.id)
     return stream
 
@@ -572,7 +575,11 @@ def processor_of_generator_with_handler() -> webrtc.MediaStreamTrackProcessor:
 async def test_handlers_of_owned_tracks_do_not_keep_owners_alive(create: Callable[[], object]) -> None:
     """Handlers of a track referencing its processor or stream don't keep them alive."""
     baseline = alive_factories()
-    refs = [weakref.ref(create()) for _ in range(5)]
+    refs: list[weakref.ref[object]] = []
+    for _ in range(5):
+        created = create()
+        refs.append(weakref.ref(await created if inspect.isawaitable(created) else created))
+    del created
     await asyncio.sleep(QUIET_PERIOD)
     collect()
 
@@ -582,7 +589,11 @@ async def test_handlers_of_owned_tracks_do_not_keep_owners_alive(create: Callabl
 
 def test_stream_keeps_the_state_of_its_tracks() -> None:
     """The native stream keeps its tracks weakly, the Python one keeps them: a stopped track stays stopped."""
-    stream = webrtc.MediaStream(webrtc.get_user_media(audio=True, video=True).get_tracks())
+    stream = webrtc.MediaStream(
+        asyncio.run(
+            webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True, video=True))
+        ).get_tracks()
+    )
     for track in stream.get_tracks():
         track.stop()
     del track
@@ -605,7 +616,11 @@ async def test_handler_of_a_track_referencing_its_sender_or_receiver(part: str) 
     def create() -> weakref.ref[webrtc.RTCRtpSender | webrtc.RTCRtpReceiver]:
         pc = webrtc.RTCPeerConnection()
         if part == 'sender':
-            owner = pc.add_track(webrtc.get_user_media(audio=True, video=False).get_tracks()[0])
+            owner = pc.add_track(
+                asyncio.run(
+                    webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))
+                ).get_tracks()[0]
+            )
         else:
             owner = pc.add_transceiver(webrtc.MediaType.audio).receiver
         track = owner.track
@@ -648,7 +663,7 @@ async def test_a_session_releases_every_native_object() -> None:
 
     async def session() -> None:
         caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
-        stream = webrtc.get_user_media(audio=True, video=True)
+        stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True, video=True))
         for track in stream.get_tracks():
             caller.add_track(track, stream)
         generator = webrtc.VideoTrackGenerator()

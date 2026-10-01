@@ -156,9 +156,9 @@ def test_codec_preferences_and_header_extensions(pc: webrtc.RTCPeerConnection) -
         transceiver.set_codec_preferences([webrtc.RTCRtpCodec('audio/nonsense', 8000)])
 
     extensions = transceiver.get_header_extensions_to_negotiate()
-    extensions[-1].direction = webrtc.TransceiverDirection.stopped
+    extensions[-1].direction = webrtc.RTCRtpTransceiverDirection.stopped
     transceiver.set_header_extensions_to_negotiate(extensions)
-    assert transceiver.get_header_extensions_to_negotiate()[-1].direction == webrtc.TransceiverDirection.stopped
+    assert transceiver.get_header_extensions_to_negotiate()[-1].direction == webrtc.RTCRtpTransceiverDirection.stopped
 
 
 @pytest.mark.asyncio
@@ -202,8 +202,13 @@ async def test_set_parameters_key_frames(caller: webrtc.RTCPeerConnection, calle
     sender = caller.add_transceiver(webrtc.MediaType.video).sender
     await exchange_offer_answer(caller, callee)
     with pytest.raises(webrtc.InvalidModificationError):
-        await sender.set_parameters(sender.get_parameters(), key_frames=[True, False])
-    await sender.set_parameters(sender.get_parameters(), key_frames=[True])
+        await sender.set_parameters(
+            sender.get_parameters(),
+            webrtc.RTCSetParameterOptions([webrtc.RTCEncodingOptions(key_frame=True), webrtc.RTCEncodingOptions()]),
+        )
+    await sender.set_parameters(
+        sender.get_parameters(), webrtc.RTCSetParameterOptions([webrtc.RTCEncodingOptions(key_frame=True)])
+    )
 
 
 @pytest.mark.asyncio
@@ -276,6 +281,7 @@ async def test_synchronization_sources(
     await wait_until(receiver.get_synchronization_sources, 'a synchronization source', timeout=5)
     [source] = receiver.get_synchronization_sources()
     inbound = (await receiver.get_stats()).of_type('inbound-rtp')[0]
+    assert isinstance(inbound, webrtc.RTCInboundRtpStreamStats)
     assert isinstance(source, webrtc.RTCRtpSynchronizationSource)
     assert source.source == inbound.ssrc
     assert abs(source.timestamp - time.time() * 1000) < 5_000
@@ -319,6 +325,6 @@ def test_transceiver_init_from_json(pc: webrtc.RTCPeerConnection) -> None:
         'x': 1,
     })
     transceiver = pc.add_transceiver(webrtc.MediaType.video, init)
-    assert transceiver.direction == webrtc.TransceiverDirection.sendonly
+    assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.sendonly
     encodings = transceiver.sender.get_parameters().encodings
     assert [(e.rid, e.max_bitrate) for e in encodings] == [('a', 100000), ('b', None)]

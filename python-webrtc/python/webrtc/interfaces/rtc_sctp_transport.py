@@ -33,7 +33,7 @@ class RTCSctpTransport(WebRTCObject[wrtc.RTCSctpTransport], EventTarget):
 
     @override
     def _on_event(self, name: str, *args: object) -> None:
-        (state,) = cast('tuple[webrtc.SctpTransportState]', args)
+        (state,) = cast('tuple[webrtc.RTCSctpTransportState]', args)
         # the state changes along with its event
         self._native_obj._surfaceState(state)
 
@@ -43,8 +43,8 @@ class RTCSctpTransport(WebRTCObject[wrtc.RTCSctpTransport], EventTarget):
         return webrtc.RTCDtlsTransport._wrap(self._native_obj.transport)
 
     @property
-    def state(self) -> webrtc.SctpTransportState:
-        """:obj:`webrtc.SctpTransportState`: An enumerated value indicating the state of the SCTP transport."""
+    def state(self) -> webrtc.RTCSctpTransportState:
+        """:obj:`webrtc.RTCSctpTransportState`: An enumerated value indicating the state of the SCTP transport."""
         return self._native_obj.state
 
     @property

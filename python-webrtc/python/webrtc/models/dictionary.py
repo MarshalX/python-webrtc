@@ -9,11 +9,12 @@
 
 from __future__ import annotations
 
+import enum
 from collections.abc import Mapping
 from dataclasses import fields
 from typing import TYPE_CHECKING, ClassVar
 
-from webrtc.utils.names import members
+from webrtc.utils.names import camel_case, members
 
 if TYPE_CHECKING:
     from dataclasses import Field
@@ -55,6 +56,22 @@ class Dictionary:
                 kwargs[name] = dictionary._from_json_member(kwargs[name])
         return cls(**kwargs)
 
+    def to_json(self) -> dict[str, object]:
+        """The JSON form of the dictionary, like a message to the remote peer.
+
+        Keys are the camelCase names of the specification, members that are :obj:`None` are left out, enums are
+        their values, and nested dictionaries are converted too.
+
+        Returns:
+            :obj:`dict`: The JSON form.
+        """
+        json: dict[str, object] = {}
+        for field in fields(self):
+            value: object = getattr(self, field.name)
+            if value is not None:
+                json[camel_case(field.name)] = _json_value(value)
+        return json
+
     @classmethod
     def _from_json_member(cls, value: object) -> object:
         """A member that holds the dictionary, a list of them, or another type of a union, which stays as it is."""
@@ -63,3 +80,14 @@ class Dictionary:
         if isinstance(value, list):
             return [cls.from_json(item) if isinstance(item, Mapping) else item for item in value]
         return value
+
+
+def _json_value(value: object) -> object:
+    if isinstance(value, Dictionary):
+        return value.to_json()
+    if isinstance(value, enum.Enum):
+        return value.value
+    if isinstance(value, (list, tuple)):
+        items: list[object] | tuple[object, ...] = value
+        return [_json_value(item) for item in items]
+    return value

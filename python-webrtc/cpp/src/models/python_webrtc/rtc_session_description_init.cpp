@@ -16,7 +16,7 @@ namespace python_webrtc {
 
   void RTCSessionDescriptionInit::Init(pybind11::module &m) {
     pybind11::class_<RTCSessionDescriptionInit>(m, "RTCSessionDescriptionInit")
-        .def(pybind11::init<webrtc::SdpType, std::string>())
+        .def(pybind11::init<webrtc::SdpType, std::string>(), pybind11::arg("type"), pybind11::arg("sdp"))
         .def_readwrite("type", &RTCSessionDescriptionInit::type)
         .def_readwrite("sdp", &RTCSessionDescriptionInit::sdp);
   }

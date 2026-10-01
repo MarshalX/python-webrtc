@@ -133,7 +133,7 @@ async def test_close_connection_while_reading(
 
 def test_loop_closed_while_frames_arrive() -> None:
     """A processor whose loop is closed doesn't block the media threads, nor fail once collected."""
-    stream = webrtc.get_user_media(audio=True, video=True)
+    stream = asyncio.run(webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True, video=True)))
 
     async def start() -> list[webrtc.MediaStreamTrackProcessor]:
         processors = [

@@ -175,6 +175,7 @@ async def test_generate_ecdsa_certificate() -> None:
     assert not certificate.expired
     (fingerprint,) = certificate.get_fingerprints()
     assert fingerprint.algorithm == 'sha-256'
+    assert fingerprint.value is not None
     assert len(fingerprint.value.split(':')) == 32
 
 
@@ -218,6 +219,7 @@ async def test_configured_certificate(create_pc: CreatePC) -> None:
     pc = create_pc(webrtc.RTCConfiguration(certificates=[certificate]))
     pc.add_transceiver(webrtc.MediaType.audio)
     offer = await pc.create_offer()
+    assert fingerprint.value is not None
     assert fingerprint.value.upper() in offer.sdp
     certificates = pc.get_configuration().certificates
     assert certificates is not None
@@ -262,7 +264,10 @@ def test_ice_candidate_parsing() -> None:
         'sdpMLineIndex': None,
         'usernameFragment': None,
     }
-    assert webrtc.RTCIceCandidate.from_json(candidate.to_json()).candidate == candidate.candidate
+    assert (
+        webrtc.RTCIceCandidate(**vars(webrtc.RTCIceCandidateInit.from_json(candidate.to_json()))).candidate
+        == candidate.candidate
+    )
 
 
 def test_invalid_ice_candidate() -> None:

@@ -127,6 +127,59 @@ ConstrainBooleanOrDOMString = Union[bool, str, ConstrainBooleanOrDOMStringParame
 
 
 @dataclass
+class MediaTrackSupportedConstraints(Dictionary):
+    """The constraints the library recognizes, all of them (:meth:`webrtc.MediaDevices.get_supported_constraints`).
+
+    Args:
+        width (:obj:`bool`, optional): :obj:`True`, like every other member.
+    """
+
+    width: bool = True
+    height: bool = True
+    aspect_ratio: bool = True
+    frame_rate: bool = True
+    facing_mode: bool = True
+    resize_mode: bool = True
+    sample_rate: bool = True
+    sample_size: bool = True
+    echo_cancellation: bool = True
+    auto_gain_control: bool = True
+    noise_suppression: bool = True
+    latency: bool = True
+    channel_count: bool = True
+    device_id: bool = True
+    group_id: bool = True
+    background_blur: bool = True
+
+    #: Alias for :attr:`aspect_ratio`
+    aspectRatio: ClassVar[Alias[bool]] = alias('aspect_ratio')
+    #: Alias for :attr:`frame_rate`
+    frameRate: ClassVar[Alias[bool]] = alias('frame_rate')
+    #: Alias for :attr:`facing_mode`
+    facingMode: ClassVar[Alias[bool]] = alias('facing_mode')
+    #: Alias for :attr:`resize_mode`
+    resizeMode: ClassVar[Alias[bool]] = alias('resize_mode')
+    #: Alias for :attr:`sample_rate`
+    sampleRate: ClassVar[Alias[bool]] = alias('sample_rate')
+    #: Alias for :attr:`sample_size`
+    sampleSize: ClassVar[Alias[bool]] = alias('sample_size')
+    #: Alias for :attr:`echo_cancellation`
+    echoCancellation: ClassVar[Alias[bool]] = alias('echo_cancellation')
+    #: Alias for :attr:`auto_gain_control`
+    autoGainControl: ClassVar[Alias[bool]] = alias('auto_gain_control')
+    #: Alias for :attr:`noise_suppression`
+    noiseSuppression: ClassVar[Alias[bool]] = alias('noise_suppression')
+    #: Alias for :attr:`channel_count`
+    channelCount: ClassVar[Alias[bool]] = alias('channel_count')
+    #: Alias for :attr:`device_id`
+    deviceId: ClassVar[Alias[bool]] = alias('device_id')
+    #: Alias for :attr:`group_id`
+    groupId: ClassVar[Alias[bool]] = alias('group_id')
+    #: Alias for :attr:`background_blur`
+    backgroundBlur: ClassVar[Alias[bool]] = alias('background_blur')
+
+
+@dataclass
 class MediaTrackSettings(Dictionary):
     """What a track carries, as far as it's known (:meth:`webrtc.MediaStreamTrack.get_settings`).
 
@@ -146,6 +199,9 @@ class MediaTrackSettings(Dictionary):
         echo_cancellation (:obj:`bool`, optional): Whether echo is cancelled.
         auto_gain_control (:obj:`bool`, optional): Whether the gain is controlled.
         noise_suppression (:obj:`bool`, optional): Whether noise is suppressed.
+        facing_mode (:obj:`str`, optional): Where the camera faces, like ``'user'``.
+        latency (:obj:`float`, optional): The latency of the audio in seconds.
+        background_blur (:obj:`bool`, optional): Whether the background is blurred.
     """
 
     width: int | None = None
@@ -158,9 +214,12 @@ class MediaTrackSettings(Dictionary):
     sample_rate: int | None = None
     sample_size: int | None = None
     channel_count: int | None = None
-    echo_cancellation: bool | None = None
+    echo_cancellation: bool | str | None = None
     auto_gain_control: bool | None = None
     noise_suppression: bool | None = None
+    facing_mode: str | None = None
+    latency: float | None = None
+    background_blur: bool | None = None
 
     #: Alias for :attr:`aspect_ratio`
     aspectRatio: ClassVar[Alias[float | None]] = alias('aspect_ratio')
@@ -179,11 +238,15 @@ class MediaTrackSettings(Dictionary):
     #: Alias for :attr:`channel_count`
     channelCount: ClassVar[Alias[int | None]] = alias('channel_count')
     #: Alias for :attr:`echo_cancellation`
-    echoCancellation: ClassVar[Alias[bool | None]] = alias('echo_cancellation')
+    echoCancellation: ClassVar[Alias[bool | str | None]] = alias('echo_cancellation')
     #: Alias for :attr:`auto_gain_control`
     autoGainControl: ClassVar[Alias[bool | None]] = alias('auto_gain_control')
     #: Alias for :attr:`noise_suppression`
     noiseSuppression: ClassVar[Alias[bool | None]] = alias('noise_suppression')
+    #: Alias for :attr:`facing_mode`
+    facingMode: ClassVar[Alias[str | None]] = alias('facing_mode')
+    #: Alias for :attr:`background_blur`
+    backgroundBlur: ClassVar[Alias[bool | None]] = alias('background_blur')
 
 
 @dataclass
@@ -207,6 +270,9 @@ class MediaTrackCapabilities(Dictionary):
         echo_cancellation (:obj:`list` of :obj:`bool`, optional): Whether echo can be cancelled.
         auto_gain_control (:obj:`list` of :obj:`bool`, optional): Whether the gain can be controlled.
         noise_suppression (:obj:`list` of :obj:`bool`, optional): Whether noise can be suppressed.
+        facing_mode (:obj:`list` of :obj:`str`, optional): Where the camera can face.
+        latency (:obj:`DoubleRange`, optional): The latencies of the audio in seconds.
+        background_blur (:obj:`list` of :obj:`bool`, optional): Whether the background can be blurred.
     """
 
     width: ULongRange | None = None
@@ -219,9 +285,12 @@ class MediaTrackCapabilities(Dictionary):
     sample_rate: ULongRange | None = None
     sample_size: ULongRange | None = None
     channel_count: ULongRange | None = None
-    echo_cancellation: list[bool] | None = None
+    echo_cancellation: list[bool | str] | None = None
     auto_gain_control: list[bool] | None = None
     noise_suppression: list[bool] | None = None
+    facing_mode: list[str] | None = None
+    latency: DoubleRange | None = None
+    background_blur: list[bool] | None = None
 
     #: Alias for :attr:`aspect_ratio`
     aspectRatio: ClassVar[Alias[DoubleRange | None]] = alias('aspect_ratio')
@@ -240,11 +309,15 @@ class MediaTrackCapabilities(Dictionary):
     #: Alias for :attr:`channel_count`
     channelCount: ClassVar[Alias[ULongRange | None]] = alias('channel_count')
     #: Alias for :attr:`echo_cancellation`
-    echoCancellation: ClassVar[Alias[list[bool] | None]] = alias('echo_cancellation')
+    echoCancellation: ClassVar[Alias[list[bool | str] | None]] = alias('echo_cancellation')
     #: Alias for :attr:`auto_gain_control`
     autoGainControl: ClassVar[Alias[list[bool] | None]] = alias('auto_gain_control')
     #: Alias for :attr:`noise_suppression`
     noiseSuppression: ClassVar[Alias[list[bool] | None]] = alias('noise_suppression')
+    #: Alias for :attr:`facing_mode`
+    facingMode: ClassVar[Alias[list[str] | None]] = alias('facing_mode')
+    #: Alias for :attr:`background_blur`
+    backgroundBlur: ClassVar[Alias[list[bool] | None]] = alias('background_blur')
 
 
 @dataclass
@@ -270,6 +343,10 @@ class MediaTrackConstraintSet(Dictionary):
         auto_gain_control (:obj:`bool` or :obj:`ConstrainBooleanParameters`, optional): Whether the gain is
             controlled.
         noise_suppression (:obj:`bool` or :obj:`ConstrainBooleanParameters`, optional): Whether noise is suppressed.
+        facing_mode (:obj:`str` or :obj:`ConstrainDOMStringParameters`, optional): Where the camera faces.
+        latency (:obj:`float` or :obj:`ConstrainDoubleRange`, optional): The latency of the audio in seconds.
+        background_blur (:obj:`bool` or :obj:`ConstrainBooleanParameters`, optional): Whether the background is
+            blurred.
     """
 
     _dictionaries: ClassVar = {
@@ -286,6 +363,9 @@ class MediaTrackConstraintSet(Dictionary):
         'echo_cancellation': ConstrainBooleanOrDOMStringParameters,
         'auto_gain_control': ConstrainBooleanParameters,
         'noise_suppression': ConstrainBooleanParameters,
+        'facing_mode': ConstrainDOMStringParameters,
+        'latency': ConstrainDoubleRange,
+        'background_blur': ConstrainBooleanParameters,
     }
 
     width: ConstrainULong | None = None
@@ -301,6 +381,9 @@ class MediaTrackConstraintSet(Dictionary):
     echo_cancellation: ConstrainBooleanOrDOMString | None = None
     auto_gain_control: ConstrainBoolean | None = None
     noise_suppression: ConstrainBoolean | None = None
+    facing_mode: ConstrainDOMString | None = None
+    latency: ConstrainDouble | None = None
+    background_blur: ConstrainBoolean | None = None
 
     #: Alias for :attr:`aspect_ratio`
     aspectRatio: ClassVar[Alias[ConstrainDouble | None]] = alias('aspect_ratio')
@@ -324,6 +407,10 @@ class MediaTrackConstraintSet(Dictionary):
     autoGainControl: ClassVar[Alias[ConstrainBoolean | None]] = alias('auto_gain_control')
     #: Alias for :attr:`noise_suppression`
     noiseSuppression: ClassVar[Alias[ConstrainBoolean | None]] = alias('noise_suppression')
+    #: Alias for :attr:`facing_mode`
+    facingMode: ClassVar[Alias[ConstrainDOMString | None]] = alias('facing_mode')
+    #: Alias for :attr:`background_blur`
+    backgroundBlur: ClassVar[Alias[ConstrainBoolean | None]] = alias('background_blur')
 
 
 @dataclass
@@ -340,3 +427,20 @@ class MediaTrackConstraints(MediaTrackConstraintSet):
     _dictionaries: ClassVar = {**MediaTrackConstraintSet._dictionaries, 'advanced': MediaTrackConstraintSet}
 
     advanced: list[MediaTrackConstraintSet] | None = None
+
+
+@dataclass
+class MediaStreamConstraints(Dictionary):
+    """The tracks :meth:`webrtc.MediaDevices.get_user_media` returns.
+
+    Args:
+        video (:obj:`bool` or :obj:`MediaTrackConstraints`, optional): Whether to get a video track, and its
+            constraints.
+        audio (:obj:`bool` or :obj:`MediaTrackConstraints`, optional): Whether to get an audio track, and its
+            constraints.
+    """
+
+    video: bool | MediaTrackConstraints = False
+    audio: bool | MediaTrackConstraints = False
+
+    _dictionaries: ClassVar = {'video': MediaTrackConstraints, 'audio': MediaTrackConstraints}

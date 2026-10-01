@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 from typing_extensions import TypedDict
 
-from webrtc import MediaType, RTCDegradationPreference, RTCPriorityType, TransceiverDirection, wrtc
+from webrtc import MediaType, RTCDegradationPreference, RTCPriorityType, RTCRtpTransceiverDirection, wrtc
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
 
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
         MediaTypeValue,
         RTCDegradationPreferenceValue,
         RTCPriorityTypeValue,
-        TransceiverDirectionValue,
+        RTCRtpTransceiverDirectionValue,
     )
 
 _NativeCodecT = TypeVar('_NativeCodecT', bound='wrtc.RtpCodec')
@@ -211,14 +211,25 @@ class RTCRtcpParameters(Dictionary):
 
 
 @dataclass
-class RTCRtpEncodingParameters(Dictionary):
+class RTCRtpCodingParameters(Dictionary):
+    """The members of an encoding that identify it.
+
+    Args:
+        rid (:obj:`str`, optional): The RTP stream id of a simulcast layer. Can't be changed once set.
+    """
+
+    rid: str | None = None
+
+
+@dataclass
+class RTCRtpEncodingParameters(RTCRtpCodingParameters):
     """An encoding of a sender, one per simulcast layer.
 
     Args:
+        rid (:obj:`str`, optional): The RTP stream id of a simulcast layer. Can't be changed once set.
         active (:obj:`bool`, optional): Whether the encoding is sent.
         max_bitrate (:obj:`int`, optional): The highest bitrate in bits per second.
         max_framerate (:obj:`float`, optional): The highest frame rate of video.
-        rid (:obj:`str`, optional): The RTP stream id of a simulcast layer. Can't be changed once set.
         scale_resolution_down_by (:obj:`float`, optional): How much video is scaled down (at least 1).
         priority (:obj:`webrtc.RTCPriorityType`, optional): The share of the bitrate the encoding gets.
         network_priority (:obj:`webrtc.RTCPriorityType`, optional): The DSCP marking of its packets.
@@ -230,7 +241,6 @@ class RTCRtpEncodingParameters(Dictionary):
     active: bool = True
     max_bitrate: int | None = None
     max_framerate: float | None = None
-    rid: str | None = None
     scale_resolution_down_by: float | None = None
     priority: RTCPriorityType | RTCPriorityTypeValue = RTCPriorityType.low
     network_priority: RTCPriorityType | RTCPriorityTypeValue = RTCPriorityType.low
@@ -309,24 +319,38 @@ class RTCRtpEncodingParameters(Dictionary):
 
 
 @dataclass
-class RTCRtpReceiveParameters(Dictionary):
-    """The parameters a receiver receives with.
+class RTCRtpParameters(Dictionary):
+    """The parameters of a sender or a receiver.
 
     Args:
-        codecs (:obj:`list` of :obj:`webrtc.RTCRtpCodecParameters`): The codecs it can receive.
         header_extensions (:obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionParameters`): The header extensions.
         rtcp (:obj:`webrtc.RTCRtcpParameters`): The RTCP parameters.
+        codecs (:obj:`list` of :obj:`webrtc.RTCRtpCodecParameters`): The negotiated codecs.
     """
 
-    codecs: list[RTCRtpCodecParameters] = field(default_factory=list)
-    header_extensions: list[RTCRtpHeaderExtensionParameters] = field(default_factory=list)
-    rtcp: RTCRtcpParameters = field(default_factory=RTCRtcpParameters)
+    header_extensions: list[RTCRtpHeaderExtensionParameters]
+    rtcp: RTCRtcpParameters
+    codecs: list[RTCRtpCodecParameters]
 
     _dictionaries: ClassVar = {
         'codecs': RTCRtpCodecParameters,
         'header_extensions': RTCRtpHeaderExtensionParameters,
         'rtcp': RTCRtcpParameters,
     }
+
+    #: Alias for :attr:`header_extensions`
+    headerExtensions: ClassVar[Alias[list[RTCRtpHeaderExtensionParameters]]] = alias('header_extensions')
+
+
+@dataclass
+class RTCRtpReceiveParameters(RTCRtpParameters):
+    """The parameters a receiver receives with.
+
+    Args:
+        header_extensions (:obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionParameters`): The header extensions.
+        rtcp (:obj:`webrtc.RTCRtcpParameters`): The RTCP parameters.
+        codecs (:obj:`list` of :obj:`webrtc.RTCRtpCodecParameters`): The codecs it can receive.
+    """
 
     @classmethod
     def _from_native(cls, native: wrtc.RtpParameters) -> RTCRtpReceiveParameters:
@@ -336,31 +360,25 @@ class RTCRtpReceiveParameters(Dictionary):
             rtcp=RTCRtcpParameters(reduced_size=native.rtcp.reducedSize),
         )
 
-    #: Alias for :attr:`header_extensions`
-    headerExtensions: ClassVar[Alias[list[RTCRtpHeaderExtensionParameters]]] = alias('header_extensions')
-
 
 @dataclass
-class RTCRtpSendParameters(Dictionary):
+class RTCRtpSendParameters(RTCRtpParameters):
     """The parameters a sender sends with, from :meth:`webrtc.RTCRtpSender.get_parameters`.
 
     Only :attr:`encodings` (all but their ``rid``) and :attr:`degradation_preference` can be changed with
     :meth:`webrtc.RTCRtpSender.set_parameters`.
 
     Args:
-        transaction_id (:obj:`str`): Identifies the call of ``get_parameters`` the parameters come from.
-        encodings (:obj:`list` of :obj:`webrtc.RTCRtpEncodingParameters`): The encodings.
-        codecs (:obj:`list` of :obj:`webrtc.RTCRtpCodecParameters`): The negotiated codecs.
         header_extensions (:obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionParameters`): The header extensions.
         rtcp (:obj:`webrtc.RTCRtcpParameters`): The RTCP parameters.
+        codecs (:obj:`list` of :obj:`webrtc.RTCRtpCodecParameters`): The negotiated codecs.
+        transaction_id (:obj:`str`): Identifies the call of ``get_parameters`` the parameters come from.
+        encodings (:obj:`list` of :obj:`webrtc.RTCRtpEncodingParameters`): The encodings.
         degradation_preference (:obj:`webrtc.RTCDegradationPreference`, optional): What video degrades first.
     """
 
     transaction_id: str
-    encodings: list[RTCRtpEncodingParameters] = field(default_factory=list)
-    codecs: list[RTCRtpCodecParameters] = field(default_factory=list)
-    header_extensions: list[RTCRtpHeaderExtensionParameters] = field(default_factory=list)
-    rtcp: RTCRtcpParameters = field(default_factory=RTCRtcpParameters)
+    encodings: list[RTCRtpEncodingParameters]
     degradation_preference: RTCDegradationPreference | RTCDegradationPreferenceValue | None = None
 
     _dictionaries: ClassVar = {
@@ -383,8 +401,6 @@ class RTCRtpSendParameters(Dictionary):
 
     #: Alias for :attr:`transaction_id`
     transactionId: ClassVar[Alias[str]] = alias('transaction_id')
-    #: Alias for :attr:`header_extensions`
-    headerExtensions: ClassVar[Alias[list[RTCRtpHeaderExtensionParameters]]] = alias('header_extensions')
     #: Alias for :attr:`degradation_preference`
     degradationPreference: ClassVar[Alias[RTCDegradationPreference | None]] = alias('degradation_preference')
 
@@ -395,12 +411,12 @@ class RTCRtpHeaderExtensionCapability(Dictionary):
 
     Args:
         uri (:obj:`str`): The URI of the extension.
-        direction (:obj:`webrtc.TransceiverDirection`, optional): In which directions it's negotiated,
-            :attr:`webrtc.TransceiverDirection.stopped` for not at all.
+        direction (:obj:`webrtc.RTCRtpTransceiverDirection`, optional): In which directions it's negotiated,
+            :attr:`webrtc.RTCRtpTransceiverDirection.stopped` for not at all.
     """
 
     uri: str
-    direction: TransceiverDirection | TransceiverDirectionValue = TransceiverDirection.sendrecv
+    direction: RTCRtpTransceiverDirection | RTCRtpTransceiverDirectionValue = RTCRtpTransceiverDirection.sendrecv
 
     @classmethod
     def _from_native(cls, native: wrtc.RtpHeaderExtensionCapability) -> RTCRtpHeaderExtensionCapability:
@@ -416,8 +432,8 @@ class RTCRtpCapabilities(Dictionary):
         header_extensions (:obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionCapability`): The header extensions.
     """
 
-    codecs: list[RTCRtpCodec] = field(default_factory=list)
-    header_extensions: list[RTCRtpHeaderExtensionCapability] = field(default_factory=list)
+    codecs: list[RTCRtpCodec]
+    header_extensions: list[RTCRtpHeaderExtensionCapability]
 
     _dictionaries: ClassVar = {'codecs': RTCRtpCodec, 'header_extensions': RTCRtpHeaderExtensionCapability}
 
@@ -443,3 +459,34 @@ class RTCRtpCapabilities(Dictionary):
 
     #: Alias for :attr:`header_extensions`
     headerExtensions: ClassVar[Alias[list[RTCRtpHeaderExtensionCapability]]] = alias('header_extensions')
+
+
+@dataclass
+class RTCEncodingOptions(Dictionary):
+    """How :meth:`webrtc.RTCRtpSender.set_parameters` changes an encoding (WebRTC Extensions).
+
+    Args:
+        key_frame (:obj:`bool`, optional): Whether the encoding sends a key frame right away.
+    """
+
+    key_frame: bool = False
+
+    #: Alias for :attr:`key_frame`
+    keyFrame: ClassVar[Alias[bool]] = alias('key_frame')
+
+
+@dataclass
+class RTCSetParameterOptions(Dictionary):
+    """The options of :meth:`webrtc.RTCRtpSender.set_parameters`.
+
+    Args:
+        encoding_options (:obj:`list` of :obj:`webrtc.RTCEncodingOptions`, optional): One per encoding
+            (WebRTC Extensions).
+    """
+
+    encoding_options: list[RTCEncodingOptions] = field(default_factory=list)
+
+    _dictionaries: ClassVar = {'encoding_options': RTCEncodingOptions}
+
+    #: Alias for :attr:`encoding_options`
+    encodingOptions: ClassVar[Alias[list[RTCEncodingOptions]]] = alias('encoding_options')

@@ -128,8 +128,10 @@ namespace python_webrtc {
   void RTCPeerConnection::Init(pybind11::module &m) {
     Listeners::BindClass<RTCPeerConnection>(m, "RTCPeerConnection")
         .def(pybind11::init(nogil_factory(+[](const std::optional<ConfigurationInit> &configuration) {
-          return std::shared_ptr<RTCPeerConnection>(new RTCPeerConnection(configuration), DeleteOffLibwebrtcThread());
-        })))
+               return std::shared_ptr<RTCPeerConnection>(new RTCPeerConnection(configuration),
+                                                         DeleteOffLibwebrtcThread());
+             })),
+             pybind11::arg("configuration"))
         .def("createOffer", WithCallbacks(&RTCPeerConnection::CreateOffer), pybind11::arg("onSuccess"),
              pybind11::arg("onFailure"), pybind11::arg("iceRestart"), pybind11::arg("voiceActivityDetection"))
         .def("createAnswer", WithCallbacks(&RTCPeerConnection::CreateAnswer), pybind11::arg("onSuccess"),

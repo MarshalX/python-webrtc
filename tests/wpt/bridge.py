@@ -18,10 +18,9 @@ import enum
 import inspect
 import sys
 import time
-from typing import TYPE_CHECKING, Callable, TypeVar, Union, cast
+from typing import TYPE_CHECKING, Callable, TypeVar, Union
 
 import pythonmonkey as pm
-from typing_extensions import TypedDict
 
 import webrtc
 import webrtc.enums
@@ -30,15 +29,6 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Coroutine
 
     from _typeshed import DataclassInstance
-
-    from webrtc.models.media_track_constraints import ConstrainDouble, ConstrainULong
-
-    class _UserMediaOptions(TypedDict, total=False, closed=True):
-        audio: bool
-        video: bool
-        width: ConstrainULong | None
-        height: ConstrainULong | None
-        frame_rate: ConstrainDouble | None
 
 
 _T = TypeVar('_T')
@@ -113,8 +103,16 @@ def _error_to_js(value: BaseException) -> object:
     return {'__error': _error(value)['error']}
 
 
+def _one_stats_to_js(stats: webrtc.RTCStats) -> object:
+    members = _dictionary_to_js(stats)
+    # address is nullable: null when the address isn't exposed
+    if isinstance(stats, webrtc.RTCIceCandidateStats):
+        members['address'] = stats.address
+    return members
+
+
 def _stats_to_js(value: webrtc.RTCStatsReport) -> object:
-    return {'__statsReport': [[stats_id, dict(stats)] for stats_id, stats in value.items()]}
+    return {'__statsReport': [[stats_id, _one_stats_to_js(stats)] for stats_id, stats in value.items()]}
 
 
 def _bytes_to_js(value: bytes) -> object:
@@ -321,13 +319,15 @@ def audio_data_copy_to(audio: webrtc.AudioData, destination: Buffer, options: ob
     return _guard(copy)
 
 
-def construct(name: str, kwargs: dict[str, object]) -> Result:
-    return _guard(lambda: getattr(webrtc, name)(**from_js(dict(kwargs))))
+def construct(name: str, kwargs: dict[str, object], args: list[object] | None = None) -> Result:
+    return _guard(
+        lambda: getattr(webrtc, name)(*from_js(list(args) if args is not None else []), **from_js(dict(kwargs)))
+    )
 
 
-def get_user_media(kwargs: dict[str, object]) -> Result:
+def get_user_media(constraints: object) -> asyncio.Future[Result]:
     # the shim converts the constraints as WebIDL does, the library validates them
-    return _guard(lambda: webrtc.get_user_media(**cast('_UserMediaOptions', from_js(dict(kwargs)))))
+    return call_async_method(webrtc.media_devices, 'get_user_media', {'args': [constraints]})
 
 
 def call_static(class_name: str, name: str, args: list[object]) -> Result:

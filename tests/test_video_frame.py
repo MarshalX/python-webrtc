@@ -350,3 +350,102 @@ async def test_visible_rect_of_a_buffer_is_the_frame() -> None:
     await frame.copy_to(out)
     assert list(out) == [3, 4, 7, 8, 10, 12]
     frame.close()
+
+
+def test_metadata_is_copied() -> None:
+    """The metadata of an init is a deep copy, kept by frames of the frame unless given again."""
+    metadata = webrtc.VideoFrameMetadata(rtp_timestamp=7)
+    frame = webrtc.VideoFrame(
+        I420_DATA,
+        webrtc.VideoFrameBufferInit(format='I420', coded_width=4, coded_height=2, timestamp=0, metadata=metadata),
+    )
+    metadata.rtp_timestamp = 8
+    assert frame.metadata() == webrtc.VideoFrameMetadata(rtp_timestamp=7)
+    assert frame.metadata() is not frame.metadata()
+    other = webrtc.VideoFrame(frame)
+    assert other.metadata().rtp_timestamp == 7
+    replaced = webrtc.VideoFrame(frame, webrtc.VideoFrameInit(metadata=webrtc.VideoFrameMetadata()))
+    assert replaced.metadata().rtp_timestamp is None
+    assert i420_4x2().metadata() == webrtc.VideoFrameMetadata()
+    for f in (frame, other, replaced):
+        f.close()
+    with pytest.raises(webrtc.InvalidStateError):
+        frame.metadata()
+
+
+def test_init_metadata_from_json() -> None:
+    """The metadata of an init comes from its JSON form too."""
+    init = webrtc.VideoFrameInit.from_json({'metadata': {'rtpTimestamp': 3}})
+    assert init.metadata == webrtc.VideoFrameMetadata(rtp_timestamp=3)
+
+
+@pytest.mark.asyncio
+async def test_transfer() -> None:
+    """Transferred buffers are validated and memoryviews released; the pixels are copied all the same."""
+    data = bytearray(I420_DATA)
+    view = memoryview(data)
+
+    def init(transfer: list[bytes | bytearray | memoryview]) -> webrtc.VideoFrameBufferInit:
+        return webrtc.VideoFrameBufferInit(
+            format='I420', coded_width=4, coded_height=2, timestamp=0, transfer=list(transfer)
+        )
+
+    with pytest.raises(webrtc.DataCloneError):
+        webrtc.VideoFrame(data, init([data, view]))
+    with pytest.raises(TypeError, match='transfer takes buffers'):
+        webrtc.VideoFrame(data, init([mistyped(1)]))
+    frame = webrtc.VideoFrame(view, init([view]))
+    with pytest.raises(ValueError, match='released'):
+        view.tobytes()
+    data[0] = 0
+    data.append(0)  # not held by the frame
+    out = bytearray(12)
+    await frame.copy_to(out)
+    assert bytes(out) == I420_DATA
+    frame.close()
+    released = memoryview(b'')
+    released.release()
+    with pytest.raises(webrtc.DataCloneError, match='released'):
+        webrtc.VideoFrame(I420_DATA, init([released]))
+
+
+@pytest.mark.parametrize('format', ['RGBA', 'BGRX'])
+def test_copy_to_color_space(format: webrtc.VideoPixelFormatValue) -> None:
+    """Conversions to RGB are in srgb, the only color space libyuv converts to."""
+    frame = i420_4x2()
+    options = webrtc.VideoFrameCopyToOptions(format=format, color_space='srgb')
+    assert frame.allocation_size(options) == 32
+    assert webrtc.VideoFrameCopyToOptions.from_json({'colorSpace': 'srgb'}).color_space == 'srgb'
+    for color_space in ('srgb-linear', 'display-p3', 'display-p3-linear'):
+        with pytest.raises(webrtc.NotSupportedError, match=color_space):
+            frame.allocation_size(webrtc.VideoFrameCopyToOptions(format=format, color_space=color_space))
+    # copies without a conversion take no color space
+    assert frame.allocation_size(webrtc.VideoFrameCopyToOptions(color_space='display-p3')) == 12
+    with pytest.raises(TypeError, match='not a PredefinedColorSpace'):
+        frame.allocation_size(webrtc.VideoFrameCopyToOptions(color_space=mistyped('rec2020')))
+    frame.close()
+
+
+def test_construct_with_positional_source() -> None:
+    """The image or data of a frame is positional only, as it has another name per overload."""
+    frame = i420_4x2()
+    with pytest.raises(TypeError):
+        webrtc.VideoFrame(source=frame)  # pyrefly: ignore[no-matching-overload]
+    frame.close()
+
+
+def test_dom_rect_from_rect_and_to_json() -> None:
+    """fromRect() copies a rect init, toJSON() gives every attribute."""
+    rect = webrtc.DOMRectReadOnly.fromRect(webrtc.DOMRectInit(x=1, y=2, width=-3, height=4))
+    assert rect == webrtc.DOMRectReadOnly(1, 2, -3, 4)
+    assert webrtc.DOMRectReadOnly.from_rect() == webrtc.DOMRectReadOnly()
+    assert rect.toJSON() == {
+        'x': 1,
+        'y': 2,
+        'width': -3,
+        'height': 4,
+        'top': 2,
+        'right': 1,
+        'bottom': 6,
+        'left': -2,
+    }
