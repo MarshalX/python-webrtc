@@ -53,7 +53,7 @@ def test_native_getters_return_members(pc: webrtc.RTCPeerConnection) -> None:
     """The native API returns members."""
     assert pc.signaling_state is webrtc.RTCSignalingState.stable
     transceiver = pc.add_transceiver('audio')
-    assert transceiver.kind is webrtc.MediaType.audio
+    assert transceiver.receiver.track.kind is webrtc.MediaType.audio
     assert transceiver.direction is webrtc.RTCRtpTransceiverDirection.sendrecv
 
 

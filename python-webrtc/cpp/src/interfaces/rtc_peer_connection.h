@@ -75,11 +75,10 @@ namespace python_webrtc {
     static void ReleaseElsewhere(std::shared_ptr<RTCPeerConnection> &&connection);
 
     void CreateOffer(std::function<void(RTCSessionDescription)> &onSuccess,
-                     std::function<void(RTCCallbackException)> &onFailure, bool iceRestart,
-                     bool voiceActivityDetection);
+                     std::function<void(RTCCallbackException)> &onFailure, bool iceRestart);
 
     void CreateAnswer(std::function<void(RTCSessionDescription)> &onSuccess,
-                      std::function<void(RTCCallbackException)> &onFailure, bool voiceActivityDetection);
+                      std::function<void(RTCCallbackException)> &onFailure);
 
     // the last description createOffer or createAnswer made, which are the only ones setLocalDescription takes
     void SaveCreatedDescription(const RTCSessionDescriptionInit &description);

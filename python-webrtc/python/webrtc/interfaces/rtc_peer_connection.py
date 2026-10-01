@@ -22,6 +22,7 @@ from webrtc import (
     InvalidStateError,
     MediaType,
     OperationError,
+    RTCAnswerOptions,
     RTCCertificate,
     RTCConfiguration,
     RTCDataChannelEvent,
@@ -332,9 +333,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             self._apply_legacy_offer_option(MediaType.audio, receive=options.offer_to_receive_audio)
             self._apply_legacy_offer_option(MediaType.video, receive=options.offer_to_receive_video)
             await later()
-            return _init_of(
-                await call_native(self._native_obj.createOffer, options.ice_restart, options.voice_activity_detection)
-            )
+            return _init_of(await call_native(self._native_obj.createOffer, options.ice_restart))
 
     async def create_answer(self, options: webrtc.RTCAnswerOptions | None = None) -> webrtc.RTCSessionDescriptionInit:
         """Creates an SDP answer to an offer received from the remote peer.
@@ -349,15 +348,19 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             :obj:`webrtc.RTCSessionDescriptionInit`: The answer, to set with :meth:`set_local_description`.
 
         Raises:
+            TypeError: If the options aren't an :obj:`webrtc.RTCAnswerOptions`.
             webrtc.InvalidStateError: If the connection is closed or has no remote offer.
         """
+        # the options have no members yet, only their type is checked
+        if options is not None and not isinstance(options, RTCAnswerOptions):
+            msg = f'options must be an RTCAnswerOptions, not {type(options).__name__}'
+            raise TypeError(msg)
         async with self._operation():
             self._check_state(
                 'create an answer', RTCSignalingState.have_remote_offer, RTCSignalingState.have_local_pranswer
             )
             await later()
-            vad = options.voice_activity_detection if options is not None else True
-            return _init_of(await call_native(self._native_obj.createAnswer, vad))
+            return _init_of(await call_native(self._native_obj.createAnswer))
 
     async def set_local_description(
         self, description: _Description | RTCLocalSessionDescriptionInit | None = None
@@ -623,26 +626,24 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         return RTCStatsReport._from_native(await call_native(self._native_obj.getStats), self.get_receivers())
 
     @staticmethod
-    async def generate_certificate(
-        keygen_algorithm: AlgorithmIdentifier, expires: float | None = None
-    ) -> webrtc.RTCCertificate:
-        """Generates a certificate for :attr:`webrtc.RTCConfiguration.certificates`.
-
-        The same as :meth:`webrtc.RTCCertificate.generate`.
+    async def generate_certificate(keygen_algorithm: AlgorithmIdentifier) -> webrtc.RTCCertificate:
+        """Generates a key and a self-signed certificate on a worker thread, for :attr:`RTCConfiguration.certificates`.
 
         Args:
-            keygen_algorithm (:obj:`str` or :obj:`webrtc.Algorithm`): The WebCrypto algorithm of the key, like
-                ``'ECDSA'``.
-            expires (:obj:`float`, optional): In how many milliseconds the certificate expires.
+            keygen_algorithm (:obj:`str` or :obj:`webrtc.Algorithm`): A WebCrypto algorithm: ``'ECDSA'``
+                (with the P-256 curve), an :obj:`webrtc.EcKeyGenParams`, or an :obj:`webrtc.RsaHashedKeyGenParams`
+                like ``RsaHashedKeyGenParams('RSASSA-PKCS1-v1_5', modulus_length=2048,
+                public_exponent=bytes([1, 0, 1]), hash='SHA-256')``. Its ``expires`` is in how many milliseconds
+                the certificate expires, at most a year (30 days by default).
 
         Returns:
             :obj:`webrtc.RTCCertificate`: The certificate.
 
         Raises:
             webrtc.NotSupportedError: If the algorithm isn't supported.
-            ValueError: If ``expires`` is negative.
+            TypeError: If ``expires`` isn't an unsigned 64-bit integer.
         """
-        return await RTCCertificate.generate(keygen_algorithm, expires)
+        return await RTCCertificate._generate(keygen_algorithm)
 
     def get_configuration(self) -> webrtc.RTCConfiguration:
         """Returns the configuration of the connection, as it was last set.

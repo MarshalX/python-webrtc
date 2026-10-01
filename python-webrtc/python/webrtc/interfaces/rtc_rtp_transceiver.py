@@ -71,8 +71,8 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
         self._native_obj.stop()
 
     @property
-    def kind(self) -> webrtc.MediaType:
-        """:obj:`webrtc.MediaType`: The kind of media the transceiver sends and receives, audio or video."""
+    def _kind(self) -> webrtc.MediaType:
+        # the kind of the native object, which the receiver's track has too
         return self._native_obj.kind
 
     def set_codec_preferences(self, codecs: list[webrtc.RTCRtpCodec]) -> None:
@@ -87,7 +87,7 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
             webrtc.InvalidModificationError: If a codec isn't supported, or only resiliency codecs
                 (like RTX or FEC) are given.
         """
-        kind = self.kind
+        kind = self._kind
         natives: list[wrtc.RtpCodecCapability] = []
         for source in (wrtc.RTCRtpReceiver.getCapabilities(kind), wrtc.RTCRtpSender.getCapabilities(kind)):
             natives.extend(source.codecs if source is not None else [])

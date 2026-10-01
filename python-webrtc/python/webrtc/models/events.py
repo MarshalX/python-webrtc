@@ -12,11 +12,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
+from webrtc.enums import SFrameTransformErrorEventType
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
 
 if TYPE_CHECKING:
     import webrtc
+    from webrtc.enums import SFrameTransformErrorEventTypeValue
 
 
 class Event:
@@ -308,3 +310,86 @@ class RTCTrackEvent(Event):
         self.track = event_init_dict.track
         self.streams = list(event_init_dict.streams)
         self.transceiver = event_init_dict.transceiver
+
+
+class RTCTransformEvent(Event):
+    """The ``rtctransform`` event the worker of a :obj:`webrtc.RTCRtpScriptTransform` is called with.
+
+    Args:
+        type (:obj:`str`): The name of the event.
+        transformer (:obj:`webrtc.RTCRtpScriptTransformer`): The transformer of the transform.
+    """
+
+    transformer: webrtc.RTCRtpScriptTransformer
+
+    def __init__(self, type: str, transformer: webrtc.RTCRtpScriptTransformer) -> None:
+        super().__init__(type)
+        self.transformer = transformer
+
+
+class KeyFrameRequestEvent(Event):
+    """A ``keyframerequest`` event of :obj:`webrtc.RTCRtpScriptTransformer`: the receiver asked for a key frame.
+
+    Args:
+        type (:obj:`str`): The name of the event.
+        rid (:obj:`str`, optional): The ``rid`` of the layer the key frame is asked for, :obj:`None` for any.
+    """
+
+    rid: str | None
+
+    def __init__(self, type: str, rid: str | None = None) -> None:
+        super().__init__(type)
+        self.rid = rid
+
+
+@dataclass
+class SFrameTransformErrorEventInit(Dictionary):
+    """The members of a :obj:`SFrameTransformErrorEvent`.
+
+    Args:
+        error_type (:obj:`webrtc.SFrameTransformErrorEventType`): Why the frame didn't decrypt, or its value.
+        frame (:obj:`webrtc.RTCEncodedVideoFrame`, :obj:`webrtc.RTCEncodedAudioFrame` or :obj:`bytes`): The frame
+            that didn't decrypt, the chunk for a buffer written to an :obj:`webrtc.SFrameDecryptorStream`.
+        key_id (:obj:`int`, optional): The unknown key id, for a ``keyID`` error.
+
+    Raises:
+        ValueError: If the error type isn't a member of :obj:`webrtc.SFrameTransformErrorEventType`.
+    """
+
+    error_type: SFrameTransformErrorEventType | SFrameTransformErrorEventTypeValue
+    frame: webrtc.RTCEncodedVideoFrame | webrtc.RTCEncodedAudioFrame | bytes
+    key_id: int | None = None
+
+    def __post_init__(self) -> None:
+        self.error_type = SFrameTransformErrorEventType(self.error_type)
+
+    #: Alias for :attr:`error_type`
+    errorType: ClassVar[Alias[SFrameTransformErrorEventType | SFrameTransformErrorEventTypeValue]] = alias('error_type')
+    #: Alias for :attr:`key_id`
+    keyID: ClassVar[Alias[int | None]] = alias('key_id')
+
+
+class SFrameTransformErrorEvent(Event):
+    """An ``error`` event of an SFrame decryptor: a frame didn't decrypt, and was dropped.
+
+    It's an event of :obj:`webrtc.RTCRtpSFrameDecryptor` and :obj:`webrtc.SFrameDecryptorStream`.
+
+    Args:
+        type (:obj:`str`): The name of the event.
+        event_init_dict (:obj:`SFrameTransformErrorEventInit`): The members of the event.
+    """
+
+    error_type: SFrameTransformErrorEventType
+    key_id: int | None
+    frame: webrtc.RTCEncodedVideoFrame | webrtc.RTCEncodedAudioFrame | bytes
+
+    def __init__(self, type: str, event_init_dict: SFrameTransformErrorEventInit) -> None:
+        super().__init__(type)
+        self.error_type = SFrameTransformErrorEventType(event_init_dict.error_type)
+        self.key_id = event_init_dict.key_id
+        self.frame = event_init_dict.frame
+
+    #: Alias for :attr:`error_type`
+    errorType: ClassVar[Alias[SFrameTransformErrorEventType]] = alias('error_type')
+    #: Alias for :attr:`key_id`
+    keyID: ClassVar[Alias[int | None]] = alias('key_id')

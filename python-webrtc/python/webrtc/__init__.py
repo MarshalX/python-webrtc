@@ -78,6 +78,15 @@ from .enums import (
     VideoFacingModeEnum,
     VideoResizeModeEnum,
     EchoCancellationModeEnum,
+    EncodedVideoChunkType,
+    RTCRtpScriptTransformType,
+    RTCRtpScriptTransformTypeValue,
+    SFrameCipherSuite,
+    SFrameCipherSuiteValue,
+    SFrameType,
+    SFrameTypeValue,
+    SFrameTransformErrorEventType,
+    SFrameTransformErrorEventTypeValue,
 )
 from .base import WebRTCObject
 from .exceptions import (
@@ -92,6 +101,8 @@ from .exceptions import (
     NotSupportedError,
     NetworkError,
     DataCloneError,
+    NotFoundError,
+    NotAllowedError,
     InvalidSyntaxError,
     InvalidRangeError,
     InvalidCharacterError,
@@ -119,6 +130,10 @@ from .models.events import (
     RTCDTMFToneChangeEventInit,
     DeviceChangeEvent,
     DeviceChangeEventInit,
+    RTCTransformEvent,
+    KeyFrameRequestEvent,
+    SFrameTransformErrorEvent,
+    SFrameTransformErrorEventInit,
 )
 
 # the order matters: modules import each other through the package namespace
@@ -154,6 +169,16 @@ from .models.video_frame import (
     VideoFrame,
 )
 from .models.audio_data import AudioDataInit, AudioDataCopyToOptions, AudioData
+from .models.rtc_encoded_frame import (
+    RTCEncodedFrameMetadata,
+    RTCEncodedVideoFrameMetadata,
+    RTCEncodedAudioFrameMetadata,
+    RTCEncodedVideoFrameOptions,
+    RTCEncodedAudioFrameOptions,
+    RTCEncodedVideoFrame,
+    RTCEncodedAudioFrame,
+)
+from .models.sframe_transform_options import SFrameTransformOptions, RTCRtpSFrameEncryptorOptions
 from .streams import (
     ReadableStream,
     ReadableStreamDefaultReader,
@@ -212,6 +237,7 @@ from .models.rtp_source import RTCRtpContributingSource, RTCRtpSynchronizationSo
 from .models.rtc_certificate import (
     Algorithm,
     EcKeyGenParams,
+    RTCCertificateExpiration,
     RsaHashedKeyGenParams,
     RTCCertificate,
     RTCDtlsFingerprint,
@@ -247,6 +273,13 @@ from .interfaces.track_generator import (
     MediaStreamTrackGenerator,
 )
 from .interfaces.rtc_dtmf_sender import RTCDTMFSender
+from .interfaces.rtc_rtp_script_transform import WorkerAndParameters, RTCRtpScriptTransformer, RTCRtpScriptTransform
+from .interfaces.sframe_transform import (
+    RTCRtpSFrameEncryptor,
+    RTCRtpSFrameDecryptor,
+    SFrameEncryptorStream,
+    SFrameDecryptorStream,
+)
 
 from .interfaces.media_devices import MediaDeviceInfo, InputDeviceInfo, MediaDevices, media_devices, mediaDevices
 
@@ -277,6 +310,7 @@ __all__ = [
     'DoubleRange',
     'EcKeyGenParams',
     'EchoCancellationModeEnum',
+    'EncodedVideoChunkType',
     'EndingType',
     'EndingTypeValue',
     'Event',
@@ -288,6 +322,7 @@ __all__ = [
     'InvalidRangeError',
     'InvalidStateError',
     'InvalidSyntaxError',
+    'KeyFrameRequestEvent',
     'MediaDeviceInfo',
     'MediaDeviceKind',
     'MediaDevices',
@@ -311,6 +346,8 @@ __all__ = [
     'MediaTypeValue',
     'MessageEvent',
     'NetworkError',
+    'NotAllowedError',
+    'NotFoundError',
     'NotSupportedError',
     'OperationError',
     'OverconstrainedError',
@@ -326,6 +363,7 @@ __all__ = [
     'RTCBundlePolicy',
     'RTCBundlePolicyValue',
     'RTCCertificate',
+    'RTCCertificateExpiration',
     'RTCCertificateStats',
     'RTCCodecStats',
     'RTCConfiguration',
@@ -344,6 +382,13 @@ __all__ = [
     'RTCDtlsRole',
     'RTCDtlsTransport',
     'RTCDtlsTransportState',
+    'RTCEncodedAudioFrame',
+    'RTCEncodedAudioFrameMetadata',
+    'RTCEncodedAudioFrameOptions',
+    'RTCEncodedFrameMetadata',
+    'RTCEncodedVideoFrame',
+    'RTCEncodedVideoFrameMetadata',
+    'RTCEncodedVideoFrameOptions',
     'RTCEncodingOptions',
     'RTCError',
     'RTCErrorDetailType',
@@ -411,6 +456,13 @@ __all__ = [
     'RTCRtpParameters',
     'RTCRtpReceiveParameters',
     'RTCRtpReceiver',
+    'RTCRtpSFrameDecryptor',
+    'RTCRtpSFrameEncryptor',
+    'RTCRtpSFrameEncryptorOptions',
+    'RTCRtpScriptTransform',
+    'RTCRtpScriptTransformType',
+    'RTCRtpScriptTransformTypeValue',
+    'RTCRtpScriptTransformer',
     'RTCRtpSendParameters',
     'RTCRtpSender',
     'RTCRtpStreamStats',
@@ -434,6 +486,7 @@ __all__ = [
     'RTCStatsType',
     'RTCTrackEvent',
     'RTCTrackEventInit',
+    'RTCTransformEvent',
     'RTCTransportStats',
     'RTCVideoSourceStats',
     'ReadableStream',
@@ -446,6 +499,17 @@ __all__ = [
     'ReadableStreamReaderModeValue',
     'ReadableWritablePair',
     'RsaHashedKeyGenParams',
+    'SFrameCipherSuite',
+    'SFrameCipherSuiteValue',
+    'SFrameDecryptorStream',
+    'SFrameEncryptorStream',
+    'SFrameTransformErrorEvent',
+    'SFrameTransformErrorEventInit',
+    'SFrameTransformErrorEventType',
+    'SFrameTransformErrorEventTypeValue',
+    'SFrameTransformOptions',
+    'SFrameType',
+    'SFrameTypeValue',
     'SdpParseException',
     'StreamPipeOptions',
     'TransformStream',
@@ -470,6 +534,7 @@ __all__ = [
     'VideoTransferCharacteristics',
     'VideoTransferCharacteristicsValue',
     'WebRTCObject',
+    'WorkerAndParameters',
     'WritableStream',
     'WritableStreamDefaultController',
     'WritableStreamDefaultWriter',

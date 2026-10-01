@@ -151,7 +151,7 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.flake8-builtins]
-ignorelist = ["format", "id", "type"]  # W3C member names
+ignorelist = ["format", "hash", "id", "type"]  # W3C member names
 
 [tool.ruff.lint.pydoclint]
 ignore-one-line-docstrings = true

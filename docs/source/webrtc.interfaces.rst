@@ -22,7 +22,9 @@ Submodules
    webrtc.interfaces.rtc_ice_transport
    webrtc.interfaces.rtc_peer_connection
    webrtc.interfaces.rtc_rtp_receiver
+   webrtc.interfaces.rtc_rtp_script_transform
    webrtc.interfaces.rtc_rtp_sender
    webrtc.interfaces.rtc_rtp_transceiver
    webrtc.interfaces.rtc_sctp_transport
+   webrtc.interfaces.sframe_transform
    webrtc.interfaces.track_generator

@@ -569,3 +569,70 @@ class ReadableStreamReaderMode(_StrEnum):
 
 #: The values of :obj:`ReadableStreamReaderMode`, which parameters taking it take too
 ReadableStreamReaderModeValue = Literal['byob']
+
+
+class EncodedVideoChunkType(_StrEnum):
+    """Whether an encoded video frame is a key frame, which decodes on its own, or depends on earlier frames."""
+
+    key = 'key'
+    delta = 'delta'
+
+
+class RTCRtpScriptTransformType(_StrEnum):
+    """How an :obj:`webrtc.RTCRtpScriptTransform` packetizes the frames it outputs."""
+
+    #: The frames are SFrame-encrypted, packetized as SFrame
+    sframe = 'sframe'
+
+
+#: The values of :obj:`RTCRtpScriptTransformType`, which parameters taking it take too
+RTCRtpScriptTransformTypeValue = Literal['sframe']
+
+
+class SFrameCipherSuite(_StrEnum):
+    """The SFrame cipher suites of RFC 9605 and draft-barnes-sframe-iana-256: AES-CTR with HMAC tags, or AES-GCM."""
+
+    AES_128_CTR_HMAC_SHA256_80 = 'AES_128_CTR_HMAC_SHA256_80'
+    AES_128_CTR_HMAC_SHA256_64 = 'AES_128_CTR_HMAC_SHA256_64'
+    AES_128_CTR_HMAC_SHA256_32 = 'AES_128_CTR_HMAC_SHA256_32'
+    AES_128_GCM_SHA256_128 = 'AES_128_GCM_SHA256_128'
+    AES_256_GCM_SHA512_128 = 'AES_256_GCM_SHA512_128'
+    AES_256_CTR_HMAC_SHA512_80 = 'AES_256_CTR_HMAC_SHA512_80'
+    AES_256_CTR_HMAC_SHA512_64 = 'AES_256_CTR_HMAC_SHA512_64'
+    AES_256_CTR_HMAC_SHA512_32 = 'AES_256_CTR_HMAC_SHA512_32'
+
+
+#: The values of :obj:`SFrameCipherSuite`, which parameters taking it take too
+SFrameCipherSuiteValue = Literal[
+    'AES_128_CTR_HMAC_SHA256_80',
+    'AES_128_CTR_HMAC_SHA256_64',
+    'AES_128_CTR_HMAC_SHA256_32',
+    'AES_128_GCM_SHA256_128',
+    'AES_256_GCM_SHA512_128',
+    'AES_256_CTR_HMAC_SHA512_80',
+    'AES_256_CTR_HMAC_SHA512_64',
+    'AES_256_CTR_HMAC_SHA512_32',
+]
+
+
+class SFrameType(_StrEnum):
+    """Whether an :obj:`webrtc.RTCRtpSFrameEncryptor` encrypts whole frames or each RTP packet."""
+
+    per_frame = 'per-frame'
+    per_packet = 'per-packet'
+
+
+#: The values of :obj:`SFrameType`, which parameters taking it take too
+SFrameTypeValue = Literal['per-frame', 'per-packet']
+
+
+class SFrameTransformErrorEventType(_StrEnum):
+    """Why a frame didn't decrypt: it didn't authenticate, its key id is unknown, or it isn't SFrame."""
+
+    authentication = 'authentication'
+    key_id = 'keyID'
+    syntax = 'syntax'
+
+
+#: The values of :obj:`SFrameTransformErrorEventType`, which parameters taking it take too
+SFrameTransformErrorEventTypeValue = Literal['authentication', 'keyID', 'syntax']

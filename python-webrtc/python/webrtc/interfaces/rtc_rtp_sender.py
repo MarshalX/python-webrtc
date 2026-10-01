@@ -55,8 +55,28 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         return webrtc.RTCDTMFSender._wrap_optional(self._native_obj.dtmf)
 
     @property
-    def kind(self) -> webrtc.MediaType:
-        """:obj:`webrtc.MediaType`: The kind of media the sender sends, audio or video."""
+    def transform(self) -> webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameEncryptor | None:
+        """:obj:`webrtc.RTCRtpScriptTransform` or :obj:`webrtc.RTCRtpSFrameEncryptor`, optional: The frame transform.
+
+        It transforms the encoded frames before they're sent, :obj:`None` sends them as they're encoded.
+        A transform is used by one sender or receiver only: a transform that had one can't be set again.
+
+        Raises:
+            TypeError: If the value set isn't a transform of a sender.
+            webrtc.InvalidStateError: If the transform set had a sender or receiver.
+        """
+        native = self._native_obj.transform
+        if isinstance(native, wrtc.SFrameTransform):
+            return webrtc.RTCRtpSFrameEncryptor._wrap(native)
+        return webrtc.RTCRtpScriptTransform._of_native(native)
+
+    @transform.setter
+    def transform(self, transform: webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameEncryptor | None) -> None:
+        self._native_obj.transform = _native_transform(transform, webrtc.RTCRtpSFrameEncryptor)
+
+    @property
+    def _kind(self) -> webrtc.MediaType:
+        # the kind of the native object, which the receiver's track has too
         return self._native_obj.kind
 
     def get_parameters(self) -> webrtc.RTCRtpSendParameters:
@@ -69,7 +89,7 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
             :obj:`webrtc.RTCRtpSendParameters`: The parameters, with a new ``transaction_id``.
         """
         parameters = RTCRtpSendParameters._from_native(self._native_obj.getParameters())
-        if self.kind == MediaType.video:
+        if self._kind == MediaType.video:
             _default_scale_resolution_down_by(parameters.encodings)
         # they expire when the current task (with the code it resumed) is over, never without a loop
         _ = TaskQueue.post_to_running(self._native_obj._expireParameters, parameters.transaction_id, after_ready=True)
@@ -104,10 +124,10 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
             raise InvalidStateError(msg)
         options = set_parameter_options.encoding_options if set_parameter_options is not None else None
         _check_unchanged(parameters, RTCRtpSendParameters._from_native(last), options)
-        if self.kind == MediaType.video:
+        if self._kind == MediaType.video:
             _check_video_ranges(parameters.encodings)
 
-        kind = self.kind
+        kind = self._kind
         # a copy (pybind returns one): changed, then set back
         encodings = last.encodings
         for native, encoding in zip(encodings, parameters.encodings):
@@ -132,8 +152,8 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
             TypeError: If the track is of another kind.
             webrtc.InvalidStateError: If the transceiver of the sender is stopped, or the connection closed.
         """
-        if with_track is not None and with_track.kind != self.kind:
-            msg = f'a {with_track.kind} track can not replace the track of a {self.kind} sender'
+        if with_track is not None and with_track.kind != self._kind:
+            msg = f'a {with_track.kind} track can not replace the track of a {self._kind} sender'
             raise TypeError(msg)
 
         def replace() -> None:
@@ -199,6 +219,21 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
     setStreams = set_streams
     #: Alias for :attr:`get_capabilities`
     getCapabilities = get_capabilities
+
+
+def _native_transform(
+    transform: webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameEncryptor | webrtc.RTCRtpSFrameDecryptor | None,
+    sframe: type[webrtc.RTCRtpSFrameEncryptor | webrtc.RTCRtpSFrameDecryptor],
+) -> wrtc._RtpTransform | None:
+    """The native transform of the transform attribute of a sender or receiver, whose SFrame transform is given."""
+    if transform is None:
+        return None
+    if not isinstance(transform, (webrtc.RTCRtpScriptTransform, sframe)):
+        msg = (
+            f'transform must be an RTCRtpScriptTransform, an {sframe.__name__} or None, not {type(transform).__name__}'
+        )
+        raise TypeError(msg)
+    return transform._native_obj
 
 
 def _check_unchanged(

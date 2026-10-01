@@ -1187,19 +1187,5 @@ class RTCStatsReport(Mapping[str, RTCStats]):
     def __len__(self) -> int:
         return len(self._stats)
 
-    def of_type(self, stats_type: RTCStatsType | str) -> list[RTCStats]:
-        """Returns the stats of a type.
-
-        Args:
-            stats_type (:obj:`webrtc.RTCStatsType` | :obj:`str`): The type, like ``'inbound-rtp'``.
-
-        Returns:
-            :obj:`list` of :obj:`webrtc.RTCStats`: The stats of the type, each the dictionary of the type.
-        """
-        return [stats for stats in self._stats.values() if stats.type == stats_type]
-
     def __repr__(self) -> str:
         return f'RTCStatsReport({len(self)} stats)'
-
-    #: Alias for :attr:`of_type`
-    ofType = of_type

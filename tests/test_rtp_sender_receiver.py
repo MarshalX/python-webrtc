@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import webrtc
-from tests.helpers import connect, exchange_offer_answer, mistyped, next_task, wait_for_event, wait_until
+from tests.helpers import connect, exchange_offer_answer, mistyped, next_task, stats_of_type, wait_for_event, wait_until
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -280,7 +280,7 @@ async def test_synchronization_sources(
     # sources are known once media is decoded (audio is only played out by a real audio device)
     await wait_until(receiver.get_synchronization_sources, 'a synchronization source', timeout=5)
     [source] = receiver.get_synchronization_sources()
-    inbound = (await receiver.get_stats()).of_type('inbound-rtp')[0]
+    inbound = stats_of_type(await receiver.get_stats(), 'inbound-rtp')[0]
     assert isinstance(inbound, webrtc.RTCInboundRtpStreamStats)
     assert isinstance(source, webrtc.RTCRtpSynchronizationSource)
     assert source.source == inbound.ssrc

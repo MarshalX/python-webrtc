@@ -1,12 +1,8 @@
 {
   "skip": {
-    "mediacapture-insertable-streams/MediaStreamTrackProcessor-with-window-tracks.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "mediacapture-insertable-streams/VideoTrackGenerator-with-window-tracks.https.html": "runs in a Worker, which a Python library has no counterpart of",
     "mediacapture-insertable-streams/idlharness.any.js": "checks the shape of JS interfaces, which shim.js defines rather than the library",
     "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-in-service-worker.https.html": "needs a service worker",
     "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-in-shared-worker.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-in-worker.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-pipes-data-in-worker.https.html": "runs in a Worker, which a Python library has no counterpart of",
     "mediacapture-insertable-streams/legacy/MediaStreamTrackProcessor-backpressure.https.html": "draws frames with canvas, ImageBitmap or WebGL, which a Python library has no counterpart of",
     "webcodecs/audio-data-serialization.any.js": "transfers frames with postMessage or structured clone, which a Python library has no counterpart of",
     "webcodecs/video-frame-serialization.any.js": "transfers frames with postMessage or structured clone, which a Python library has no counterpart of",
@@ -22,28 +18,13 @@
     "webcodecs/videoFrame-serialization.crossAgentCluster.https.html": "transfers frames with postMessage or structured clone, which a Python library has no counterpart of",
     "webcodecs/videoFrame-serialization.https.html": "transfers frames with postMessage or structured clone, which a Python library has no counterpart of",
     "webcodecs/videoFrame-texImage.any.js": "draws frames with canvas, ImageBitmap or WebGL, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/RTCRtpScriptTransform-bad-chunk.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/RTCRtpScriptTransform-encoded-transform.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/RTCRtpScriptTransform-padding.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/RTCRtpScriptTransform-sender-worker-single-frame.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/RTCRtpScriptTransform-write-rules.https.html": "runs in a Worker, which a Python library has no counterpart of",
     "webrtc-encoded-transform/idlharness.https.window.js": "checks the shape of JS interfaces, which shim.js defines rather than the library",
-    "webrtc-encoded-transform/script-audio-transform.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/script-change-transform.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/script-metadata-transform.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/script-transform-generateKeyFrame-simulcast.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/script-transform-generateKeyFrame.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/script-transform-sendKeyFrameRequest.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/script-transform.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/script-write-twice-transform.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/sframe-transform-in-worker.https.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/tentative/RTCEncodedAudioFrame-audiolevel.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/tentative/RTCEncodedAudioFrame-constructor.html": "runs in a Worker, which a Python library has no counterpart of",
+    "webrtc-encoded-transform/tentative/RTCEncodedAudioFrame-constructor.html": "needs the absolute capture time header extension, which libwebrtc doesn't send here: its cases time out",
     "webrtc-encoded-transform/tentative/RTCEncodedAudioFrame-serviceworker-failure.https.html": "needs a service worker",
-    "webrtc-encoded-transform/tentative/RTCEncodedFrame-timestamps.html": "runs in a Worker, which a Python library has no counterpart of",
-    "webrtc-encoded-transform/tentative/RTCEncodedVideoFrame-constructor.html": "runs in a Worker, which a Python library has no counterpart of",
+    "webrtc-encoded-transform/tentative/RTCEncodedFrame-timestamps.html": "needs the absolute capture time header extension, which libwebrtc doesn't send here: its cases time out",
+    "webrtc-encoded-transform/tentative/RTCEncodedVideoFrame-constructor.html": "needs the absolute capture time header extension, which libwebrtc doesn't send here: its cases time out",
     "webrtc-encoded-transform/tentative/RTCEncodedVideoFrame-serviceworker-failure.https.html": "needs a service worker",
-    "webrtc-encoded-transform/tentative/RTCPeerConnection-insertable-streams-worker.https.html": "runs in a Worker, which a Python library has no counterpart of",
+    "webrtc-encoded-transform/tentative/RTCPeerConnection-insertable-streams-worker.https.html": "uses createEncodedStreams, Chrome's nonstandard API that RTCRtpScriptTransform replaces",
     "webrtc-extensions/RTCRtpEncodingParameters-scaleResolutionDownTo.https.html": "needs DOM elements (video, canvas or iframes)",
     "webrtc-extensions/RTCRtpSynchronizationSource-captureTimestamp.html": "needs DOM elements (video, canvas or iframes)",
     "webrtc-extensions/RTCRtpSynchronizationSource-senderCaptureTimeOffset.html": "needs DOM elements (video, canvas or iframes)",
@@ -52,7 +33,6 @@
     "webrtc-identity/RTCPeerConnection-peerIdentity.https.html": "needs an identity provider hosted by the browser",
     "webrtc-identity/idlharness.https.window.js": "checks the shape of JS interfaces, which shim.js defines rather than the library",
     "webrtc-stats/idlharness.window.js": "checks the shape of JS interfaces, which shim.js defines rather than the library",
-    "webrtc/RTCDataChannel-worker-GC.html": "runs in a Worker, which a Python library has no counterpart of",
     "webrtc/RTCPeerConnection-capture-video.https.html": "needs DOM elements (video, canvas or iframes)",
     "webrtc/RTCPeerConnection-perfect-negotiation-stress-glare-linear.https.html": "needs DOM elements (video, canvas or iframes)",
     "webrtc/RTCPeerConnection-perfect-negotiation-stress-glare.https.html": "needs DOM elements (video, canvas or iframes)",
@@ -69,12 +49,22 @@
     "webrtc/idlharness.https.window.js": "checks the shape of JS interfaces, which shim.js defines rather than the library",
     "webrtc/legacy/simplecall_callbacks.optional.https.html": "needs DOM elements (video, canvas or iframes)",
     "webrtc/simplecall-no-ssrcs.https.html": "needs DOM elements (video, canvas or iframes)",
-    "webrtc/simplecall.https.html": "needs DOM elements (video, canvas or iframes)",
-    "webrtc/transfer-datachannel.html": "runs in a Worker, which a Python library has no counterpart of"
+    "webrtc/simplecall.https.html": "needs DOM elements (video, canvas or iframes)"
   },
   "results": {
+    "mediacapture-insertable-streams/MediaStreamTrackProcessor-with-window-tracks.https.html": {
+      "Tests that the reader of a video MediaStreamTrackProcessor produces VideoFrame objects and is closed on track stop while running on a worker": "FAIL"
+    },
+    "mediacapture-insertable-streams/VideoTrackGenerator-with-window-tracks.https.html": {
+      "Tests that frames are actually rendered correctly in a stream sent over a peer connection.": "FAIL",
+      "Tests that frames are actually rendered correctly in a stream used for a video element.": "FAIL",
+      "Tests that frames are sent correctly with RTCRtpEncodingParameters.scaleResolutionDownBy.": "FAIL"
+    },
     "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-audio.https.html": {
       "Tests that audio actually flows to a connected audio element": "FAIL"
+    },
+    "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-pipes-data-in-worker.https.html": {
+      "A worker is able to pipe data through a MediaStreamTrackGenerator without crashing": "FAIL"
     },
     "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-video.https.html": {
       "Mismatched frame and generator kind throws on write.": "FAIL",
@@ -205,56 +195,53 @@
     "webrtc-encoded-transform/RTCEncodedFrame-copy-construction.https.html": {
       "RTCEncodedAudioFrame cannot be serialized for storage on main thread.": "FAIL",
       "RTCEncodedAudioFrame copy c'tor using transferred frame throws DataCloneError on main thread.": "FAIL",
-      "RTCEncodedAudioFrame copy construction metadata override on main thread.": "FAIL",
-      "RTCEncodedAudioFrame copy construction metadata override/addition on main thread (audioLevel).": "FAIL",
-      "RTCEncodedAudioFrame copy construction metadata override/addition on main thread (captureTime).": "FAIL",
-      "RTCEncodedAudioFrame copy construction metadata override/addition on main thread (contributingSources).": "FAIL",
-      "RTCEncodedAudioFrame copy construction metadata override/addition on main thread (mimeType).": "FAIL",
-      "RTCEncodedAudioFrame copy construction metadata override/addition on main thread (payloadType).": "FAIL",
-      "RTCEncodedAudioFrame copy construction metadata override/addition on main thread (receiveTime).": "FAIL",
-      "RTCEncodedAudioFrame copy construction metadata override/addition on main thread (rtpTimestamp).": "FAIL",
-      "RTCEncodedAudioFrame copy construction metadata override/addition on main thread (senderCaptureTimeOffset).": "FAIL",
-      "RTCEncodedAudioFrame copy construction metadata override/addition on main thread (sequenceNumber).": "FAIL",
-      "RTCEncodedAudioFrame copy construction metadata override/addition on main thread (synchronizationSource).": "FAIL",
-      "RTCEncodedAudioFrame copy construction on main thread.": "FAIL",
-      "RTCEncodedAudioFrame copying leaves original data buffer alone on main thread.": "FAIL",
-      "RTCEncodedAudioFrame data rejects buffers it cannot take on main thread.": "FAIL",
-      "RTCEncodedAudioFrame structuredClone after in-place modification on main thread.": "FAIL",
       "RTCEncodedAudioFrame structuredClone keeps a buffer shared between frames shared on main thread.": "FAIL",
       "RTCEncodedAudioFrame structuredClone of transferred frame throws DataCloneError on main thread.": "FAIL",
-      "RTCEncodedAudioFrame structuredClone on main thread.": "FAIL",
       "RTCEncodedVideoFrame cannot be serialized for storage on main thread.": "FAIL",
       "RTCEncodedVideoFrame copy c'tor using transferred frame throws DataCloneError on main thread.": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override on main thread.": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (captureTime).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (contributingSources).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (dependencies).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (frameId).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (height).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (mimeType).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (payloadType).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (receiveTime).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (rtpTimestamp).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (senderCaptureTimeOffset).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (spatialIndex).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (synchronizationSource).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (temporalIndex).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (timestamp).": "FAIL",
-      "RTCEncodedVideoFrame copy construction metadata override/addition on main thread (width).": "FAIL",
-      "RTCEncodedVideoFrame copy construction on main thread.": "FAIL",
-      "RTCEncodedVideoFrame copying leaves original data buffer alone on main thread.": "FAIL",
-      "RTCEncodedVideoFrame data rejects buffers it cannot take on main thread.": "FAIL",
-      "RTCEncodedVideoFrame structuredClone after in-place modification on main thread.": "FAIL",
       "RTCEncodedVideoFrame structuredClone keeps a buffer shared between frames shared on main thread.": "FAIL",
-      "RTCEncodedVideoFrame structuredClone of transferred frame throws DataCloneError on main thread.": "FAIL",
-      "RTCEncodedVideoFrame structuredClone on main thread.": "FAIL"
+      "RTCEncodedVideoFrame structuredClone of transferred frame throws DataCloneError on main thread.": "FAIL"
     },
     "webrtc-encoded-transform/RTCEncodedFrame-shared-buffer.https.html": {
       "RTCEncodedAudioFrame data rejects a SharedArrayBuffer.": "FAIL",
       "RTCEncodedVideoFrame data rejects a SharedArrayBuffer.": "FAIL"
     },
+    "webrtc-encoded-transform/RTCRtpScriptTransform-encoded-transform.https.html": {
+      "Receiver and sender read, modifiy and write audio frames.": "FAIL",
+      "Receiver and sender read, modifiy and write video frames.": "FAIL",
+      "Receiver and sender read/write frames (detach, audio).": "FAIL",
+      "Receiver and sender read/write frames (detach, video).": "FAIL",
+      "Sender reads frames but doesn't write them back. Receiver doesn't receive any frames.": "FAIL",
+      "Sender skips some frames and only writes one back. Receiver only receives that frame.": "FAIL"
+    },
+    "webrtc-encoded-transform/script-audio-transform.https.html": {
+      "script-audio-transform": "FAIL"
+    },
+    "webrtc-encoded-transform/script-change-transform.https.html": {
+      "change sender transform": "FAIL"
+    },
     "webrtc-encoded-transform/script-late-transform.https.html": {
       "video exchange with late receiver transform": "FAIL"
+    },
+    "webrtc-encoded-transform/script-metadata-transform.https.html": {
+      "audio frame: timestamp (renamed to metadata.rtpTimestamp": "FAIL",
+      "audio metadata: senderCaptureTimeOffset": "FAIL",
+      "video frame: timestamp (renamed to metadata.rtpTimestamp": "FAIL"
+    },
+    "webrtc-encoded-transform/script-transform-generateKeyFrame.https.html": {
+      "generateKeyFrame timestamp should advance": "FAIL",
+      "generateKeyFrame(null) resolves for video sender, and throws for video receiver": "FAIL"
+    },
+    "webrtc-encoded-transform/script-transform-sendKeyFrameRequest.https.html": {
+      "sendKeyFrameRequest resolves for video receiver, and throws for video sender": "FAIL",
+      "sendKeyFrameRequest throws for audio sender/receiver": "FAIL"
+    },
+    "webrtc-encoded-transform/script-transform.https.html": {
+      "audio exchange with transform": "FAIL",
+      "video exchange with transform": "FAIL"
+    },
+    "webrtc-encoded-transform/script-write-twice-transform.https.html": {
+      "video exchange with write twice transform": "FAIL"
     },
     "webrtc-encoded-transform/sframe-keys.https.html": {
       "Audio exchange with SFrame setup": "FAIL",
@@ -263,15 +250,17 @@
     "webrtc-encoded-transform/sframe-transform-buffer-source.html": {
       "Uint8Array as input to SFrameEncrypterStream": "FAIL"
     },
+    "webrtc-encoded-transform/sframe-transform-in-worker.https.html": {
+      "video exchange with SFrame transform in worker": "FAIL"
+    },
     "webrtc-encoded-transform/sframe-transform-readable.html": {
       "sframe-transform-readable": "FAIL"
     },
     "webrtc-encoded-transform/sframe-transform.html": {
-      "Cannot reuse attached transforms": "FAIL",
-      "SFrame decryption with array buffer that is too small": "FAIL",
-      "SFrame transform gets errored if trying to process unexpected value types": "FAIL",
-      "SFrame with array buffer - AES_128_CTR_HMAC_SHA256_80": "FAIL",
-      "SFrameEncrypterStream exposes readable and writable": "FAIL"
+      "SFrame decryption with array buffer that is too small": "NOTRUN",
+      "SFrame transform gets errored if trying to process unexpected value types": "NOTRUN",
+      "SFrame with array buffer - AES_128_CTR_HMAC_SHA256_80": "TIMEOUT",
+      "[harness]": "TIMEOUT"
     },
     "webrtc-encoded-transform/tentative/RTCEncodedAudioFrame-clone.https.html": {
       "Cloning before sending works": "FAIL"
@@ -333,18 +322,6 @@
     },
     "webrtc-identity/RTCPeerConnection-constructor.html": {
       "RTCPeerConnection constructor throws if the given peerIdentity getter throws": "FAIL"
-    },
-    "webrtc-stats/RTCDataChannel-stats.html": {
-      "answerer on worker: Check that RTCDataChannelStats are present": "FAIL",
-      "answerer on worker: Check that RTCDataChannelStats have a valid initial state": "FAIL",
-      "answerer on worker: Check that RTCDataChannelStats messages/bytes Sent/Received are correct for various binary messages received as arraybuffer": "FAIL",
-      "answerer on worker: Check that RTCDataChannelStats messages/bytes Sent/Received are correct for various binary messages received as blob": "FAIL",
-      "answerer on worker: Check that RTCDataChannelStats messages/bytes Sent/Received are correct for various strings": "FAIL",
-      "offerer on worker: Check that RTCDataChannelStats are present": "FAIL",
-      "offerer on worker: Check that RTCDataChannelStats have a valid initial state": "FAIL",
-      "offerer on worker: Check that RTCDataChannelStats messages/bytes Sent/Received are correct for various binary messages received as arraybuffer": "FAIL",
-      "offerer on worker: Check that RTCDataChannelStats messages/bytes Sent/Received are correct for various binary messages received as blob": "FAIL",
-      "offerer on worker: Check that RTCDataChannelStats messages/bytes Sent/Received are correct for various strings": "FAIL"
     },
     "webrtc-stats/hardware-capability-stats.https.html": {
       "decoderImplementation not exposed when fullscreen and not capturing.": "FAIL",
@@ -434,6 +411,9 @@
     },
     "webrtc/RTCDataChannel-send.html": {
       "Sending multiple messages simultaneously in unordered mode works reliably": "FAIL"
+    },
+    "webrtc/RTCDataChannel-worker-GC.html": {
+      "While remote PC remains open, its worker datachannel should not be collected": "FAIL"
     },
     "webrtc/RTCDtlsTransport-getRemoteCertificates.html": {
       "RTCDtlsTransport-getRemoteCertificates": "FAIL"
@@ -815,6 +795,10 @@
     "webrtc/simulcast/vp9.https.html": {
       "VP9 simulcast setup with two streams": "FAIL",
       "[harness]": "ERROR"
+    },
+    "webrtc/transfer-datachannel.html": {
+      "Failing to transfer a data channel": "FAIL",
+      "Sanity check worker shim: RTCDataChannel not transferable": "FAIL"
     }
   }
 }

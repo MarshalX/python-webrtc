@@ -19,6 +19,7 @@ Submodules
    webrtc.models.media_track_constraints
    webrtc.models.rtc_certificate
    webrtc.models.rtc_configuration
+   webrtc.models.rtc_encoded_frame
    webrtc.models.rtc_ice_candidate
    webrtc.models.rtc_offer_answer_options
    webrtc.models.rtc_rtp_transceiver_init
@@ -27,4 +28,5 @@ Submodules
    webrtc.models.rtc_stats
    webrtc.models.rtp_parameters
    webrtc.models.rtp_source
+   webrtc.models.sframe_transform_options
    webrtc.models.video_frame

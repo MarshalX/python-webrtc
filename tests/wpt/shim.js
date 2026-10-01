@@ -107,6 +107,8 @@
     DataCloneError: 'DataCloneError',
     InvalidSyntaxError: 'SyntaxError',
     InvalidCharacterError: 'InvalidCharacterError',
+    NotFoundError: 'NotFoundError',
+    NotAllowedError: 'NotAllowedError',
   };
   const JS_ERROR_BY_CLASS = {
     TypeError,
@@ -369,6 +371,8 @@
   function toAlgorithm(algorithm) {
     if (typeof algorithm !== 'object' || algorithm === null) return String(algorithm);
     const converted = {name: String(algorithm.name)};
+    // RTCCertificateExpiration, a member of the algorithm object
+    if (algorithm.expires !== undefined) converted.expires = enforceRange(algorithm.expires, 0, Number.MAX_SAFE_INTEGER);
     if (algorithm.namedCurve !== undefined) converted.namedCurve = String(algorithm.namedCurve);
     if (algorithm.modulusLength !== undefined) converted.modulusLength = enforceRange(algorithm.modulusLength, 0, 2 ** 32 - 1);
     if (algorithm.publicExponent !== undefined) converted.publicExponent = algorithm.publicExponent;
@@ -379,7 +383,7 @@
     if (name === 'ECDSA' && converted.namedCurve !== undefined) return pyJson('EcKeyGenParams', converted);
     const rsa = ['modulusLength', 'publicExponent', 'hash'].every((key) => converted[key] !== undefined);
     if (name === 'RSASSA-PKCS1-V1_5' && rsa) return pyJson('RsaHashedKeyGenParams', converted);
-    return pyJson('Algorithm', {name: converted.name});
+    return pyJson('Algorithm', {name: converted.name, expires: converted.expires});
   }
 
   class RTCIceCandidate extends Interface {
@@ -587,10 +591,20 @@
       return callStatic('RTCRtpSender', 'get_capabilities', String(kind));
     }
   }
+  // (RTCRtpSFrameEncryptor or RTCRtpScriptTransform)? and its receiver counterpart
+  const toTransform = (sframe) => (value) => {
+    if (value === null || value === undefined) return null;
+    if (!(value instanceof RTCRtpScriptTransform) && !(value instanceof sframe())) {
+      throw new TypeError(`transform: argument is not of type RTCRtpScriptTransform or ${sframe().name}`);
+    }
+    return toPy(value);
+  };
+
   defineAttributes(RTCRtpSender, [
     ['track', 'track'],
     ['transport', 'transport'],
     ['dtmf', 'dtmf'],
+    ['transform', 'transform', toTransform(() => RTCRtpSFrameEncryptor)],
   ]);
 
   class RTCRtpReceiver extends Interface {
@@ -609,6 +623,7 @@
     ['transport', 'transport'],
     // a nullable DOMHighResTimeStamp
     ['jitterBufferTarget', 'jitter_buffer_target', (v) => (v === null ? null : Number(v))],
+    ['transform', 'transform', toTransform(() => RTCRtpSFrameDecryptor)],
   ]);
 
   class RTCRtpTransceiver extends Interface {
@@ -739,9 +754,7 @@
   const toConfiguration = (configuration) => pyModel('RTCConfiguration', convertDictionary(
     requireDictionary(configuration, 'RTCConfiguration'), 'RTCConfiguration', CONFIGURATION));
 
-  const ANSWER_OPTIONS = {
-    voiceActivityDetection: ['voice_activity_detection', Boolean],
-  };
+  const ANSWER_OPTIONS = {};
   const OFFER_OPTIONS = {
     ...ANSWER_OPTIONS,
     iceRestart: ['ice_restart', Boolean],
@@ -835,11 +848,7 @@
 
     static async generateCertificate(algorithm) {
       requireArguments(arguments, 1, 'RTCPeerConnection.generateCertificate');
-      const args = [toAlgorithm(algorithm)];
-      if (typeof algorithm === 'object' && algorithm !== null && algorithm.expires !== undefined) {
-        args.push(enforceRange(algorithm.expires, 0, Number.MAX_SAFE_INTEGER));
-      }
-      return unwrap(await bridge.call_async_static('RTCPeerConnection', 'generate_certificate', args));
+      return unwrap(await bridge.call_async_static('RTCPeerConnection', 'generate_certificate', [toAlgorithm(algorithm)]));
     }
 
     getConfiguration() { return callMethod(this, 'get_configuration'); }
@@ -921,6 +930,17 @@
     MediaStreamTrackEvent: defineEvent('MediaStreamTrackEvent', ['track']),
     RTCDTMFToneChangeEvent: defineEvent('RTCDTMFToneChangeEvent', [], {tone: ''}),
     MessageEvent: defineEvent('MessageEvent', [], {data: null, origin: '', lastEventId: '', source: null, ports: []}),
+    RTCTransformEvent: defineEvent('RTCTransformEvent', ['transformer'], {}, {transformer: () => RTCRtpScriptTransformer}),
+    SFrameTransformErrorEvent: defineEvent('SFrameTransformErrorEvent', ['errorType', 'frame'], {keyID: null}),
+    KeyFrameRequestEvent: class KeyFrameRequestEvent extends Event {
+      // constructor(DOMString type, optional DOMString rid); the library's events come with their members
+      constructor(type, rid) {
+        requireArguments(arguments, 1, 'KeyFrameRequestEvent');
+        super(String(type));
+        const value = typeof rid === 'object' && rid !== null ? rid.rid : rid;
+        this.rid = value === undefined || value === null ? null : String(value);
+      }
+    },
   };
 
   // Streams, frames, processors and generators of python-webrtc. Streams are the Python ones: scripts read and
@@ -937,6 +957,21 @@
       requireInterface(destination, WritableStream, 'ReadableStream.pipeTo');
       const dict = requireDictionary(options, 'StreamPipeOptions');
       return callAsyncMethod(this, 'pipe_to', destination, pyJson('StreamPipeOptions', {
+        preventClose: Boolean(dict.preventClose),
+        preventAbort: Boolean(dict.preventAbort),
+        preventCancel: Boolean(dict.preventCancel),
+      }));
+    }
+
+    pipeThrough(transform, options) {
+      // ReadableWritablePair, read from any object with the members (like a GenericTransformStream)
+      const pair = requireMembers(transform, 'ReadableWritablePair', ['readable', 'writable']);
+      requireInterface(pair.readable, ReadableStream, 'ReadableStream.pipeThrough');
+      requireInterface(pair.writable, WritableStream, 'ReadableStream.pipeThrough');
+      const dict = requireDictionary(options, 'StreamPipeOptions');
+      return callMethod(this, 'pipe_through', pyModel('ReadableWritablePair', {
+        readable: toPy(pair.readable), writable: toPy(pair.writable),
+      }), pyJson('StreamPipeOptions', {
         preventClose: Boolean(dict.preventClose),
         preventAbort: Boolean(dict.preventAbort),
         preventCancel: Boolean(dict.preventCancel),
@@ -1153,6 +1188,173 @@
   }
   defineAttributes(MediaStreamTrackGenerator, [['writable', 'writable']]);
 
+  // WebRTC Encoded Transform. The worker of a transform is a Worker of polyfills.js, which gets the rtctransform
+  // event in its scope; options are an `any`, which the worker gets as given (a browser clones them)
+  const transformerOptions = new WeakMap();
+
+  class RTCRtpScriptTransform extends Interface {
+    constructor(...args) {
+      super(INTERNAL, pyObjectOf(args, (workerOrWorkerAndParameters, options, transfer) => {
+        requireArguments(args, 1, 'RTCRtpScriptTransform');
+        let worker = workerOrWorkerAndParameters;
+        let type;
+        if (!(worker instanceof Worker)) {
+          const dict = requireMembers(worker, 'WorkerAndParameters', ['worker']);
+          worker = requireInterface(dict.worker, Worker, 'WorkerAndParameters.worker');
+          type = dict.type;
+        }
+        const deliver = (pyEvent) => {
+          const event = unwrap(bridge.wrap(pyEvent));
+          transformerOptions.set(event.transformer, options);
+          worker.__dispatchInScope(event);
+        };
+        const pyWorker = type === undefined
+          ? deliver
+          : pyModel('WorkerAndParameters', {worker: deliver, type: pyEnum('RTCRtpScriptTransformType', type)});
+        const transferList = transfer === undefined ? null : Array.from(transfer, () => ({}));
+        return construct('RTCRtpScriptTransform', {}, [pyWorker, null, transferList]);
+      }));
+    }
+  }
+
+  class RTCRtpScriptTransformer extends Interface {
+    get options() { return transformerOptions.get(this); }
+
+    generateKeyFrame(rid) {
+      return callAsyncMethod(this, 'generate_key_frame', rid === undefined ? null : String(rid)).then(() => undefined);
+    }
+
+    sendKeyFrameRequest() { return callAsyncMethod(this, 'send_key_frame_request').then(() => undefined); }
+  }
+  defineAttributes(RTCRtpScriptTransformer, [
+    ['readable', 'readable'],
+    ['writable', 'writable'],
+  ]);
+  defineEventHandlers(RTCRtpScriptTransformer, ['keyframerequest']);
+
+  // the ArrayBuffer of the data of a frame, sharing the memory of the bytearray of the library, the same one while
+  // that bytearray is
+  const frameBuffers = new WeakMap();
+
+  class EncodedFrame extends Interface {
+    get data() {
+      const result = bridge.get_buffer(pyObjects.get(this), 'data');
+      if (result.error) throw toJsError(result.error);
+      const [id, bytes, detached] = result.ok;
+      const cached = frameBuffers.get(this);
+      if (cached?.id === id) return cached.buffer;
+      let {buffer} = bytes;
+      if (detached) {
+        buffer = new ArrayBuffer(0);
+        buffer.transfer();
+      }
+      frameBuffers.set(this, {id, buffer});
+      return buffer;
+    }
+
+    set data(value) {
+      // an ArrayBuffer: not a view, nor a resizable or shared buffer
+      if (!(value instanceof ArrayBuffer) || value.resizable) throw new TypeError('data is not an ArrayBuffer');
+      setAttr(this, 'data', value);
+    }
+
+    getMetadata() { return callMethod(this, 'get_metadata'); }
+
+    // [Serializable]: a copy of the frame (see structuredClone in polyfills.js)
+    [Symbol.for('wpt.serialize')]() { return new this.constructor(this); }
+  }
+
+  const frameConstructor = (name, optionsName) => function (args) {
+    const [originalFrame, options] = args;
+    requireArguments(args, 1, name);
+    requireInterface(originalFrame, this, name);
+    const dict = requireDictionary(options, optionsName);
+    const pyOptions = dict.metadata === undefined ? null : pyJson(optionsName, {metadata: requireDictionary(dict.metadata, 'metadata')});
+    return construct(name, {}, [toPy(originalFrame), pyOptions]);
+  };
+
+  class RTCEncodedVideoFrame extends EncodedFrame {
+    constructor(...args) {
+      super(INTERNAL, pyObjectOf(args, () => frameConstructor('RTCEncodedVideoFrame', 'RTCEncodedVideoFrameOptions').call(RTCEncodedVideoFrame, args)));
+    }
+  }
+  defineAttributes(RTCEncodedVideoFrame, [['type', 'type']]);
+
+  class RTCEncodedAudioFrame extends EncodedFrame {
+    constructor(...args) {
+      super(INTERNAL, pyObjectOf(args, () => frameConstructor('RTCEncodedAudioFrame', 'RTCEncodedAudioFrameOptions').call(RTCEncodedAudioFrame, args)));
+    }
+  }
+
+  // SFrame. Keys are the CryptoKeys of polyfills.js, the library takes their raw bytes
+  function keyBytes(key) {
+    const data = key?.[Symbol.for('wpt.keyData')];
+    if (!(data instanceof Uint8Array)) throw new TypeError('key is not a CryptoKey');
+    return data;
+  }
+
+  // CryptoKeyID, (SmallCryptoKeyID or bigint): the library checks the range of a bigint
+  const toKeyID = (value) => (typeof value === 'bigint' ? value : enforceRange(value, 0, Number.MAX_SAFE_INTEGER));
+
+  const sframeOptions = (args, name, dictName, members) => {
+    requireArguments(args, 1, name);
+    return pyJson(dictName, pick(requireMembers(args[0], dictName, ['cipherSuite']), members));
+  };
+
+  // SFrameEncryptorManager and SFrameDecryptorManager
+  const encryptorManager = {
+    async setEncryptionKey(key, keyId) {
+      requireArguments(arguments, 2, 'setEncryptionKey');
+      return callAsyncMethod(this, 'set_encryption_key', keyBytes(key), toKeyID(keyId)).then(() => undefined);
+    },
+  };
+  const decryptorManager = {
+    async addDecryptionKey(key, keyId) {
+      requireArguments(arguments, 2, 'addDecryptionKey');
+      return callAsyncMethod(this, 'add_decryption_key', keyBytes(key), toKeyID(keyId)).then(() => undefined);
+    },
+    async removeDecryptionKey(keyId) {
+      requireArguments(arguments, 1, 'removeDecryptionKey');
+      return callAsyncMethod(this, 'remove_decryption_key', toKeyID(keyId)).then(() => undefined);
+    },
+  };
+
+  class RTCRtpSFrameEncryptor extends Interface {
+    constructor(...args) {
+      super(INTERNAL, pyObjectOf(args, () => construct('RTCRtpSFrameEncryptor', {}, [
+        sframeOptions(args, 'RTCRtpSFrameEncryptor', 'RTCRtpSFrameEncryptorOptions', ['cipherSuite', 'type'])])));
+    }
+  }
+  Object.assign(RTCRtpSFrameEncryptor.prototype, encryptorManager);
+
+  class RTCRtpSFrameDecryptor extends Interface {
+    constructor(...args) {
+      super(INTERNAL, pyObjectOf(args, () => construct('RTCRtpSFrameDecryptor', {}, [
+        sframeOptions(args, 'RTCRtpSFrameDecryptor', 'SFrameTransformOptions', ['cipherSuite'])])));
+    }
+  }
+  Object.assign(RTCRtpSFrameDecryptor.prototype, decryptorManager);
+  defineEventHandlers(RTCRtpSFrameDecryptor, ['error']);
+
+  class SFrameEncryptorStream extends Interface {
+    constructor(...args) {
+      super(INTERNAL, pyObjectOf(args, () => construct('SFrameEncryptorStream', {}, [
+        sframeOptions(args, 'SFrameEncryptorStream', 'SFrameTransformOptions', ['cipherSuite'])])));
+    }
+  }
+  Object.assign(SFrameEncryptorStream.prototype, encryptorManager);
+  defineAttributes(SFrameEncryptorStream, [['readable', 'readable'], ['writable', 'writable']]);
+
+  class SFrameDecryptorStream extends Interface {
+    constructor(...args) {
+      super(INTERNAL, pyObjectOf(args, () => construct('SFrameDecryptorStream', {}, [
+        sframeOptions(args, 'SFrameDecryptorStream', 'SFrameTransformOptions', ['cipherSuite'])])));
+    }
+  }
+  Object.assign(SFrameDecryptorStream.prototype, decryptorManager);
+  defineAttributes(SFrameDecryptorStream, [['readable', 'readable'], ['writable', 'writable']]);
+  defineEventHandlers(SFrameDecryptorStream, ['error']);
+
   class OverconstrainedError extends DOMException {
     constructor(constraint, message = '') {
       super(message, 'OverconstrainedError');
@@ -1185,8 +1387,23 @@
     MediaStreamTrackProcessor,
     VideoTrackGenerator,
     MediaStreamTrackGenerator,
+    RTCRtpScriptTransform,
+    RTCRtpScriptTransformer,
+    RTCEncodedVideoFrame,
+    RTCEncodedAudioFrame,
+    RTCRtpSFrameEncryptor,
+    RTCRtpSFrameDecryptor,
+    SFrameEncryptorStream,
+    SFrameDecryptorStream,
   };
   Object.assign(globalThis, interfaces, {OverconstrainedError});
+  // the names WebKit shipped SFrame with, which WPT tests use
+  Object.assign(globalThis, {
+    RTCRtpSFrameEncrypter: RTCRtpSFrameEncryptor,
+    RTCRtpSFrameDecrypter: RTCRtpSFrameDecryptor,
+    SFrameEncrypterStream: SFrameEncryptorStream,
+    SFrameDecrypterStream: SFrameDecryptorStream,
+  });
   const {Event: _, ...eventInterfaces} = events;
   Object.assign(globalThis, eventInterfaces, {RTCError, RTCStatsReport});
 

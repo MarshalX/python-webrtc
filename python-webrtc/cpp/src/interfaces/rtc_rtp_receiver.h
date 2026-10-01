@@ -20,6 +20,7 @@
 #include <api/scoped_refptr.h>
 
 #include "../exceptions.h"
+#include "../media/frame_transformer_bridge.h"
 #include "../utils/alive_guard.h"
 #include "media_stream_track.h"
 #include "peer_connection_factory.h"
@@ -29,7 +30,9 @@ namespace python_webrtc {
 
   class RTCPeerConnection;
 
-  class RTCRtpReceiver : public webrtc::RtpReceiverObserverInterface, public SingleObserverSlot {
+  class RTCRtpReceiver : public webrtc::RtpReceiverObserverInterface,
+                         public SingleObserverSlot,
+                         public std::enable_shared_from_this<RTCRtpReceiver> {
   public:
     // (is a synchronization source, source, timestamp in ms since the Unix epoch, RTP timestamp,
     // audio level in -dBov)
@@ -75,8 +78,18 @@ namespace python_webrtc {
 
     static std::optional<webrtc::RtpCapabilities> GetCapabilities(const std::string &kind);
 
+    std::shared_ptr<RtpTransform> GetTransform() { return _transform.Get(); }
+
+    // InvalidStateError if the transform has had a sender or receiver
+    void SetTransform(const std::shared_ptr<RtpTransform> &transform);
+
+    // the connection closed: the transform gets no frames anymore
+    void ReleaseTransform() { _transform.Release(); }
+
   private:
     std::shared_ptr<RTCPeerConnection> GetConnection();
+
+    FrameSource TransformSource();
 
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::RtpReceiverInterface> _receiver;
@@ -88,6 +101,7 @@ namespace python_webrtc {
     // the receiver owns the wrapper of its current transport
     std::shared_ptr<RTCDtlsTransport> _transport;
     std::optional<double> _jitterBufferTarget;
+    TransformSlot _transform;
 
     // see AliveGuard
     AliveGuard _alive;

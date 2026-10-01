@@ -21,45 +21,83 @@ from webrtc.utils.names import Alias, alias
 
 
 @dataclass
-class Algorithm(Dictionary):
-    """A WebCrypto algorithm, by its name.
+class RTCCertificateExpiration(Dictionary):
+    """When a generated certificate expires, a member of the algorithm it's generated with.
+
+    Args:
+        expires (:obj:`int`, optional): In how many milliseconds the certificate expires, at most a year
+            (the default is 30 days).
+    """
+
+    expires: int | None = None
+
+
+# the members are required, but expires keyword-only after them, which dataclasses can't do before 3.10
+@dataclass(init=False)
+class Algorithm(RTCCertificateExpiration):
+    """A WebCrypto algorithm, by its name, for :meth:`webrtc.RTCPeerConnection.generate_certificate`.
 
     Args:
         name (:obj:`str`): The name, like ``'ECDSA'``.
+        expires (:obj:`int`, optional): In how many milliseconds the certificate expires.
     """
 
     name: str
 
+    def __init__(self, name: str, *, expires: int | None = None) -> None:
+        super().__init__(expires)
+        self.name = name
 
-@dataclass
+
+@dataclass(init=False)
 class EcKeyGenParams(Algorithm):
-    """A WebCrypto algorithm of an elliptic curve key, for :meth:`webrtc.RTCCertificate.generate`.
+    """A WebCrypto algorithm of an elliptic curve key.
 
     Args:
         name (:obj:`str`): ``'ECDSA'``.
         named_curve (:obj:`str`): The curve, ``'P-256'`` as the only one supported.
+        expires (:obj:`int`, optional): In how many milliseconds the certificate expires.
     """
 
     named_curve: str
+
+    def __init__(self, name: str, named_curve: str, *, expires: int | None = None) -> None:
+        super().__init__(name, expires=expires)
+        self.named_curve = named_curve
 
     #: Alias for :attr:`named_curve`
     namedCurve: ClassVar[Alias[str]] = alias('named_curve')
 
 
-@dataclass
+@dataclass(init=False)
 class RsaHashedKeyGenParams(Algorithm):
-    """A WebCrypto algorithm of an RSA key, for :meth:`webrtc.RTCCertificate.generate`.
+    """A WebCrypto algorithm of an RSA key.
 
     Args:
         name (:obj:`str`): ``'RSASSA-PKCS1-v1_5'``.
         modulus_length (:obj:`int`): The length of the modulus in bits, like 2048.
         public_exponent (:obj:`bytes`): The public exponent, big-endian, like ``bytes([1, 0, 1])`` for 65537.
         hash (:obj:`str` or :obj:`webrtc.Algorithm`): The hash function, ``'SHA-256'`` as the only one supported.
+        expires (:obj:`int`, optional): In how many milliseconds the certificate expires.
     """
 
     modulus_length: int
     public_exponent: bytes
     hash: str | Algorithm
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        modulus_length: int,
+        public_exponent: bytes,
+        hash: str | Algorithm,
+        expires: int | None = None,
+    ) -> None:
+        super().__init__(name, expires=expires)
+        self.modulus_length = modulus_length
+        self.public_exponent = public_exponent
+        self.hash = hash
 
     _dictionaries: ClassVar = {'hash': Algorithm}
 
@@ -125,41 +163,23 @@ def _key_params(algorithm: AlgorithmIdentifier) -> _KeyParams:
 class RTCCertificate(WebRTCObject[wrtc.RTCCertificate]):
     """A certificate a connection uses to authenticate with DTLS.
 
-    Generated with :meth:`generate` and set with :attr:`webrtc.RTCConfiguration.certificates`. Without one,
-    a connection generates its own.
+    Generated with :meth:`webrtc.RTCPeerConnection.generate_certificate` and set with
+    :attr:`webrtc.RTCConfiguration.certificates`. Without one, a connection generates its own.
     """
 
     _class = wrtc.RTCCertificate
 
     @classmethod
-    async def generate(cls, algorithm: AlgorithmIdentifier = 'ECDSA', expires: float | None = None) -> RTCCertificate:
-        """Generates a key and a self-signed certificate, on a worker thread.
-
-        Args:
-            algorithm (:obj:`str` or :obj:`webrtc.Algorithm`, optional): A WebCrypto algorithm: ``'ECDSA'``
-                (with the P-256 curve), an :obj:`webrtc.EcKeyGenParams`, or an :obj:`webrtc.RsaHashedKeyGenParams`
-                like ``RsaHashedKeyGenParams('RSASSA-PKCS1-v1_5', 2048, bytes([1, 0, 1]), 'SHA-256')``.
-            expires (:obj:`float`, optional): In how many milliseconds the certificate expires, at most a year
-                (the default is 30 days).
-
-        Returns:
-            :obj:`webrtc.RTCCertificate`: The certificate.
-
-        Raises:
-            webrtc.NotSupportedError: If the algorithm isn't supported.
-            ValueError: If ``expires`` is negative.
-        """
+    async def _generate(cls, algorithm: AlgorithmIdentifier) -> RTCCertificate:
+        # see RTCPeerConnection.generate_certificate
         key_type, modulus_length, exponent = _key_params(algorithm)
-        if expires is not None and expires < 0:
-            msg = f'expires must not be negative, not {expires}'
-            raise ValueError(msg)
+        expires = algorithm.expires if isinstance(algorithm, Algorithm) else None
+        valid = expires is None or (type(expires) is int and expires >= 0)
+        if not valid:
+            msg = f'expires must be an unsigned 64-bit integer, not {expires!r}'
+            raise TypeError(msg)
         native = await asyncio.get_running_loop().run_in_executor(
-            None,
-            wrtc.RTCCertificate.generate,
-            key_type,
-            modulus_length,
-            exponent,
-            int(expires) if expires is not None else None,
+            None, wrtc.RTCCertificate.generate, key_type, modulus_length, exponent, expires
         )
         if native is None:
             msg = 'the key could not be generated with these parameters'
@@ -171,9 +191,7 @@ class RTCCertificate(WebRTCObject[wrtc.RTCCertificate]):
         """:obj:`float`: When the certificate expires, in milliseconds since the epoch."""
         return float(self._native_obj.expires)
 
-    @property
-    def expired(self) -> bool:
-        """:obj:`bool`: Whether the certificate has expired."""
+    def _expired(self) -> bool:
         return self.expires <= time.time() * 1000
 
     def get_fingerprints(self) -> list[RTCDtlsFingerprint]:

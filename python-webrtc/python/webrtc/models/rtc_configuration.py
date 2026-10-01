@@ -255,7 +255,7 @@ class RTCConfiguration(Dictionary):
 
         if self.certificates is not None:
             for certificate in self.certificates:
-                if certificate.expired:
+                if certificate._expired():
                     msg = 'the certificate has expired'
                     raise InvalidAccessError(msg)
             native.certificates = [certificate._native_obj for certificate in self.certificates]

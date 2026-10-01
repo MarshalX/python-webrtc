@@ -18,16 +18,7 @@ from webrtc.utils.names import Alias, alias
 
 @dataclass
 class RTCOfferAnswerOptions(Dictionary):
-    """The options of :meth:`webrtc.RTCPeerConnection.create_offer` and :meth:`webrtc.RTCPeerConnection.create_answer`.
-
-    Args:
-        voice_activity_detection (:obj:`bool`, optional): Whether audio codecs may use voice activity detection.
-    """
-
-    voice_activity_detection: bool = True
-
-    #: Alias for :attr:`voice_activity_detection`
-    voiceActivityDetection: ClassVar[Alias[bool]] = alias('voice_activity_detection')
+    """The options of creating an offer or an answer, which :obj:`RTCOfferOptions` adds to."""
 
 
 @dataclass
@@ -35,7 +26,6 @@ class RTCOfferOptions(RTCOfferAnswerOptions):
     """The options of :meth:`webrtc.RTCPeerConnection.create_offer`.
 
     Args:
-        voice_activity_detection (:obj:`bool`, optional): Whether audio codecs may use voice activity detection.
         ice_restart (:obj:`bool`, optional): Whether to restart ICE, gathering new credentials and candidates.
             :meth:`webrtc.RTCPeerConnection.restart_ice` is the preferred way.
         offer_to_receive_audio (:obj:`bool`, optional): Legacy: :obj:`True` adds a receiving audio transceiver
@@ -58,8 +48,4 @@ class RTCOfferOptions(RTCOfferAnswerOptions):
 
 @dataclass
 class RTCAnswerOptions(RTCOfferAnswerOptions):
-    """The options of :meth:`webrtc.RTCPeerConnection.create_answer`.
-
-    Args:
-        voice_activity_detection (:obj:`bool`, optional): Whether audio codecs may use voice activity detection.
-    """
+    """The options of :meth:`webrtc.RTCPeerConnection.create_answer`."""

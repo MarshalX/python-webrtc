@@ -32,6 +32,11 @@ CreatePC = Callable[..., webrtc.RTCPeerConnection]
 _T = TypeVar('_T')
 
 
+def stats_of_type(report: webrtc.RTCStatsReport, stats_type: str) -> list[webrtc.RTCStats]:
+    """The stats of a type in a report."""
+    return [stats for stats in report.values() if stats.type == stats_type]
+
+
 def mistyped(value: object) -> _T:
     """A value of the wrong type, passed where a test checks that the library rejects it at runtime."""
     return cast('_T', value)

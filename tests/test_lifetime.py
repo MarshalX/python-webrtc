@@ -613,14 +613,12 @@ def test_stream_keeps_the_state_of_its_tracks() -> None:
 async def test_handler_of_a_track_referencing_its_sender_or_receiver(part: str) -> None:
     baseline = alive_factories()
 
-    def create() -> weakref.ref[webrtc.RTCRtpSender | webrtc.RTCRtpReceiver]:
+    async def create() -> weakref.ref[webrtc.RTCRtpSender | webrtc.RTCRtpReceiver]:
         pc = webrtc.RTCPeerConnection()
         if part == 'sender':
-            owner = pc.add_track(
-                asyncio.run(
-                    webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))
-                ).get_tracks()[0]
-            )
+            stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))
+            owner = pc.add_track(stream.get_tracks()[0])
+            del stream
         else:
             owner = pc.add_transceiver(webrtc.MediaType.audio).receiver
         track = owner.track
@@ -633,7 +631,7 @@ async def test_handler_of_a_track_referencing_its_sender_or_receiver(part: str) 
         pc.close()
         return weakref.ref(owner)
 
-    ref = create()
+    ref = await create()
     await asyncio.sleep(QUIET_PERIOD)
     collect()
 

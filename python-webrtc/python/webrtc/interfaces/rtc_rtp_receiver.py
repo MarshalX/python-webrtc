@@ -22,6 +22,7 @@ from webrtc import (
     WebRTCObject,
     wrtc,
 )
+from webrtc.interfaces.rtc_rtp_sender import _native_transform
 from webrtc.utils.native_calls import call_native
 
 _SourceT = TypeVar('_SourceT', bound=RTCRtpContributingSource)
@@ -49,6 +50,26 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
     def transport(self) -> webrtc.RTCDtlsTransport | None:
         """:obj:`webrtc.RTCDtlsTransport`, optional: The transport of the packets, :obj:`None` until there's one."""
         return webrtc.RTCDtlsTransport._wrap_optional(self._native_obj.transport)
+
+    @property
+    def transform(self) -> webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameDecryptor | None:
+        """:obj:`webrtc.RTCRtpScriptTransform` or :obj:`webrtc.RTCRtpSFrameDecryptor`, optional: The frame transform.
+
+        It transforms the encoded frames before they're decoded, :obj:`None` decodes them as they're received.
+        A transform is used by one sender or receiver only: a transform that had one can't be set again.
+
+        Raises:
+            TypeError: If the value set isn't a transform of a receiver.
+            webrtc.InvalidStateError: If the transform set had a sender or receiver.
+        """
+        native = self._native_obj.transform
+        if isinstance(native, wrtc.SFrameTransform):
+            return webrtc.RTCRtpSFrameDecryptor._wrap(native)
+        return webrtc.RTCRtpScriptTransform._of_native(native)
+
+    @transform.setter
+    def transform(self, transform: webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameDecryptor | None) -> None:
+        self._native_obj.transform = _native_transform(transform, webrtc.RTCRtpSFrameDecryptor)
 
     @property
     def jitter_buffer_target(self) -> float | None:

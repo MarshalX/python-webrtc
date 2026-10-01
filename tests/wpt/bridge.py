@@ -24,6 +24,7 @@ import pythonmonkey as pm
 
 import webrtc
 import webrtc.enums
+from tests.wpt.loader import WPT_ROOT
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Coroutine
@@ -53,10 +54,19 @@ _PLAIN_INTERFACES = (
     webrtc.WritableStreamDefaultWriter,
     webrtc.VideoTrackGenerator,
     webrtc.VideoColorSpace,
+    webrtc.RTCRtpScriptTransformer,
+    webrtc.RTCEncodedVideoFrame,
+    webrtc.RTCEncodedAudioFrame,
 )
 
 
+# WebIDL names that aren't the camelCase of the snake_case ones
+_IDL_NAMES = {'key_id': 'keyID'}
+
+
 def _camel_case(name: str) -> str:
+    if name in _IDL_NAMES:
+        return _IDL_NAMES[name]
     first, *rest = name.split('_')
     return first + ''.join(part.title() for part in rest)
 
@@ -356,6 +366,28 @@ def subscribe(obj: webrtc.EventTarget, name: str, callback: Callable[[object], o
     return _guard(add_listener)
 
 
+def wrap(value: object) -> Result:
+    """A Python object JS got as it is (like the event a JS callback is called with), as the shim reads it."""
+    return _guard(lambda: value)
+
+
+def get_buffer(obj: object, name: str) -> Result:
+    """A bytearray attribute as [identity, bytearray, detached]: JS shares its memory, one ArrayBuffer for each."""
+
+    def get() -> list[object]:
+        value = getattr(obj, name)
+        # the data of an encoded frame written to its transformer, an ArrayBuffer transferred in a browser
+        detached = bool(getattr(obj, '_detached', False))
+        return [id(value), value, detached]
+
+    return _guard(get)
+
+
+def read_text(path: str) -> Result:
+    """A file of the WPT checkout by its path from the root, like the script of a Worker."""
+    return _guard((WPT_ROOT / path.lstrip('/')).read_text)
+
+
 EXPORTS = {
     f.__name__: f
     for f in (
@@ -372,5 +404,8 @@ EXPORTS = {
         get_user_media,
         now,
         subscribe,
+        wrap,
+        get_buffer,
+        read_text,
     )
 }

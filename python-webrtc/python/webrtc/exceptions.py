@@ -57,6 +57,14 @@ class NetworkError(RTCException):
     """An error of an underlying network protocol."""
 
 
+class NotFoundError(RTCException):
+    """An object isn't found, like a simulcast layer of an unknown ``rid``."""
+
+
+class NotAllowedError(RTCException):
+    """The operation isn't allowed, like with a malformed ``rid``."""
+
+
 class DataCloneError(RTCException):
     """An object can't be transferred, like a buffer listed twice in ``transfer``."""
 

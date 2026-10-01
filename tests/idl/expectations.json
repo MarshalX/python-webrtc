@@ -2,50 +2,16 @@
   "CameraDevicePermissionDescriptor": [
     "missing dictionary"
   ],
-  "EncodedVideoChunkType": [
-    "missing enum"
-  ],
-  "KeyFrameRequestEvent": [
-    "missing interface"
-  ],
   "MediaStreamTrackHandle": [
     "missing interface"
   ],
   "MediaStreamTrackProcessorInit": [
     "track: type lacks MediaStreamTrackHandle"
   ],
-  "RTCCertificate": [
-    "expired: extra member",
-    "generate: extra member"
-  ],
-  "RTCCertificateExpiration": [
-    "missing dictionary"
-  ],
   "RTCConfiguration": [
     "always_negotiate_data_channels: extra member",
     "port_range: extra member",
     "rtp_header_encryption_policy: extra member"
-  ],
-  "RTCEncodedAudioFrame": [
-    "missing interface"
-  ],
-  "RTCEncodedAudioFrameMetadata": [
-    "missing dictionary"
-  ],
-  "RTCEncodedAudioFrameOptions": [
-    "missing dictionary"
-  ],
-  "RTCEncodedFrameMetadata": [
-    "missing dictionary"
-  ],
-  "RTCEncodedVideoFrame": [
-    "missing interface"
-  ],
-  "RTCEncodedVideoFrameMetadata": [
-    "missing dictionary"
-  ],
-  "RTCEncodedVideoFrameOptions": [
-    "missing dictionary"
   ],
   "RTCError": [
     "http_request_status_code: extra member"
@@ -56,91 +22,26 @@
   "RTCIceServer": [
     "credential_type: extra member"
   ],
-  "RTCOfferAnswerOptions": [
-    "voice_activity_detection: extra member"
-  ],
-  "RTCPeerConnection": [
-    "generateCertificate(expires): extra argument"
-  ],
   "RTCRtpEncodingParameters": [
     "adaptive_ptime: extra member"
   ],
   "RTCRtpHeaderExtensionCapability": [
     "direction: extra member"
   ],
-  "RTCRtpReceiver": [
-    "transform: missing attribute"
-  ],
-  "RTCRtpSFrameDecryptor": [
-    "missing interface"
-  ],
-  "RTCRtpSFrameEncryptor": [
-    "missing interface"
-  ],
-  "RTCRtpSFrameEncryptorOptions": [
-    "missing dictionary"
-  ],
-  "RTCRtpScriptTransform": [
-    "missing interface"
-  ],
-  "RTCRtpScriptTransformType": [
-    "missing enum"
-  ],
-  "RTCRtpScriptTransformer": [
-    "missing interface"
-  ],
-  "RTCRtpSender": [
-    "kind: extra member",
-    "transform: missing attribute"
-  ],
   "RTCRtpTransceiver": [
     "get_header_extensions_to_negotiate: extra member",
     "get_negotiated_header_extensions: extra member",
-    "kind: extra member",
     "set_header_extensions_to_negotiate: extra member",
     "stopped: extra member"
   ],
   "RTCSetParameterOptions": [
     "encoding_options: extra member"
   ],
-  "RTCStatsReport": [
-    "of_type: extra member"
-  ],
-  "RTCTransformEvent": [
-    "missing interface"
-  ],
-  "SFrameCipherSuite": [
-    "missing enum"
-  ],
-  "SFrameDecryptorStream": [
-    "missing interface"
-  ],
-  "SFrameEncryptorStream": [
-    "missing interface"
-  ],
-  "SFrameTransformErrorEvent": [
-    "missing interface"
-  ],
-  "SFrameTransformErrorEventInit": [
-    "missing dictionary"
-  ],
-  "SFrameTransformErrorEventType": [
-    "missing enum"
-  ],
-  "SFrameTransformOptions": [
-    "missing dictionary"
-  ],
-  "SFrameType": [
-    "missing enum"
-  ],
   "StreamPipeOptions": [
     "signal: missing member"
   ],
   "VideoFrameMetadata": [
     "rtp_timestamp: extra member"
-  ],
-  "WorkerAndParameters": [
-    "missing dictionary"
   ],
   "WritableStreamDefaultController": [
     "signal: missing attribute"

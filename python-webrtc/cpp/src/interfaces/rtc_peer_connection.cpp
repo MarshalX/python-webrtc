@@ -133,9 +133,9 @@ namespace python_webrtc {
              })),
              pybind11::arg("configuration"))
         .def("createOffer", WithCallbacks(&RTCPeerConnection::CreateOffer), pybind11::arg("onSuccess"),
-             pybind11::arg("onFailure"), pybind11::arg("iceRestart"), pybind11::arg("voiceActivityDetection"))
+             pybind11::arg("onFailure"), pybind11::arg("iceRestart"))
         .def("createAnswer", WithCallbacks(&RTCPeerConnection::CreateAnswer), pybind11::arg("onSuccess"),
-             pybind11::arg("onFailure"), pybind11::arg("voiceActivityDetection"))
+             pybind11::arg("onFailure"))
         .def("setLocalDescription", WithCallbacks(&RTCPeerConnection::SetLocalDescription), pybind11::arg("onSuccess"),
              pybind11::arg("onFailure"), pybind11::arg("description"))
         .def("setRemoteDescription", WithCallbacks(&RTCPeerConnection::SetRemoteDescription),
@@ -501,8 +501,7 @@ namespace python_webrtc {
   }
 
   void RTCPeerConnection::CreateOffer(std::function<void(RTCSessionDescription)> &onSuccess,
-                                      std::function<void(RTCCallbackException)> &onFailure, bool iceRestart,
-                                      bool voiceActivityDetection) {
+                                      std::function<void(RTCCallbackException)> &onFailure, bool iceRestart) {
     auto pc = connection();
     auto state = pc ? pc->signaling_state() : SignalingState::kClosed;
     if (state == SignalingState::kClosed) {
@@ -520,14 +519,12 @@ namespace python_webrtc {
 
     auto options = webrtc::PeerConnectionInterface::RTCOfferAnswerOptions();
     options.ice_restart = iceRestart;
-    options.voice_activity_detection = voiceActivityDetection;
 
     pc->CreateOffer(observer.get(), options);
   }
 
   void RTCPeerConnection::CreateAnswer(std::function<void(RTCSessionDescription)> &onSuccess,
-                                       std::function<void(RTCCallbackException)> &onFailure,
-                                       bool voiceActivityDetection) {
+                                       std::function<void(RTCCallbackException)> &onFailure) {
     auto pc = connection();
     if (!pc || pc->signaling_state() == SignalingState::kClosed) {
       onFailure(RTCCallbackException(closedError("createAnswer")));
@@ -535,9 +532,7 @@ namespace python_webrtc {
     }
 
     auto observer = webrtc::make_ref_counted<CreateSessionDescriptionObserver>(weak_from_this(), onSuccess, onFailure);
-    auto options = webrtc::PeerConnectionInterface::RTCOfferAnswerOptions();
-    options.voice_activity_detection = voiceActivityDetection;
-    pc->CreateAnswer(observer.get(), options);
+    pc->CreateAnswer(observer.get(), webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
   }
 
   void RTCPeerConnection::SaveCreatedDescription(const RTCSessionDescriptionInit &description) {
@@ -1306,6 +1301,13 @@ namespace python_webrtc {
       pc->Close();
       for (const auto &transceiver : pc->GetTransceivers()) {
         Wrap(_transceivers, transceiver)->GetReceiver()->GetTrack()->OnPeerConnectionClosed();
+        // transforms get no frames anymore, their streams end
+        if (auto sender = RTCRtpSender::holder().Find(transceiver->sender().get())) {
+          sender->ReleaseTransform();
+        }
+        if (auto receiver = RTCRtpReceiver::holder().Find(transceiver->receiver().get())) {
+          receiver->ReleaseTransform();
+        }
       }
     }
 

@@ -15,7 +15,7 @@ import pytest
 from typing_extensions import TypedDict, Unpack
 
 import webrtc
-from tests.helpers import connect, mistyped, wait_for_event, wait_until
+from tests.helpers import connect, mistyped, stats_of_type, wait_for_event, wait_until
 
 
 class ChannelOptions(TypedDict, total=False, closed=True):
@@ -204,7 +204,7 @@ async def test_stats_are_current(caller: webrtc.RTCPeerConnection, callee: webrt
     channel, remote = await open_pair(caller, callee)
 
     async def bytes_received() -> int | None:
-        [stats] = (await callee.get_stats()).of_type('data-channel')
+        [stats] = stats_of_type(await callee.get_stats(), 'data-channel')
         assert isinstance(stats, webrtc.RTCDataChannelStats)
         return stats.bytes_received
 

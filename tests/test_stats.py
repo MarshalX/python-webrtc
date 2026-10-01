@@ -15,7 +15,7 @@ import time
 import pytest
 
 import webrtc
-from tests.helpers import connect, wait_for_event, wait_until, wait_until_unmuted
+from tests.helpers import connect, stats_of_type, wait_for_event, wait_until, wait_until_unmuted
 
 
 async def send_audio(
@@ -41,17 +41,17 @@ async def test_connection_stats(
 
     report = await caller.get_stats()
     assert isinstance(report, webrtc.RTCStatsReport)
-    assert all(isinstance(stats, webrtc.RTCPeerConnectionStats) for stats in report.of_type('peer-connection'))
-    outbound = report.of_type(webrtc.RTCStatsType.outbound_rtp)[0]
+    assert all(isinstance(stats, webrtc.RTCPeerConnectionStats) for stats in stats_of_type(report, 'peer-connection'))
+    outbound = stats_of_type(report, webrtc.RTCStatsType.outbound_rtp)[0]
     assert isinstance(outbound, webrtc.RTCOutboundRtpStreamStats)
     assert outbound.kind == 'audio'
     assert outbound.type is webrtc.RTCStatsType.outbound_rtp
     assert abs(outbound.timestamp - time.time() * 1000) < 60_000
-    [transport] = report.of_type('transport')
+    [transport] = stats_of_type(report, 'transport')
     assert isinstance(transport, webrtc.RTCTransportStats)
     assert transport.dtls_state is webrtc.RTCDtlsTransportState.connected
     assert transport.dtlsState is transport.dtls_state
-    [source] = report.of_type('media-source')
+    [source] = stats_of_type(report, 'media-source')
     assert isinstance(source, webrtc.RTCAudioSourceStats)
 
 
@@ -63,8 +63,8 @@ async def test_sender_stats(
     await send_audio(caller, callee, audio_stream)
 
     sender_report = await caller.get_senders()[0].get_stats()
-    assert len(sender_report.of_type('outbound-rtp')) > 0
-    assert len(sender_report.of_type('inbound-rtp')) == 0
+    assert len(stats_of_type(sender_report, 'outbound-rtp')) > 0
+    assert len(stats_of_type(sender_report, 'inbound-rtp')) == 0
     assert len(await caller.get_stats(audio_stream.get_tracks()[0])) == len(sender_report)
 
 
@@ -77,7 +77,7 @@ async def test_receiver_stats(
     receiver = callee.get_receivers()[0]
 
     async def receives() -> list[webrtc.RTCStats]:
-        return (await receiver.get_stats()).of_type('inbound-rtp')
+        return stats_of_type(await receiver.get_stats(), 'inbound-rtp')
 
     await wait_until(receives, 'inbound-rtp stats')
     [inbound] = await receives()
@@ -102,7 +102,7 @@ async def test_closed_connection_has_stats(
     """A closed connection still has stats."""
     await send_audio(caller, callee, audio_stream)
     caller.close()
-    assert len((await caller.get_stats()).of_type('peer-connection')) > 0
+    assert len(stats_of_type(await caller.get_stats(), 'peer-connection')) > 0
 
 
 @pytest.mark.asyncio
@@ -114,7 +114,7 @@ async def test_remote_audio_is_played_out(
     receiver = callee.get_receivers()[0]
 
     async def decoded() -> bool:
-        inbound = (await receiver.get_stats()).of_type('inbound-rtp')
+        inbound = stats_of_type(await receiver.get_stats(), 'inbound-rtp')
         if len(inbound) == 0:
             return False
         assert isinstance(inbound[0], webrtc.RTCInboundRtpStreamStats)
@@ -178,7 +178,7 @@ def test_stats_are_the_dictionary_of_their_type(entry: dict[str, object], dictio
     assert type(stats) is dictionary
     assert stats.id == 'S'
     assert stats.timestamp == 1500
-    assert report.of_type(str(entry['type'])) == [stats]
+    assert stats_of_type(report, str(entry['type'])) == [stats]
 
 
 def test_stats_members() -> None:

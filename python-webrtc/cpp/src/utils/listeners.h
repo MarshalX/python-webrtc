@@ -32,9 +32,9 @@ namespace python_webrtc {
     Listeners &operator=(const Listeners &) = delete;
 
     // the class of a wrapper, with its listeners property
-    template <typename T>
-    static pybind11::class_<T, std::shared_ptr<T>> BindClass(pybind11::module &m, const char *name) {
-      pybind11::class_<T, std::shared_ptr<T>> cls(m, name, TypeSetup<T>());
+    template <typename T, typename... Bases>
+    static pybind11::class_<T, Bases..., std::shared_ptr<T>> BindClass(pybind11::module &m, const char *name) {
+      pybind11::class_<T, Bases..., std::shared_ptr<T>> cls(m, name, TypeSetup<T>());
       cls.def_property("_listeners", &T::GetListeners, &T::SetListeners);
       return cls;
     }
