@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from webrtc import AudioData, MediaStreamTrack, MediaType, VideoFrame, WebRTCObject, wrtc
+from webrtc.models.dictionary import Dictionary
 from webrtc.streams import ReadableStream
 from webrtc.utils.events import EventTarget
 from webrtc.utils.names import Alias, alias
@@ -28,7 +29,7 @@ _MAX_BUFFER_SIZE = 65535
 
 
 @dataclass
-class MediaStreamTrackProcessorInit:
+class MediaStreamTrackProcessorInit(Dictionary):
     """How to create a :obj:`MediaStreamTrackProcessor`.
 
     Args:
@@ -41,30 +42,6 @@ class MediaStreamTrackProcessorInit:
 
     #: Alias for :attr:`max_buffer_size`
     maxBufferSize: ClassVar[Alias[int | None]] = alias('max_buffer_size')
-
-
-def _parse_init(
-    track: object, max_buffer_size: int | None, options: dict[str, object]
-) -> tuple[MediaStreamTrack, int | None]:
-    """The track and the buffer size, from the init, its dict form, or the arguments."""
-    if isinstance(track, MediaStreamTrackProcessorInit):
-        track, max_buffer_size = track.track, track.max_buffer_size
-    elif isinstance(track, dict):
-        init = dict(track)
-        track = init.pop('track', None)
-        max_buffer_size = init.pop('max_buffer_size', init.pop('maxBufferSize', max_buffer_size))
-        if init:
-            msg = f'MediaStreamTrackProcessorInit has no member {next(iter(init))!r}'
-            raise TypeError(msg)
-    if 'maxBufferSize' in options:
-        max_buffer_size = options.pop('maxBufferSize')
-    if options:
-        msg = f'Unexpected arguments: {", ".join(options)}'
-        raise TypeError(msg)
-    if not isinstance(track, MediaStreamTrack):
-        msg = f'track must be a MediaStreamTrack, not {type(track).__name__}'
-        raise TypeError(msg)
-    return track, max_buffer_size
 
 
 class _TrackSource:
@@ -118,17 +95,15 @@ class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], Ev
     when the track ends. Frames read are to be closed once used.
 
     Args:
-        track (:obj:`webrtc.MediaStreamTrack` or :obj:`MediaStreamTrackProcessorInit`): The track to read, or the
-            init with it. A dictionary of the init's members is taken too.
-        max_buffer_size (:obj:`int`, optional): How many items are queued: 1 frame of video by default, 10 chunks
-            of audio.
+        init (:obj:`MediaStreamTrackProcessorInit`): The track to read, and how many items are queued: 1 frame of
+            video by default, 10 chunks of audio.
 
     Raises:
-        TypeError: If the track isn't a :obj:`webrtc.MediaStreamTrack`, or the size isn't from 0 to 65535.
+        TypeError: If the size isn't an integer from 0 to 65535.
 
     Example::
 
-        processor = webrtc.MediaStreamTrackProcessor(track)
+        processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
         async for frame in processor.readable:
             ...
             frame.close()
@@ -136,13 +111,8 @@ class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], Ev
 
     _class = wrtc.MediaStreamTrackProcessor
 
-    def __init__(
-        self,
-        track: MediaStreamTrack | MediaStreamTrackProcessorInit | dict[str, Any] | None = None,
-        max_buffer_size: int | None = None,
-        **options: object,
-    ) -> None:
-        track, max_buffer_size = _parse_init(track, max_buffer_size, options)
+    def __init__(self, init: MediaStreamTrackProcessorInit) -> None:
+        track, max_buffer_size = init.track, init.max_buffer_size
         video = track.kind == MediaType.video
         if max_buffer_size is None:
             max_buffer_size = DEFAULT_VIDEO_BUFFER_SIZE if video else DEFAULT_AUDIO_BUFFER_SIZE

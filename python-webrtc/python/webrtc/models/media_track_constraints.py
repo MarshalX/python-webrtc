@@ -12,17 +12,15 @@ See https://developer.mozilla.org/en-US/docs/Web/API/Media_Capture_and_Streams_A
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
-from typing import Any, ClassVar, Union
+from dataclasses import dataclass
+from typing import ClassVar, Union
 
-from webrtc.utils.names import Alias, alias, snake_case
-
-#: A value, or a constraint on it: a :obj:`dict` with any of ``exact``, ``ideal``, ``min`` and ``max``
-ConstrainValue = Union[float, int, str, bool, dict[str, Any]]
+from webrtc.models.dictionary import Dictionary
+from webrtc.utils.names import Alias, alias
 
 
 @dataclass
-class ULongRange:
+class ULongRange(Dictionary):
     """A range of integers.
 
     Args:
@@ -35,7 +33,7 @@ class ULongRange:
 
 
 @dataclass
-class DoubleRange:
+class DoubleRange(Dictionary):
     """A range of numbers.
 
     Args:
@@ -48,7 +46,88 @@ class DoubleRange:
 
 
 @dataclass
-class MediaTrackSettings:
+class ConstrainULongRange(ULongRange):
+    """A constraint on an integer.
+
+    Args:
+        min (:obj:`int`, optional): The lowest value, required.
+        max (:obj:`int`, optional): The highest value, required.
+        exact (:obj:`int`, optional): The value, required.
+        ideal (:obj:`int`, optional): The value to get as near as possible.
+    """
+
+    exact: int | None = None
+    ideal: int | None = None
+
+
+@dataclass
+class ConstrainDoubleRange(DoubleRange):
+    """A constraint on a number.
+
+    Args:
+        min (:obj:`float`, optional): The lowest value, required.
+        max (:obj:`float`, optional): The highest value, required.
+        exact (:obj:`float`, optional): The value, required.
+        ideal (:obj:`float`, optional): The value to get as near as possible.
+    """
+
+    exact: float | None = None
+    ideal: float | None = None
+
+
+@dataclass
+class ConstrainBooleanParameters(Dictionary):
+    """A constraint on a boolean.
+
+    Args:
+        exact (:obj:`bool`, optional): The value, required.
+        ideal (:obj:`bool`, optional): The value to get if possible.
+    """
+
+    exact: bool | None = None
+    ideal: bool | None = None
+
+
+@dataclass
+class ConstrainDOMStringParameters(Dictionary):
+    """A constraint on a string.
+
+    Args:
+        exact (:obj:`str` or :obj:`list` of :obj:`str`, optional): The value, or the values allowed, required.
+        ideal (:obj:`str` or :obj:`list` of :obj:`str`, optional): The value, or the values, to get if possible.
+    """
+
+    exact: str | list[str] | None = None
+    ideal: str | list[str] | None = None
+
+
+@dataclass
+class ConstrainBooleanOrDOMStringParameters(Dictionary):
+    """A constraint on a boolean or a string.
+
+    Args:
+        exact (:obj:`bool` or :obj:`str`, optional): The value, required.
+        ideal (:obj:`bool` or :obj:`str`, optional): The value to get if possible.
+    """
+
+    exact: bool | str | None = None
+    ideal: bool | str | None = None
+
+
+#: An integer (an ideal one), or a constraint on it
+ConstrainULong = Union[int, ConstrainULongRange]
+#: A number (an ideal one), or a constraint on it
+ConstrainDouble = Union[float, ConstrainDoubleRange]
+#: A boolean (an ideal one), or a constraint on it
+ConstrainBoolean = Union[bool, ConstrainBooleanParameters]
+#: A string or strings (ideal ones), or a constraint on them
+ConstrainDOMString = Union[str, list[str], ConstrainDOMStringParameters]
+#: A boolean or a string (an ideal one), or a constraint on it
+ConstrainBooleanOrDOMString = Union[bool, str, ConstrainBooleanOrDOMStringParameters]
+
+
+@dataclass
+class MediaTrackSettings(Dictionary):
     """What a track carries, as far as it's known (:meth:`webrtc.MediaStreamTrack.get_settings`).
 
     Members are :obj:`None` when they don't apply to the track.
@@ -108,7 +187,7 @@ class MediaTrackSettings:
 
 
 @dataclass
-class MediaTrackCapabilities:
+class MediaTrackCapabilities(Dictionary):
     """What the source of a track can do (:meth:`webrtc.MediaStreamTrack.get_capabilities`).
 
     The synthetic camera and microphone of :func:`webrtc.get_user_media` have capabilities, other tracks don't control
@@ -169,79 +248,95 @@ class MediaTrackCapabilities:
 
 
 @dataclass
-class MediaTrackConstraints:
-    """What a track is asked to be (:meth:`webrtc.MediaStreamTrack.apply_constraints`).
+class MediaTrackConstraintSet(Dictionary):
+    """A set of constraints on a track, see :obj:`MediaTrackConstraints`.
 
-    Each member is a value (an ideal one) or a :obj:`dict` of ``exact``, ``ideal``, ``min`` and ``max``: the required
+    Each member is a value (an ideal one) or a constraint with ``exact``, ``ideal``, ``min`` and ``max``: the required
     ones make the constraints fail if the source can't satisfy them.
 
     Args:
-        width (optional): The width of the video.
-        height (optional): The height of the video.
-        aspect_ratio (optional): The aspect ratio of the video.
-        frame_rate (optional): The frame rate of the video.
-        resize_mode (optional): How the source is resized.
-        device_id (optional): The device.
-        group_id (optional): The group of the device.
-        sample_rate (optional): The sample rate of the audio.
-        sample_size (optional): The bits per sample of the audio.
-        channel_count (optional): The channels of the audio.
-        echo_cancellation (optional): Whether echo is cancelled.
-        auto_gain_control (optional): Whether the gain is controlled.
-        noise_suppression (optional): Whether noise is suppressed.
-        advanced (:obj:`list` of :obj:`dict`, optional): Sets of constraints tried in order, each applied if it can
-            be satisfied.
+        width (:obj:`int` or :obj:`ConstrainULongRange`, optional): The width of the video.
+        height (:obj:`int` or :obj:`ConstrainULongRange`, optional): The height of the video.
+        aspect_ratio (:obj:`float` or :obj:`ConstrainDoubleRange`, optional): The aspect ratio of the video.
+        frame_rate (:obj:`float` or :obj:`ConstrainDoubleRange`, optional): The frame rate of the video.
+        resize_mode (:obj:`str` or :obj:`ConstrainDOMStringParameters`, optional): How the source is resized.
+        device_id (:obj:`str` or :obj:`ConstrainDOMStringParameters`, optional): The device.
+        group_id (:obj:`str` or :obj:`ConstrainDOMStringParameters`, optional): The group of the device.
+        sample_rate (:obj:`int` or :obj:`ConstrainULongRange`, optional): The sample rate of the audio.
+        sample_size (:obj:`int` or :obj:`ConstrainULongRange`, optional): The bits per sample of the audio.
+        channel_count (:obj:`int` or :obj:`ConstrainULongRange`, optional): The channels of the audio.
+        echo_cancellation (:obj:`bool` or :obj:`ConstrainBooleanOrDOMStringParameters`, optional): Whether echo is
+            cancelled.
+        auto_gain_control (:obj:`bool` or :obj:`ConstrainBooleanParameters`, optional): Whether the gain is
+            controlled.
+        noise_suppression (:obj:`bool` or :obj:`ConstrainBooleanParameters`, optional): Whether noise is suppressed.
     """
 
-    width: ConstrainValue | None = None
-    height: ConstrainValue | None = None
-    aspect_ratio: ConstrainValue | None = None
-    frame_rate: ConstrainValue | None = None
-    resize_mode: ConstrainValue | None = None
-    device_id: ConstrainValue | None = None
-    group_id: ConstrainValue | None = None
-    sample_rate: ConstrainValue | None = None
-    sample_size: ConstrainValue | None = None
-    channel_count: ConstrainValue | None = None
-    echo_cancellation: ConstrainValue | None = None
-    auto_gain_control: ConstrainValue | None = None
-    noise_suppression: ConstrainValue | None = None
-    advanced: list[dict[str, Any]] | None = None
+    _dictionaries: ClassVar = {
+        'width': ConstrainULongRange,
+        'height': ConstrainULongRange,
+        'aspect_ratio': ConstrainDoubleRange,
+        'frame_rate': ConstrainDoubleRange,
+        'resize_mode': ConstrainDOMStringParameters,
+        'device_id': ConstrainDOMStringParameters,
+        'group_id': ConstrainDOMStringParameters,
+        'sample_rate': ConstrainULongRange,
+        'sample_size': ConstrainULongRange,
+        'channel_count': ConstrainULongRange,
+        'echo_cancellation': ConstrainBooleanOrDOMStringParameters,
+        'auto_gain_control': ConstrainBooleanParameters,
+        'noise_suppression': ConstrainBooleanParameters,
+    }
 
-    @classmethod
-    def _parse(cls, value: object) -> MediaTrackConstraints:
-        """Constraints from an instance or a dictionary, with snake_case or camelCase names."""
-        if value is None:
-            return cls()
-        if isinstance(value, cls):
-            return value
-        if not isinstance(value, dict):
-            msg = f'{value!r} is not a MediaTrackConstraints'
-            raise TypeError(msg)
-        names = {f.name for f in fields(cls)}
-        members = {snake_case(k): v for k, v in value.items()}
-        # unknown members are ignored, as the specification says
-        return cls(**{k: v for k, v in members.items() if k in names})
+    width: ConstrainULong | None = None
+    height: ConstrainULong | None = None
+    aspect_ratio: ConstrainDouble | None = None
+    frame_rate: ConstrainDouble | None = None
+    resize_mode: ConstrainDOMString | None = None
+    device_id: ConstrainDOMString | None = None
+    group_id: ConstrainDOMString | None = None
+    sample_rate: ConstrainULong | None = None
+    sample_size: ConstrainULong | None = None
+    channel_count: ConstrainULong | None = None
+    echo_cancellation: ConstrainBooleanOrDOMString | None = None
+    auto_gain_control: ConstrainBoolean | None = None
+    noise_suppression: ConstrainBoolean | None = None
 
     #: Alias for :attr:`aspect_ratio`
-    aspectRatio: ClassVar[Alias[ConstrainValue | None]] = alias('aspect_ratio')
+    aspectRatio: ClassVar[Alias[ConstrainDouble | None]] = alias('aspect_ratio')
     #: Alias for :attr:`frame_rate`
-    frameRate: ClassVar[Alias[ConstrainValue | None]] = alias('frame_rate')
+    frameRate: ClassVar[Alias[ConstrainDouble | None]] = alias('frame_rate')
     #: Alias for :attr:`resize_mode`
-    resizeMode: ClassVar[Alias[ConstrainValue | None]] = alias('resize_mode')
+    resizeMode: ClassVar[Alias[ConstrainDOMString | None]] = alias('resize_mode')
     #: Alias for :attr:`device_id`
-    deviceId: ClassVar[Alias[ConstrainValue | None]] = alias('device_id')
+    deviceId: ClassVar[Alias[ConstrainDOMString | None]] = alias('device_id')
     #: Alias for :attr:`group_id`
-    groupId: ClassVar[Alias[ConstrainValue | None]] = alias('group_id')
+    groupId: ClassVar[Alias[ConstrainDOMString | None]] = alias('group_id')
     #: Alias for :attr:`sample_rate`
-    sampleRate: ClassVar[Alias[ConstrainValue | None]] = alias('sample_rate')
+    sampleRate: ClassVar[Alias[ConstrainULong | None]] = alias('sample_rate')
     #: Alias for :attr:`sample_size`
-    sampleSize: ClassVar[Alias[ConstrainValue | None]] = alias('sample_size')
+    sampleSize: ClassVar[Alias[ConstrainULong | None]] = alias('sample_size')
     #: Alias for :attr:`channel_count`
-    channelCount: ClassVar[Alias[ConstrainValue | None]] = alias('channel_count')
+    channelCount: ClassVar[Alias[ConstrainULong | None]] = alias('channel_count')
     #: Alias for :attr:`echo_cancellation`
-    echoCancellation: ClassVar[Alias[ConstrainValue | None]] = alias('echo_cancellation')
+    echoCancellation: ClassVar[Alias[ConstrainBooleanOrDOMString | None]] = alias('echo_cancellation')
     #: Alias for :attr:`auto_gain_control`
-    autoGainControl: ClassVar[Alias[ConstrainValue | None]] = alias('auto_gain_control')
+    autoGainControl: ClassVar[Alias[ConstrainBoolean | None]] = alias('auto_gain_control')
     #: Alias for :attr:`noise_suppression`
-    noiseSuppression: ClassVar[Alias[ConstrainValue | None]] = alias('noise_suppression')
+    noiseSuppression: ClassVar[Alias[ConstrainBoolean | None]] = alias('noise_suppression')
+
+
+@dataclass
+class MediaTrackConstraints(MediaTrackConstraintSet):
+    """What a track is asked to be (:meth:`webrtc.MediaStreamTrack.apply_constraints`).
+
+    The members are the ones of :obj:`MediaTrackConstraintSet`, and:
+
+    Args:
+        advanced (:obj:`list` of :obj:`MediaTrackConstraintSet`, optional): Sets of constraints tried in order, each
+            applied if it can be satisfied.
+    """
+
+    _dictionaries: ClassVar = {**MediaTrackConstraintSet._dictionaries, 'advanced': MediaTrackConstraintSet}
+
+    advanced: list[MediaTrackConstraintSet] | None = None

@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar
 
+from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
 
 # RFC 6464 and RFC 6465 levels are -dBov, 127 being silence
@@ -19,7 +20,7 @@ _SILENT_LEVEL = 127
 
 
 @dataclass(frozen=True)
-class RTCRtpContributingSource:
+class RTCRtpContributingSource(Dictionary):
     """A source of the media an :obj:`webrtc.RTCRtpReceiver` received in the last 10 seconds.
 
     Args:

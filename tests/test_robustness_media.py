@@ -22,7 +22,10 @@ I420_SIZE = WIDTH * HEIGHT * 3 // 2
 
 
 def i420_frame() -> webrtc.VideoFrame:
-    return webrtc.VideoFrame(bytes(I420_SIZE), format='I420', coded_width=WIDTH, coded_height=HEIGHT, timestamp=0)
+    return webrtc.VideoFrame(
+        bytes(I420_SIZE),
+        webrtc.VideoFrameBufferInit(format='I420', coded_width=WIDTH, coded_height=HEIGHT, timestamp=0),
+    )
 
 
 def reversed_view(size: int) -> memoryview:
@@ -37,14 +40,17 @@ def strided_view(size: int) -> memoryview:
 @pytest.mark.parametrize('view', [reversed_view, strided_view])
 def test_frame_from_non_contiguous_buffer_is_rejected(view: Callable[[int], memoryview]) -> None:
     with pytest.raises(TypeError, match='contiguous'):
-        webrtc.VideoFrame(view(I420_SIZE), format='I420', coded_width=WIDTH, coded_height=HEIGHT, timestamp=0)
+        webrtc.VideoFrame(
+            view(I420_SIZE),
+            webrtc.VideoFrameBufferInit(format='I420', coded_width=WIDTH, coded_height=HEIGHT, timestamp=0),
+        )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('view', [reversed_view, strided_view])
-@pytest.mark.parametrize('options', [None, {'format': 'RGBA'}])
+@pytest.mark.parametrize('options', [None, webrtc.VideoFrameCopyToOptions(format='RGBA')])
 async def test_frame_copy_to_non_contiguous_destination_is_rejected(
-    view: Callable[[int], memoryview], options: dict[str, str] | None
+    view: Callable[[int], memoryview], options: webrtc.VideoFrameCopyToOptions | None
 ) -> None:
     frame = i420_frame()
     with pytest.raises(TypeError, match='contiguous'):
@@ -55,10 +61,12 @@ async def test_frame_copy_to_non_contiguous_destination_is_rejected(
 @pytest.mark.parametrize('view', [reversed_view, strided_view])
 def test_audio_copy_to_non_contiguous_destination_is_rejected(view: Callable[[int], memoryview]) -> None:
     data = webrtc.AudioData(
-        format='s16', sample_rate=48000, number_of_frames=480, number_of_channels=2, timestamp=0, data=bytes(1920)
+        webrtc.AudioDataInit(
+            format='s16', sample_rate=48000, number_of_frames=480, number_of_channels=2, timestamp=0, data=bytes(1920)
+        )
     )
     with pytest.raises(TypeError, match='contiguous'):
-        data.copy_to(view(1920), {'plane_index': 0})
+        data.copy_to(view(1920), webrtc.AudioDataCopyToOptions(plane_index=0))
     data.close()
 
 
@@ -97,7 +105,9 @@ def test_native_bounds_checks_do_not_overflow() -> None:
 def test_audio_data_sample_rate_is_positive_and_finite(rate: float) -> None:
     with pytest.raises(TypeError):
         webrtc.AudioData(
-            format='s16', sample_rate=rate, number_of_frames=1, number_of_channels=1, timestamp=0, data=bytes(2)
+            webrtc.AudioDataInit(
+                format='s16', sample_rate=rate, number_of_frames=1, number_of_channels=1, timestamp=0, data=bytes(2)
+            )
         )
 
 
@@ -119,9 +129,9 @@ def test_generator_rejects_audio_libwebrtc_cannot_send() -> None:
             frames = max(1, min(int(rate) // 100, 4800))
             try:
                 for i in range(10):
-                    data = webrtc.AudioData(format='s16', sample_rate=rate, number_of_frames=frames,
-                                            number_of_channels=channels, timestamp=i * 10000,
-                                            data=bytes(frames * channels * 2))
+                    data = webrtc.AudioData(webrtc.AudioDataInit(
+                        format='s16', sample_rate=rate, number_of_frames=frames, number_of_channels=channels,
+                        timestamp=i * 10000, data=bytes(frames * channels * 2)))
                     await writer.write(data)
                     await asyncio.sleep(0.01)
                 result = 'written'

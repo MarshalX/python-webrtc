@@ -9,15 +9,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import ClassVar
 
-from webrtc import WebRTCObject, wrtc
+from webrtc import wrtc
+from webrtc.enums import RTCSdpType
+from webrtc.models.dictionary import Dictionary
 
-if TYPE_CHECKING:
-    import webrtc
 
-
-class RTCSessionDescriptionInit(WebRTCObject):
+@dataclass
+class RTCSessionDescriptionInit(Dictionary):
     """The type and the SDP of a description.
 
     As :meth:`webrtc.RTCPeerConnection.create_offer` and :meth:`webrtc.RTCPeerConnection.create_answer` return them.
@@ -25,33 +26,23 @@ class RTCSessionDescriptionInit(WebRTCObject):
     Args:
         type (:obj:`webrtc.RTCSdpType`): The type of the description, or its value (like ``'offer'``).
         sdp (:obj:`str`, optional): The SDP of the description.
+
+    Raises:
+        ValueError: If the type isn't a member of :obj:`webrtc.RTCSdpType`.
+        TypeError: If the SDP is :obj:`None`.
     """
 
-    _class = wrtc.RTCSessionDescriptionInit
+    type: RTCSdpType
+    sdp: str = ''
 
-    def __init__(self, type: webrtc.RTCSdpType, sdp: str = '') -> None:
-        super().__init__(self._class(type, sdp))
+    def __post_init__(self) -> None:
+        self.type = RTCSdpType(self.type)
+        if self.sdp is None:
+            msg = 'The SDP of a description may not be None'
+            raise TypeError(msg)
 
-    @property
-    def type(self) -> webrtc.RTCSdpType:
-        """:obj:`webrtc.RTCSdpType`: A member of the :obj:`webrtc.RTCSdpType` enum."""
-        return self._native_obj.type
-
-    @type.setter
-    def type(self, value: webrtc.RTCSdpType) -> None:
-        self._native_obj.type = value
-
-    @property
-    def sdp(self) -> str:
-        """:obj:`str`: A string containing a SDP message describing the session.
-
-        This value is an empty string by default and may not be :obj:`None`.
-        """
-        return self._native_obj.sdp
-
-    @sdp.setter
-    def sdp(self, value: str) -> None:
-        self._native_obj.sdp = value
+    def _to_native(self) -> wrtc.RTCSessionDescriptionInit:
+        return wrtc.RTCSessionDescriptionInit(self.type, self.sdp)
 
     def to_json(self) -> dict[str, str]:
         """The description as a JSON-serializable dictionary, to send to the remote peer.
@@ -65,4 +56,30 @@ class RTCSessionDescriptionInit(WebRTCObject):
         return f'RTCSessionDescriptionInit(type={self.type.value!r}, sdp={len(self.sdp)} characters)'
 
     #: Alias for :attr:`to_json`
-    toJSON = to_json
+    toJSON: ClassVar = to_json
+
+
+@dataclass
+class RTCLocalSessionDescriptionInit(Dictionary):
+    """A local description, whose type may be left out (:meth:`webrtc.RTCPeerConnection.set_local_description`).
+
+    Without a type, nor an SDP, the offer or the answer the signaling state calls for is created and set.
+
+    Args:
+        type (:obj:`webrtc.RTCSdpType`, optional): The type of the description, or its value (like ``'offer'``).
+        sdp (:obj:`str`, optional): The SDP of the description.
+
+    Raises:
+        ValueError: If the type isn't a member of :obj:`webrtc.RTCSdpType`.
+        TypeError: If the SDP is :obj:`None`.
+    """
+
+    type: RTCSdpType | None = None
+    sdp: str = ''
+
+    def __post_init__(self) -> None:
+        if self.type is not None:
+            self.type = RTCSdpType(self.type)
+        if self.sdp is None:
+            msg = 'The SDP of a description may not be None'
+            raise TypeError(msg)

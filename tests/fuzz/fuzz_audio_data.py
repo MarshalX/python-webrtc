@@ -27,8 +27,8 @@ def check_identity(audio: webrtc.AudioData, data: bytes) -> None:
     """Interleaved samples copied out in their own format are the same bytes."""
     if audio.format.value.endswith('-planar'):
         return
-    out = bytearray(audio.allocation_size({'plane_index': 0}))
-    audio.copy_to(out, {'plane_index': 0})
+    out = bytearray(audio.allocation_size(webrtc.AudioDataCopyToOptions(plane_index=0)))
+    audio.copy_to(out, webrtc.AudioDataCopyToOptions(plane_index=0))
     assert bytes(out) == data[: len(out)], f'{audio!r} copied out differently'
 
 
@@ -45,12 +45,14 @@ def test_one_input(data: bytes) -> None:
     source = inp.buffer(size)
     try:
         audio = webrtc.AudioData(
-            format=format,
-            sample_rate=sample_rate,
-            number_of_frames=frames,
-            number_of_channels=channels,
-            timestamp=inp.integer(),
-            data=source,
+            webrtc.AudioDataInit(
+                format=format,
+                sample_rate=sample_rate,
+                number_of_frames=frames,
+                number_of_channels=channels,
+                timestamp=inp.integer(),
+                data=source,
+            )
         )
     except EXPECTED:
         return
@@ -60,13 +62,13 @@ def test_one_input(data: bytes) -> None:
 
 def exercise(inp: Input, audio: webrtc.AudioData) -> None:
     for _ in range(inp.small(4)):
-        options: dict[str, object] = {'plane_index': inp.integer(8)}
+        options = webrtc.AudioDataCopyToOptions(plane_index=inp.integer(8))
         if inp.flag():
-            options['frame_offset'] = inp.integer(512)
+            options.frame_offset = inp.integer(512)
         if inp.flag():
-            options['frame_count'] = inp.integer(512)
+            options.frame_count = inp.integer(512)
         if inp.flag():
-            options['format'] = inp.choice(FORMATS)
+            options.format = inp.choice(FORMATS)
         try:
             size = audio.allocation_size(options)
             audio.copy_to(inp.destination(min(size, 1 << 20)), options)

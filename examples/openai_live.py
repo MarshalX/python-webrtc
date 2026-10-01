@@ -238,7 +238,7 @@ class LiveCall:
 
         console.info(f'Creating a {args.model} session...')
         answer = await self._create_session(self.pc.local_description.sdp)
-        await self.pc.set_remote_description({'type': 'answer', 'sdp': answer})
+        await self.pc.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', answer))
 
         self.microphone.start()
         self.tasks.append(asyncio.ensure_future(self._send_microphone(generator.writable.get_writer())))
@@ -312,12 +312,14 @@ class LiveCall:
                     )
             guarded = not self.args.barge_in and time.monotonic() - self.assistant_spoke_at < ECHO_TAIL
             data = webrtc.AudioData(
-                format='s16',
-                sample_rate=SAMPLE_RATE,
-                number_of_frames=FRAME,
-                number_of_channels=1,
-                timestamp=timestamp,
-                data=silence if guarded else chunk,
+                webrtc.AudioDataInit(
+                    format='s16',
+                    sample_rate=SAMPLE_RATE,
+                    number_of_frames=FRAME,
+                    number_of_channels=1,
+                    timestamp=timestamp,
+                    data=silence if guarded else chunk,
+                )
             )
             await writer.write(data)
             timestamp += 10_000
@@ -325,10 +327,13 @@ class LiveCall:
     async def _play(self, track: webrtc.MediaStreamTrack) -> None:
         """Plays the assistant's audio."""
         heard = False
-        async for data in webrtc.MediaStreamTrackProcessor(track, max_buffer_size=50).readable:
+        async for data in webrtc.MediaStreamTrackProcessor(
+            webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=50)
+        ).readable:
             with data:
-                samples = bytearray(data.allocation_size({'plane_index': 0, 'format': 's16'}))
-                data.copy_to(samples, {'plane_index': 0, 'format': 's16'})
+                options = webrtc.AudioDataCopyToOptions(plane_index=0, format='s16')
+                samples = bytearray(data.allocation_size(options))
+                data.copy_to(samples, options)
                 rate, channels = int(data.sample_rate), data.number_of_channels
             if peak(samples) > VOICE_LEVEL:
                 self.assistant_spoke_at = time.monotonic()

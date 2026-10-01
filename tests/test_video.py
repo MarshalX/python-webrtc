@@ -33,9 +33,9 @@ def test_get_user_media_needs_audio_or_video() -> None:
 @pytest.mark.parametrize(
     ('constraints', 'error'),
     [
-        ({'width': {'exact': 0}}, webrtc.OverconstrainedError),
-        ({'frame_rate': {'max': 0}}, webrtc.OverconstrainedError),
-        ({'width': {'min': 0, 'max': -1}}, TypeError),
+        ({'width': webrtc.ConstrainULongRange(exact=0)}, webrtc.OverconstrainedError),
+        ({'frame_rate': webrtc.ConstrainDoubleRange(max=0)}, webrtc.OverconstrainedError),
+        ({'width': webrtc.ConstrainULongRange(min=0, max=-1)}, TypeError),
     ],
     ids=['exact', 'max', 'negative'],
 )
@@ -47,7 +47,7 @@ def test_get_user_media_constraint_beyond_the_camera(constraints: dict[str, obje
 
 def test_get_user_media_ideal_beyond_the_camera() -> None:
     """An ideal value selects the nearest one the camera can have."""
-    (track,) = webrtc.get_user_media(audio=False, video=True, height={'ideal': 0}).get_tracks()
+    (track,) = webrtc.get_user_media(audio=False, video=True, height=webrtc.ConstrainULongRange(ideal=0)).get_tracks()
     assert capture_mode(track) == (640, 1, 30)
     track.stop()
 
@@ -55,7 +55,11 @@ def test_get_user_media_ideal_beyond_the_camera() -> None:
 def test_get_user_media_constraints() -> None:
     """Constraints that select a positive value are accepted."""
     stream = webrtc.get_user_media(
-        audio=False, video=True, width={'ideal': 320}, height={'min': 100, 'max': 240}, frame_rate={'exact': 15}
+        audio=False,
+        video=True,
+        width=webrtc.ConstrainULongRange(ideal=320),
+        height=webrtc.ConstrainULongRange(min=100, max=240),
+        frame_rate=webrtc.ConstrainDoubleRange(exact=15),
     )
     for track in stream.get_tracks():
         track.stop()

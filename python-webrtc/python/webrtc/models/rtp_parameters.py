@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, TypeVar
 
 from webrtc import MediaType, RTCDegradationPreference, RTCPriorityType, TransceiverDirection, wrtc
+from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
 
 _NativeCodecT = TypeVar('_NativeCodecT', bound='wrtc.RtpCodec')
@@ -65,7 +66,7 @@ def _codec_members(native: wrtc.RtpCodec) -> dict[str, Any]:
 
 
 @dataclass
-class RTCRtpCodec:
+class RTCRtpCodec(Dictionary):
     """A codec.
 
     Args:
@@ -117,7 +118,7 @@ class RTCRtpCodec:
 
 
 @dataclass
-class RTCRtpCodecParameters:
+class RTCRtpCodecParameters(Dictionary):
     """A codec negotiated for a sender or a receiver.
 
     Args:
@@ -149,7 +150,7 @@ class RTCRtpCodecParameters:
 
 
 @dataclass
-class RTCRtpHeaderExtensionParameters:
+class RTCRtpHeaderExtensionParameters(Dictionary):
     """An RTP header extension negotiated for a sender or a receiver.
 
     Args:
@@ -168,7 +169,7 @@ class RTCRtpHeaderExtensionParameters:
 
 
 @dataclass
-class RTCRtcpParameters:
+class RTCRtcpParameters(Dictionary):
     """RTCP parameters of a sender or a receiver.
 
     Args:
@@ -184,7 +185,7 @@ class RTCRtcpParameters:
 
 
 @dataclass
-class RTCRtpEncodingParameters:
+class RTCRtpEncodingParameters(Dictionary):
     """An encoding of a sender, one per simulcast layer.
 
     Args:
@@ -210,6 +211,8 @@ class RTCRtpEncodingParameters:
     scalability_mode: str | None = None
     adaptive_ptime: bool = False
     codec: RTCRtpCodec | None = None
+
+    _dictionaries: ClassVar = {'codec': RTCRtpCodec}
 
     @classmethod
     def _from_native(cls, native: wrtc.RtpEncodingParameters) -> RTCRtpEncodingParameters:
@@ -280,7 +283,7 @@ class RTCRtpEncodingParameters:
 
 
 @dataclass
-class RTCRtpReceiveParameters:
+class RTCRtpReceiveParameters(Dictionary):
     """The parameters a receiver receives with.
 
     Args:
@@ -292,6 +295,12 @@ class RTCRtpReceiveParameters:
     codecs: list[RTCRtpCodecParameters] = field(default_factory=list)
     header_extensions: list[RTCRtpHeaderExtensionParameters] = field(default_factory=list)
     rtcp: RTCRtcpParameters = field(default_factory=RTCRtcpParameters)
+
+    _dictionaries: ClassVar = {
+        'codecs': RTCRtpCodecParameters,
+        'header_extensions': RTCRtpHeaderExtensionParameters,
+        'rtcp': RTCRtcpParameters,
+    }
 
     @classmethod
     def _from_native(cls, native: wrtc.RtpParameters) -> RTCRtpReceiveParameters:
@@ -306,7 +315,7 @@ class RTCRtpReceiveParameters:
 
 
 @dataclass
-class RTCRtpSendParameters:
+class RTCRtpSendParameters(Dictionary):
     """The parameters a sender sends with, from :meth:`webrtc.RTCRtpSender.get_parameters`.
 
     Only :attr:`encodings` (all but their ``rid``) and :attr:`degradation_preference` can be changed with
@@ -328,6 +337,13 @@ class RTCRtpSendParameters:
     rtcp: RTCRtcpParameters = field(default_factory=RTCRtcpParameters)
     degradation_preference: RTCDegradationPreference | None = None
 
+    _dictionaries: ClassVar = {
+        'encodings': RTCRtpEncodingParameters,
+        'codecs': RTCRtpCodecParameters,
+        'header_extensions': RTCRtpHeaderExtensionParameters,
+        'rtcp': RTCRtcpParameters,
+    }
+
     @classmethod
     def _from_native(cls, native: wrtc.RtpParameters) -> RTCRtpSendParameters:
         return cls(
@@ -348,7 +364,7 @@ class RTCRtpSendParameters:
 
 
 @dataclass
-class RTCRtpHeaderExtensionCapability:
+class RTCRtpHeaderExtensionCapability(Dictionary):
     """An RTP header extension that can be negotiated.
 
     Args:
@@ -366,7 +382,7 @@ class RTCRtpHeaderExtensionCapability:
 
 
 @dataclass
-class RTCRtpCapabilities:
+class RTCRtpCapabilities(Dictionary):
     """The codecs and header extensions a sender or a receiver supports.
 
     Args:
@@ -376,6 +392,8 @@ class RTCRtpCapabilities:
 
     codecs: list[RTCRtpCodec] = field(default_factory=list)
     header_extensions: list[RTCRtpHeaderExtensionCapability] = field(default_factory=list)
+
+    _dictionaries: ClassVar = {'codecs': RTCRtpCodec, 'header_extensions': RTCRtpHeaderExtensionCapability}
 
     @classmethod
     def _from_native(cls, native: wrtc.RtpCapabilities) -> RTCRtpCapabilities:

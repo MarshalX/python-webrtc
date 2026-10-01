@@ -11,20 +11,70 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import starmap
-from typing import Union
+from typing import ClassVar, Union
 
 from webrtc import NotSupportedError, WebRTCObject, wrtc
-from webrtc.utils.names import snake_case
+from webrtc.models.dictionary import Dictionary
+from webrtc.utils.names import Alias, alias
 
-#: A WebCrypto algorithm: its name (like ``'ECDSA'``), or a dictionary with its name and parameters.
-Algorithm = Union[str, Mapping[str, object]]
+
+@dataclass
+class Algorithm(Dictionary):
+    """A WebCrypto algorithm, by its name.
+
+    Args:
+        name (:obj:`str`): The name, like ``'ECDSA'``.
+    """
+
+    name: str
+
+
+@dataclass
+class EcKeyGenParams(Algorithm):
+    """A WebCrypto algorithm of an elliptic curve key, for :meth:`webrtc.RTCCertificate.generate`.
+
+    Args:
+        name (:obj:`str`): ``'ECDSA'``.
+        named_curve (:obj:`str`): The curve, ``'P-256'`` as the only one supported.
+    """
+
+    named_curve: str
+
+    #: Alias for :attr:`named_curve`
+    namedCurve: ClassVar[Alias[str]] = alias('named_curve')
+
+
+@dataclass
+class RsaHashedKeyGenParams(Algorithm):
+    """A WebCrypto algorithm of an RSA key, for :meth:`webrtc.RTCCertificate.generate`.
+
+    Args:
+        name (:obj:`str`): ``'RSASSA-PKCS1-v1_5'``.
+        modulus_length (:obj:`int`): The length of the modulus in bits, like 2048.
+        public_exponent (:obj:`bytes`): The public exponent, big-endian, like ``bytes([1, 0, 1])`` for 65537.
+        hash (:obj:`str` or :obj:`webrtc.Algorithm`): The hash function, ``'SHA-256'`` as the only one supported.
+    """
+
+    modulus_length: int
+    public_exponent: bytes
+    hash: str | Algorithm
+
+    _dictionaries: ClassVar = {'hash': Algorithm}
+
+    #: Alias for :attr:`modulus_length`
+    modulusLength: ClassVar[Alias[int]] = alias('modulus_length')
+    #: Alias for :attr:`public_exponent`
+    publicExponent: ClassVar[Alias[bytes]] = alias('public_exponent')
+
+
+#: A WebCrypto algorithm, or its name
+AlgorithmIdentifier = Union[str, Algorithm]
 
 
 @dataclass(frozen=True)
-class RTCDtlsFingerprint:
+class RTCDtlsFingerprint(Dictionary):
     """A fingerprint of a certificate, as in the ``a=fingerprint`` line of SDP.
 
     Args:
@@ -36,50 +86,38 @@ class RTCDtlsFingerprint:
     value: str
 
 
-#: The key type, modulus length and public exponent, as the native generate() takes them.
 _KeyParams = tuple[str, int, int]
 
 
-def _member(algorithm: Mapping[str, object], name: str, default: object = None) -> object:
-    """A member of a WebCrypto algorithm dictionary, by its camelCase or snake_case name."""
-    return algorithm.get(name, algorithm.get(snake_case(name), default))
-
-
-def _ecdsa_params(algorithm: Mapping[str, object]) -> _KeyParams:
-    curve = _member(algorithm, 'namedCurve', 'P-256')
+def _ecdsa_params(algorithm: Algorithm) -> _KeyParams:
+    curve = algorithm.named_curve if isinstance(algorithm, EcKeyGenParams) else 'P-256'
     if curve != 'P-256':
         msg = f'the {curve} curve is not supported, only P-256 is'
         raise NotSupportedError(msg)
     return 'ecdsa', 0, 0
 
 
-def _rsa_params(algorithm: Mapping[str, object]) -> _KeyParams:
-    hash_name = _member(algorithm, 'hash')
-    if isinstance(hash_name, Mapping):
-        hash_name = hash_name.get('name')
-    modulus_length = _member(algorithm, 'modulusLength')
-    exponent = _member(algorithm, 'publicExponent')
-    if hash_name is None or modulus_length is None or exponent is None:
-        msg = 'RSASSA-PKCS1-v1_5 needs a hash, a modulus length and a public exponent'
+def _rsa_params(algorithm: Algorithm) -> _KeyParams:
+    if not isinstance(algorithm, RsaHashedKeyGenParams):
+        msg = 'RSASSA-PKCS1-v1_5 needs an RsaHashedKeyGenParams, with a hash, a modulus length and a public exponent'
         raise NotSupportedError(msg)
-    if str(hash_name).upper() != 'SHA-256':
+    hash_name = algorithm.hash.name if isinstance(algorithm.hash, Algorithm) else algorithm.hash
+    if hash_name.upper() != 'SHA-256':
         msg = f'the {hash_name} hash is not supported, only SHA-256 is'
         raise NotSupportedError(msg)
-    if isinstance(exponent, (bytes, bytearray, memoryview)):
-        exponent = int.from_bytes(bytes(exponent), 'big')
-    return 'rsa', int(modulus_length), int(exponent)
+    return 'rsa', algorithm.modulus_length, int.from_bytes(bytes(algorithm.public_exponent), 'big')
 
 
 _KEY_PARAMS = {'ECDSA': _ecdsa_params, 'RSASSA-PKCS1-V1_5': _rsa_params}
 
 
-def _key_params(algorithm: Algorithm) -> _KeyParams:
+def _key_params(algorithm: AlgorithmIdentifier) -> _KeyParams:
     """The key parameters for an algorithm."""
     if isinstance(algorithm, str):
-        algorithm = {'name': algorithm}
-    key_params = _KEY_PARAMS.get(str(_member(algorithm, 'name', '')).upper())
+        algorithm = Algorithm(algorithm)
+    key_params = _KEY_PARAMS.get(algorithm.name.upper())
     if key_params is None:
-        msg = f'the {algorithm.get("name")!r} algorithm is not supported, ECDSA and RSASSA-PKCS1-v1_5 are'
+        msg = f'the {algorithm.name!r} algorithm is not supported, ECDSA and RSASSA-PKCS1-v1_5 are'
         raise NotSupportedError(msg)
     return key_params(algorithm)
 
@@ -94,13 +132,13 @@ class RTCCertificate(WebRTCObject):
     _class = wrtc.RTCCertificate
 
     @classmethod
-    async def generate(cls, algorithm: Algorithm = 'ECDSA', expires: float | None = None) -> RTCCertificate:
+    async def generate(cls, algorithm: AlgorithmIdentifier = 'ECDSA', expires: float | None = None) -> RTCCertificate:
         """Generates a key and a self-signed certificate, on a worker thread.
 
         Args:
-            algorithm (:obj:`str` or :obj:`dict`, optional): A WebCrypto algorithm: ``'ECDSA'`` (with the P-256 curve),
-                or a dictionary like ``{'name': 'RSASSA-PKCS1-v1_5', 'modulus_length': 2048,
-                'public_exponent': 65537, 'hash': 'SHA-256'}``.
+            algorithm (:obj:`str` or :obj:`webrtc.Algorithm`, optional): A WebCrypto algorithm: ``'ECDSA'``
+                (with the P-256 curve), an :obj:`webrtc.EcKeyGenParams`, or an :obj:`webrtc.RsaHashedKeyGenParams`
+                like ``RsaHashedKeyGenParams('RSASSA-PKCS1-v1_5', 2048, bytes([1, 0, 1]), 'SHA-256')``.
             expires (:obj:`float`, optional): In how many milliseconds the certificate expires, at most a year
                 (the default is 30 days).
 

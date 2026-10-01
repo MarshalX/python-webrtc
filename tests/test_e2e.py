@@ -66,12 +66,14 @@ async def test_peers_connect_and_send_audio(caller: webrtc.RTCPeerConnection, ca
     for i in range(10):
         await writer.write(
             webrtc.AudioData(
-                format='s16',
-                sample_rate=48000,
-                number_of_frames=480,
-                number_of_channels=1,
-                timestamp=i * 10_000,
-                data=bytes(480 * 2),
+                webrtc.AudioDataInit(
+                    format='s16',
+                    sample_rate=48000,
+                    number_of_frames=480,
+                    number_of_channels=1,
+                    timestamp=i * 10_000,
+                    data=bytes(480 * 2),
+                )
             )
         )
         await asyncio.sleep(0.01)

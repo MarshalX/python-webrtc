@@ -22,6 +22,7 @@ from webrtc import (
     WebRTCObject,
     wrtc,
 )
+from webrtc.models.dictionary import Dictionary
 from webrtc.utils.events import EventTarget
 from webrtc.utils.names import Alias, alias
 
@@ -44,7 +45,7 @@ def check_utf8_length(name: str, value: str) -> None:
 
 
 @dataclass
-class RTCDataChannelInit:
+class RTCDataChannelInit(Dictionary):
     """How :meth:`webrtc.RTCPeerConnection.create_data_channel` creates a channel.
 
     Args:

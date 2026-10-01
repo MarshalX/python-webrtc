@@ -128,6 +128,9 @@ def _dict_from_js(value: dict[str, object]) -> object:
     if '__model' in value:
         # a WebIDL dictionary the library has a keyword model for
         return getattr(webrtc, str(value['__model']))(**from_js(value['kwargs']))
+    if '__json' in value:
+        # a WebIDL dictionary as JS has it, which the library converts with its from_json
+        return getattr(webrtc, str(value['__json'])).from_json(from_js(value['value']))
     return {k: from_js(v) for k, v in value.items()}
 
 

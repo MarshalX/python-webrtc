@@ -21,9 +21,10 @@ async def open_pair(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, **options: object
 ) -> tuple[webrtc.RTCDataChannel, webrtc.RTCDataChannel]:
     """Opens a channel of the caller and returns it with its remote end."""
-    channel = caller.create_data_channel('chat', options)
-    if options.get('negotiated'):
-        remote = callee.create_data_channel('chat', options)
+    init = webrtc.RTCDataChannelInit(**options)
+    channel = caller.create_data_channel('chat', init)
+    if init.negotiated:
+        remote = callee.create_data_channel('chat', init)
         opened = [wait_for_event(channel, 'open'), wait_for_event(remote, 'open')]
         await connect(caller, callee)
         await asyncio.gather(*opened)
@@ -117,24 +118,26 @@ async def test_close_states_and_events(caller: webrtc.RTCPeerConnection, callee:
 def test_invalid_data_channel_init(pc: webrtc.RTCPeerConnection, init: dict[str, object], error: str) -> None:
     """A channel has at most one of the limits, and a negotiated one an id in range."""
     with pytest.raises(ValueError, match=error):
-        pc.create_data_channel('x', init)
+        pc.create_data_channel('x', webrtc.RTCDataChannelInit(**init))
 
 
 def test_id_is_ignored_unless_negotiated(pc: webrtc.RTCPeerConnection) -> None:
     """The id of a channel that isn't negotiated is chosen once SCTP is up."""
-    assert pc.create_data_channel('x', {'id': 65535}).id is None
+    assert pc.create_data_channel('x', webrtc.RTCDataChannelInit(id=65535)).id is None
 
 
 def test_id_taken(pc: webrtc.RTCPeerConnection) -> None:
     """Two negotiated channels can't have the same id."""
-    pc.create_data_channel('taken', {'negotiated': True, 'id': 1})
+    pc.create_data_channel('taken', webrtc.RTCDataChannelInit(negotiated=True, id=1))
     with pytest.raises(webrtc.OperationError):
         pc.create_data_channel('again', webrtc.RTCDataChannelInit(negotiated=True, id=1))
 
 
 def test_data_channel_options(pc: webrtc.RTCPeerConnection) -> None:
     """A new channel has its options and is connecting, and only sends text and bytes."""
-    channel = pc.create_data_channel('x', {'priority': webrtc.RTCPriorityType.high, 'ordered': False})
+    channel = pc.create_data_channel(
+        'x', webrtc.RTCDataChannelInit(priority=webrtc.RTCPriorityType.high, ordered=False)
+    )
     assert channel.priority == webrtc.RTCPriorityType.high
     assert channel.ordered is False
     assert channel.ready_state == webrtc.RTCDataChannelState.connecting

@@ -27,13 +27,15 @@ def audio_data(
 ) -> webrtc.AudioData:
     size = {'u8': 1, 's16': 2}.get(format.split('-', maxsplit=1)[0], 4)
     return webrtc.AudioData(
-        format=format,
-        sample_rate=8000,
-        number_of_frames=frames,
-        number_of_channels=channels,
-        timestamp=1234,
-        data=data if data is not None else bytes(channels * frames * size),
-        **init,
+        webrtc.AudioDataInit(
+            format=format,
+            sample_rate=8000,
+            number_of_frames=frames,
+            number_of_channels=channels,
+            timestamp=1234,
+            data=data if data is not None else bytes(channels * frames * size),
+            **init,
+        )
     )
 
 
@@ -48,8 +50,8 @@ def test_construct() -> None:
     audio.close()
 
 
-def test_init_as_dictionary() -> None:
-    """The init is also a dictionary with camelCase names."""
+def test_init_from_json() -> None:
+    """The init comes from its JSON form with camelCase names, a dictionary isn't taken itself."""
     init = {
         'format': 's16',
         'sampleRate': 48000,
@@ -57,9 +59,12 @@ def test_init_as_dictionary() -> None:
         'numberOfChannels': 1,
         'timestamp': -10,
         'data': bytes(960),
+        'transfer': [],
     }
-    audio = webrtc.AudioData(init)
+    audio = webrtc.AudioData(webrtc.AudioDataInit.from_json(init))
     assert audio.timestamp == -10
+    options = webrtc.AudioDataCopyToOptions.from_json({'planeIndex': 0, 'frameCount': 2})
+    assert audio.allocation_size(options) == 4
     audio.close()
 
 
@@ -86,7 +91,7 @@ def test_close_and_clone() -> None:
     audio.close()
     assert (audio.format, audio.sample_rate, audio.number_of_frames, audio.number_of_channels) == (None, 0, 0, 0)
     with pytest.raises(webrtc.InvalidStateError):
-        audio.copy_to(bytearray(20), {'plane_index': 0})
+        audio.copy_to(bytearray(20), webrtc.AudioDataCopyToOptions(plane_index=0))
     assert clone.number_of_frames == 5
     clone.close()
 
@@ -106,11 +111,11 @@ def test_copy_to_interleaved_and_planar() -> None:
     """Planar data copies to an interleaved format with every channel, and back one channel at a time."""
     audio = audio_data(data=f32(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
     out = bytearray(40)
-    audio.copy_to(out, {'planeIndex': 0, 'format': 'f32'})
+    audio.copy_to(out, webrtc.AudioDataCopyToOptions(plane_index=0, format='f32'))
     assert array.array('f', out).tolist() == [1, 6, 2, 7, 3, 8, 4, 9, 5, 10]
     interleaved = audio_data(format='f32', data=bytes(out))
     plane = bytearray(20)
-    interleaved.copy_to(plane, {'plane_index': 1, 'format': 'f32-planar'})
+    interleaved.copy_to(plane, webrtc.AudioDataCopyToOptions(plane_index=1, format='f32-planar'))
     assert array.array('f', plane).tolist() == [6, 7, 8, 9, 10]
     audio.close()
     interleaved.close()
@@ -119,13 +124,13 @@ def test_copy_to_interleaved_and_planar() -> None:
 @pytest.mark.parametrize(
     'options',
     [
-        {'plane_index': 2},
-        {'plane_index': 1, 'format': 'f32'},
-        {'plane_index': 0, 'frame_offset': 5},
-        {'plane_index': 0, 'frame_offset': 1, 'frame_count': 5},
+        webrtc.AudioDataCopyToOptions(plane_index=2),
+        webrtc.AudioDataCopyToOptions(plane_index=1, format='f32'),
+        webrtc.AudioDataCopyToOptions(plane_index=0, frame_offset=5),
+        webrtc.AudioDataCopyToOptions(plane_index=0, frame_offset=1, frame_count=5),
     ],
 )
-def test_copy_ranges(options: dict[str, object]) -> None:
+def test_copy_ranges(options: webrtc.AudioDataCopyToOptions) -> None:
     """Planes and frames that don't exist are a RangeError."""
     audio = audio_data()
     with pytest.raises(webrtc.InvalidRangeError):
@@ -137,7 +142,7 @@ def test_destination_too_small() -> None:
     """A destination smaller than the copy is a RangeError."""
     audio = audio_data()
     with pytest.raises(webrtc.InvalidRangeError):
-        audio.copy_to(bytearray(19), {'plane_index': 0})
+        audio.copy_to(bytearray(19), webrtc.AudioDataCopyToOptions(plane_index=0))
     audio.close()
 
 
@@ -158,7 +163,7 @@ def test_sample_conversions(source: str, destination: str) -> None:
     audio = audio_data(format=source, channels=1, frames=4, data=array.array(code, values).tobytes())
     expected, destination_code = VALUES[destination]
     out = array.array(destination_code, [0] * 4)
-    audio.copy_to(memoryview(out).cast('B'), {'plane_index': 0, 'format': destination})
+    audio.copy_to(memoryview(out).cast('B'), webrtc.AudioDataCopyToOptions(plane_index=0, format=destination))
     # a coarser source can't reach the extremes of a finer destination exactly
     tolerance = {'u8': 1, 's16': 256, 's32': 2**24, 'f32': 1 / 64}[destination]
     for got, want in zip(out.tolist(), expected):
@@ -173,7 +178,7 @@ def test_non_finite_f32_samples_convert(destination: str) -> None:
     audio = audio_data(format='f32', channels=1, frames=3, data=array.array('f', values).tobytes())
     silence, maximum, minimum = VALUES[destination][0][3], VALUES[destination][0][1], VALUES[destination][0][0]
     out = array.array(VALUES[destination][1], [1] * 3)
-    audio.copy_to(memoryview(out).cast('B'), {'plane_index': 0, 'format': destination})
+    audio.copy_to(memoryview(out).cast('B'), webrtc.AudioDataCopyToOptions(plane_index=0, format=destination))
     assert out.tolist() == [silence, maximum, minimum]
     audio.close()
 
@@ -182,6 +187,6 @@ def test_s16_bytes_are_little_endian() -> None:
     """s16 samples are little endian, scaled by 1/32768 to f32."""
     audio = audio_data(format='s16', channels=1, frames=2, data=struct.pack('<2h', 1, -1))
     out = bytearray(8)
-    audio.copy_to(out, {'plane_index': 0, 'format': 'f32'})
+    audio.copy_to(out, webrtc.AudioDataCopyToOptions(plane_index=0, format='f32'))
     assert array.array('f', out).tolist() == [1 / 32768, -1 / 32768]
     audio.close()

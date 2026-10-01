@@ -15,7 +15,10 @@ import sys
 from dataclasses import dataclass, field
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 WPT_ROOT = Path(__file__).resolve().parents[2] / 'wpt'
 
@@ -78,14 +81,14 @@ class Spec:
         """The members of a definition, inherited ones included."""
         return [member for definition in self.lineage(name) for member in definition.members]
 
-    def named_types(self, idl_type: Node | list[Node] | str) -> set[str]:
-        """The definitions of the spec a type refers to, through unions, generics and typedefs."""
+    def named_types(self, idl_type: Node | list[Node] | str, known: Callable[[str], bool] | None = None) -> set[str]:
+        """The definitions a type refers to through unions, generics and typedefs, but not ``known`` typedefs."""
         if isinstance(idl_type, list):
-            return set().union(*(self.named_types(item) for item in idl_type))
+            return set().union(*(self.named_types(item, known) for item in idl_type))
         if isinstance(idl_type, dict):
-            return self.named_types(idl_type['idlType'])
+            return self.named_types(idl_type['idlType'], known)
         if idl_type in self.typedefs:
-            return self.named_types(self.typedefs[idl_type])
+            return set() if known and known(idl_type) else self.named_types(self.typedefs[idl_type], known)
         return {idl_type} if idl_type in self.definitions else set()
 
     def dictionary(self, idl_type: Node) -> Definition | None:

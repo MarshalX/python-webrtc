@@ -19,18 +19,23 @@ def test_type_is_required() -> None:
     with pytest.raises(TypeError):
         webrtc.RTCSessionDescription()
     with pytest.raises(TypeError):
-        webrtc.RTCSessionDescription({'sdp': ''})
+        webrtc.RTCSessionDescriptionInit.from_json({'sdp': ''})
     with pytest.raises(TypeError):
-        webrtc.RTCSessionDescription({'type': 'offer', 'sdp': None})
+        webrtc.RTCSessionDescription('offer', None)
+    with pytest.raises(ValueError, match='not a valid RTCSdpType'):
+        webrtc.RTCSessionDescription({'type': 'offer'})
 
 
 @pytest.mark.parametrize(
-    'init', [{'type': 'rollback'}, webrtc.RTCSessionDescriptionInit('rollback'), webrtc.RTCSdpType.rollback]
+    'init',
+    [
+        webrtc.RTCSessionDescriptionInit.from_json({'type': 'rollback'}),
+        webrtc.RTCSessionDescriptionInit('rollback'),
+        webrtc.RTCSdpType.rollback,
+    ],
 )
-def test_sdp_is_empty_by_default(
-    init: dict[str, str] | webrtc.RTCSessionDescriptionInit | webrtc.RTCSdpType,
-) -> None:
-    """A description from a dictionary, an init or a type has an empty SDP."""
+def test_sdp_is_empty_by_default(init: webrtc.RTCSessionDescriptionInit | webrtc.RTCSdpType) -> None:
+    """A description from the JSON form, an init or a type has an empty SDP."""
     description = webrtc.RTCSessionDescription(init)
     assert description.type == webrtc.RTCSdpType.rollback
     assert not description.sdp

@@ -12,7 +12,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from webrtc import (
     InvalidAccessError,
@@ -25,6 +25,7 @@ from webrtc import (
     RTCRtpHeaderEncryptionPolicy,
     wrtc,
 )
+from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
 
 if TYPE_CHECKING:
@@ -75,7 +76,7 @@ def _check_url(url: str) -> str:
 
 
 @dataclass
-class RTCOAuthCredential:
+class RTCOAuthCredential(Dictionary):
     """An OAuth credential of a TURN server (RFC 7635).
 
     Args:
@@ -93,7 +94,7 @@ class RTCOAuthCredential:
 
 
 @dataclass
-class RTCIceServer:
+class RTCIceServer(Dictionary):
     """A STUN or TURN server used to gather ICE candidates.
 
     Args:
@@ -111,10 +112,12 @@ class RTCIceServer:
     credential: str | RTCOAuthCredential | None = None
     credential_type: str = 'password'
 
+    _dictionaries: ClassVar = {'credential': RTCOAuthCredential}
+
     @classmethod
-    def _to_native_list(cls, servers: Iterable[RTCIceServer | dict[str, Any]]) -> list[wrtc.IceServerInit]:
-        """The native servers of a list of servers, or of their keyword arguments."""
-        return [(cls(**server) if isinstance(server, dict) else server)._to_native() for server in servers]
+    def _to_native_list(cls, servers: Iterable[RTCIceServer]) -> list[wrtc.IceServerInit]:
+        """The native servers of a list of servers."""
+        return [server._to_native() for server in servers]
 
     def _to_native(self) -> wrtc.IceServerInit:
         urls = [self.urls] if isinstance(self.urls, str) else list(self.urls)
@@ -152,12 +155,12 @@ class RTCIceServer:
 
 
 @dataclass
-class RTCConfiguration:
+class RTCConfiguration(Dictionary):
     """The configuration of a :obj:`webrtc.RTCPeerConnection`.
 
     Args:
         ice_servers (:obj:`list` of :obj:`webrtc.RTCIceServer`, optional): STUN and TURN servers to gather
-            ICE candidates with. A :obj:`dict` of the arguments of :obj:`webrtc.RTCIceServer` is accepted too.
+            ICE candidates with.
         ice_transport_policy (:obj:`webrtc.RTCIceTransportPolicy`, optional): Which candidates may be used,
             all of them (the default) or only relay ones.
         bundle_policy (:obj:`webrtc.RTCBundlePolicy`, optional): How media is bundled when the remote peer
@@ -177,7 +180,7 @@ class RTCConfiguration:
             a remote description without it fails (``require``). Can't be changed.
     """
 
-    ice_servers: list[RTCIceServer | dict[str, Any]] = field(default_factory=list)
+    ice_servers: list[RTCIceServer] = field(default_factory=list)
     ice_transport_policy: RTCIceTransportPolicy = RTCIceTransportPolicy.all
     bundle_policy: RTCBundlePolicy = RTCBundlePolicy.balanced
     rtcp_mux_policy: RTCRtcpMuxPolicy = RTCRtcpMuxPolicy.require
@@ -186,6 +189,8 @@ class RTCConfiguration:
     certificates: list[RTCCertificate] | None = None
     always_negotiate_data_channels: bool = False
     rtp_header_encryption_policy: RTCRtpHeaderEncryptionPolicy = RTCRtpHeaderEncryptionPolicy.negotiate
+
+    _dictionaries: ClassVar = {'ice_servers': RTCIceServer}
 
     def _to_native(self) -> wrtc.ConfigurationInit:
         """Validates the configuration and creates the native one.
@@ -248,7 +253,7 @@ class RTCConfiguration:
         )
 
     #: Alias for :attr:`ice_servers`
-    iceServers: ClassVar[Alias[list[RTCIceServer | dict[str, Any]]]] = alias('ice_servers')
+    iceServers: ClassVar[Alias[list[RTCIceServer]]] = alias('ice_servers')
     #: Alias for :attr:`ice_transport_policy`
     iceTransportPolicy: ClassVar[Alias[RTCIceTransportPolicy]] = alias('ice_transport_policy')
     #: Alias for :attr:`bundle_policy`

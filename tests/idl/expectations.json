@@ -1,14 +1,9 @@
 {
-  "AudioData": [
-    "constructor(**options): extra argument",
-    "constructor(init): should be required"
-  ],
   "AudioDataInit": [
     "transfer: missing member"
   ],
   "Blob": [
     "constructor(blobParts): named parts",
-    "constructor(blobParts): type lacks Blob",
     "constructor(options.endings): missing member",
     "stream: missing method",
     "textStream: missing method"
@@ -17,24 +12,6 @@
     "missing dictionary"
   ],
   "CameraDevicePermissionDescriptor": [
-    "missing dictionary"
-  ],
-  "ConstrainBooleanOrDOMStringParameters": [
-    "missing dictionary"
-  ],
-  "ConstrainBooleanParameters": [
-    "missing dictionary"
-  ],
-  "ConstrainDOMStringParameters": [
-    "missing dictionary"
-  ],
-  "ConstrainDoubleRange": [
-    "missing dictionary"
-  ],
-  "ConstrainULongRange": [
-    "missing dictionary"
-  ],
-  "DOMRectInit": [
     "missing dictionary"
   ],
   "DOMRectReadOnly": [
@@ -89,11 +66,6 @@
   "MediaStreamTrackHandle": [
     "missing interface"
   ],
-  "MediaStreamTrackProcessor": [
-    "constructor(**options): extra argument",
-    "constructor(init.track): should be required",
-    "constructor(init.track): type lacks MediaStreamTrackHandle"
-  ],
   "MediaStreamTrackProcessorInit": [
     "track: type lacks MediaStreamTrackHandle"
   ],
@@ -103,26 +75,14 @@
     "latency: missing member"
   ],
   "MediaTrackConstraintSet": [
-    "missing dictionary"
+    "backgroundBlur: missing member",
+    "facingMode: missing member",
+    "latency: missing member"
   ],
   "MediaTrackConstraints": [
-    "advanced: type lacks MediaTrackConstraintSet",
-    "aspectRatio: type lacks ConstrainDoubleRange",
-    "autoGainControl: type lacks ConstrainBooleanParameters",
     "backgroundBlur: missing member",
-    "channelCount: type lacks ConstrainULongRange",
-    "deviceId: type lacks ConstrainDOMStringParameters",
-    "echoCancellation: type lacks ConstrainBooleanOrDOMStringParameters",
     "facingMode: missing member",
-    "frameRate: type lacks ConstrainDoubleRange",
-    "groupId: type lacks ConstrainDOMStringParameters",
-    "height: type lacks ConstrainULongRange",
-    "latency: missing member",
-    "noiseSuppression: type lacks ConstrainBooleanParameters",
-    "resizeMode: type lacks ConstrainDOMStringParameters",
-    "sampleRate: type lacks ConstrainULongRange",
-    "sampleSize: type lacks ConstrainULongRange",
-    "width: type lacks ConstrainULongRange"
+    "latency: missing member"
   ],
   "MediaTrackSettings": [
     "backgroundBlur: missing member",
@@ -212,7 +172,6 @@
     "missing dictionary"
   ],
   "RTCError": [
-    "constructor(init): named options",
     "http_request_status_code: extra member",
     "message: extra member"
   ],
@@ -228,9 +187,6 @@
   "RTCIceCandidate": [
     "from_json: extra member",
     "toJSON(): type lacks RTCIceCandidateInit"
-  ],
-  "RTCIceCandidateInit": [
-    "missing dictionary"
   ],
   "RTCIceCandidatePairStats": [
     "missing dictionary"
@@ -258,7 +214,6 @@
   "RTCIceTransport": [
     "addRemoteCandidate(remoteCandidate): named candidate",
     "addRemoteCandidate(remoteCandidate): should be optional",
-    "addRemoteCandidate(remoteCandidate): type lacks RTCIceCandidateInit",
     "gatheringState: type lacks RTCIceGathererState",
     "onerror: missing event",
     "start(remoteParameters): should be optional"
@@ -267,9 +222,6 @@
     "missing dictionary"
   ],
   "RTCLocalIceCandidateInit": [
-    "missing dictionary"
-  ],
-  "RTCLocalSessionDescriptionInit": [
     "missing dictionary"
   ],
   "RTCMediaSourceStats": [
@@ -285,10 +237,8 @@
     "missing dictionary"
   ],
   "RTCPeerConnection": [
-    "addIceCandidate(candidate): type lacks RTCIceCandidateInit",
     "addTrack(streams): named stream",
     "addTrack(streams): should be variadic",
-    "addTransceiver(init): type lacks RTCRtpTransceiverInit",
     "createAnswer(options): missing argument",
     "createAnswer(voice_activity_detection): extra argument",
     "createDataChannel(dataChannelDict): named options",
@@ -296,7 +246,6 @@
     "generateCertificate(expires): extra argument",
     "generateCertificate(keygenAlgorithm): named algorithm",
     "generateCertificate(keygenAlgorithm): should be required",
-    "setLocalDescription(description): type lacks RTCLocalSessionDescriptionInit",
     "setRemoteDescription(description): type lacks RTCSessionDescriptionInit"
   ],
   "RTCPeerConnectionIceErrorEvent": [
@@ -402,7 +351,7 @@
     "missing enum"
   ],
   "RTCRtpTransceiverInit": [
-    "missing dictionary"
+    "direction: type lacks RTCRtpTransceiverDirection"
   ],
   "RTCSctpTransport": [
     "state: type lacks RTCSctpTransportState"
@@ -516,29 +465,21 @@
     "enqueue(chunk): should be optional",
     "error(reason): named error"
   ],
-  "VideoColorSpaceInit": [
-    "missing dictionary"
-  ],
   "VideoFacingModeEnum": [
     "missing enum"
   ],
   "VideoFrame": [
-    "constructor(**options): extra argument",
     "constructor(image): named source"
   ],
   "VideoFrameBufferInit": [
-    "colorSpace: type lacks VideoColorSpaceInit",
     "metadata: missing member",
-    "transfer: missing member",
-    "visibleRect: type lacks DOMRectInit"
+    "transfer: missing member"
   ],
   "VideoFrameCopyToOptions": [
-    "colorSpace: missing member",
-    "rect: type lacks DOMRectInit"
+    "colorSpace: missing member"
   ],
   "VideoFrameInit": [
-    "metadata: missing member",
-    "visibleRect: type lacks DOMRectInit"
+    "metadata: missing member"
   ],
   "VideoFrameMetadata": [
     "rtp_timestamp: extra member"

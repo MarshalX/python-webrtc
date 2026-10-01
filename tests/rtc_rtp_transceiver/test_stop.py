@@ -16,7 +16,7 @@ from tests.helpers import exchange_offer_answer
 @pytest.mark.asyncio
 async def test_1(pc: webrtc.RTCPeerConnection) -> None:
     """A transceiver added and stopped before the initial offer should not get an m-section in it."""
-    init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
+    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
     pc.add_transceiver(webrtc.MediaType.audio, init)
     pc.add_transceiver(webrtc.MediaType.video)
     pc.get_transceivers()[0].stop()
@@ -29,7 +29,7 @@ async def test_1(pc: webrtc.RTCPeerConnection) -> None:
 
 def test_2(pc: webrtc.RTCPeerConnection) -> None:
     """A transceiver added and stopped should not crash when getting receiver's transport."""
-    init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
+    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
     pc.add_transceiver(webrtc.MediaType.audio, init)
     pc.add_transceiver(webrtc.MediaType.video)
 

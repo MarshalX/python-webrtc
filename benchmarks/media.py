@@ -204,7 +204,9 @@ class VideoLoopback:
             # enough for the size, so the encoder doesn't drop frames for bitrate
             bitrate = int(self.width * self.height * self.fps * 0.2)
             remote = await _remote_track(caller, callee, generator.track, max_bitrate=bitrate)
-            processor = webrtc.MediaStreamTrackProcessor(remote, max_buffer_size=self.max_buffer_size)
+            processor = webrtc.MediaStreamTrackProcessor(
+                webrtc.MediaStreamTrackProcessorInit(remote, max_buffer_size=self.max_buffer_size)
+            )
             sampling = asyncio.ensure_future(run.sample_rss(self.rss_every)) if self.rss_every else None
             lag = await run.phases.measure(
                 run.result, processor, write=lambda: run.write(generator), read=lambda: run.read(processor)
@@ -243,13 +245,18 @@ class _VideoRun:
             if self.phases.measuring.is_set():
                 self.result.sent += 1
             await writer.write(
-                webrtc.VideoFrame(frame, format='I420', coded_width=width, coded_height=height, timestamp=number)
+                webrtc.VideoFrame(
+                    frame,
+                    webrtc.VideoFrameBufferInit(
+                        format='I420', coded_width=width, coded_height=height, timestamp=number
+                    ),
+                )
             )
             number += 1
             await asyncio.sleep(max(0.0, start + number / fps - loop.time()))
 
     async def read(self, processor: webrtc.MediaStreamTrackProcessor) -> None:
-        header = {'rect': {'x': 0, 'y': 0, 'width': BITS * BLOCK, 'height': BLOCK}}
+        header = webrtc.VideoFrameCopyToOptions(rect=webrtc.DOMRectInit(x=0, y=0, width=BITS * BLOCK, height=BLOCK))
         loop = asyncio.get_running_loop()
         async for frame in processor.readable:
             now = loop.time()
@@ -310,7 +317,7 @@ async def audio_loopback(channels: int = 2, seconds: float = 60, warmup: float =
     async with _connection() as (caller, callee):
         generator = webrtc.MediaStreamTrackGenerator('audio')
         remote = await _remote_track(caller, callee, generator)
-        processor = webrtc.MediaStreamTrackProcessor(remote, max_buffer_size=50)
+        processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(remote, max_buffer_size=50))
 
         async def write() -> None:
             writer = generator.writable.get_writer()
@@ -319,12 +326,14 @@ async def audio_loopback(channels: int = 2, seconds: float = 60, warmup: float =
             while not phases.done.is_set():
                 await writer.write(
                     webrtc.AudioData(
-                        format='s16',
-                        sample_rate=48000,
-                        number_of_frames=480,
-                        number_of_channels=channels,
-                        timestamp=written * 10_000,
-                        data=chunk,
+                        webrtc.AudioDataInit(
+                            format='s16',
+                            sample_rate=48000,
+                            number_of_frames=480,
+                            number_of_channels=channels,
+                            timestamp=written * 10_000,
+                            data=chunk,
+                        )
                     )
                 )
                 written += 1
@@ -370,10 +379,11 @@ async def copy_costs(
     for width, height in sizes:
         chroma = (width // 2) * (height // 2)
         frame = webrtc.VideoFrame(
-            bytes(width * height + 2 * chroma), format='I420', coded_width=width, coded_height=height, timestamp=0
+            bytes(width * height + 2 * chroma),
+            webrtc.VideoFrameBufferInit(format='I420', coded_width=width, coded_height=height, timestamp=0),
         )
         for format in formats:
-            options = {'format': format}
+            options = webrtc.VideoFrameCopyToOptions(format=format)
             destination = bytearray(frame.allocation_size(options))
             runs = 0
             start = time.perf_counter()
@@ -391,6 +401,8 @@ def construct_cost(width: int, height: int, budget: float = 1.0) -> float:
     runs = 0
     start = time.perf_counter()
     while time.perf_counter() - start < budget:
-        webrtc.VideoFrame(data, format='I420', coded_width=width, coded_height=height, timestamp=0).close()
+        webrtc.VideoFrame(
+            data, webrtc.VideoFrameBufferInit(format='I420', coded_width=width, coded_height=height, timestamp=0)
+        ).close()
         runs += 1
     return (time.perf_counter() - start) / runs * 1000
