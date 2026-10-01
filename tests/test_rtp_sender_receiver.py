@@ -28,7 +28,7 @@ def test_capabilities() -> None:
 
 
 def add_simulcast_sender(pc: webrtc.RTCPeerConnection) -> webrtc.RTCRtpSender:
-    init = webrtc.RtpTransceiverInit(
+    init = webrtc.RTCRtpTransceiverInit(
         send_encodings=[webrtc.RTCRtpEncodingParameters(rid='hi'), webrtc.RTCRtpEncodingParameters(rid='lo')]
     )
     return pc.add_transceiver(webrtc.MediaType.video, init).sender
@@ -100,7 +100,7 @@ async def test_parameters_expire_with_their_task(pc: webrtc.RTCPeerConnection) -
 )
 def test_invalid_send_encodings(pc: webrtc.RTCPeerConnection, encodings: list[dict[str, str]], error: str) -> None:
     """The rids of send encodings are unique, present when there are several, and alphanumeric."""
-    init = webrtc.RtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(**e) for e in encodings])
+    init = webrtc.RTCRtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(**e) for e in encodings])
     with pytest.raises(ValueError, match=error):
         pc.add_transceiver(webrtc.MediaType.video, init)
 
@@ -109,7 +109,7 @@ def test_send_encoding_of_an_unknown_codec(pc: webrtc.RTCPeerConnection) -> None
     """The codec of a send encoding must be one the sender supports."""
     unknown = webrtc.RTCRtpEncodingParameters(codec=webrtc.RTCRtpCodec('audio/unknown', 8000))
     with pytest.raises(webrtc.OperationError):
-        pc.add_transceiver(webrtc.MediaType.audio, webrtc.RtpTransceiverInit(send_encodings=[unknown]))
+        pc.add_transceiver(webrtc.MediaType.audio, webrtc.RTCRtpTransceiverInit(send_encodings=[unknown]))
 
 
 @pytest.mark.asyncio
@@ -167,7 +167,7 @@ async def test_sender_codecs_leave_out_unknown_remote_codecs(
     sdp = sdp.replace(m_line, m_line + ' 125').replace(
         '\r\na=rtpmap:', '\r\na=rtpmap:125 flarglblurp/8000/2\r\na=rtpmap:', 1
     )
-    await caller.set_remote_description({'type': 'answer', 'sdp': sdp})
+    await caller.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', sdp))
 
     parameters = sender.get_parameters()
     assert parameters.codecs
@@ -200,7 +200,7 @@ async def test_set_parameters_after_rollback(pc: webrtc.RTCPeerConnection) -> No
     """A sender rolled back out of its offer has no media channel: setting parameters rejects, not hangs."""
     sender = pc.add_transceiver(webrtc.MediaType.video).sender
     await pc.set_local_description()
-    await pc.set_local_description({'type': 'rollback'})
+    await pc.set_local_description(webrtc.RTCSessionDescriptionInit('rollback'))
     with pytest.raises(webrtc.InvalidStateError):
         await asyncio.wait_for(sender.set_parameters(sender.get_parameters()), 5)
 
@@ -211,7 +211,7 @@ async def test_simulcast_receiver_parameters(
 ) -> None:
     """The receiver of simulcast has the negotiated codecs and header extensions."""
     encodings = [webrtc.RTCRtpEncodingParameters(rid='a'), webrtc.RTCRtpEncodingParameters(rid='b')]
-    caller.add_transceiver(webrtc.MediaType.video, webrtc.RtpTransceiverInit(send_encodings=encodings))
+    caller.add_transceiver(webrtc.MediaType.video, webrtc.RTCRtpTransceiverInit(send_encodings=encodings))
     await exchange_offer_answer(caller, callee)
     parameters = callee.get_transceivers()[0].receiver.get_parameters()
     assert parameters.codecs
@@ -278,19 +278,23 @@ def test_encodings_have_their_webidl_types(pc: webrtc.RTCPeerConnection, encodin
     with pytest.raises(TypeError):
         pc.add_transceiver(
             webrtc.MediaType.video,
-            webrtc.RtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(**encoding)]),
+            webrtc.RTCRtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(**encoding)]),
         )
 
 
 def test_encoding_bitrate_beyond_an_int_is_no_limit(pc: webrtc.RTCPeerConnection) -> None:
-    init = webrtc.RtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(max_bitrate=2**32 - 1)])
+    init = webrtc.RTCRtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(max_bitrate=2**32 - 1)])
     sender = pc.add_transceiver(webrtc.MediaType.video, init).sender
     assert sender.get_parameters().encodings[0].max_bitrate == 2**31 - 1
 
 
-def test_transceiver_init_as_a_dictionary(pc: webrtc.RTCPeerConnection) -> None:
-    """As in browsers, with camelCase or snake_case names, the encodings too; unknown members are ignored."""
-    init = {'direction': 'sendonly', 'sendEncodings': [{'rid': 'a', 'maxBitrate': 100000}, {'rid': 'b'}], 'x': 1}
+def test_transceiver_init_from_json(pc: webrtc.RTCPeerConnection) -> None:
+    """From the JSON form, with camelCase or snake_case names, the encodings too; unknown members are ignored."""
+    init = webrtc.RTCRtpTransceiverInit.from_json({
+        'direction': 'sendonly',
+        'sendEncodings': [{'rid': 'a', 'maxBitrate': 100000}, {'rid': 'b'}],
+        'x': 1,
+    })
     transceiver = pc.add_transceiver(webrtc.MediaType.video, init)
     assert transceiver.direction == webrtc.TransceiverDirection.sendonly
     encodings = transceiver.sender.get_parameters().encodings

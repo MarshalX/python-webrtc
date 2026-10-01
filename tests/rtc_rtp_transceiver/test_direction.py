@@ -27,7 +27,7 @@ def test_1(pc: webrtc.RTCPeerConnection) -> None:
 
 def test_2(pc: webrtc.RTCPeerConnection) -> None:
     """Setting direction with same direction should have no effect."""
-    init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
+    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
     transceiver = pc.add_transceiver(webrtc.MediaType.audio, init)
 
     assert transceiver.direction == webrtc.TransceiverDirection.sendonly
@@ -38,7 +38,7 @@ def test_2(pc: webrtc.RTCPeerConnection) -> None:
 @pytest.mark.asyncio
 async def test_3(pc: webrtc.RTCPeerConnection) -> None:
     """Setting direction should change transceiver.direction independent of transceiver.currentDirection."""
-    init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.recvonly)
+    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.TransceiverDirection.recvonly)
     transceiver = pc.add_transceiver(webrtc.MediaType.audio, init)
 
     assert transceiver.direction == webrtc.TransceiverDirection.recvonly

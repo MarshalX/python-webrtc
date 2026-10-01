@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, ClassVar, TypeVar, Union
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, Union
 
 from webrtc import (
     RTCIceCandidateType,
@@ -21,7 +21,11 @@ from webrtc import (
     RTCIceServerTransportProtocol,
     RTCIceTcpCandidateType,
 )
+from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 _FOUNDATION = re.compile(r'[A-Za-z0-9+/]{1,32}')
 _DIGITS = re.compile(r'[0-9]+')
@@ -147,7 +151,7 @@ def _member_or_none(cls: type[_EnumT], value: object) -> _EnumT | None:
 
 
 @dataclass(frozen=True)
-class RTCIceParameters:
+class RTCIceParameters(Dictionary):
     """The ICE username fragment and password of one end of an :obj:`webrtc.RTCIceTransport`.
 
     Args:
@@ -160,6 +164,33 @@ class RTCIceParameters:
 
     #: Alias for :attr:`username_fragment`
     usernameFragment: ClassVar[Alias[str]] = alias('username_fragment')
+
+
+@dataclass
+class RTCIceCandidateInit(Dictionary):
+    """A candidate as it's signaled, for :meth:`webrtc.RTCPeerConnection.add_ice_candidate`.
+
+    The JSON form :meth:`webrtc.RTCIceCandidate.to_json` returns, which :meth:`from_json` reads.
+
+    Args:
+        candidate (:obj:`str`, optional): The candidate-attribute from SDP. An empty string means the end of
+            candidates.
+        sdp_mid (:obj:`str`, optional): The media stream identification tag of the media section of the candidate.
+        sdp_m_line_index (:obj:`int`, optional): The index of the media section of the candidate.
+        username_fragment (:obj:`str`, optional): The ICE username fragment the candidate belongs to.
+    """
+
+    candidate: str = ''
+    sdp_mid: str | None = None
+    sdp_m_line_index: int | None = None
+    username_fragment: str | None = None
+
+    #: Alias for :attr:`sdp_mid`
+    sdpMid: ClassVar[Alias[str | None]] = alias('sdp_mid')
+    #: Alias for :attr:`sdp_m_line_index`
+    sdpMLineIndex: ClassVar[Alias[int | None]] = alias('sdp_m_line_index')
+    #: Alias for :attr:`username_fragment`
+    usernameFragment: ClassVar[Alias[str | None]] = alias('username_fragment')
 
 
 @dataclass(frozen=True)
@@ -215,20 +246,10 @@ class RTCIceCandidate:
 
     @staticmethod
     def _members_of(
-        candidate: RTCIceCandidate | dict[str, Any],
+        candidate: RTCIceCandidate | RTCIceCandidateInit,
     ) -> tuple[str, str | None, int | None, str | None]:
-        """The candidate, sdp_mid, sdp_m_line_index and username_fragment of a candidate or of its JSON form."""
-        if isinstance(candidate, RTCIceCandidate):
-            return candidate.candidate, candidate.sdp_mid, candidate.sdp_m_line_index, candidate.username_fragment
-        if isinstance(candidate, dict):
-            return (
-                candidate.get('candidate') or '',
-                candidate.get('sdpMid'),
-                candidate.get('sdpMLineIndex'),
-                candidate.get('usernameFragment'),
-            )
-        msg = f'candidate must be an RTCIceCandidate or a dict, not {type(candidate).__name__}'
-        raise TypeError(msg)
+        """The candidate, sdp_mid, sdp_m_line_index and username_fragment of a candidate or of its init."""
+        return candidate.candidate or '', candidate.sdp_mid, candidate.sdp_m_line_index, candidate.username_fragment
 
     @classmethod
     def _peer_reflexive(cls, kwargs: dict[str, Any]) -> RTCIceCandidate:
@@ -251,17 +272,19 @@ class RTCIceCandidate:
         return candidate
 
     @classmethod
-    def from_json(cls, init: dict[str, Any]) -> RTCIceCandidate:
+    def from_json(cls, value: Mapping[str, Any]) -> RTCIceCandidate:
         """Creates a candidate from its JSON form, as :meth:`to_json` returns it.
 
         Args:
-            init (:obj:`dict`): A dictionary with ``candidate``, ``sdpMid``, ``sdpMLineIndex``
-                and ``usernameFragment`` keys, all optional.
+            value (:obj:`dict`): The JSON form, read as :meth:`webrtc.RTCIceCandidateInit.from_json` does.
 
         Returns:
             :obj:`webrtc.RTCIceCandidate`: The candidate.
+
+        Raises:
+            TypeError: If both ``sdpMid`` and ``sdpMLineIndex`` are missing.
         """
-        return cls(*cls._members_of(init))
+        return cls(*cls._members_of(RTCIceCandidateInit.from_json(value)))
 
     @property
     def foundation(self) -> str | None:

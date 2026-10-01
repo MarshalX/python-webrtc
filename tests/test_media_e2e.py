@@ -38,12 +38,14 @@ async def write_sine(generator: webrtc.MediaStreamTrackGenerator, frequency: flo
             'h', (int(12000 * math.sin(2 * math.pi * frequency * (written + i) / 48000)) for i in range(480))
         )
         audio = webrtc.AudioData(
-            format='s16',
-            sample_rate=48000,
-            number_of_frames=480,
-            number_of_channels=1,
-            timestamp=written * 1_000_000 // 48000,
-            data=samples.tobytes(),
+            webrtc.AudioDataInit(
+                format='s16',
+                sample_rate=48000,
+                number_of_frames=480,
+                number_of_channels=1,
+                timestamp=written * 1_000_000 // 48000,
+                data=samples.tobytes(),
+            )
         )
         await writer.write(audio)
         written += 480
@@ -64,8 +66,8 @@ async def read_frames(reader: webrtc.ReadableStreamDefaultReader, count: int) ->
         assert (frame.coded_width, frame.coded_height) == (WIDTH, HEIGHT)
         assert frame.metadata().rtp_timestamp > 0
         timestamps.append(frame.timestamp)
-        rgba = bytearray(frame.allocation_size({'format': 'RGBA'}))
-        await frame.copy_to(rgba, {'format': 'RGBA'})
+        rgba = bytearray(frame.allocation_size(webrtc.VideoFrameCopyToOptions(format='RGBA')))
+        await frame.copy_to(rgba, webrtc.VideoFrameCopyToOptions(format='RGBA'))
         frame.close()
     return timestamps, rgba
 
@@ -77,7 +79,9 @@ async def test_video_through_a_connection(caller: webrtc.RTCPeerConnection, call
     # pure red in BT.601 limited range
     async with writing(write_video, generator, solid_i420(81, 90, 240), (WIDTH, HEIGHT)):
         remote = await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
-        reader = webrtc.MediaStreamTrackProcessor(remote, max_buffer_size=5).readable.get_reader()
+        reader = webrtc.MediaStreamTrackProcessor(
+            webrtc.MediaStreamTrackProcessorInit(remote, max_buffer_size=5)
+        ).readable.get_reader()
         timestamps, rgba = await read_frames(reader, 10)
         await reader.cancel()
     generator.track.stop()
@@ -98,13 +102,17 @@ async def test_audio_through_a_connection(caller: webrtc.RTCPeerConnection, call
     generator = webrtc.MediaStreamTrackGenerator('audio')
     async with writing(write_sine, generator, 440):
         remote = await connect_track(caller, callee, generator, timeout=TIMEOUT)
-        reader = webrtc.MediaStreamTrackProcessor(remote, max_buffer_size=100).readable.get_reader()
+        reader = webrtc.MediaStreamTrackProcessor(
+            webrtc.MediaStreamTrackProcessorInit(remote, max_buffer_size=100)
+        ).readable.get_reader()
         samples = []
         for chunk in range(150):
             audio = (await asyncio.wait_for(reader.read(), TIMEOUT)).value
             assert audio.sample_rate == 48000
             plane = array.array('f', [0.0] * audio.number_of_frames)
-            audio.copy_to(memoryview(plane).cast('B'), {'plane_index': 0, 'format': 'f32-planar'})
+            audio.copy_to(
+                memoryview(plane).cast('B'), webrtc.AudioDataCopyToOptions(plane_index=0, format='f32-planar')
+            )
             audio.close()
             # the first half second is the jitter buffer filling up
             if chunk >= 50:
@@ -124,7 +132,7 @@ async def test_remote_track_end_closes_the_processor(
     generator = webrtc.VideoTrackGenerator()
     async with writing(write_video, generator, solid_i420(128, 128, 128), (WIDTH, HEIGHT)):
         remote = await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
-        reader = webrtc.MediaStreamTrackProcessor(remote).readable.get_reader()
+        reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(remote)).readable.get_reader()
         (await asyncio.wait_for(reader.read(), TIMEOUT)).value.close()
         callee.close()
         await asyncio.wait_for(reader.closed, TIMEOUT)

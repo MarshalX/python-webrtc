@@ -129,10 +129,13 @@ def fullscreen() -> Iterator[None]:
 async def watch(track: webrtc.MediaStreamTrack) -> None:
     """Draws the frames of the video track until it ends."""
     # a buffer of one frame drops the frames the terminal is too slow for
-    async for frame in webrtc.MediaStreamTrackProcessor(track, max_buffer_size=1).readable:
+    async for frame in webrtc.MediaStreamTrackProcessor(
+        webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=1)
+    ).readable:
         with frame:
-            rgbx = bytearray(frame.allocation_size({'format': 'RGBX'}))
-            await frame.copy_to(rgbx, {'format': 'RGBX'})
+            options = webrtc.VideoFrameCopyToOptions(format='RGBX')
+            rgbx = bytearray(frame.allocation_size(options))
+            await frame.copy_to(rgbx, options)
             size = frame.visible_rect
         draw(rgbx, int(size.width), int(size.height))
 
@@ -141,9 +144,11 @@ async def listen(track: webrtc.MediaStreamTrack) -> None:
     """Plays the audio track until it ends."""
     speakers = None
     try:
-        async for data in webrtc.MediaStreamTrackProcessor(track, max_buffer_size=50).readable:
+        async for data in webrtc.MediaStreamTrackProcessor(
+            webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=50)
+        ).readable:
             with data:
-                options = {'plane_index': 0, 'format': 's16'}
+                options = webrtc.AudioDataCopyToOptions(plane_index=0, format='s16')
                 samples = bytearray(data.allocation_size(options))
                 data.copy_to(samples, options)
                 speakers = speakers or Speakers(int(data.sample_rate), data.number_of_channels)
@@ -157,7 +162,7 @@ async def answer(pc: webrtc.RTCPeerConnection, offer: dict[str, str]) -> dict[st
     """Answers with all the ICE candidates in the SDP, since there is no trickling."""
     gathered = asyncio.Event()
     pc.on('icegatheringstatechange', lambda _: pc.ice_gathering_state == 'complete' and gathered.set())
-    await pc.set_remote_description(offer)
+    await pc.set_remote_description(webrtc.RTCSessionDescriptionInit.from_json(offer))
     await pc.set_local_description(await pc.create_answer())
     with contextlib.suppress(asyncio.TimeoutError):
         await asyncio.wait_for(gathered.wait(), 5)

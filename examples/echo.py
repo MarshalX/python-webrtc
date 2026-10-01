@@ -24,17 +24,17 @@ SECONDS = 3
 
 async def grayscale(frame: webrtc.VideoFrame, controller: webrtc.TransformStreamDefaultController) -> None:
     """Transforms an I420 frame: U and V at 128 leave only the luma."""
-    data = bytearray(frame.allocation_size({'format': 'I420'}))
-    await frame.copy_to(data, {'format': 'I420'})
+    i420 = webrtc.VideoFrameCopyToOptions(format='I420')
+    data = bytearray(frame.allocation_size(i420))
+    await frame.copy_to(data, i420)
     luma = frame.coded_width * frame.coded_height
     data[luma:] = b'\x80' * (len(data) - luma)
     controller.enqueue(
         webrtc.VideoFrame(
             data,
-            format='I420',
-            coded_width=frame.coded_width,
-            coded_height=frame.coded_height,
-            timestamp=frame.timestamp,
+            webrtc.VideoFrameBufferInit(
+                format='I420', coded_width=frame.coded_width, coded_height=frame.coded_height, timestamp=frame.timestamp
+            ),
         )
     )
     frame.close()
@@ -42,14 +42,15 @@ async def grayscale(frame: webrtc.VideoFrame, controller: webrtc.TransformStream
 
 async def watch(track: webrtc.MediaStreamTrack) -> None:
     """Reads the echoed frames for a while, then prints whether the last one is gray."""
-    reader = webrtc.MediaStreamTrackProcessor(track).readable.get_reader()
+    reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
     loop = asyncio.get_running_loop()
     end = loop.time() + SECONDS
     frames = 0
     while loop.time() < end:
         frame = (await reader.read()).value
-        rgba = bytearray(frame.allocation_size({'format': 'RGBA'}))
-        await frame.copy_to(rgba, {'format': 'RGBA'})
+        options = webrtc.VideoFrameCopyToOptions(format='RGBA')
+        rgba = bytearray(frame.allocation_size(options))
+        await frame.copy_to(rgba, options)
         frame.close()
         frames += 1
     red, green, blue = rgba[0:3]
@@ -91,7 +92,7 @@ async def main() -> None:
 
     @echo.on('track')
     def on_echo_track(event: webrtc.RTCTrackEvent) -> None:
-        readable = webrtc.MediaStreamTrackProcessor(event.track).readable
+        readable = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(event.track)).readable
         pipe = readable.pipe_through(webrtc.TransformStream({'transform': grayscale})).pipe_to(generator.writable)
         pipes.append(asyncio.ensure_future(pipe))
 

@@ -30,7 +30,7 @@ def test_constructors_from_many_threads() -> None:
         def construct():
             try:
                 while not stop.is_set():
-                    webrtc.MediaStreamTrackProcessor(track)
+                    webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
                     webrtc.RTCPeerConnection().close()
                     webrtc.RTCIceTransport().stop()
                     gc.collect()
@@ -79,7 +79,8 @@ def test_released_while_libwebrtc_threads_wait_for_the_gil(kind: str) -> None:
             elif {kind!r} == 'audio generator':
                 released = webrtc.MediaStreamTrackGenerator('audio')
             else:
-                released = webrtc.MediaStreamTrackProcessor(webrtc.VideoTrackGenerator().track)
+                init = webrtc.MediaStreamTrackProcessorInit(webrtc.VideoTrackGenerator().track)
+                released = webrtc.MediaStreamTrackProcessor(init)
             gc.collect()
             # the signaling thread delivers the messages, waiting for the GIL this thread keeps
             sys.setswitchinterval(1000)

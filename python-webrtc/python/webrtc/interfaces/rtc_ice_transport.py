@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 import weakref
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from webrtc import (
     CricketIceGatheringState,
@@ -110,14 +110,13 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
     def gather(
         self,
         gather_policy: webrtc.RTCIceTransportPolicy | str = 'all',
-        ice_servers: Sequence[webrtc.RTCIceServer | dict[str, Any]] | None = None,
+        ice_servers: Sequence[webrtc.RTCIceServer] | None = None,
     ) -> None:
         """Gathers the candidates of a standalone transport, sent in ``icecandidate`` events.
 
         Args:
             gather_policy (:obj:`webrtc.RTCIceTransportPolicy`, optional): All candidates, or only relay ones.
             ice_servers (:obj:`list` of :obj:`webrtc.RTCIceServer`, optional): STUN and TURN servers to gather with.
-                A :obj:`dict` of the arguments of :obj:`webrtc.RTCIceServer` is accepted too.
 
         Raises:
             webrtc.InvalidStateError: If it's stopped, gathering already, or belongs to a connection.
@@ -133,7 +132,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
 
     def start(
         self,
-        remote_parameters: webrtc.RTCIceParameters | dict[str, str],
+        remote_parameters: webrtc.RTCIceParameters,
         role: webrtc.RTCIceRole | str = 'controlled',
     ) -> None:
         """Starts connecting a standalone transport to the remote agent, with the candidates added, or later.
@@ -142,7 +141,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
 
         Args:
             remote_parameters (:obj:`webrtc.RTCIceParameters`): The username fragment and the password of the
-                remote agent. A :obj:`dict` of the arguments of :obj:`webrtc.RTCIceParameters` is accepted too.
+                remote agent.
             role (:obj:`webrtc.RTCIceRole`, optional): Controlling or controlled (the default). When both agents take
                 the same role, one of them switches.
 
@@ -152,8 +151,6 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
             ValueError: If the role is neither controlling nor controlled.
         """
         self._check_open('start')
-        if isinstance(remote_parameters, dict):
-            remote_parameters = RTCIceParameters(**remote_parameters)
         if not _UFRAG.fullmatch(remote_parameters.username_fragment):
             msg = f'{remote_parameters.username_fragment!r} is not a valid ICE username fragment'
             raise InvalidSyntaxError(msg)
@@ -165,12 +162,11 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
             raise ValueError(msg)
         self._native_obj.start(remote_parameters.username_fragment, remote_parameters.password, role)
 
-    def add_remote_candidate(self, candidate: webrtc.RTCIceCandidate | dict[str, Any]) -> None:
+    def add_remote_candidate(self, candidate: webrtc.RTCIceCandidate | webrtc.RTCIceCandidateInit) -> None:
         """Adds a candidate of the remote agent to a standalone transport.
 
         Args:
-            candidate (:obj:`webrtc.RTCIceCandidate`): The candidate, or its JSON form
-                (see :meth:`webrtc.RTCIceCandidate.to_json`).
+            candidate (:obj:`webrtc.RTCIceCandidate` or :obj:`webrtc.RTCIceCandidateInit`): The candidate.
 
         Raises:
             TypeError: If the candidate has neither ``sdp_mid`` nor ``sdp_m_line_index``.
@@ -179,7 +175,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
         """
         self._check_open('add a remote candidate')
         if not isinstance(candidate, RTCIceCandidate):
-            candidate = RTCIceCandidate.from_json(candidate)
+            candidate = RTCIceCandidate(*RTCIceCandidate._members_of(candidate))
         self._native_obj.addRemoteCandidate(
             candidate.candidate, candidate.sdp_mid or '', candidate.sdp_m_line_index or 0, candidate.username_fragment
         )

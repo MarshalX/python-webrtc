@@ -10,9 +10,8 @@
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import re
-from typing import TYPE_CHECKING, Any, ClassVar, Union
+from typing import TYPE_CHECKING, ClassVar, Union
 
 import webrtc
 from webrtc import (
@@ -25,24 +24,23 @@ from webrtc import (
     RTCConfiguration,
     RTCDataChannelEvent,
     RTCIceCandidate,
+    RTCLocalSessionDescriptionInit,
     RTCPeerConnectionIceErrorEvent,
     RTCPeerConnectionIceEvent,
     RTCRtpCodec,
-    RTCRtpEncodingParameters,
+    RTCRtpTransceiverInit,
     RTCSdpType,
     RTCSessionDescription,
     RTCSessionDescriptionInit,
     RTCSignalingState,
     RTCStatsReport,
     RTCTrackEvent,
-    RtpTransceiverInit,
     TransceiverDirection,
     WebRTCObject,
     wrtc,
 )
 from webrtc.interfaces.rtc_data_channel import RTCDataChannelInit, check_utf8_length
 from webrtc.utils.events import EventTarget
-from webrtc.utils.names import members
 from webrtc.utils.native_calls import call_native
 from webrtc.utils.operations import OperationsChain, later
 from webrtc.utils.task_queue import TaskQueue
@@ -53,7 +51,7 @@ if TYPE_CHECKING:
     from typing_extensions import Self
 
 #: A description, as the methods that set one take it
-_Description = Union[RTCSessionDescription, RTCSessionDescriptionInit, dict[str, Any]]
+_Description = Union[RTCSessionDescription, RTCSessionDescriptionInit]
 
 # the signaling states a local description of a type can be set in
 _LOCAL_DESCRIPTION_STATES = {
@@ -276,7 +274,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
                 elif transceiver.direction == directions.recvonly:
                     transceiver.direction = directions.inactive
         elif not any(t.direction in {directions.sendrecv, directions.recvonly} for t in transceivers):
-            self.add_transceiver(kind, RtpTransceiverInit(direction=directions.recvonly))
+            self.add_transceiver(kind, RTCRtpTransceiverInit(direction=directions.recvonly))
 
     def _completed_description(self) -> None:
         """The success task of setting a description."""
@@ -345,7 +343,9 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             await later()
             return _init_of(await call_native(self._native_obj.createAnswer, voice_activity_detection))
 
-    async def set_local_description(self, description: _Description | None = None) -> None:
+    async def set_local_description(
+        self, description: _Description | RTCLocalSessionDescriptionInit | None = None
+    ) -> None:
         """Changes the local description associated with the connection.
 
         This description specifies the properties of the local end of the connection, including the media format.
@@ -353,8 +353,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         Args:
             description (:obj:`webrtc.RTCSessionDescription`, optional): The description, as returned by
                 :meth:`create_offer` or :meth:`create_answer`, or a ``rollback`` one. An
-                :obj:`webrtc.RTCSessionDescriptionInit` or a :obj:`dict` with ``type`` and ``sdp`` keys is accepted
-                too. Without it, or with an empty ``sdp``, the offer or the answer the signaling state calls for
+                :obj:`webrtc.RTCSessionDescriptionInit` or :obj:`webrtc.RTCLocalSessionDescriptionInit` is accepted
+                too. Without it, or without a type and an SDP, the offer or the answer the signaling state calls for
                 is created and set.
 
         Raises:
@@ -380,8 +380,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
 
         Args:
             description (:obj:`webrtc.RTCSessionDescription`): The description received from the remote peer.
-                An :obj:`webrtc.RTCSessionDescriptionInit` or a :obj:`dict` with ``type`` and ``sdp`` keys
-                is accepted too.
+                An :obj:`webrtc.RTCSessionDescriptionInit` is accepted too, like one from
+                :meth:`webrtc.RTCSessionDescriptionInit.from_json`.
 
         Raises:
             webrtc.InvalidStateError: If the type doesn't match the signaling state, or the connection is closed.
@@ -425,7 +425,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
     def add_transceiver(
         self,
         track_or_kind: webrtc.MediaStreamTrack | webrtc.MediaType,
-        init: webrtc.RtpTransceiverInit | dict[str, Any] | None = None,
+        init: webrtc.RTCRtpTransceiverInit | None = None,
     ) -> webrtc.RTCRtpTransceiver:
         """Creates a new :obj:`webrtc.RTCRtpTransceiver` and adds it to the transceivers of the connection.
 
@@ -437,9 +437,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
                 :obj:`webrtc.MediaStreamTrack` to associate with the transceiver, or :attr:`webrtc.MediaType.audio`
                 or :attr:`webrtc.MediaType.video` (or its value), which is used as the kind of the receiver's track,
                 and by extension of the :obj:`webrtc.RTCRtpReceiver` itself.
-            init (:obj:`webrtc.RtpTransceiverInit` or :obj:`dict`, optional): An object for specifying any options
-                when creating the new transceiver, or a dictionary of its members (the encodings may be dictionaries
-                too). It isn't changed.
+            init (:obj:`webrtc.RTCRtpTransceiverInit`, optional): The options of the new transceiver. It isn't
+                changed.
 
         Returns:
             :obj:`webrtc.RTCRtpTransceiver`: The new transceiver.
@@ -455,13 +454,9 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             msg = f'{kind!r} is not a kind of track'
             raise TypeError(msg)
         native_init = None
-        if isinstance(init, dict):
-            init = _transceiver_init(init)
         if init is not None:
             _check_send_encodings(init.send_encodings, kind)
-            # a copy, with the encodings for the kind
-            encodings = [encoding._for_kind(kind) for encoding in init.send_encodings]
-            native_init = RtpTransceiverInit(init.direction, encodings, init.streams)._native_obj
+            native_init = init._to_native([encoding._for_kind(kind) for encoding in init.send_encodings])
 
         if isinstance(track_or_kind, webrtc.MediaStreamTrack):
             transceiver = self._native_obj.addTransceiver(track_or_kind._native_obj, native_init)
@@ -526,13 +521,15 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         """
         self._native_obj.removeTrack(sender._native_obj)
 
-    async def add_ice_candidate(self, candidate: webrtc.RTCIceCandidate | dict[str, Any] | None = None) -> None:
+    async def add_ice_candidate(
+        self, candidate: webrtc.RTCIceCandidateInit | webrtc.RTCIceCandidate | None = None
+    ) -> None:
         """Adds a candidate received from the remote peer to the remote description.
 
         Args:
-            candidate (:obj:`webrtc.RTCIceCandidate` or :obj:`dict`, optional): The candidate, or its JSON form
-                (see :meth:`webrtc.RTCIceCandidate.to_json`). A candidate with an empty
-                :attr:`webrtc.RTCIceCandidate.candidate`, or :obj:`None`, means the end of candidates.
+            candidate (:obj:`webrtc.RTCIceCandidateInit` or :obj:`webrtc.RTCIceCandidate`, optional): The
+                candidate, like one from :meth:`webrtc.RTCIceCandidateInit.from_json`. An empty ``candidate``,
+                or :obj:`None`, means the end of candidates.
 
         Raises:
             TypeError: If a non-empty candidate has neither ``sdp_mid`` nor ``sdp_m_line_index``.
@@ -556,7 +553,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             await call_native(self._native_obj.addIceCandidate, candidate_str, sdp_mid, sdp_m_line_index, ufrag)
 
     def create_data_channel(
-        self, label: str, options: webrtc.RTCDataChannelInit | dict[str, Any] | None = None
+        self, label: str, options: webrtc.RTCDataChannelInit | None = None
     ) -> webrtc.RTCDataChannel:
         """Creates a channel to send messages to the remote peer, negotiated with the next offer.
 
@@ -564,8 +561,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
 
         Args:
             label (:obj:`str`): The name of the channel, up to 65535 bytes in UTF-8.
-            options (:obj:`webrtc.RTCDataChannelInit` or :obj:`dict`, optional): How to create the channel, or
-                a dictionary of its members.
+            options (:obj:`webrtc.RTCDataChannelInit`, optional): How to create the channel.
 
         Returns:
             :obj:`webrtc.RTCDataChannel`: The channel.
@@ -576,11 +572,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             webrtc.InvalidStateError: If the connection is closed.
             webrtc.OperationError: If the ``id`` is in use, or no id is left.
         """
-        if isinstance(options, dict):
-            options = RTCDataChannelInit(
-                **members(options, [field.name for field in dataclasses.fields(RTCDataChannelInit)])
-            )
-        init = options or RTCDataChannelInit()
+        init = options if options is not None else RTCDataChannelInit()
         check_utf8_length('label', label)
         init._check()
         native = self._native_obj.createDataChannel(
@@ -624,14 +616,14 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
 
     @staticmethod
     async def generate_certificate(
-        algorithm: webrtc.models.rtc_certificate.Algorithm = 'ECDSA', expires: float | None = None
+        algorithm: webrtc.models.rtc_certificate.AlgorithmIdentifier = 'ECDSA', expires: float | None = None
     ) -> webrtc.RTCCertificate:
         """Generates a certificate for :attr:`webrtc.RTCConfiguration.certificates`.
 
         The same as :meth:`webrtc.RTCCertificate.generate`.
 
         Args:
-            algorithm (:obj:`str` or :obj:`dict`, optional): The WebCrypto algorithm of the key.
+            algorithm (:obj:`str` or :obj:`webrtc.Algorithm`, optional): The WebCrypto algorithm of the key.
             expires (:obj:`float`, optional): In how many milliseconds the certificate expires.
 
         Returns:
@@ -670,7 +662,9 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             ValueError: If a member of the configuration is out of range.
             TypeError: If a member of the configuration has a wrong type, or a value its enum doesn't have.
         """
-        self._native_obj.setConfiguration((configuration or RTCConfiguration())._to_native())
+        if configuration is None:
+            configuration = RTCConfiguration()
+        self._native_obj.setConfiguration(configuration._to_native())
 
     def restart_ice(self) -> None:
         """Allows to easily request that ICE candidate gathering be redone on both ends of the connection.
@@ -812,40 +806,26 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
 
 
 def _description_init(
-    description: _Description | None, *, allow_implicit: bool
+    description: _Description | RTCLocalSessionDescriptionInit | None, *, allow_implicit: bool
 ) -> wrtc.RTCSessionDescriptionInit | None:
     """The native RTCSessionDescriptionInit of a description, or :obj:`None` for an implicit one."""
-    if description is None and allow_implicit:
-        return None
-    if isinstance(description, dict):
-        if description.get('type') is None:
-            if allow_implicit and not description.get('sdp'):
-                return None
-            msg = 'the type of a description is required'
-            raise TypeError(msg)
-        description = RTCSessionDescription(description)
     if isinstance(description, RTCSessionDescription):
         return description._native_obj.init
+    if allow_implicit and isinstance(description, RTCLocalSessionDescriptionInit):
+        if description.type is None and description.sdp:
+            msg = 'the type of a description is required'
+            raise TypeError(msg)
+        description = None if description.type is None else RTCSessionDescriptionInit(description.type, description.sdp)
     if isinstance(description, RTCSessionDescriptionInit):
-        return description._native_obj
+        return description._to_native()
+    if allow_implicit and description is None:
+        return None
     msg = f'expected an RTCSessionDescription, not {type(description).__name__}'
     raise TypeError(msg)
 
 
 def _init_of(description: wrtc.RTCSessionDescription) -> webrtc.RTCSessionDescriptionInit:
     return RTCSessionDescriptionInit(description.type, description.sdp)
-
-
-def _transceiver_init(init: dict[str, Any]) -> RtpTransceiverInit:
-    """An init from a dictionary, as in browsers, with its encodings dictionaries too."""
-    values = members(init, ('direction', 'send_encodings', 'streams'))
-    encodings = values.get('send_encodings')
-    if encodings is not None:
-        names = [field.name for field in dataclasses.fields(RTCRtpEncodingParameters)]
-        values['send_encodings'] = [
-            RTCRtpEncodingParameters(**members(e, names)) if isinstance(e, dict) else e for e in encodings
-        ]
-    return RtpTransceiverInit(**values)
 
 
 def _check_send_encodings(encodings: list[webrtc.RTCRtpEncodingParameters], kind: webrtc.MediaType) -> None:

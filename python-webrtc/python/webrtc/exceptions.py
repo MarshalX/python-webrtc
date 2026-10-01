@@ -9,14 +9,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Any, ClassVar
+from dataclasses import dataclass
+from typing import ClassVar
 
 from webrtc import RTCErrorDetailType, wrtc
-from webrtc.utils.names import Alias, alias, members
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
+from webrtc.models.dictionary import Dictionary
+from webrtc.utils.names import Alias, alias
 
 PythonWebRTCExceptionBase = wrtc.PythonWebRTCExceptionBase
 PythonWebRTCException = wrtc.PythonWebRTCException
@@ -77,7 +75,7 @@ class OverconstrainedError(RTCException):
 
 
 @dataclass
-class RTCErrorInit:
+class RTCErrorInit(Dictionary):
     """The WebRTC-specific information of an :obj:`RTCError`.
 
     Args:
@@ -120,21 +118,11 @@ class RTCError(OperationError):
     """An error carrying WebRTC-specific information, the members of its :obj:`RTCErrorInit`.
 
     Args:
-        options (:obj:`RTCErrorInit` or :obj:`dict`): The WebRTC-specific information, or a dictionary of its
-            members.
+        init (:obj:`RTCErrorInit`): The WebRTC-specific information.
         message (:obj:`str`, optional): A description of the error.
-
-    Raises:
-        TypeError: If a dictionary has no ``error_detail``.
-        ValueError: If ``error_detail`` isn't a member of :obj:`RTCErrorDetailType`.
     """
 
-    def __init__(self, options: RTCErrorInit | Mapping[str, Any], message: str = '') -> None:
-        init = (
-            options
-            if isinstance(options, RTCErrorInit)
-            else RTCErrorInit(**members(options, [field.name for field in fields(RTCErrorInit)]))
-        )
+    def __init__(self, init: RTCErrorInit, message: str = '') -> None:
         super().__init__(message)
         self.message = message
         self.error_detail = init.error_detail

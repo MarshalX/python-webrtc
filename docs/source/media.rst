@@ -22,9 +22,10 @@ Receiving
 
     @pc.on('track')
     async def on_track(event):
-        async for frame in webrtc.MediaStreamTrackProcessor(event.track).readable:
-            rgba = bytearray(frame.allocation_size({'format': 'RGBA'}))
-            await frame.copy_to(rgba, {'format': 'RGBA'})
+        rgba_options = webrtc.VideoFrameCopyToOptions(format='RGBA')
+        async for frame in webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(event.track)).readable:
+            rgba = bytearray(frame.allocation_size(rgba_options))
+            await frame.copy_to(rgba, rgba_options)
             frame.close()
 
 Sending
@@ -35,13 +36,14 @@ Sending
     generator = webrtc.VideoTrackGenerator()
     pc.add_track(generator.track)
     writer = generator.writable.get_writer()
-    await writer.write(webrtc.VideoFrame(i420, format='I420', coded_width=640, coded_height=480, timestamp=0))
+    init = webrtc.VideoFrameBufferInit(format='I420', coded_width=640, coded_height=480, timestamp=0)
+    await writer.write(webrtc.VideoFrame(i420, init))
 
     microphone = webrtc.MediaStreamTrackGenerator('audio')
     pc.add_track(microphone)
     await microphone.writable.get_writer().write(
-        webrtc.AudioData(format='s16', sample_rate=48000, number_of_frames=480, number_of_channels=1,
-                         timestamp=0, data=pcm)
+        webrtc.AudioData(webrtc.AudioDataInit(format='s16', sample_rate=48000, number_of_frames=480,
+                                              number_of_channels=1, timestamp=0, data=pcm))
     )
 
 Transforming
@@ -49,6 +51,6 @@ Transforming
 
 .. code-block:: python
 
-    processor = webrtc.MediaStreamTrackProcessor(track)
+    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
     generator = webrtc.VideoTrackGenerator()
     await processor.readable.pipe_through(webrtc.TransformStream(transformer)).pipe_to(generator.writable)

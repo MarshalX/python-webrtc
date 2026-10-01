@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import math
 import warnings
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, TypeVar
 
@@ -28,15 +28,14 @@ from webrtc import (
     wrtc,
 )
 from webrtc.models.closable import Closable
-from webrtc.utils.names import Alias, alias, snake_case
+from webrtc.models.dictionary import Dictionary
+from webrtc.utils.names import Alias, alias
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
     from typing_extensions import Buffer
 
 _EnumT = TypeVar('_EnumT', bound=Enum)
-_InitT = TypeVar('_InitT')
+_InitT = TypeVar('_InitT', 'VideoFrameBufferInit', 'VideoFrameInit')
 
 _MAX_UNSIGNED_LONG = 2**32 - 1
 _RGB_FORMATS = (VideoPixelFormat.RGBA, VideoPixelFormat.RGBX, VideoPixelFormat.BGRA, VideoPixelFormat.BGRX)
@@ -80,7 +79,24 @@ class DOMRectReadOnly:
 
 
 @dataclass
-class PlaneLayout:
+class DOMRectInit(Dictionary):
+    """A rectangle to give, like the visible part of a new frame. A :obj:`DOMRectReadOnly` is taken as well.
+
+    Args:
+        x (:obj:`float`, optional): The left edge.
+        y (:obj:`float`, optional): The top edge.
+        width (:obj:`float`, optional): The width.
+        height (:obj:`float`, optional): The height.
+    """
+
+    x: float = 0
+    y: float = 0
+    width: float = 0
+    height: float = 0
+
+
+@dataclass
+class PlaneLayout(Dictionary):
     """Where a plane is in a buffer.
 
     Args:
@@ -123,6 +139,26 @@ class VideoColorSpace:
     toJSON: ClassVar = to_json
 
 
+@dataclass
+class VideoColorSpaceInit(Dictionary):
+    """A color space to give a new frame. A :obj:`VideoColorSpace` is taken as well.
+
+    Args:
+        primaries (:obj:`webrtc.VideoColorPrimaries`, optional): The color primaries.
+        transfer (:obj:`webrtc.VideoTransferCharacteristics`, optional): The transfer characteristics.
+        matrix (:obj:`webrtc.VideoMatrixCoefficients`, optional): The matrix coefficients.
+        full_range (:obj:`bool`, optional): Whether the samples use the full range of their bits.
+    """
+
+    primaries: VideoColorPrimaries | None = None
+    transfer: VideoTransferCharacteristics | None = None
+    matrix: VideoMatrixCoefficients | None = None
+    full_range: bool | None = None
+
+    #: Alias for :attr:`full_range`
+    fullRange: ClassVar[Alias[bool | None]] = alias('full_range')
+
+
 _REC709 = VideoColorSpace(
     VideoColorPrimaries.bt709, VideoTransferCharacteristics.bt709, VideoMatrixCoefficients.bt709, full_range=False
 )
@@ -139,7 +175,7 @@ _REC601 = VideoColorSpace(
 
 
 @dataclass
-class VideoFrameMetadata:
+class VideoFrameMetadata(Dictionary):
     """What else is known of a frame.
 
     Args:
@@ -153,7 +189,7 @@ class VideoFrameMetadata:
 
 
 @dataclass
-class VideoFrameBufferInit:
+class VideoFrameBufferInit(Dictionary):
     """How to create a :obj:`VideoFrame` from a buffer of pixels.
 
     Args:
@@ -164,13 +200,15 @@ class VideoFrameBufferInit:
         duration (:obj:`int`, optional): The duration in microseconds.
         layout (:obj:`list` of :obj:`PlaneLayout`, optional): Where the planes are in the buffer, packed one after
             another by default.
-        visible_rect (:obj:`DOMRectReadOnly`, optional): The part of the frame to show, all of it by default.
+        visible_rect (:obj:`DOMRectInit`, optional): The part of the frame to show, all of it by default.
         rotation (:obj:`float`, optional): How the frame is rotated clockwise to be shown, rounded to a multiple of 90.
         flip (:obj:`bool`, optional): Whether the frame is mirrored horizontally to be shown, before the rotation.
         display_width (:obj:`int`, optional): The width to show the frame at, with ``display_height``.
         display_height (:obj:`int`, optional): The height to show the frame at, with ``display_width``.
-        color_space (:obj:`VideoColorSpace`, optional): The color space.
+        color_space (:obj:`VideoColorSpaceInit`, optional): The color space.
     """
+
+    _dictionaries: ClassVar = {'layout': PlaneLayout, 'visible_rect': DOMRectInit, 'color_space': VideoColorSpaceInit}
 
     format: VideoPixelFormat
     coded_width: int
@@ -178,53 +216,55 @@ class VideoFrameBufferInit:
     timestamp: int
     duration: int | None = None
     layout: list[PlaneLayout] | None = None
-    visible_rect: DOMRectReadOnly | None = None
+    visible_rect: DOMRectInit | DOMRectReadOnly | None = None
     rotation: float = 0
     flip: bool = False
     display_width: int | None = None
     display_height: int | None = None
-    color_space: VideoColorSpace | None = None
+    color_space: VideoColorSpaceInit | VideoColorSpace | None = None
 
     #: Alias for :attr:`coded_width`
     codedWidth: ClassVar[Alias[int]] = alias('coded_width')
     #: Alias for :attr:`coded_height`
     codedHeight: ClassVar[Alias[int]] = alias('coded_height')
     #: Alias for :attr:`visible_rect`
-    visibleRect: ClassVar[Alias[DOMRectReadOnly | None]] = alias('visible_rect')
+    visibleRect: ClassVar[Alias[DOMRectInit | DOMRectReadOnly | None]] = alias('visible_rect')
     #: Alias for :attr:`display_width`
     displayWidth: ClassVar[Alias[int | None]] = alias('display_width')
     #: Alias for :attr:`display_height`
     displayHeight: ClassVar[Alias[int | None]] = alias('display_height')
     #: Alias for :attr:`color_space`
-    colorSpace: ClassVar[Alias[VideoColorSpace | None]] = alias('color_space')
+    colorSpace: ClassVar[Alias[VideoColorSpaceInit | VideoColorSpace | None]] = alias('color_space')
 
 
 @dataclass
-class VideoFrameInit:
+class VideoFrameInit(Dictionary):
     """How to create a :obj:`VideoFrame` from another one. Members left out are the ones of that frame.
 
     Args:
         timestamp (:obj:`int`, optional): The presentation time in microseconds.
         duration (:obj:`int`, optional): The duration in microseconds.
         alpha (:obj:`webrtc.AlphaOption`, optional): Whether the alpha channel is kept.
-        visible_rect (:obj:`DOMRectReadOnly`, optional): The part of the frame to show.
+        visible_rect (:obj:`DOMRectInit`, optional): The part of the frame to show.
         rotation (:obj:`float`, optional): A rotation added to the one of the frame.
         flip (:obj:`bool`, optional): Whether to mirror the frame, in addition to the frame's own flip.
         display_width (:obj:`int`, optional): The width to show the frame at, with ``display_height``.
         display_height (:obj:`int`, optional): The height to show the frame at, with ``display_width``.
     """
 
+    _dictionaries: ClassVar = {'visible_rect': DOMRectInit}
+
     timestamp: int | None = None
     duration: int | None = None
     alpha: AlphaOption = AlphaOption.keep
-    visible_rect: DOMRectReadOnly | None = None
+    visible_rect: DOMRectInit | DOMRectReadOnly | None = None
     rotation: float = 0
     flip: bool = False
     display_width: int | None = None
     display_height: int | None = None
 
     #: Alias for :attr:`visible_rect`
-    visibleRect: ClassVar[Alias[DOMRectReadOnly | None]] = alias('visible_rect')
+    visibleRect: ClassVar[Alias[DOMRectInit | DOMRectReadOnly | None]] = alias('visible_rect')
     #: Alias for :attr:`display_width`
     displayWidth: ClassVar[Alias[int | None]] = alias('display_width')
     #: Alias for :attr:`display_height`
@@ -232,17 +272,19 @@ class VideoFrameInit:
 
 
 @dataclass
-class VideoFrameCopyToOptions:
+class VideoFrameCopyToOptions(Dictionary):
     """How :meth:`VideoFrame.copy_to` copies a frame.
 
     Args:
-        rect (:obj:`DOMRectReadOnly`, optional): The part to copy, the visible one by default.
+        rect (:obj:`DOMRectInit`, optional): The part to copy, the visible one by default.
         layout (:obj:`list` of :obj:`PlaneLayout`, optional): Where to put the planes, one after another by default.
         format (:obj:`webrtc.VideoPixelFormat`, optional): The format to convert to: the frame's own one, or one of
             ``RGBA``, ``RGBX``, ``BGRA`` and ``BGRX``.
     """
 
-    rect: DOMRectReadOnly | None = None
+    _dictionaries: ClassVar = {'rect': DOMRectInit, 'layout': PlaneLayout}
+
+    rect: DOMRectInit | DOMRectReadOnly | None = None
     layout: list[PlaneLayout] | None = None
     format: VideoPixelFormat | None = None
 
@@ -342,23 +384,16 @@ def _oriented(width: int, height: int, rotation: int) -> tuple[int, int]:
     return (height, width) if _is_sideways(rotation) else (width, height)
 
 
-def _rect(value: object) -> DOMRectReadOnly | None:
+def _rect(value: DOMRectInit | DOMRectReadOnly | None) -> DOMRectReadOnly | None:
     if value is None or isinstance(value, DOMRectReadOnly):
         return value
-    if isinstance(value, dict):
-        return DOMRectReadOnly(**{k: v for k, v in value.items() if k in {'x', 'y', 'width', 'height'}})
-    msg = f'{value!r} is not a DOMRectReadOnly'
-    raise TypeError(msg)
+    return DOMRectReadOnly(value.x, value.y, value.width, value.height)
 
 
-def _layout(value: Iterable[PlaneLayout | dict[str, int]] | None) -> list[PlaneLayout] | None:
+def _layout(value: list[PlaneLayout] | None) -> list[PlaneLayout] | None:
     if value is None:
         return None
-    layout = []
-    for item in value:
-        plane = PlaneLayout(item['offset'], item['stride']) if isinstance(item, dict) else item
-        layout.append(PlaneLayout(_dimension(plane.offset, 'offset'), _dimension(plane.stride, 'stride')))
-    return layout
+    return [PlaneLayout(_dimension(plane.offset, 'offset'), _dimension(plane.stride, 'stride')) for plane in value]
 
 
 def _rotation(value: float) -> int:
@@ -458,19 +493,9 @@ def _plane_copy(
     return _PlaneCopy(left_bytes, top, width_bytes, height, layout[index].offset, layout[index].stride)
 
 
-def _color_space(value: object) -> VideoColorSpace | None:
+def _color_space(value: VideoColorSpaceInit | VideoColorSpace | None) -> VideoColorSpace | None:
     if value is None:
         return None
-    if isinstance(value, dict):
-        value = VideoColorSpace(
-            primaries=value.get('primaries'),
-            transfer=value.get('transfer'),
-            matrix=value.get('matrix'),
-            full_range=value.get('full_range', value.get('fullRange')),
-        )
-    if not isinstance(value, VideoColorSpace):
-        msg = f'{value!r} is not a VideoColorSpace'
-        raise TypeError(msg)
     return VideoColorSpace(
         _optional_enum(VideoColorPrimaries, value.primaries),
         _optional_enum(VideoTransferCharacteristics, value.transfer),
@@ -479,30 +504,13 @@ def _color_space(value: object) -> VideoColorSpace | None:
     )
 
 
-def _init_from(init: object, cls: type[_InitT], options: dict[str, object]) -> _InitT:
-    """The init of a constructor: a dataclass, a dictionary (with snake_case or camelCase names), or keywords."""
-    if init is None:
-        init = options
-    elif options:
-        msg = 'Pass either an init or keyword arguments'
-        raise TypeError(msg)
-    if isinstance(init, cls):
+def _init_of(init: _InitT | None, cls: type[_InitT]) -> _InitT:
+    """The init of a constructor, which a frame of a buffer requires."""
+    if init is not None:
         return init
-    if isinstance(init, dict):
-        names = {f.name for f in fields(cls)}
-        kwargs = {}
-        for key, value in init.items():
-            name = snake_case(key)
-            if name not in names:
-                msg = f'{cls.__name__} has no member {key!r}'
-                raise TypeError(msg)
-            kwargs[name] = value
-        try:
-            return cls(**kwargs)
-        except TypeError as e:
-            msg = f'Invalid {cls.__name__}: {e}'
-            raise TypeError(msg) from None
-    msg = f'{init!r} is not a {cls.__name__}'
+    if cls is VideoFrameInit:
+        return cls()
+    msg = f'A VideoFrame of a buffer needs a {cls.__name__}'
     raise TypeError(msg)
 
 
@@ -557,7 +565,7 @@ class VideoFrame(Closable):
     Args:
         source: A bytes-like buffer of pixels, or a :obj:`VideoFrame` to create another frame of the same pixels.
         init (:obj:`VideoFrameBufferInit` or :obj:`VideoFrameInit`, optional): How to create the frame, for a buffer
-            (required) or a frame. A dictionary of its members, or keyword arguments, can be passed instead.
+            (required) or a frame.
 
     Raises:
         TypeError: If the init isn't valid, or the buffer is too small for it.
@@ -565,20 +573,21 @@ class VideoFrame(Closable):
 
     Example::
 
-        frame = webrtc.VideoFrame(i420, format='I420', coded_width=640, coded_height=480, timestamp=0)
+        frame = webrtc.VideoFrame(
+            i420, webrtc.VideoFrameBufferInit(format='I420', coded_width=640, coded_height=480, timestamp=0)
+        )
     """
 
     def __init__(
         self,
         source: Buffer | VideoFrame,
-        init: VideoFrameBufferInit | VideoFrameInit | dict[str, object] | None = None,
-        **options: object,
+        init: VideoFrameBufferInit | VideoFrameInit | None = None,
     ) -> None:
         self._resource = None
         if isinstance(source, VideoFrame):
-            self._init_from_frame(source, _init_from(init, VideoFrameInit, options))
+            self._init_from_frame(source, _init_of(init, VideoFrameInit))
         elif _is_buffer(source):
-            self._init_from_buffer(source, _init_from(init, VideoFrameBufferInit, options))
+            self._init_from_buffer(source, _init_of(init, VideoFrameBufferInit))
         else:
             msg = f'A VideoFrame is created from a buffer or a VideoFrame, not {type(source).__name__}'
             raise TypeError(msg)
@@ -759,11 +768,12 @@ class VideoFrame(Closable):
             raise InvalidStateError(msg)
         return VideoFrameMetadata(self._metadata.rtp_timestamp)
 
-    def _plan_copy(self, options: VideoFrameCopyToOptions | dict[str, object] | None) -> _CopyPlan:
+    def _plan_copy(self, options: VideoFrameCopyToOptions | None) -> _CopyPlan:
         if self._resource is None:
             msg = 'The frame is closed'
             raise InvalidStateError(msg)
-        options = _init_from(options, VideoFrameCopyToOptions, {})
+        if options is None:
+            options = VideoFrameCopyToOptions()
         format = self._format
         if options.format is not None:
             format = _enum(VideoPixelFormat, options.format)
@@ -775,7 +785,7 @@ class VideoFrame(Closable):
         size, planes = _compute_layout(rect, format, _layout(options.layout))
         return _CopyPlan(format, rect, size, planes)
 
-    def allocation_size(self, options: VideoFrameCopyToOptions | dict[str, object] | None = None) -> int:
+    def allocation_size(self, options: VideoFrameCopyToOptions | None = None) -> int:
         """Returns how many bytes :meth:`copy_to` needs.
 
         Raises :obj:`webrtc.InvalidStateError` if the frame is closed, :obj:`TypeError` if the options aren't valid
@@ -787,7 +797,7 @@ class VideoFrame(Closable):
         return self._plan_copy(options).size
 
     def copy_to(
-        self, destination: bytearray | memoryview, options: VideoFrameCopyToOptions | dict[str, object] | None = None
+        self, destination: bytearray | memoryview, options: VideoFrameCopyToOptions | None = None
     ) -> asyncio.Future[list[PlaneLayout]]:
         """Copies the pixels into a buffer.
 
@@ -807,7 +817,7 @@ class VideoFrame(Closable):
         return future
 
     def _copy_to(
-        self, destination: bytearray | memoryview, options: VideoFrameCopyToOptions | dict[str, object] | None
+        self, destination: bytearray | memoryview, options: VideoFrameCopyToOptions | None
     ) -> list[PlaneLayout]:
         plan = self._plan_copy(options)
         if _buffer_size(destination) < plan.size:

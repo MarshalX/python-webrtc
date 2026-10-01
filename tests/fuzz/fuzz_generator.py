@@ -43,7 +43,12 @@ class Session:
     async def start(self) -> None:
         self.caller, self.callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
         self.processors = []
-        self.callee.on('track', lambda event: self.processors.append(webrtc.MediaStreamTrackProcessor(event.track)))
+        self.callee.on(
+            'track',
+            lambda event: self.processors.append(
+                webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(event.track))
+            ),
+        )
         self.senders, self.writers = {}, {}
         for kind in ('audio', 'video'):
             generator = webrtc.MediaStreamTrackGenerator(kind)
@@ -72,12 +77,14 @@ def audio_data(inp: Input) -> webrtc.AudioData:
         channels, frames = 1, 480
     size = min(frames * channels * SAMPLE_BYTES[format.value.split('-')[0]], 1 << 20)
     return webrtc.AudioData(
-        format=format,
-        sample_rate=rate,
-        number_of_frames=frames,
-        number_of_channels=channels,
-        timestamp=inp.integer(),
-        data=bytes(size),
+        webrtc.AudioDataInit(
+            format=format,
+            sample_rate=rate,
+            number_of_frames=frames,
+            number_of_channels=channels,
+            timestamp=inp.integer(),
+            data=bytes(size),
+        )
     )
 
 
@@ -85,9 +92,9 @@ def video_frame(inp: Input) -> webrtc.VideoFrame:
     format = inp.choice(PIXEL_FORMATS)
     width = inp.small(64) + 1 if inp.flag() else inp.choice([1, 2, 3, 15, 16, 17, 639, 640, 1920, 4096])
     height = inp.small(64) + 1 if inp.flag() else inp.choice([1, 2, 3, 15, 16, 17, 479, 480, 1080, 4096])
-    init = {'format': format, 'coded_width': width, 'coded_height': height, 'timestamp': inp.integer()}
+    init = webrtc.VideoFrameBufferInit(format=format, coded_width=width, coded_height=height, timestamp=inp.integer())
     if inp.flag():
-        init['rotation'] = inp.choice([0, 90, 180, 270])
+        init.rotation = inp.choice([0, 90, 180, 270])
     # enough for every format: 4 planes of 16-bit samples at most
     return webrtc.VideoFrame(inp.buffer(width * height * 8), init)
 

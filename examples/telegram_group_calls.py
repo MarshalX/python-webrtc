@@ -133,12 +133,14 @@ async def send_audio_data(generator: webrtc.MediaStreamTrackGenerator, file: Bin
         frames = len(data) // 4
         await writer.write(
             webrtc.AudioData(
-                format='s16',
-                sample_rate=48000,
-                number_of_frames=frames,
-                number_of_channels=2,
-                timestamp=chunks * 10_000,
-                data=data[: frames * 4],
+                webrtc.AudioDataInit(
+                    format='s16',
+                    sample_rate=48000,
+                    number_of_frames=frames,
+                    number_of_channels=2,
+                    timestamp=chunks * 10_000,
+                    data=data[: frames * 4],
+                )
             )
         )
         chunks += 1

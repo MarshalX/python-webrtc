@@ -65,6 +65,8 @@
   const pyEnum = (name, value, strict = true) => ({__enum: name, value: String(value), strict});
   // a dictionary the library takes as a keyword model
   const pyModel = (name, kwargs) => ({__model: name, kwargs});
+  // a dictionary with the members JS gives, converted by the from_json of the library's model
+  const pyJson = (name, value) => ({__json: name, value});
 
   // USVString conversion replaces lone surrogates
   const toUSVString = (value) => String(value).toWellFormed();
@@ -309,7 +311,8 @@
     getCapabilities() { return callMethod(this, 'get_capabilities'); }
     getConstraints() { return callMethod(this, 'get_constraints'); }
     applyConstraints(constraints) {
-      return callAsyncMethod(this, 'apply_constraints', requireDictionary(constraints, 'MediaTrackConstraints'));
+      return callAsyncMethod(this, 'apply_constraints',
+        pyJson('MediaTrackConstraints', requireDictionary(constraints, 'MediaTrackConstraints')));
     }
   }
   defineAttributes(MediaStreamTrack, [
@@ -360,6 +363,7 @@
   }
   defineAttributes(RTCCertificate, [['expires', 'expires']]);
 
+  // the WebCrypto dictionary an algorithm normalizes to, as far as its members are given
   function toAlgorithm(algorithm) {
     if (typeof algorithm !== 'object' || algorithm === null) return String(algorithm);
     const converted = {name: String(algorithm.name)};
@@ -369,7 +373,11 @@
     if (algorithm.hash !== undefined) {
       converted.hash = typeof algorithm.hash === 'object' ? String(algorithm.hash.name) : String(algorithm.hash);
     }
-    return converted;
+    const name = converted.name.toUpperCase();
+    if (name === 'ECDSA' && converted.namedCurve !== undefined) return pyJson('EcKeyGenParams', converted);
+    const rsa = ['modulusLength', 'publicExponent', 'hash'].every((key) => converted[key] !== undefined);
+    if (name === 'RSASSA-PKCS1-V1_5' && rsa) return pyJson('RsaHashedKeyGenParams', converted);
+    return pyJson('Algorithm', {name: converted.name});
   }
 
   class RTCIceCandidate extends Interface {
@@ -744,9 +752,9 @@
     const sdp = init.sdp === undefined ? '' : String(init.sdp);
     if (init.type === undefined) {
       if (typeRequired) throw new TypeError('RTCSessionDescriptionInit: missing required member type');
-      return {sdp};
+      return pyModel('RTCLocalSessionDescriptionInit', {sdp});
     }
-    return {type: pyEnum('RTCSdpType', init.type), sdp};
+    return pyModel('RTCSessionDescriptionInit', {type: pyEnum('RTCSdpType', init.type), sdp});
   }
 
   class RTCPeerConnection extends Interface {
@@ -786,7 +794,7 @@
         : requireInterface(trackOrKind, MediaStreamTrack, 'RTCPeerConnection.addTransceiver');
       if (init === undefined) return callMethod(this, 'add_transceiver', trackOrPyKind);
       return callMethod(this, 'add_transceiver', trackOrPyKind,
-        pyModel('RtpTransceiverInit', convertDictionary(init, 'RTCRtpTransceiverInit', TRANSCEIVER_INIT)));
+        pyModel('RTCRtpTransceiverInit', convertDictionary(init, 'RTCRtpTransceiverInit', TRANSCEIVER_INIT)));
     }
 
     getTransceivers() { return callMethod(this, 'get_transceivers'); }
@@ -800,19 +808,18 @@
       requireArguments(arguments, 1, 'RTCPeerConnection.createDataChannel');
       const kwargs = convertDictionary(requireDictionary(init, 'RTCDataChannelInit'), 'RTCDataChannelInit',
         DATA_CHANNEL_INIT);
-      return callMethod(this, 'create_data_channel', toUSVString(label), kwargs);
+      return callMethod(this, 'create_data_channel', toUSVString(label), pyModel('RTCDataChannelInit', kwargs));
     }
 
     async addIceCandidate(candidate) {
       if (candidate instanceof RTCIceCandidate) return callAsyncMethod(this, 'add_ice_candidate', candidate);
-      // the JSON form of a candidate (the keys of RTCIceCandidateInit), which add_ice_candidate takes as it is
       const init = candidate ?? {};
-      return callAsyncMethod(this, 'add_ice_candidate', {
+      return callAsyncMethod(this, 'add_ice_candidate', pyModel('RTCIceCandidateInit', {
         candidate: init.candidate === undefined ? '' : String(init.candidate),
-        sdpMid: init.sdpMid ?? null,
-        sdpMLineIndex: init.sdpMLineIndex ?? null,
-        usernameFragment: init.usernameFragment ?? null,
-      });
+        sdp_mid: init.sdpMid ?? null,
+        sdp_m_line_index: init.sdpMLineIndex ?? null,
+        username_fragment: init.usernameFragment ?? null,
+      }));
     }
 
     async getStats(selector) {
@@ -973,9 +980,17 @@
   // members of the WebIDL dictionaries the library takes, the others are left out as WebIDL does
   const pick = (dict, members) =>
     Object.fromEntries(members.filter((m) => dict[m] !== undefined).map((m) => [m, dict[m]]));
-  // a DOMRectInit, read from any object with its members (like a DOMRectReadOnly, whose members are getters)
+  // nested dictionaries, read from any object with their members (like a DOMRectReadOnly, whose members are getters)
   const toRectInit = (rect) => (rect == null ? rect : pick(rect, ['x', 'y', 'width', 'height']));
-  const withRect = (dict, name) => (dict[name] === undefined ? dict : {...dict, [name]: toRectInit(dict[name])});
+  const toColorSpaceInit = (space) => (space == null ? space : pick(space, ['primaries', 'transfer', 'matrix', 'fullRange']));
+  const toLayout = (layout) => (layout == null ? layout : Array.from(layout, (plane) => pick(plane, ['offset', 'stride'])));
+  const nested = (dict) => {
+    const result = {...dict};
+    for (const name of ['visibleRect', 'rect']) if (result[name] !== undefined) result[name] = toRectInit(result[name]);
+    if (result.colorSpace !== undefined) result.colorSpace = toColorSpaceInit(result.colorSpace);
+    if (result.layout !== undefined) result.layout = toLayout(result.layout);
+    return result;
+  };
   const VIDEO_FRAME_BUFFER_INIT = [
     'format', 'codedWidth', 'codedHeight', 'timestamp', 'duration', 'layout', 'visibleRect', 'rotation', 'flip',
     'displayWidth', 'displayHeight', 'colorSpace',
@@ -983,7 +998,8 @@
   const VIDEO_FRAME_INIT = [
     'duration', 'timestamp', 'alpha', 'visibleRect', 'rotation', 'flip', 'displayWidth', 'displayHeight',
   ];
-  const copyToOptions = (options) => withRect(requireDictionary(options, 'VideoFrameCopyToOptions'), 'rect');
+  const copyToOptions = (options) =>
+    pyJson('VideoFrameCopyToOptions', nested(pick(requireDictionary(options, 'VideoFrameCopyToOptions'), ['rect', 'layout', 'format'])));
 
   class VideoFrame extends Interface {
     constructor(...args) {
@@ -991,11 +1007,11 @@
         requireArguments(args, 1, 'VideoFrame');
         const dict = requireDictionary(init, 'VideoFrameInit');
         if (image instanceof VideoFrame) {
-          const init = withRect(pick(dict, VIDEO_FRAME_INIT), 'visibleRect');
+          const init = pyJson('VideoFrameInit', nested(pick(dict, VIDEO_FRAME_INIT)));
           return construct('VideoFrame', {source: toPy(image), init});
         }
         if (image instanceof ArrayBuffer || ArrayBuffer.isView(image)) {
-          const init = withRect(pick(dict, VIDEO_FRAME_BUFFER_INIT), 'visibleRect');
+          const init = pyJson('VideoFrameBufferInit', nested(pick(dict, VIDEO_FRAME_BUFFER_INIT)));
           return construct('VideoFrame', {source: bytesOf(image), init});
         }
         // images, canvases and video elements are the browser's
@@ -1054,6 +1070,8 @@
   ]);
 
   const AUDIO_DATA_INIT = ['format', 'sampleRate', 'numberOfFrames', 'numberOfChannels', 'timestamp', 'data'];
+  const audioCopyToOptions = (options) => pyJson('AudioDataCopyToOptions',
+    pick(requireDictionary(options, 'options'), ['planeIndex', 'frameOffset', 'frameCount', 'format']));
 
   class AudioData extends Interface {
     constructor(...args) {
@@ -1061,15 +1079,15 @@
         requireArguments(args, 1, 'AudioData');
         const dict = pick(requireDictionary(init, 'AudioDataInit'), AUDIO_DATA_INIT);
         if (dict.data !== undefined) dict.data = bytesOf(dict.data, 'AudioDataInit.data');
-        return construct('AudioData', {init: dict});
+        return construct('AudioData', {init: pyJson('AudioDataInit', dict)});
       }));
     }
 
-    allocationSize(options) { return callMethod(this, 'allocation_size', requireDictionary(options, 'options')); }
+    allocationSize(options) { return callMethod(this, 'allocation_size', audioCopyToOptions(options)); }
 
     copyTo(destination, options) {
       const bytes = bytesOf(destination, 'destination');
-      const data = unwrap(bridge.audio_data_copy_to(pyObjects.get(this), bytes, requireDictionary(options, 'options')));
+      const data = unwrap(bridge.audio_data_copy_to(pyObjects.get(this), bytes, audioCopyToOptions(options)));
       bytes.set(new Uint8Array(data));
     }
 
@@ -1096,7 +1114,7 @@
         requireInterface(dict.track, MediaStreamTrack, 'MediaStreamTrackProcessor');
         const kwargs = {track: toPy(dict.track)};
         if (dict.maxBufferSize !== undefined) kwargs.max_buffer_size = enforceRange(dict.maxBufferSize, 0, 65535);
-        return construct('MediaStreamTrackProcessor', kwargs);
+        return construct('MediaStreamTrackProcessor', {init: pyModel('MediaStreamTrackProcessorInit', kwargs)});
       }));
     }
   }
@@ -1165,8 +1183,13 @@
   const {Event: _, ...eventInterfaces} = events;
   Object.assign(globalThis, eventInterfaces, {RTCError, RTCStatsReport});
 
-  // each a value, or a constraint on it (ConstrainULong, ConstrainDouble), which the library takes as they are
-  const VIDEO_CONSTRAINTS = {width: ['width'], height: ['height'], frameRate: ['frame_rate']};
+  // each a value, or a constraint on it (ConstrainULong, ConstrainDouble) the library has a model of
+  const constrain = (name) => (v) => (typeof v === 'object' && v !== null ? pyJson(name, v) : v);
+  const VIDEO_CONSTRAINTS = {
+    width: ['width', constrain('ConstrainULongRange')],
+    height: ['height', constrain('ConstrainULongRange')],
+    frameRate: ['frame_rate', constrain('ConstrainDoubleRange')],
+  };
 
   globalThis.navigator = {
     mediaDevices: {

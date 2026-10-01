@@ -26,42 +26,44 @@ EXPECTED = (TypeError, ValueError, BufferError, webrtc.NotSupportedError, webrtc
 loop = asyncio.new_event_loop()
 
 
-async def _copy_to(frame: webrtc.VideoFrame, destination: Buffer, options: dict[str, object] | None) -> None:
+async def _copy_to(
+    frame: webrtc.VideoFrame, destination: Buffer, options: webrtc.VideoFrameCopyToOptions | None
+) -> None:
     await frame.copy_to(destination, options)
 
 
-def copy_to(frame: webrtc.VideoFrame, destination: Buffer, options: dict[str, object] | None) -> None:
+def copy_to(frame: webrtc.VideoFrame, destination: Buffer, options: webrtc.VideoFrameCopyToOptions | None) -> None:
     loop.run_until_complete(_copy_to(frame, destination, options))
 
 
-def rect(inp: Input) -> dict[str, float]:
-    return {'x': inp.number(), 'y': inp.number(), 'width': inp.number(), 'height': inp.number()}
+def rect(inp: Input) -> webrtc.DOMRectInit:
+    return webrtc.DOMRectInit(inp.number(), inp.number(), inp.number(), inp.number())
 
 
-def layout(inp: Input) -> list[dict[str, object]]:
-    return [{'offset': inp.integer(4096), 'stride': inp.integer(256)} for _ in range(inp.small(4))]
+def layout(inp: Input) -> list[webrtc.PlaneLayout]:
+    return [webrtc.PlaneLayout(inp.integer(4096), inp.integer(256)) for _ in range(inp.small(4))]
 
 
-def copy_options(inp: Input) -> dict[str, object]:
-    options: dict[str, object] = {}
+def copy_options(inp: Input) -> webrtc.VideoFrameCopyToOptions:
+    options = webrtc.VideoFrameCopyToOptions()
     if inp.flag():
-        options['rect'] = rect(inp)
+        options.rect = rect(inp)
     if inp.flag():
-        options['layout'] = layout(inp)
+        options.layout = layout(inp)
     if inp.flag():
-        options['format'] = inp.choice(FORMATS)
+        options.format = inp.choice(FORMATS)
     return options
 
 
 def frame_of_frame(inp: Input, frame: webrtc.VideoFrame) -> webrtc.VideoFrame:
-    init: dict[str, object] = {'visible_rect': rect(inp)} if inp.flag() else {}
+    init = webrtc.VideoFrameInit(visible_rect=rect(inp) if inp.flag() else None)
     if inp.flag():
-        init['alpha'] = inp.choice(['keep', 'discard'])
+        init.alpha = inp.choice([webrtc.AlphaOption.keep, webrtc.AlphaOption.discard])
     if inp.flag():
-        init['rotation'] = inp.number(360)
-        init['flip'] = inp.flag()
+        init.rotation = inp.number(360)
+        init.flip = inp.flag()
     if inp.flag():
-        init['display_width'], init['display_height'] = inp.integer(), inp.integer()
+        init.display_width, init.display_height = inp.integer(), inp.integer()
     return webrtc.VideoFrame(frame, init)
 
 
@@ -85,7 +87,7 @@ def exercise(inp: Input, frame: webrtc.VideoFrame) -> None:
 def check_identity(format: webrtc.VideoPixelFormat, size: tuple[int, int], data: Buffer) -> None:
     """A packed frame copied out as it is gives the same bytes."""
     width, height = size
-    init = {'format': format, 'coded_width': width, 'coded_height': height, 'timestamp': 0}
+    init = webrtc.VideoFrameBufferInit(format=format, coded_width=width, coded_height=height, timestamp=0)
     size = webrtc.VideoFrame(bytes(1 << 16), init).allocation_size() if width * height <= 1024 else 0
     if not size:
         return
@@ -104,20 +106,15 @@ def test_one_input(data: bytes) -> None:
         check_identity(format, (width, height), inp.buffer(width * height * 8))
         return
     width, height = inp.integer(), inp.integer()
-    init: dict[str, object] = {
-        'format': format,
-        'coded_width': width,
-        'coded_height': height,
-        'timestamp': inp.integer(),
-    }
+    init = webrtc.VideoFrameBufferInit(format=format, coded_width=width, coded_height=height, timestamp=inp.integer())
     if inp.flag():
-        init['layout'] = layout(inp)
+        init.layout = layout(inp)
     if inp.flag():
-        init['visible_rect'] = rect(inp)
+        init.visible_rect = rect(inp)
     if inp.flag():
-        init['rotation'] = inp.number(360)
+        init.rotation = inp.number(360)
     if inp.flag():
-        init['display_width'], init['display_height'] = inp.integer(), inp.integer()
+        init.display_width, init.display_height = inp.integer(), inp.integer()
     try:
         frame = webrtc.VideoFrame(inp.buffer(inp.small(1 << 15)), init)
         exercise(inp, frame)

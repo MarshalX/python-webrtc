@@ -204,7 +204,9 @@ class MediaSteps(State):
     async def new_processor(self) -> None:
         track = self.pick(self.tracks)
         if track:
-            processor = webrtc.MediaStreamTrackProcessor(track, max_buffer_size=self.random.randrange(4))
+            processor = webrtc.MediaStreamTrackProcessor(
+                webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=self.random.randrange(4))
+            )
             track.on('ended', self.handler())
             self.processors.append((processor, processor.readable.get_reader()))
 
@@ -243,18 +245,21 @@ class MediaSteps(State):
         if kind == 'video':
             width, height = self.random.choice([(2, 2), (33, 17), (320, 240)])
             chunk = webrtc.VideoFrame(
-                bytes(width * height * 4), format='RGBA', coded_width=width, coded_height=height, timestamp=0
+                bytes(width * height * 4),
+                webrtc.VideoFrameBufferInit(format='RGBA', coded_width=width, coded_height=height, timestamp=0),
             )
         else:
             rate, channels = self.random.choice([(48000, 2), (8000, 1), (44100, 1), (1000, 1), (48000, 20)])
             frames = rate // 100
             chunk = webrtc.AudioData(
-                format='s16',
-                sample_rate=rate,
-                number_of_frames=frames,
-                number_of_channels=channels,
-                timestamp=0,
-                data=bytes(frames * channels * 2),
+                webrtc.AudioDataInit(
+                    format='s16',
+                    sample_rate=rate,
+                    number_of_frames=frames,
+                    number_of_channels=channels,
+                    timestamp=0,
+                    data=bytes(frames * channels * 2),
+                )
             )
         await writer.write(chunk)
 
@@ -270,9 +275,10 @@ class MediaSteps(State):
         fmt = self.random.choice(list(webrtc.VideoPixelFormat))
         width, height = self.random.randrange(1, 40), self.random.randrange(1, 40)
         frame = webrtc.VideoFrame(
-            bytes(width * height * 8), format=fmt, coded_width=width, coded_height=height, timestamp=0
+            bytes(width * height * 8),
+            webrtc.VideoFrameBufferInit(format=fmt, coded_width=width, coded_height=height, timestamp=0),
         )
-        options = self.random.choice([None, {'format': 'RGBA'}, {'format': 'BGRX'}])
+        options = self.random.choice([None, *(webrtc.VideoFrameCopyToOptions(format=f) for f in ('RGBA', 'BGRX'))])
         await frame.copy_to(bytearray(frame.allocation_size(options)), options)
         self.frames.append(frame)
 
@@ -284,7 +290,7 @@ class MediaSteps(State):
     async def pipe(self) -> None:
         track = self.pick([track for track in self.tracks if track.kind == 'video'])
         if track:
-            processor = webrtc.MediaStreamTrackProcessor(track)
+            processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
             generator = webrtc.VideoTrackGenerator()
             self.tracks.append(generator.track)
             self.tasks.append(processor.readable.pipe_through(webrtc.TransformStream()).pipe_to(generator.writable))
@@ -293,7 +299,13 @@ class MediaSteps(State):
         track = self.pick(self.tracks)
         if track:
             track.get_settings()
-            track.apply_constraints(self.random.choice([{'width': 320}, {'frame_rate': 5}, {'width': {'exact': 7}}]))
+            track.apply_constraints(
+                self.random.choice([
+                    webrtc.MediaTrackConstraints(width=320),
+                    webrtc.MediaTrackConstraints(frame_rate=5),
+                    webrtc.MediaTrackConstraints(width=webrtc.ConstrainULongRange(exact=7)),
+                ])
+            )
 
     async def stream(self) -> None:
         tracks = self.random.sample(self.tracks, min(len(self.tracks), 2))

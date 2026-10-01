@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 
 from webrtc import AudioData, AudioSampleFormat, MediaStreamTrack, MediaType, VideoFrame, wrtc
 from webrtc.exceptions import NotSupportedError
+from webrtc.models.audio_data import AudioDataCopyToOptions
+from webrtc.models.dictionary import Dictionary
 from webrtc.streams import WritableStream
 
 if TYPE_CHECKING:
@@ -54,7 +56,7 @@ class _TrackSink:
             samples = audio._data
         else:
             samples = bytearray(audio.number_of_frames * audio.number_of_channels * 2)
-            audio.copy_to(samples, {'plane_index': 0, 'format': AudioSampleFormat.s16})
+            audio.copy_to(samples, AudioDataCopyToOptions(plane_index=0, format=AudioSampleFormat.s16))
             samples = bytes(samples)
         # rates beyond an int are unsupported too: the native check rejects them
         rate = min(int(audio.sample_rate), 2**31 - 1)
@@ -85,7 +87,8 @@ class VideoTrackGenerator:
         generator = webrtc.VideoTrackGenerator()
         pc.add_track(generator.track)
         writer = generator.writable.get_writer()
-        await writer.write(webrtc.VideoFrame(i420, format='I420', coded_width=640, coded_height=480, timestamp=0))
+        init = webrtc.VideoFrameBufferInit(format='I420', coded_width=640, coded_height=480, timestamp=0)
+        await writer.write(webrtc.VideoFrame(i420, init))
     """
 
     def __init__(self) -> None:
@@ -115,7 +118,7 @@ class VideoTrackGenerator:
 
 
 @dataclass
-class MediaStreamTrackGeneratorInit:
+class MediaStreamTrackGeneratorInit(Dictionary):
     """How to create a :obj:`MediaStreamTrackGenerator`.
 
     Args:
@@ -135,17 +138,15 @@ class MediaStreamTrackGenerator(MediaStreamTrack):
 
     Args:
         kind (:obj:`webrtc.MediaType`, :obj:`str` or :obj:`MediaStreamTrackGeneratorInit`): ``'audio'`` or ``'video'``,
-            or the init with it. A dictionary of the init's members is taken too.
+            or the init with it.
 
     Raises:
         TypeError: If the kind isn't audio or video.
     """
 
-    def __init__(self, kind: str | MediaType | MediaStreamTrackGeneratorInit | dict[str, str]) -> None:
+    def __init__(self, kind: str | MediaType | MediaStreamTrackGeneratorInit) -> None:
         if isinstance(kind, MediaStreamTrackGeneratorInit):
             kind = kind.kind
-        elif isinstance(kind, dict):
-            kind = kind.get('kind')
         if kind not in {'audio', 'video'}:
             msg = f"The kind must be 'audio' or 'video', not {kind!r}"
             raise TypeError(msg)

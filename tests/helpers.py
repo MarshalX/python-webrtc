@@ -200,7 +200,10 @@ async def write_video(
     timestamp = 0
     while not stop.is_set():
         await writer.write(
-            webrtc.VideoFrame(data, format='I420', coded_width=width, coded_height=height, timestamp=timestamp)
+            webrtc.VideoFrame(
+                data,
+                webrtc.VideoFrameBufferInit(format='I420', coded_width=width, coded_height=height, timestamp=timestamp),
+            )
         )
         timestamp += round(interval * 1_000_000)
         await asyncio.sleep(interval)

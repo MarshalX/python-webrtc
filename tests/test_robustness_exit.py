@@ -100,7 +100,7 @@ def test_forked_child_leaves_the_objects_of_its_parent_alone() -> None:
             track = webrtc.get_user_media(audio=False, video=True).get_tracks()[0]
             caller.add_track(track)
             await asyncio.wait_for(connect(caller, callee), 10)
-            reader = webrtc.MediaStreamTrackProcessor(track).readable.get_reader()
+            reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
             (await asyncio.wait_for(reader.read(), 5)).value.close()
             track.stop()
             caller.close()

@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from webrtc import RTCSessionDescriptionInit, WebRTCObject, wrtc
 
@@ -32,37 +32,30 @@ class RTCSessionDescription(WebRTCObject):
     Note:
         :meth:`webrtc.RTCPeerConnection.set_local_description` and
         :meth:`webrtc.RTCPeerConnection.set_remote_description` also take an
-        :obj:`webrtc.RTCSessionDescriptionInit` or a :obj:`dict`, so creating an
+        :obj:`webrtc.RTCSessionDescriptionInit`, so creating an
         :obj:`webrtc.RTCSessionDescription` isn't necessary.
 
     Args:
         type (:obj:`webrtc.RTCSdpType`): The type of the description, required as in the specification.
-            An :obj:`webrtc.RTCSessionDescriptionInit` or its JSON form (a :obj:`dict` with a ``type`` key and an
-            optional ``sdp`` one) is accepted too.
+            An :obj:`webrtc.RTCSessionDescriptionInit` is accepted too (see
+            :meth:`webrtc.RTCSessionDescriptionInit.from_json` for its JSON form).
         sdp (:obj:`str`, optional): The SDP of the description, empty by default. It's parsed when the description
             is set.
 
     Raises:
-        TypeError: If the type is missing, or the SDP is :obj:`None`.
+        ValueError: If the type isn't a member of :obj:`webrtc.RTCSdpType`.
+        TypeError: If the SDP is :obj:`None`.
     """
 
     _class = wrtc.RTCSessionDescription
 
     def __init__(
         self,
-        type: webrtc.RTCSdpType | webrtc.RTCSessionDescriptionInit | dict[str, Any],
+        type: webrtc.RTCSdpType | webrtc.RTCSessionDescriptionInit,
         sdp: str = '',
     ) -> None:
-        if isinstance(type, dict):
-            if type.get('type') is None:
-                msg = 'RTCSessionDescriptionInit requires a type'
-                raise TypeError(msg)
-            type, sdp = type['type'], type.get('sdp', '')
-        if sdp is None:
-            msg = 'The SDP of a description may not be None'
-            raise TypeError(msg)
         init = type if isinstance(type, RTCSessionDescriptionInit) else RTCSessionDescriptionInit(type, sdp)
-        super().__init__(self._class(init._native_obj))
+        super().__init__(self._class(init._to_native()))
 
     def to_json(self) -> dict[str, str]:
         """The description as a JSON-serializable dictionary, to send to the remote peer.

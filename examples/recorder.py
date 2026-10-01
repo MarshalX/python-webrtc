@@ -30,10 +30,13 @@ async def record(track: webrtc.MediaStreamTrack, file: BinaryIO) -> None:
     """Writes the frames of a track to a file until the track ends."""
     frames = 0
     with file:
-        async for media in webrtc.MediaStreamTrackProcessor(track, max_buffer_size=30).readable:
+        async for media in webrtc.MediaStreamTrackProcessor(
+            webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=30)
+        ).readable:
             if track.kind == 'audio':
-                data = bytearray(media.allocation_size({'plane_index': 0}))
-                media.copy_to(data, {'plane_index': 0})
+                options = webrtc.AudioDataCopyToOptions(plane_index=0)
+                data = bytearray(media.allocation_size(options))
+                media.copy_to(data, options)
             else:
                 data = bytearray(media.allocation_size())
                 await media.copy_to(data)

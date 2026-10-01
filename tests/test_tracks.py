@@ -58,7 +58,7 @@ async def test_rollback_ends_the_track_of_a_removed_transceiver(
     await exchange_offer(caller, callee)
     [transceiver] = callee.get_transceivers()
 
-    await callee.set_remote_description({'type': 'rollback'})
+    await callee.set_remote_description(webrtc.RTCSessionDescriptionInit('rollback'))
     track = transceiver.receiver.track
     assert track.ready_state == webrtc.MediaStreamTrackState.live
     await wait_for_event(track, 'ended')
@@ -118,7 +118,7 @@ async def test_remote_track_mute_and_stream_events(
     (audio,), (video,) = audio_stream.get_tracks(), video_stream.get_tracks()
     stream = webrtc.MediaStream([audio, video])
     caller.add_track(audio, stream)
-    transceiver = caller.add_transceiver(video, webrtc.RtpTransceiverInit(streams=[stream]))
+    transceiver = caller.add_transceiver(video, webrtc.RTCRtpTransceiverInit(streams=[stream]))
     events = []
     callee.on('track', events.append)
     await connect(caller, callee)

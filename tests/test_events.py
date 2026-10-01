@@ -84,7 +84,7 @@ async def test_signaling_state_changes_with_its_event(pc: webrtc.RTCPeerConnecti
 
     await pc.set_local_description()
     assert states == [webrtc.RTCSignalingState.have_local_offer]
-    await pc.set_local_description({'type': 'rollback'})
+    await pc.set_local_description(webrtc.RTCSessionDescriptionInit('rollback'))
     assert states == [webrtc.RTCSignalingState.have_local_offer, webrtc.RTCSignalingState.stable]
 
 

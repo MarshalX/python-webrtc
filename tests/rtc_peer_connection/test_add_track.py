@@ -84,7 +84,7 @@ def test_5(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> No
 
 def test_6(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
     """add_track with existing sender with None track, same kind, and recvonly direction should reuse sender."""
-    init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.recvonly)
+    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.TransceiverDirection.recvonly)
     transceiver = pc.add_transceiver(webrtc.MediaType.audio, init)
 
     assert transceiver.sender.track is None
@@ -141,7 +141,7 @@ async def test_8(
 
 def test_9(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
     """add_track with existing recvonly sender with null track of a different kind should create new sender."""
-    init = webrtc.RtpTransceiverInit(direction=webrtc.TransceiverDirection.recvonly)
+    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.TransceiverDirection.recvonly)
     transceiver = pc.add_transceiver(webrtc.MediaType.video, init)
 
     assert transceiver.sender.track is None

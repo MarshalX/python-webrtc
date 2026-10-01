@@ -9,26 +9,23 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from webrtc import MediaStream, MediaTrackConstraints, MediaTrackSettings, OverconstrainedError, wrtc
 from webrtc.interfaces.media_stream_track import _CAMERA_CAPABILITIES, _check_numbers, _selected, _unsatisfied
 
 if TYPE_CHECKING:
     import webrtc
-
-
-#: A value, or a constraint on it: a :obj:`dict` with any of ``exact``, ``ideal``, ``min`` and ``max``
-Constrain = Union[float, dict[str, float]]
+    from webrtc.models.media_track_constraints import ConstrainDouble, ConstrainULong
 
 
 def get_user_media(
     *,
     audio: bool = True,
     video: bool = False,
-    width: Constrain | None = None,
-    height: Constrain | None = None,
-    frame_rate: Constrain | None = None,
+    width: ConstrainULong | None = None,
+    height: ConstrainULong | None = None,
+    frame_rate: ConstrainDouble | None = None,
 ) -> webrtc.MediaStream:
     """Returns a stream of local media, as requested: a synthetic microphone and/or camera.
 
@@ -39,11 +36,12 @@ def get_user_media(
     Args:
         audio (:obj:`bool`, optional): Whether the stream has an audio track.
         video (:obj:`bool`, optional): Whether the stream has a video track.
-        width (:obj:`int` | :obj:`dict`, optional): The width of the video, or a constraint on it (see
-            :obj:`Constrain`), 640 by default.
-        height (:obj:`int` | :obj:`dict`, optional): The height of the video, or a constraint on it, 480 by default.
-        frame_rate (:obj:`float` | :obj:`dict`, optional): The frames per second of the video, or a constraint on
-            it, 30 by default.
+        width (:obj:`int` or :obj:`webrtc.ConstrainULongRange`, optional): The width of the video, or a constraint
+            on it, 640 by default.
+        height (:obj:`int` or :obj:`webrtc.ConstrainULongRange`, optional): The height of the video, or a constraint
+            on it, 480 by default.
+        frame_rate (:obj:`float` or :obj:`webrtc.ConstrainDoubleRange`, optional): The frames per second of the
+            video, or a constraint on it, 30 by default.
 
     Returns:
         :obj:`webrtc.MediaStream`: The stream.

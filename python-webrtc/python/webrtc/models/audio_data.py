@@ -16,7 +16,8 @@ from typing import Any, ClassVar, NamedTuple
 
 from webrtc import AudioSampleFormat, InvalidRangeError, InvalidStateError, NotSupportedError, wrtc
 from webrtc.models.closable import Closable
-from webrtc.utils.names import Alias, alias, snake_case
+from webrtc.models.dictionary import Dictionary
+from webrtc.utils.names import Alias, alias
 
 _SAMPLE_BYTES = {'u8': 1, 's16': 2, 's32': 4, 'f32': 4}
 
@@ -38,7 +39,7 @@ def _is_planar(format: AudioSampleFormat) -> bool:
 
 
 @dataclass
-class AudioDataInit:
+class AudioDataInit(Dictionary):
     """How to create an :obj:`AudioData`.
 
     Args:
@@ -66,7 +67,7 @@ class AudioDataInit:
 
 
 @dataclass
-class AudioDataCopyToOptions:
+class AudioDataCopyToOptions(Dictionary):
     """What :meth:`AudioData.copy_to` copies.
 
     Args:
@@ -89,47 +90,11 @@ class AudioDataCopyToOptions:
     frameCount: ClassVar[Alias[int | None]] = alias('frame_count')
 
 
-def _copy_options(value: object) -> AudioDataCopyToOptions:
-    if isinstance(value, AudioDataCopyToOptions):
-        return value
-    if isinstance(value, dict):
-        kwargs = {snake_case(k): v for k, v in value.items() if v is not None}
-        if 'plane_index' not in kwargs:
-            msg = 'plane_index is required'
-            raise TypeError(msg)
-        try:
-            return AudioDataCopyToOptions(**kwargs)
-        except TypeError as e:
-            msg = f'Invalid AudioDataCopyToOptions: {e}'
-            raise TypeError(msg) from None
-    msg = f'{value!r} is not an AudioDataCopyToOptions'
-    raise TypeError(msg)
-
-
 def _unsigned(value: object, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         msg = f'{name} must be a non-negative integer, not {value!r}'
         raise TypeError(msg)
     return value
-
-
-def _audio_data_init(init: object, options: dict[str, object]) -> AudioDataInit:
-    if init is None:
-        init = options
-    elif options:
-        msg = 'Pass either an init or keyword arguments'
-        raise TypeError(msg)
-    if isinstance(init, dict):
-        kwargs = {snake_case(k): v for k, v in init.items() if k != 'transfer'}
-        try:
-            init = AudioDataInit(**kwargs)
-        except TypeError as e:
-            msg = f'Invalid AudioDataInit: {e}'
-            raise TypeError(msg) from None
-    if not isinstance(init, AudioDataInit):
-        msg = f'{init!r} is not an AudioDataInit'
-        raise TypeError(msg)
-    return init
 
 
 def _sample_rate(value: object) -> float:
@@ -173,8 +138,7 @@ class AudioData(Closable):
     Samples read from a track hold memory until :meth:`close`, like a :obj:`webrtc.VideoFrame`.
 
     Args:
-        init (:obj:`AudioDataInit`, optional): The samples and their format. A dictionary of its members, or keyword
-            arguments, can be passed instead.
+        init (:obj:`AudioDataInit`): The samples and their format.
 
     Raises:
         TypeError: If the init isn't valid, or the data is too small for it.
@@ -182,12 +146,18 @@ class AudioData(Closable):
     Example::
 
         data = webrtc.AudioData(
-            format='s16', sample_rate=48000, number_of_frames=480, number_of_channels=1, timestamp=0, data=bytes(960)
+            webrtc.AudioDataInit(
+                format='s16',
+                sample_rate=48000,
+                number_of_frames=480,
+                number_of_channels=1,
+                timestamp=0,
+                data=bytes(960),
+            )
         )
     """
 
-    def __init__(self, init: AudioDataInit | dict[str, object] | None = None, **options: object) -> None:
-        init = _audio_data_init(init, options)
+    def __init__(self, init: AudioDataInit) -> None:
         format = _sample_format(init.format)
         sample_rate = _sample_rate(init.sample_rate)
         frames = _unsigned(init.number_of_frames, 'number_of_frames')
@@ -261,11 +231,10 @@ class AudioData(Closable):
         """:obj:`int`: The presentation time in microseconds."""
         return self._timestamp
 
-    def _plan_copy(self, options: AudioDataCopyToOptions | dict[str, object]) -> _CopyPlan:
+    def _plan_copy(self, options: AudioDataCopyToOptions) -> _CopyPlan:
         if self._data is None:
             msg = 'The data is closed'
             raise InvalidStateError(msg)
-        options = _copy_options(options)
         plane_index = _unsigned(options.plane_index, 'plane_index')
         frame_offset = _unsigned(options.frame_offset, 'frame_offset')
         destination = self._format if options.format is None else _sample_format(options.format)
@@ -289,7 +258,7 @@ class AudioData(Closable):
         elements = frame_count if _is_planar(destination) else frame_count * self._channels
         return _CopyPlan(destination, plane_index, frame_offset, frame_count, elements * _sample_bytes(destination))
 
-    def allocation_size(self, options: AudioDataCopyToOptions | dict[str, object]) -> int:
+    def allocation_size(self, options: AudioDataCopyToOptions) -> int:
         """Returns how many bytes :meth:`copy_to` needs.
 
         Raises :obj:`webrtc.InvalidStateError` if the data is closed, :obj:`TypeError` if the options aren't valid
@@ -300,7 +269,7 @@ class AudioData(Closable):
         """
         return self._plan_copy(options).size
 
-    def copy_to(self, destination: bytearray | memoryview, options: AudioDataCopyToOptions | dict[str, object]) -> None:
+    def copy_to(self, destination: bytearray | memoryview, options: AudioDataCopyToOptions) -> None:
         """Copies samples into a buffer, converting them to another format if asked.
 
         Raises the errors of :meth:`allocation_size` too.

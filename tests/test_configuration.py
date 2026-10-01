@@ -116,14 +116,29 @@ def test_ice_server_of_ipv6_address(create_pc: CreatePC) -> None:
 
 def test_oauth_ice_server() -> None:
     """An OAuth credential is an RTCOAuthCredential, which libwebrtc doesn't support."""
-    server = {'urls': 'turns:turn.example.org', 'username': 'user', 'credential': 'cred', 'credential_type': 'oauth'}
+    server = webrtc.RTCIceServer('turns:turn.example.org', 'user', 'cred', credential_type='oauth')
     with pytest.raises(webrtc.InvalidAccessError):
         webrtc.RTCPeerConnection(webrtc.RTCConfiguration(ice_servers=[server]))
-    server['credential'] = webrtc.RTCOAuthCredential(
+    server.credential = webrtc.RTCOAuthCredential(
         mac_key=base64.b64encode(b'key').decode(), access_token=base64.b64encode(b'token').decode()
     )
     with pytest.raises(webrtc.NotSupportedError):
         webrtc.RTCPeerConnection(webrtc.RTCConfiguration(ice_servers=[server]))
+
+
+def test_configuration_from_json() -> None:
+    """Nested dictionaries are converted, with camelCase names."""
+    configuration = webrtc.RTCConfiguration.from_json({
+        'iceServers': [
+            {'urls': 'stun:stun.example.org'},
+            {'urls': 'turns:turn.example.org', 'credential': {'macKey': 'a2V5', 'accessToken': 'dG9rZW4='}},
+        ],
+        'iceTransportPolicy': 'relay',
+    })
+    stun, turn = configuration.ice_servers
+    assert stun == webrtc.RTCIceServer('stun:stun.example.org')
+    assert turn.credential == webrtc.RTCOAuthCredential('a2V5', 'dG9rZW4=')
+    assert configuration.ice_transport_policy == 'relay'
 
 
 @pytest.mark.asyncio
@@ -163,21 +178,30 @@ async def test_generate_ecdsa_certificate() -> None:
 @pytest.mark.asyncio
 async def test_generate_rsa_certificate() -> None:
     """An RSA certificate is generated from WebCrypto parameters."""
-    rsa = await webrtc.RTCCertificate.generate({
-        'name': 'RSASSA-PKCS1-v1_5',
-        'modulus_length': 1024,
-        'public_exponent': 65537,
-        'hash': 'SHA-256',
-    })
+    rsa = await webrtc.RTCCertificate.generate(
+        webrtc.RsaHashedKeyGenParams(
+            'RSASSA-PKCS1-v1_5', modulus_length=1024, public_exponent=b'\x01\x00\x01', hash='SHA-256'
+        )
+    )
     assert not rsa.expired
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     'algorithm',
-    ['nonsense', {'name': 'RSASSA-PKCS1-v1_5', 'modulusLength': 2048, 'publicExponent': 3, 'hash': 'SHA-1'}],
+    [
+        'nonsense',
+        webrtc.Algorithm('RSASSA-PKCS1-v1_5'),
+        webrtc.EcKeyGenParams('ECDSA', named_curve='P-384'),
+        webrtc.RsaHashedKeyGenParams.from_json({
+            'name': 'RSASSA-PKCS1-v1_5',
+            'modulusLength': 2048,
+            'publicExponent': bytes([3]),
+            'hash': {'name': 'SHA-1'},
+        }),
+    ],
 )
-async def test_generate_unsupported_certificate(algorithm: str | dict[str, object]) -> None:
+async def test_generate_unsupported_certificate(algorithm: str | webrtc.Algorithm) -> None:
     """Algorithms other than ECDSA and RSASSA-PKCS1-v1_5 with SHA-256 and the exponent 65537 aren't supported."""
     with pytest.raises(webrtc.NotSupportedError):
         await webrtc.RTCCertificate.generate(algorithm)
@@ -277,21 +301,22 @@ def test_rtc_error() -> None:
         webrtc.RTCErrorInit('nonsense')
 
 
-def test_rtc_error_options_dict() -> None:
-    """Options can be a dictionary with camelCase names, as in browsers."""
-    error = webrtc.RTCError({'errorDetail': 'sdp-syntax-error', 'sdpLineNumber': 3, 'unknown': 1}, 'bad')
+def test_rtc_error_init_from_json() -> None:
+    """The init can come from its JSON form, with camelCase names and unknown ones ignored."""
+    init = webrtc.RTCErrorInit.from_json({'errorDetail': 'sdp-syntax-error', 'sdpLineNumber': 3, 'unknown': 1})
+    error = webrtc.RTCError(init, 'bad')
     assert error.error_detail == webrtc.RTCErrorDetailType.sdp_syntax_error
     assert error.sdp_line_number == 3
     assert str(error) == 'bad'
     with pytest.raises(TypeError, match='error_detail'):
-        webrtc.RTCError({})
+        webrtc.RTCErrorInit.from_json({})
 
 
 @pytest.mark.asyncio
 async def test_description_errors(pc: webrtc.RTCPeerConnection) -> None:
     """An answer without an offer is in the wrong state, and invalid SDP is an RTCError of its syntax."""
     with pytest.raises(webrtc.InvalidStateError):
-        await pc.set_remote_description({'type': 'answer', 'sdp': 'invalid'})
+        await pc.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', 'invalid'))
     with pytest.raises(webrtc.RTCError) as info:
         await pc.set_remote_description(webrtc.RTCSessionDescription('offer', 'v=0\r\nnonsense'))
     assert info.value.error_detail == webrtc.RTCErrorDetailType.sdp_syntax_error
@@ -305,7 +330,9 @@ async def test_created_descriptions(pc: webrtc.RTCPeerConnection) -> None:
     assert isinstance(offer, webrtc.RTCSessionDescriptionInit)
     assert offer.to_json() == {'type': 'offer', 'sdp': offer.sdp}
     with pytest.raises(webrtc.InvalidModificationError):
-        await pc.set_local_description({'type': 'offer', 'sdp': offer.sdp.replace('a=mid:0', 'a=mid:1')})
+        await pc.set_local_description(
+            webrtc.RTCSessionDescriptionInit('offer', offer.sdp.replace('a=mid:0', 'a=mid:1'))
+        )
     await pc.set_local_description(offer)
     # not compared by identity: gathered candidates change the description (and its object) between reads
     assert pc.pending_local_description.type == pc.local_description.type == offer.type
@@ -320,7 +347,7 @@ async def test_provisional_answers_without_sdp(
     caller.add_transceiver(webrtc.MediaType.audio)
     await exchange_offer(caller, callee)
 
-    await callee.set_local_description({'type': 'pranswer'})
+    await callee.set_local_description(webrtc.RTCSessionDescriptionInit('pranswer'))
     assert callee.signaling_state == webrtc.RTCSignalingState.have_local_pranswer
     assert callee.pending_local_description.type == webrtc.RTCSdpType.pranswer
     # without a type, the final answer

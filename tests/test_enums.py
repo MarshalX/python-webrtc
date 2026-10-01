@@ -71,4 +71,4 @@ def test_invalid_values_are_type_errors(pc: webrtc.RTCPeerConnection) -> None:
 def test_data_channel_priority(pc: webrtc.RTCPeerConnection) -> None:
     """Every priority of a data channel round-trips through libwebrtc."""
     for priority in webrtc.RTCPriorityType:
-        assert pc.create_data_channel('x', {'priority': priority.value}).priority is priority
+        assert pc.create_data_channel('x', webrtc.RTCDataChannelInit(priority=priority.value)).priority is priority

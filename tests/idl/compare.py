@@ -116,7 +116,11 @@ class _Types:
         text = _text(annotation)
         if text is None:
             return []
-        missing = sorted(name for name in self.spec.named_types(idl_type) if not re.search(rf'\b{name}\b', text))
+
+        def named(name: str) -> bool:
+            return re.search(rf'\b{name}\b', text) is not None
+
+        missing = sorted(name for name in self.spec.named_types(idl_type, named) if not named(name))
         return [f'{label}: type lacks {", ".join(missing)}'] if missing else []
 
 

@@ -11,12 +11,18 @@ from __future__ import annotations
 
 import asyncio
 import math
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union
 
 from webrtc import (
+    ConstrainBooleanOrDOMStringParameters,
+    ConstrainBooleanParameters,
+    ConstrainDOMStringParameters,
+    ConstrainDoubleRange,
+    ConstrainULongRange,
     DoubleRange,
     MediaTrackCapabilities,
     MediaTrackConstraints,
+    MediaTrackConstraintSet,
     MediaTrackSettings,
     OverconstrainedError,
     ULongRange,
@@ -27,6 +33,14 @@ from webrtc.utils.events import EventTarget
 
 if TYPE_CHECKING:
     import webrtc
+
+_Parameters = Union[
+    ConstrainULongRange,
+    ConstrainDoubleRange,
+    ConstrainBooleanParameters,
+    ConstrainDOMStringParameters,
+    ConstrainBooleanOrDOMStringParameters,
+]
 
 #: The device of the video tracks of :func:`webrtc.get_user_media`
 CAMERA_DEVICE_ID = 'synthetic-camera'
@@ -71,6 +85,17 @@ _CONSTRAINABLE = (
 )
 
 
+# the constraints with required parts, the others are ideal values
+_PARAMETERS = (
+    ConstrainULongRange,
+    ConstrainDoubleRange,
+    ConstrainBooleanParameters,
+    ConstrainDOMStringParameters,
+    ConstrainBooleanOrDOMStringParameters,
+)
+_RANGES = (ConstrainULongRange, ConstrainDoubleRange)
+
+
 def _satisfied(value: object, capability: object, current: float | str | None) -> bool:
     """Whether the required parts of a constraint (exact, min, max) are satisfiable.
 
@@ -79,17 +104,20 @@ def _satisfied(value: object, capability: object, current: float | str | None) -
     Returns:
         :obj:`bool`: Whether they are.
     """
-    if not isinstance(value, dict) or all(value.get(key) is None for key in ('exact', 'min', 'max')):
+    required = isinstance(value, _PARAMETERS) and any(
+        getattr(value, name, None) is not None for name in ('exact', 'min', 'max')
+    )
+    if not required:
         return True
-    if isinstance(capability, (ULongRange, DoubleRange)):
+    if isinstance(value, _RANGES) and isinstance(capability, (ULongRange, DoubleRange)):
         return _within_range(value, capability)
     if capability is None:
         return _satisfied_by_setting(value, current)
-    return _matches(value.get('exact'), capability)
+    return _matches(value.exact, capability)
 
 
-def _within_range(value: dict[str, float], capability: ULongRange | DoubleRange) -> bool:
-    exact, low, high = value.get('exact'), value.get('min'), value.get('max')
+def _within_range(value: ConstrainULongRange | ConstrainDoubleRange, capability: ULongRange | DoubleRange) -> bool:
+    exact, low, high = value.exact, value.min, value.max
     low_cap = capability.min if capability.min is not None else float('-inf')
     high_cap = capability.max if capability.max is not None else float('inf')
     exact_within = exact is None or low_cap <= exact <= high_cap
@@ -106,14 +134,16 @@ def _matches(exact: object, capability: object) -> bool:
     return exact == capability or (isinstance(exact, list) and capability in exact)
 
 
-def _satisfied_by_setting(value: dict[str, float], current: float | str | None) -> bool:
-    if current is None or not _matches(value.get('exact'), current):
+def _satisfied_by_setting(value: _Parameters, current: float | str | None) -> bool:
+    if current is None or not _matches(value.exact, current):
         return False
-    low, high = value.get('min'), value.get('max')
+    low, high = getattr(value, 'min', None), getattr(value, 'max', None)
     return (low is None or low <= current) and (high is None or current <= high)
 
 
-def _selected(value: float | dict[str, float] | None, current: float, capability: object = None) -> float:
+def _selected(
+    value: float | ConstrainULongRange | ConstrainDoubleRange | None, current: float, capability: object = None
+) -> float:
     """The value a constraint selects (exact, ideal or current), the nearest within its range and the capability."""
     low, high = float('-inf'), float('inf')
     if isinstance(capability, (ULongRange, DoubleRange)):
@@ -121,14 +151,14 @@ def _selected(value: float | dict[str, float] | None, current: float, capability
         high = capability.max if capability.max is not None else high
     if value is None:
         selected = current
-    elif not isinstance(value, dict):
+    elif not isinstance(value, _RANGES):
         selected = value
-    elif value.get('exact') is not None:
-        selected = value['exact']
+    elif value.exact is not None:
+        selected = value.exact
     else:
-        low = max(low, value['min']) if value.get('min') is not None else low
-        high = min(high, value['max']) if value.get('max') is not None else high
-        selected = value['ideal'] if value.get('ideal') is not None else current
+        low = max(low, value.min) if value.min is not None else low
+        high = min(high, value.max) if value.max is not None else high
+        selected = value.ideal if value.ideal is not None else current
     return min(max(selected, low), high)
 
 
@@ -137,11 +167,11 @@ _ULONG_CONSTRAINTS = ('width', 'height', 'sample_rate', 'sample_size', 'channel_
 _DOUBLE_CONSTRAINTS = ('aspect_ratio', 'frame_rate')
 
 
-def _check_numbers(constraint_set: MediaTrackConstraints) -> None:
+def _check_numbers(constraint_set: MediaTrackConstraintSet) -> None:
     """The WebIDL types of the numbers of a constraint set: finite, and not negative for unsigned longs."""
     for name in _ULONG_CONSTRAINTS + _DOUBLE_CONSTRAINTS:
         value = getattr(constraint_set, name)
-        members = [value.get(key) for key in ('exact', 'ideal', 'min', 'max')] if isinstance(value, dict) else [value]
+        members = [value.exact, value.ideal, value.min, value.max] if isinstance(value, _RANGES) else [value]
         unsigned = name in _ULONG_CONSTRAINTS
         for member in members:
             if member is not None and not _valid_number(member, unsigned=unsigned):
@@ -157,7 +187,7 @@ def _valid_number(member: object, *, unsigned: bool) -> bool:
 
 
 def _unsatisfied(
-    constraint_set: MediaTrackConstraints, capabilities: MediaTrackCapabilities, settings: MediaTrackSettings
+    constraint_set: MediaTrackConstraintSet, capabilities: MediaTrackCapabilities, settings: MediaTrackSettings
 ) -> str | None:
     """The name of the first constraint of the set that can't be satisfied, if any."""
     for name in _CONSTRAINABLE:
@@ -291,17 +321,14 @@ class MediaStreamTrack(WebRTCObject[wrtc.MediaStreamTrack], EventTarget):
         constraints = self._native_obj._constraints
         return constraints if constraints is not None else MediaTrackConstraints()
 
-    def apply_constraints(
-        self, constraints: MediaTrackConstraints | dict[str, Any] | None = None
-    ) -> asyncio.Future[None]:
+    def apply_constraints(self, constraints: MediaTrackConstraints | None = None) -> asyncio.Future[None]:
         """Applies constraints to the track.
 
         The synthetic camera of :func:`webrtc.get_user_media` changes its size and frame rate, the source of other
         tracks stays as it is.
 
         Args:
-            constraints (:obj:`webrtc.MediaTrackConstraints` or :obj:`dict`, optional): The constraints, none to
-                remove them.
+            constraints (:obj:`webrtc.MediaTrackConstraints`, optional): The constraints, none to remove them.
 
         Returns:
             :obj:`asyncio.Future`: Done once applied, failed with :obj:`webrtc.OverconstrainedError` if a required
@@ -309,14 +336,14 @@ class MediaStreamTrack(WebRTCObject[wrtc.MediaStreamTrack], EventTarget):
         """
         future = asyncio.get_running_loop().create_future()
         try:
-            self._apply_constraints(MediaTrackConstraints._parse(constraints))
+            self._apply_constraints(constraints if constraints is not None else MediaTrackConstraints())
             future.set_result(None)
         except (OverconstrainedError, TypeError) as e:
             future.set_exception(e)
         return future
 
     def _apply_constraints(self, constraints: MediaTrackConstraints) -> None:
-        advanced = [MediaTrackConstraints._parse(constraint_set) for constraint_set in constraints.advanced or ()]
+        advanced = list(constraints.advanced or ())
         for constraint_set in [constraints, *advanced]:
             _check_numbers(constraint_set)
         if self.ready_state == 'ended':

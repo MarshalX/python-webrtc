@@ -531,7 +531,7 @@ def test_generator_track_stays_ended_without_its_wrapper() -> None:
 
 def processor_with_handler_on_its_track() -> webrtc.MediaStreamTrackProcessor:
     track = webrtc.get_user_media(audio=False, video=True).get_tracks()[0]
-    processor = webrtc.MediaStreamTrackProcessor(track)
+    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
     track.on('ended', lambda _: processor.readable)
     track.stop()
     return processor
@@ -545,7 +545,7 @@ def stream_with_handler_on_its_track() -> webrtc.MediaStream:
 
 def processor_of_generator_with_handler() -> webrtc.MediaStreamTrackProcessor:
     generator = webrtc.MediaStreamTrackGenerator('video')
-    processor = webrtc.MediaStreamTrackProcessor(generator)
+    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(generator))
     generator.on('ended', lambda _: processor.readable)
     generator.stop()
     return processor
@@ -638,10 +638,13 @@ async def test_a_session_releases_every_native_object() -> None:
         received = wait_for_event(callee, 'track')
         await connect(caller, callee)
         remote = (await received).track
-        reader = webrtc.MediaStreamTrackProcessor(remote).readable.get_reader()
+        reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(remote)).readable.get_reader()
         writer = generator.writable.get_writer()
         await writer.write(
-            webrtc.VideoFrame(bytes(64 * 48 * 4), format='RGBA', coded_width=64, coded_height=48, timestamp=0)
+            webrtc.VideoFrame(
+                bytes(64 * 48 * 4),
+                webrtc.VideoFrameBufferInit(format='RGBA', coded_width=64, coded_height=48, timestamp=0),
+            )
         )
         (await asyncio.wait_for(reader.read(), 5)).value.close()
         await caller.get_stats()

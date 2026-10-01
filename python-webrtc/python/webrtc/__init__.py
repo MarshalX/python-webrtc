@@ -80,20 +80,28 @@ from .models.events import (
 )
 
 # the order matters: modules import each other through the package namespace
-from .models.rtc_session_description_init import RTCSessionDescriptionInit
+from .models.rtc_session_description_init import RTCSessionDescriptionInit, RTCLocalSessionDescriptionInit
 from .models.rtc_session_description import RTCSessionDescription
 from .models.media_track_constraints import (
     ULongRange,
     DoubleRange,
+    ConstrainULongRange,
+    ConstrainDoubleRange,
+    ConstrainBooleanParameters,
+    ConstrainDOMStringParameters,
+    ConstrainBooleanOrDOMStringParameters,
     MediaTrackSettings,
     MediaTrackCapabilities,
+    MediaTrackConstraintSet,
     MediaTrackConstraints,
 )
 from .models.blob import Blob
 from .models.video_frame import (
     DOMRectReadOnly,
+    DOMRectInit,
     PlaneLayout,
     VideoColorSpace,
+    VideoColorSpaceInit,
     VideoFrameMetadata,
     VideoFrameBufferInit,
     VideoFrameInit,
@@ -123,10 +131,16 @@ from .models.rtp_parameters import (
     RTCRtpHeaderExtensionCapability,
     RTCRtpCapabilities,
 )
-from .models.rtp_transceiver_init import RtpTransceiverInit
+from .models.rtc_rtp_transceiver_init import RTCRtpTransceiverInit
 from .models.rtc_stats import RTCStats, RTCStatsReport
 from .models.rtp_source import RTCRtpContributingSource, RTCRtpSynchronizationSource
-from .models.rtc_certificate import RTCCertificate, RTCDtlsFingerprint
+from .models.rtc_certificate import (
+    Algorithm,
+    EcKeyGenParams,
+    RsaHashedKeyGenParams,
+    RTCCertificate,
+    RTCDtlsFingerprint,
+)
 from .models.rtc_configuration import (
     RTCConfiguration,
     RTCIceServer,
@@ -134,6 +148,7 @@ from .models.rtc_configuration import (
 )
 from .models.rtc_ice_candidate import (
     RTCIceCandidate,
+    RTCIceCandidateInit,
     RTCIceCandidatePair,
     RTCIceParameters,
 )
@@ -160,6 +175,7 @@ from .functions.get_user_media import getUserMedia, get_user_media
 
 
 __all__ = [
+    'Algorithm',
     'AlphaOption',
     'AudioData',
     'AudioDataCopyToOptions',
@@ -167,10 +183,17 @@ __all__ = [
     'AudioSampleFormat',
     'BinaryType',
     'Blob',
+    'ConstrainBooleanOrDOMStringParameters',
+    'ConstrainBooleanParameters',
+    'ConstrainDOMStringParameters',
+    'ConstrainDoubleRange',
+    'ConstrainULongRange',
     'CricketIceGatheringState',
+    'DOMRectInit',
     'DOMRectReadOnly',
     'DoubleRange',
     'DtlsTransportState',
+    'EcKeyGenParams',
     'Event',
     'EventTarget',
     'InvalidAccessError',
@@ -189,6 +212,7 @@ __all__ = [
     'MediaStreamTrackProcessorInit',
     'MediaStreamTrackState',
     'MediaTrackCapabilities',
+    'MediaTrackConstraintSet',
     'MediaTrackConstraints',
     'MediaTrackSettings',
     'MediaType',
@@ -218,6 +242,7 @@ __all__ = [
     'RTCErrorInit',
     'RTCException',
     'RTCIceCandidate',
+    'RTCIceCandidateInit',
     'RTCIceCandidatePair',
     'RTCIceCandidateType',
     'RTCIceComponent',
@@ -232,6 +257,7 @@ __all__ = [
     'RTCIceTransport',
     'RTCIceTransportPolicy',
     'RTCIceTransportState',
+    'RTCLocalSessionDescriptionInit',
     'RTCOAuthCredential',
     'RTCPeerConnection',
     'RTCPeerConnectionIceErrorEvent',
@@ -254,6 +280,7 @@ __all__ = [
     'RTCRtpSender',
     'RTCRtpSynchronizationSource',
     'RTCRtpTransceiver',
+    'RTCRtpTransceiverInit',
     'RTCSctpTransport',
     'RTCSdpType',
     'RTCSessionDescription',
@@ -266,7 +293,7 @@ __all__ = [
     'ReadableStreamDefaultController',
     'ReadableStreamDefaultReader',
     'ReadableStreamReadResult',
-    'RtpTransceiverInit',
+    'RsaHashedKeyGenParams',
     'SctpTransportState',
     'SdpParseException',
     'TransceiverDirection',
@@ -275,6 +302,7 @@ __all__ = [
     'ULongRange',
     'VideoColorPrimaries',
     'VideoColorSpace',
+    'VideoColorSpaceInit',
     'VideoFrame',
     'VideoFrameBufferInit',
     'VideoFrameCopyToOptions',
