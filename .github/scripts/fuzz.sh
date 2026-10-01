@@ -25,7 +25,7 @@ if [ ! -x "$BUILD/venv/bin/python" ]; then
     # built from source with this Clang, so its sanitizer runtime is the one the extension is instrumented for
     CLANG_BIN="$(command -v clang)" LIBFUZZER_LIB="$(clang -print-runtime-dir)/libclang_rt.fuzzer_no_main.a" \
         "$BUILD/venv/bin/pip" install -q --no-binary atheris atheris \
-        cmake ninja "pybind11>=3.0" pytest
+        cmake ninja "pybind11>=3.0" "typing_extensions>=4.10" pytest
 fi
 # shellcheck disable=SC1091
 source "$BUILD/venv/bin/activate"

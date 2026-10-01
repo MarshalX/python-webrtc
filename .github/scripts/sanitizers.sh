@@ -20,7 +20,7 @@ dnf install -y -q clang lld compiler-rt llvm
 "$PYTHON" -m venv "$BUILD/venv"
 # shellcheck disable=SC1091
 source "$BUILD/venv/bin/activate"
-python -m pip install -q cmake ninja "pybind11>=3.0" pytest pytest-asyncio pytest-timeout
+python -m pip install -q cmake ninja "pybind11>=3.0" "typing_extensions>=4.10" pytest pytest-asyncio pytest-timeout
 
 CC=clang CXX=clang++ cmake -S "$SRC" -B "$BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
