@@ -10,11 +10,13 @@
 from __future__ import annotations
 
 import enum
+from typing import Literal
 
 
 class _StrEnum(str, enum.Enum):
     def __str__(self) -> str:
-        return self.value
+        value: str = self.value
+        return value
 
 
 class RTCPeerConnectionState(_StrEnum):
@@ -70,6 +72,10 @@ class RTCSdpType(_StrEnum):
     rollback = 'rollback'
 
 
+#: The values of :obj:`RTCSdpType`, which parameters taking it take too
+RTCSdpTypeValue = Literal['offer', 'pranswer', 'answer', 'rollback']
+
+
 class MediaStreamTrackState(_StrEnum):
     """The state of a track."""
 
@@ -96,6 +102,10 @@ class TransceiverDirection(_StrEnum):
     stopped = 'stopped'
 
 
+#: The values of :obj:`TransceiverDirection`, which parameters taking it take too
+TransceiverDirectionValue = Literal['sendrecv', 'sendonly', 'recvonly', 'inactive', 'stopped']
+
+
 class MediaType(_StrEnum):
     """The kind of a track: audio or video. Data and unsupported media sections exist in libwebrtc only."""
 
@@ -103,6 +113,10 @@ class MediaType(_StrEnum):
     video = 'video'
     data = 'data'
     unsupported = 'unsupported'
+
+
+#: The values of :obj:`MediaType`, which parameters taking it take too
+MediaTypeValue = Literal['audio', 'video', 'data', 'unsupported']
 
 
 class RTCIceComponent(_StrEnum):
@@ -177,6 +191,10 @@ class RTCPriorityType(_StrEnum):
     high = 'high'
 
 
+#: The values of :obj:`RTCPriorityType`, which parameters taking it take too
+RTCPriorityTypeValue = Literal['very-low', 'low', 'medium', 'high']
+
+
 class RTCDegradationPreference(_StrEnum):
     """What a video sender degrades first when it can't keep up."""
 
@@ -186,11 +204,24 @@ class RTCDegradationPreference(_StrEnum):
     maintain_framerate_and_resolution = 'maintain-framerate-and-resolution'
 
 
+#: The values of :obj:`RTCDegradationPreference`, which parameters taking it take too
+RTCDegradationPreferenceValue = Literal[
+    'maintain-framerate',
+    'maintain-resolution',
+    'balanced',
+    'maintain-framerate-and-resolution',
+]
+
+
 class RTCIceTransportPolicy(_StrEnum):
     """Which ICE candidates may be used."""
 
     all = 'all'
     relay = 'relay'
+
+
+#: The values of :obj:`RTCIceTransportPolicy`, which parameters taking it take too
+RTCIceTransportPolicyValue = Literal['all', 'relay']
 
 
 class RTCBundlePolicy(_StrEnum):
@@ -201,10 +232,18 @@ class RTCBundlePolicy(_StrEnum):
     max_bundle = 'max-bundle'
 
 
+#: The values of :obj:`RTCBundlePolicy`, which parameters taking it take too
+RTCBundlePolicyValue = Literal['balanced', 'max-compat', 'max-bundle']
+
+
 class RTCRtcpMuxPolicy(_StrEnum):
     """Whether RTCP is multiplexed with RTP, which is required."""
 
     require = 'require'
+
+
+#: The values of :obj:`RTCRtcpMuxPolicy`, which parameters taking it take too
+RTCRtcpMuxPolicyValue = Literal['require']
 
 
 class RTCRtpHeaderEncryptionPolicy(_StrEnum):
@@ -212,6 +251,10 @@ class RTCRtpHeaderEncryptionPolicy(_StrEnum):
 
     negotiate = 'negotiate'
     require = 'require'
+
+
+#: The values of :obj:`RTCRtpHeaderEncryptionPolicy`, which parameters taking it take too
+RTCRtpHeaderEncryptionPolicyValue = Literal['negotiate', 'require']
 
 
 class RTCIceCandidateType(_StrEnum):
@@ -246,6 +289,10 @@ class RTCIceServerTransportProtocol(_StrEnum):
     tls = 'tls'
 
 
+#: The values of :obj:`RTCIceServerTransportProtocol`, which parameters taking it take too
+RTCIceServerTransportProtocolValue = Literal['udp', 'tcp', 'tls']
+
+
 class RTCErrorDetailType(_StrEnum):
     """The WebRTC-specific cause of an :obj:`webrtc.RTCError`."""
 
@@ -258,6 +305,18 @@ class RTCErrorDetailType(_StrEnum):
     hardware_encoder_error = 'hardware-encoder-error'
 
 
+#: The values of :obj:`RTCErrorDetailType`, which parameters taking it take too
+RTCErrorDetailTypeValue = Literal[
+    'data-channel-failure',
+    'dtls-failure',
+    'fingerprint-failure',
+    'sctp-failure',
+    'sdp-syntax-error',
+    'hardware-encoder-not-available',
+    'hardware-encoder-error',
+]
+
+
 class BinaryType(_StrEnum):
     """What the binary messages of a :obj:`webrtc.RTCDataChannel` are delivered as."""
 
@@ -265,6 +324,10 @@ class BinaryType(_StrEnum):
     arraybuffer = 'arraybuffer'
     #: :obj:`webrtc.Blob`
     blob = 'blob'
+
+
+#: The values of :obj:`BinaryType`, which parameters taking it take too
+BinaryTypeValue = Literal['arraybuffer', 'blob']
 
 
 class VideoPixelFormat(_StrEnum):
@@ -299,6 +362,34 @@ class VideoPixelFormat(_StrEnum):
     BGRX = 'BGRX'
 
 
+#: The values of :obj:`VideoPixelFormat`, which parameters taking it take too
+VideoPixelFormatValue = Literal[
+    'I420',
+    'I420P10',
+    'I420P12',
+    'I420A',
+    'I420AP10',
+    'I420AP12',
+    'I422',
+    'I422P10',
+    'I422P12',
+    'I422A',
+    'I422AP10',
+    'I422AP12',
+    'I444',
+    'I444P10',
+    'I444P12',
+    'I444A',
+    'I444AP10',
+    'I444AP12',
+    'NV12',
+    'RGBA',
+    'RGBX',
+    'BGRA',
+    'BGRX',
+]
+
+
 class VideoColorPrimaries(_StrEnum):
     """The color primaries of a :obj:`webrtc.VideoColorSpace`."""
 
@@ -307,6 +398,10 @@ class VideoColorPrimaries(_StrEnum):
     smpte170m = 'smpte170m'
     bt2020 = 'bt2020'
     smpte432 = 'smpte432'
+
+
+#: The values of :obj:`VideoColorPrimaries`, which parameters taking it take too
+VideoColorPrimariesValue = Literal['bt709', 'bt470bg', 'smpte170m', 'bt2020', 'smpte432']
 
 
 class VideoTransferCharacteristics(_StrEnum):
@@ -320,6 +415,10 @@ class VideoTransferCharacteristics(_StrEnum):
     hlg = 'hlg'
 
 
+#: The values of :obj:`VideoTransferCharacteristics`, which parameters taking it take too
+VideoTransferCharacteristicsValue = Literal['bt709', 'smpte170m', 'iec61966-2-1', 'linear', 'pq', 'hlg']
+
+
 class VideoMatrixCoefficients(_StrEnum):
     """The matrix coefficients of a :obj:`webrtc.VideoColorSpace`."""
 
@@ -330,11 +429,19 @@ class VideoMatrixCoefficients(_StrEnum):
     bt2020_ncl = 'bt2020-ncl'
 
 
+#: The values of :obj:`VideoMatrixCoefficients`, which parameters taking it take too
+VideoMatrixCoefficientsValue = Literal['rgb', 'bt709', 'bt470bg', 'smpte170m', 'bt2020-ncl']
+
+
 class AlphaOption(_StrEnum):
     """Whether a :obj:`webrtc.VideoFrame` created from another one keeps its alpha channel."""
 
     keep = 'keep'
     discard = 'discard'
+
+
+#: The values of :obj:`AlphaOption`, which parameters taking it take too
+AlphaOptionValue = Literal['keep', 'discard']
 
 
 class AudioSampleFormat(_StrEnum):
@@ -348,3 +455,7 @@ class AudioSampleFormat(_StrEnum):
     s16_planar = 's16-planar'
     s32_planar = 's32-planar'
     f32_planar = 'f32-planar'
+
+
+#: The values of :obj:`AudioSampleFormat`, which parameters taking it take too
+AudioSampleFormatValue = Literal['u8', 's16', 's32', 'f32', 'u8-planar', 's16-planar', 's32-planar', 'f32-planar']

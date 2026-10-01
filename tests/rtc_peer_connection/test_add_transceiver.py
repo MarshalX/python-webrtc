@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 import webrtc
+from tests.helpers import mistyped
 
 
 def test_1(pc: webrtc.RTCPeerConnection) -> None:
@@ -17,7 +18,7 @@ def test_1(pc: webrtc.RTCPeerConnection) -> None:
     assert hasattr(pc, 'add_transceiver')
 
     with pytest.raises(TypeError):
-        pc.add_transceiver('invalid')
+        pc.add_transceiver(mistyped('invalid'))
 
 
 def _create_and_test_transceiver(pc: webrtc.RTCPeerConnection, kind: webrtc.MediaType) -> None:
@@ -79,7 +80,7 @@ def test_4(pc: webrtc.RTCPeerConnection) -> None:
 def test_5() -> None:
     """An init with an invalid direction can't be created, so add_transceiver can't get one."""
     with pytest.raises(ValueError, match='not a valid TransceiverDirection'):
-        webrtc.RTCRtpTransceiverInit(direction='invalid')
+        webrtc.RTCRtpTransceiverInit(direction=mistyped('invalid'))
 
 
 def test_6(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:

@@ -16,7 +16,7 @@ import pathlib
 import subprocess
 import sys
 import textwrap
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, TypeVar, cast
 
 import pytest
 
@@ -24,10 +24,17 @@ import webrtc
 import wrtc
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable
+    from collections.abc import AsyncGenerator, Awaitable
 
 #: The fixture creating connections with a configuration
 CreatePC = Callable[..., webrtc.RTCPeerConnection]
+
+_T = TypeVar('_T')
+
+
+def mistyped(value: object) -> _T:
+    """A value of the wrong type, passed where a test checks that the library rejects it at runtime."""
+    return cast('_T', value)
 
 
 async def exchange_offer(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
@@ -75,7 +82,7 @@ async def wait_until(predicate: Callable[[], object], what: str, timeout: float 
     """
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
-    while not await _called(predicate):
+    while not bool(await _called(predicate)):
         if loop.time() > deadline:
             msg = f'Timed out waiting for {what}'
             raise TimeoutError(msg)
@@ -210,7 +217,7 @@ async def write_video(
 
 
 @contextlib.asynccontextmanager
-async def writing(write: Callable[..., Awaitable[None]], *args: object, **kwargs: object) -> AsyncIterator[None]:
+async def writing(write: Callable[..., Awaitable[None]], *args: object, **kwargs: object) -> AsyncGenerator[None]:
     """Runs write(*args, stop=stop, **kwargs) in a task for the block, then stops it."""
     stop = asyncio.Event()
     task = asyncio.ensure_future(write(*args, stop=stop, **kwargs))
@@ -252,7 +259,7 @@ def rss_bytes() -> int:
         counters.cb = ctypes.sizeof(counters)
         process = ctypes.windll.kernel32.GetCurrentProcess()
         ctypes.windll.psapi.GetProcessMemoryInfo(process, ctypes.byref(counters), counters.cb)
-        return counters.WorkingSetSize
+        return int(counters.WorkingSetSize)
     # macOS and other BSDs
     return int(subprocess.check_output(['/bin/ps', '-o', 'rss=', '-p', str(os.getpid())])) * 1024
 

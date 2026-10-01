@@ -144,7 +144,7 @@ def git_fetch(url: str, ref: str, repo: str) -> str:
 def resolve_llvm(deps: str, name: str) -> str:
     """Chromium mirrors each llvm-project dir as its own repo: finds the llvm-project commit with the same tree."""
     match = re.search(rf"'{re.escape(LLVM_DIRS[name][0])}':\s*'([^'@]+)@([0-9a-f]+)'", deps)
-    if not match:
+    if match is None:
         msg = f'{LLVM_DIRS[name][0]} is not in the WebRTC DEPS'
         raise SystemExit(msg)
     url, revision = match.groups()
@@ -158,25 +158,26 @@ def resolve_llvm(deps: str, name: str) -> str:
     commits: list[Commit] = json.loads(gh(f'{REPO}/commits?path={name}&since={since}&until={until}&per_page=100'))
     for commit in commits:
         if tree_sha(commit['sha'], name) == tree:
-            return str(commit['sha'])
+            return commit['sha']
     msg = f'no llvm-project commit has the {name} tree of {url}@{revision}'
     raise SystemExit(msg)
 
 
 def runtime_sources(tag: str) -> list[str]:
     """The libc++ and libc++abi sources of Chromium's Linux build, as llvm-project paths."""
-    sources = []
+    sources: list[str] = []
     for gn, llvm in (('libc%2B%2B', 'libcxx'), ('libc%2B%2Babi', 'libcxxabi')):
         for line in chromium(f'buildtools/third_party/{gn}/BUILD.gn', tag).decode().splitlines():
             match = re.search(r'"//third_party/libc\+\+(?:abi)?/src/src/([^"]+\.cpp)"', line)
-            if match and not line.lstrip().startswith('#') and 'win32' not in match[1]:
+            if match is not None and not line.lstrip().startswith('#') and 'win32' not in match[1]:
                 sources.append(f'{llvm}/src/{match[1]}')
     return sorted(set(sources))
 
 
 def includes(path: str, data: bytes) -> set[str]:
     """The llvm-project paths a file may include: next to it, or from libcxx/src and llvm-libc."""
-    found = set()
+    found: set[str] = set()
+    include: bytes  # one group, so findall gives its bytes
     for include in INCLUDE.findall(data):
         name = include.decode()
         found.add(posixpath.normpath(posixpath.join(posixpath.dirname(path), name)))
@@ -193,13 +194,13 @@ def pin_runtime(commits: dict[str, str], tag: str) -> None:
     pinned: dict[str, bytes] = {}
     queue = list(sources)
     with ThreadPoolExecutor(8) as pool:
-        while queue:
+        while len(queue) > 0:
             pinned.update(zip(queue, pool.map(blob, [tree[p] for p in queue])))
-            found = set().union(*(includes(path, pinned[path]) for path in queue))
+            found = set[str]().union(*(includes(path, pinned[path]) for path in queue))
             queue = sorted(c for c in found if c in tree and c not in pinned)
     # CMake compiles every pinned libcxx/libcxxabi .cpp, so only the sources may be among them
     stray = [p for p in pinned if p.endswith('.cpp') and p not in sources and not p.startswith('libc/')]
-    if stray:
+    if len(stray) > 0:
         msg = f'sources include other .cpp files: {stray}'
         raise SystemExit(msg)
     lines = [f'{hashlib.sha256(data).hexdigest()}  {path}\n' for path, data in sorted(pinned.items())]
@@ -222,7 +223,7 @@ def pin_headers(commit: str, headers: Path) -> None:
     remote = {e['path']: e['sha'] for e in tree}
     local = {str(p.relative_to(headers)): blob_sha(p.read_bytes()) for p in headers.rglob('*') if p.is_file()}
     mismatches = [path for path, sha in local.items() if remote.get(path) != sha]
-    if mismatches:
+    if len(mismatches) > 0:
         msg = f'the prebuilt headers differ from llvm-project@{commit}: {mismatches[:10]}'
         raise SystemExit(msg)
 
@@ -240,7 +241,7 @@ def pin_headers(commit: str, headers: Path) -> None:
 
 def pin_config(tag: str) -> None:
     """Pins Chromium's build-generated libc++ config."""
-    config = []
+    config: list[str] = []
     for name in CHROMIUM_CONFIG:
         data = chromium(f'buildtools/third_party/libc%2B%2B/{name}', tag)
         config.append(f'{hashlib.sha256(data).hexdigest()}  {name}\n')

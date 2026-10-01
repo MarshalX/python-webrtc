@@ -24,7 +24,7 @@ fi
 
 if [ ! -x "$BUILD/venv/bin/python" ]; then
     uv venv -q "$BUILD/venv" --python "$PYTHON"
-    uv pip install -q --python "$BUILD/venv/bin/python" cmake ninja "pybind11>=3.0" pytest pytest-asyncio pytest-timeout
+    uv pip install -q --python "$BUILD/venv/bin/python" cmake ninja "pybind11>=3.0" "typing_extensions>=4.10" pytest pytest-asyncio pytest-timeout
 fi
 export PATH="$BUILD/venv/bin:$PATH"
 

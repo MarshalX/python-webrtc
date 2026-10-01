@@ -180,14 +180,18 @@ async def test_10(
     await wait_for_ice_gathering_complete(callee)
 
     second_track, *_ = audio_stream2.get_tracks()
-    candidates = []
-    caller.on('icecandidate', lambda event: candidates.append(event.candidate))
+    candidates: list[webrtc.RTCIceCandidate | None] = []
+
+    def on_candidate(event: webrtc.RTCPeerConnectionIceEvent) -> None:
+        candidates.append(event.candidate)
+
+    caller.on('icecandidate', on_candidate)
 
     caller.add_track(second_track)
 
     await exchange_offer_answer(caller, callee)
     await asyncio.sleep(0.1)
-    assert not candidates, 'Expect no icecandidate events after adding a bundled track'
+    assert len(candidates) == 0, 'Expect no icecandidate events after adding a bundled track'
 
     first_transceiver, second_transceiver, *_ = caller.get_transceivers()
     assert first_transceiver.receiver.transport == second_transceiver.receiver.transport

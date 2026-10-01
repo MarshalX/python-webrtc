@@ -15,6 +15,7 @@ import logging
 import sys
 
 import pythonmonkey as pm
+from typing_extensions import TypedDict
 
 from tests.wpt import bridge
 from tests.wpt.loader import build_scripts, load, split_case
@@ -29,6 +30,23 @@ from tests.wpt.runner import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# what testharness reports, as JS objects: statuses are numbers, messages may be null or undefined
+class _JsHarness(TypedDict):
+    status: float
+    message: object
+
+
+class _JsTest(TypedDict):
+    name: str
+    status: float
+    message: object
+
+
+class _JsResult(TypedDict):
+    harness: _JsHarness
+    tests: list[_JsTest]
 
 
 def _text(value: object) -> str | None:
@@ -53,10 +71,10 @@ async def run_in_process(case: str) -> CaseResult:
     test_file = load(path)
 
     loop = asyncio.get_running_loop()
-    completed = loop.create_future()
+    completed: asyncio.Future[_JsResult] = loop.create_future()
     unsupported: set[str] = set()
 
-    def complete(result: dict) -> None:
+    def complete(result: _JsResult) -> None:
         if not completed.done():
             completed.set_result(result)
 

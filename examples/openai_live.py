@@ -41,10 +41,11 @@ import sys
 import threading
 import time
 from array import array
-from typing import Any, ClassVar
+from typing import ClassVar, TypedDict
 
 import httpx
 import sounddevice
+from typing_extensions import NotRequired
 
 import webrtc
 
@@ -55,6 +56,60 @@ VOICE_LEVEL = 0.02  # the peak level above which audio counts as speech
 ECHO_TAIL = 0.6  # seconds the microphone stays muted after the assistant stops
 MAX_PLAYBACK = 0.5  # seconds of assistant audio buffered before the oldest is dropped
 SILENT_MIC_WARNING = 10  # seconds of silence before the microphone is suspected
+
+
+class Session(TypedDict, total=False):
+    """The session of a reply of the API."""
+
+    id: str
+
+
+class Transport(TypedDict):
+    """The transport of a reply of the API: the answer."""
+
+    sdp: str
+
+
+class SessionReply(TypedDict):
+    """The reply of the API to a new session."""
+
+    session: NotRequired[Session]
+    transport: Transport
+
+
+class Usage(TypedDict, total=False):
+    """The usage of a session."""
+
+    seconds: float
+
+
+class ContextWindow(TypedDict, total=False):
+    """How full the context of the model is."""
+
+    usage_ratio: object
+
+
+class ApiError(TypedDict, total=False):
+    """An error of the API."""
+
+    message: str
+
+
+class ErrorReply(TypedDict, total=False):
+    """The reply of the API to a request that failed."""
+
+    error: ApiError
+
+
+class Message(TypedDict, total=False):
+    """An event of the API on the event channel: the fields used here."""
+
+    type: str
+    delta: str
+    reason: str
+    usage: Usage
+    error: ApiError
+    context_window: ContextWindow
 
 
 class Console:
@@ -72,7 +127,7 @@ class Console:
 
     def __init__(self, *, verbose: bool) -> None:
         self.verbose = verbose
-        self.color = sys.stdout.isatty() and not os.environ.get('NO_COLOR')
+        self.color = sys.stdout.isatty() and os.environ.get('NO_COLOR', '') == ''
         self.speaker: str | None = None  # who the open transcript line belongs to
 
     def paint(self, text: str, color: str) -> str:
@@ -80,7 +135,7 @@ class Console:
         return f'\033[{self.COLORS[color]}m{text}\033[0m' if self.color else text
 
     def _end_transcript(self) -> None:
-        if self.speaker:
+        if self.speaker is not None:
             print(flush=True)
             self.speaker = None
 
@@ -88,7 +143,7 @@ class Console:
         """Prints a timestamped status line."""
         self._end_transcript()
         line = f'{self.paint(time.strftime("%H:%M:%S"), "dim")}  {icon}  {text}'
-        print(self.paint(line, color) if color else line, flush=True)
+        print(self.paint(line, color) if color is not None else line, flush=True)
 
     def info(self, text: str) -> None:
         """Prints a status line."""
@@ -121,10 +176,10 @@ class Console:
         print(delta, end='', flush=True)
 
 
-def peak(samples: bytes) -> float:
+def peak(samples: bytes | bytearray) -> float:
     """The peak level of 16-bit samples, from 0 to 1."""
     values = array('h', samples)
-    return max(*values, -min(values)) / 32768 if values else 0
+    return max(*values, -min(values)) / 32768 if len(values) > 0 else 0
 
 
 class Microphone:
@@ -167,7 +222,7 @@ class Speakers:
         self._lock = threading.Lock()
         self._limit = 0
 
-    def play(self, samples: bytes, sample_rate: int, channels: int) -> None:
+    def play(self, samples: bytes | bytearray, sample_rate: int, channels: int) -> None:
         """Queues samples, opening the device on the first ones."""
         if self._stream is None:
             self._limit = int(sample_rate * MAX_PLAYBACK) * channels * 2
@@ -221,39 +276,49 @@ class LiveCall:
         if not args.barge_in:
             console.info('Echo guard on: the mic is muted while the assistant speaks (--barge-in turns it off)')
 
-        self.pc = webrtc.RTCPeerConnection()
-        self.pc.on('connectionstatechange', self._on_connection_state)
-        self.pc.on('track', self._on_track)
+        self.pc = pc = webrtc.RTCPeerConnection()
+        pc.on('connectionstatechange', self._on_connection_state)
+        pc.on('track', self._on_track)
 
         generator = webrtc.MediaStreamTrackGenerator('audio')
-        self.pc.add_track(generator)
+        pc.add_track(generator)
         # created before the offer, so the offer negotiates it
-        self.events = self.pc.create_data_channel('oai-events')
+        self.events = pc.create_data_channel('oai-events')
         self.events.on('open', lambda _event: console.ok('Event channel open'))
         self.events.on('message', self._on_message)
 
-        offer = await self.pc.create_offer()
-        await self.pc.set_local_description(offer)
-        await self._gathered()
+        offer = await pc.create_offer()
+        await pc.set_local_description(offer)
+        sdp = await self._gathered(pc)
 
         console.info(f'Creating a {args.model} session...')
-        answer = await self._create_session(self.pc.local_description.sdp)
-        await self.pc.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', answer))
+        answer = await self._create_session(sdp)
+        await pc.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', answer))
 
         self.microphone.start()
-        self.tasks.append(asyncio.ensure_future(self._send_microphone(generator.writable.get_writer())))
+        writer = generator.writable.get_writer()
+        self.tasks.append(asyncio.ensure_future(self._send_microphone(writer, self.microphone)))
         await hang_up.wait()
         await self.close()
 
-    async def _gathered(self) -> None:
-        """Waits for the local ICE candidates, which go in the offer since there is no trickling."""
+    async def _gathered(self, pc: webrtc.RTCPeerConnection) -> str:
+        """Waits for the local ICE candidates, which go in the offer since there is no trickling, returns the offer."""
         done = asyncio.Event()
-        self.pc.on('icegatheringstatechange', lambda _event: self.pc.ice_gathering_state == 'complete' and done.set())
-        if self.pc.ice_gathering_state != 'complete':
+
+        def on_gathering_state(_event: webrtc.Event) -> None:
+            if pc.ice_gathering_state == 'complete':
+                done.set()
+
+        pc.on('icegatheringstatechange', on_gathering_state)
+        if pc.ice_gathering_state != 'complete':
             try:
                 await asyncio.wait_for(done.wait(), 5)
             except asyncio.TimeoutError:
                 self.console.warn('ICE gathering is slow, sending the candidates found so far')
+        if pc.local_description is None:
+            msg = 'No local description'
+            raise CallError(msg)
+        return pc.local_description.sdp
 
     async def _create_session(self, sdp: str) -> str:
         session: dict[str, object] = {'model': self.args.model}
@@ -273,11 +338,14 @@ class LiveCall:
             raise CallError(msg) from None
         if response.is_error:
             raise CallError(_describe_http_error(response))
-        reply: dict[str, Any] = response.json()
+        reply: SessionReply = response.json()
         self.console.ok(f'Session created: {reply.get("session", {}).get("id", "?")}')
         return reply['transport']['sdp']
 
     def _on_connection_state(self, _event: webrtc.Event) -> None:
+        if self.pc is None:
+            msg = 'No connection'
+            raise CallError(msg)
         state = self.pc.connection_state
         messages = {
             'connecting': ('info', 'Connecting audio...'),
@@ -290,16 +358,19 @@ class LiveCall:
             getattr(self.console, level)(text)
 
     def _on_track(self, event: webrtc.RTCTrackEvent) -> None:
+        if self.speakers is None:
+            msg = 'No speakers'
+            raise CallError(msg)
         self.console.debug(f"Receiving the assistant's {event.track.kind} track")
-        self.tasks.append(asyncio.ensure_future(self._play(event.track)))
+        self.tasks.append(asyncio.ensure_future(self._play(event.track, self.speakers)))
 
-    async def _send_microphone(self, writer: webrtc.WritableStreamDefaultWriter) -> None:
+    async def _send_microphone(self, writer: webrtc.WritableStreamDefaultWriter, microphone: Microphone) -> None:
         """Sends the microphone to the model, silence instead while the echo guard holds it."""
         console, loop = self.console, asyncio.get_running_loop()
         silence = bytes(FRAME * 2)
         timestamp, heard, started = 0, False, loop.time()
         while True:
-            chunk = await self.microphone.queue.get()
+            chunk = await microphone.queue.get()
             if not heard:
                 if peak(chunk) > VOICE_LEVEL:
                     heard = True
@@ -324,12 +395,15 @@ class LiveCall:
             await writer.write(data)
             timestamp += 10_000
 
-    async def _play(self, track: webrtc.MediaStreamTrack) -> None:
+    async def _play(self, track: webrtc.MediaStreamTrack, speakers: Speakers) -> None:
         """Plays the assistant's audio."""
         heard = False
         async for data in webrtc.MediaStreamTrackProcessor(
             webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=50)
         ).readable:
+            if not isinstance(data, webrtc.AudioData):
+                msg = f'expected audio data, not {data!r}'
+                raise TypeError(msg)
             with data:
                 options = webrtc.AudioDataCopyToOptions(plane_index=0, format='s16')
                 samples = bytearray(data.allocation_size(options))
@@ -340,13 +414,12 @@ class LiveCall:
                 if not heard:
                     heard = True
                     self.console.ok(f"Receiving the assistant's voice ({rate} Hz, {channels} ch)")
-            self.speakers.play(samples, rate, channels)
+            speakers.play(samples, rate, channels)
 
     def _on_message(self, event: webrtc.MessageEvent) -> None:
         console = self.console
-        try:
-            message: dict[str, Any] = json.loads(event.data)
-        except ValueError:
+        message = parse_message(event.data)
+        if message is None:
             console.debug(f'Not JSON: {event.data!r}')
             return
         kind = message.get('type')
@@ -358,12 +431,15 @@ class LiveCall:
             console.ok('Session started, say something! (Ctrl+C to hang up)')
         elif kind == 'session.closed':
             usage = message.get('usage', {})
-            reason = message.get('reason')
-            console.info(f'Session closed{f" ({reason})" if reason else ""}, {usage.get("seconds", "?")} s billed')
+            reason = message.get('reason', '')
+            console.info(
+                f'Session closed{f" ({reason})" if reason != "" else ""}, {usage.get("seconds", "?")} s billed'
+            )
             self.session_closed.set()
         elif kind == 'error':
             error = message.get('error', {})
-            console.error(f'API error: {error.get("message") or error}')
+            text = error.get('message')
+            console.error(f'API error: {text if text is not None and text != "" else error}')
         elif kind == 'session.usage.updated':
             usage = message.get('usage', {})
             ratio = message.get('context_window', {}).get('usage_ratio')
@@ -394,15 +470,28 @@ class LiveCall:
         console.ok('Bye!')
 
 
+def parse_message(data: str | bytes | webrtc.Blob) -> Message | None:
+    """An event of the API from the event channel, None if it isn't JSON."""
+    if isinstance(data, webrtc.Blob):
+        msg = 'the binary type of the event channel is bytes, not blobs'
+        raise TypeError(msg)
+    try:
+        message: Message = json.loads(data)
+    except ValueError:
+        return None
+    return message
+
+
 class CallError(Exception):
     """The call couldn't be set up."""
 
 
 def _describe_http_error(response: httpx.Response) -> str:
     try:
-        message = response.json().get('error', {}).get('message')
+        reply: ErrorReply = response.json()
     except ValueError:
-        message = None
+        reply = {}
+    message = reply.get('error', {}).get('message', '')
     hints = {
         401: 'the API key is invalid',
         403: 'the key has no access to this model',
@@ -410,7 +499,7 @@ def _describe_http_error(response: httpx.Response) -> str:
         429: 'rate limit or quota exceeded',
     }
     summary = hints.get(response.status_code, response.reason_phrase)
-    return f'OpenAI API returned {response.status_code}, {summary}' + (f': {message}' if message else '')
+    return f'OpenAI API returned {response.status_code}, {summary}' + (f': {message}' if message != '' else '')
 
 
 def parse_args() -> argparse.Namespace:
@@ -430,7 +519,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('-v', '--verbose', action='store_true', help='log every event from the API')
     args = parser.parse_args()
     for name in ('input_device', 'output_device'):
-        value = getattr(args, name)
+        value: str | None = getattr(args, name)
         if value is not None and value.isdigit():
             setattr(args, name, int(value))
     return args

@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import TYPE_CHECKING, ClassVar, Union
+from typing import TYPE_CHECKING, ClassVar, Literal, Union, cast, overload
+
+from typing_extensions import override
 
 import webrtc
 from webrtc import (
+    CricketIceGatheringState,
     Event,
     InvalidAccessError,
     InvalidStateError,
@@ -47,8 +50,11 @@ from webrtc.utils.task_queue import TaskQueue
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
+    from typing import Callable
 
     from typing_extensions import Self
+
+    from webrtc.models.rtc_certificate import AlgorithmIdentifier
 
 #: A description, as the methods that set one take it
 _Description = Union[RTCSessionDescription, RTCSessionDescriptionInit]
@@ -133,10 +139,11 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
     _deferred_negotiation_id: int | None = None
 
     def __init__(self, configuration: webrtc.RTCConfiguration | None = None) -> None:
-        super().__init__(self._class(configuration._to_native() if configuration is not None else None))
+        super().__init__(wrtc.RTCPeerConnection(configuration._to_native() if configuration is not None else None))
         self._attach()
 
     @classmethod
+    @override
     def _wrap(cls, item: wrtc.RTCPeerConnection) -> Self:
         # the wrapper that owns the listeners (and so the operations chain), when there is one
         listeners = item._listeners
@@ -157,7 +164,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         # negotiationneeded fires now, if it's still needed
         if self._deferred_negotiation_id is not None:
             event_id, self._deferred_negotiation_id = self._deferred_negotiation_id, None
-            asyncio.get_running_loop().call_soon(self._dispatch, 'negotiationneeded', event_id)
+            _ = asyncio.get_running_loop().call_soon(self._dispatch, 'negotiationneeded', event_id)
 
     def _check_state(self, operation: str, *allowed: RTCSignalingState) -> None:
         """Checks the connection isn't closed, and is in one of the allowed states if they're given.
@@ -169,13 +176,14 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         if state == RTCSignalingState.closed:
             msg = f"Can not {operation}: the RTCPeerConnection's signalingState is 'closed'"
             raise InvalidStateError(msg)
-        if allowed and state not in allowed:
+        if len(allowed) > 0 and state not in allowed:
             msg = f'Can not {operation} in the {state} signaling state'
             raise InvalidStateError(msg)
 
+    @override
     def _on_event(self, name: str, *args: object) -> None:
         if name == '_gatheringcomplete':
-            transports, state = args
+            transports, state = cast('tuple[list[wrtc.RTCIceTransport], webrtc.RTCIceGatheringState]', args)
             self._complete_gathering(transports, state)
             return
         # the state attributes change along with their events
@@ -184,17 +192,17 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             state = args[0]
             getattr(self._native_obj, surface)(state)
         if name == 'signalingstatechange':
-            _, descriptions = args
+            _, descriptions = cast('tuple[RTCSignalingState, int]', args)
             # the descriptions as the change left them
             self._native_obj._applyDescriptions(descriptions)
         elif name in {'icecandidate', 'icegatheringstatechange'}:
             # the local description gains candidates (and loses pending ones) along with these events
             self._native_obj._refreshDescriptions()
         elif name == 'datachannel':
-            (channel,) = args
-            webrtc.RTCDataChannel._wrap(channel)
+            (channel,) = cast('tuple[wrtc.RTCDataChannel]', args)
+            _ = webrtc.RTCDataChannel._wrap(channel)
             # the events of the channel follow the handlers of this one
-            TaskQueue.post_to_running(channel._release)
+            _ = TaskQueue.post_to_running(channel._release)
 
     def _complete_gathering(self, transports: list[wrtc.RTCIceTransport], state: webrtc.RTCIceGatheringState) -> None:
         """The ICE transports and the connection complete gathering, and the candidates end, in a single task.
@@ -203,7 +211,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         """
         ice_transports = webrtc.RTCIceTransport._wrap_many(transports)
         for ice_transport in ice_transports:
-            ice_transport._native_obj._surfaceGatheringState(state)
+            ice_transport._native_obj._surfaceGatheringState(CricketIceGatheringState(state))
         self._native_obj._surfaceIceGatheringState(state)
         self._native_obj._refreshDescriptions()
         for ice_transport in ice_transports:
@@ -212,14 +220,16 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         # the end of candidates is an icecandidate event without a candidate
         self._dispatch('icecandidate')
 
+    @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
         # events queued before close() aren't delivered after it
         if self._native_obj.signalingState == RTCSignalingState.closed:
             return None
-        creator = self._EVENT_CREATORS.get(name)
-        if creator is None:
+        creator_name = self._EVENT_CREATORS.get(name)
+        if creator_name is None:
             return super()._create_event(name, *args)
-        return getattr(self, creator)(*args)
+        creator: Callable[..., webrtc.Event | None] = getattr(self, creator_name)
+        return creator(*args)
 
     def _negotiation_needed_event(self, event_id: int) -> webrtc.Event | None:
         # not while operations are chained, but once they're done, if it's still needed
@@ -237,9 +247,15 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         return RTCPeerConnectionIceEvent('icecandidate', RTCIceCandidate(**kwargs), kwargs['url'], target=self)
 
     def _ice_candidate_error_event(self, *native: object) -> webrtc.Event:
-        address, port, url, error_code, error_text = native
+        address, port, url, error_code, error_text = cast('tuple[str, int, str, int, str]', native)
         return RTCPeerConnectionIceErrorEvent(
-            'icecandidateerror', address or None, port or None, url, error_code, error_text, target=self
+            'icecandidateerror',
+            address if address != '' else None,
+            port if port != 0 else None,
+            url,
+            error_code,
+            error_text,
+            target=self,
         )
 
     def _data_channel_event(self, channel: wrtc.RTCDataChannel) -> webrtc.Event:
@@ -274,7 +290,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
                 elif transceiver.direction == directions.recvonly:
                     transceiver.direction = directions.inactive
         elif not any(t.direction in {directions.sendrecv, directions.recvonly} for t in transceivers):
-            self.add_transceiver(kind, RTCRtpTransceiverInit(direction=directions.recvonly))
+            _ = self.add_transceiver(kind, RTCRtpTransceiverInit(direction=directions.recvonly))
 
     def _completed_description(self) -> None:
         """The success task of setting a description."""
@@ -412,7 +428,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             :obj:`webrtc.RTCRtpSender`: The :obj:`webrtc.RTCRtpSender` object which will be used to
             transmit the media data.
         """
-        if not stream:
+        if stream is None or (isinstance(stream, list) and len(stream) == 0):
             sender = self._native_obj.addTrack(track._native_obj, None)
         elif isinstance(stream, list):
             native_objects = [s._native_obj for s in stream]
@@ -424,7 +440,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
 
     def add_transceiver(
         self,
-        track_or_kind: webrtc.MediaStreamTrack | webrtc.MediaType,
+        track_or_kind: webrtc.MediaStreamTrack | webrtc.MediaType | webrtc.MediaTypeValue,
         init: webrtc.RTCRtpTransceiverInit | None = None,
     ) -> webrtc.RTCRtpTransceiver:
         """Creates a new :obj:`webrtc.RTCRtpTransceiver` and adds it to the transceivers of the connection.
@@ -540,7 +556,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             candidate_str, sdp_mid, sdp_m_line_index, ufrag = '', None, None, None
         else:
             candidate_str, sdp_mid, sdp_m_line_index, ufrag = RTCIceCandidate._members_of(candidate)
-        if candidate_str and sdp_mid is None and sdp_m_line_index is None:
+        if candidate_str != '' and sdp_mid is None and sdp_m_line_index is None:
             msg = 'sdp_mid and sdp_m_line_index are both None'
             raise TypeError(msg)
 
@@ -616,7 +632,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
 
     @staticmethod
     async def generate_certificate(
-        algorithm: webrtc.models.rtc_certificate.AlgorithmIdentifier = 'ECDSA', expires: float | None = None
+        algorithm: AlgorithmIdentifier = 'ECDSA', expires: float | None = None
     ) -> webrtc.RTCCertificate:
         """Generates a certificate for :attr:`webrtc.RTCConfiguration.certificates`.
 
@@ -805,6 +821,18 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
     setConfiguration = set_configuration
 
 
+@overload
+def _description_init(
+    description: _Description, *, allow_implicit: Literal[False]
+) -> wrtc.RTCSessionDescriptionInit: ...
+
+
+@overload
+def _description_init(
+    description: _Description | RTCLocalSessionDescriptionInit | None, *, allow_implicit: Literal[True]
+) -> wrtc.RTCSessionDescriptionInit | None: ...
+
+
 def _description_init(
     description: _Description | RTCLocalSessionDescriptionInit | None, *, allow_implicit: bool
 ) -> wrtc.RTCSessionDescriptionInit | None:
@@ -812,7 +840,7 @@ def _description_init(
     if isinstance(description, RTCSessionDescription):
         return description._native_obj.init
     if allow_implicit and isinstance(description, RTCLocalSessionDescriptionInit):
-        if description.type is None and description.sdp:
+        if description.type is None and description.sdp != '':
             msg = 'the type of a description is required'
             raise TypeError(msg)
         description = None if description.type is None else RTCSessionDescriptionInit(description.type, description.sdp)
@@ -837,7 +865,7 @@ def _check_send_encodings(encodings: list[webrtc.RTCRtpEncodingParameters], kind
     """
     rids = [e.rid for e in encodings]
     for rid in rids:
-        if rid is not None and not _RID.fullmatch(rid):
+        if rid is not None and _RID.fullmatch(rid) is None:
             msg = f'{rid!r} is not a valid rid: 1 to 16 letters and digits'
             raise ValueError(msg)
     if len(encodings) > 1 and (None in rids or len(set(rids)) != len(rids)):
@@ -845,9 +873,9 @@ def _check_send_encodings(encodings: list[webrtc.RTCRtpEncodingParameters], kind
         raise ValueError(msg)
 
     codecs = [e.codec for e in encodings if e.codec is not None]
-    if codecs:
+    if len(codecs) > 0:
         capabilities = webrtc.RTCRtpSender.get_capabilities(kind)
-        supported = capabilities.codecs if capabilities is not None else []
+        supported: list[RTCRtpCodec] = capabilities.codecs if capabilities is not None else []
         for codec in codecs:
             if not any(RTCRtpCodec._matches(c, codec) for c in supported):
                 msg = f'{codec.mime_type} can not be sent'

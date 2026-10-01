@@ -22,7 +22,7 @@ import contextlib
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
 
 class OperationsChain:
@@ -45,7 +45,7 @@ class OperationsChain:
         return self._last is not None and not self._last.done()
 
     @contextlib.asynccontextmanager
-    async def operation(self) -> AsyncIterator[None]:
+    async def operation(self) -> AsyncGenerator[None, None]:
         """Chains an operation after the ones that are running."""
         previous = self._last
         done = asyncio.get_running_loop().create_future()

@@ -23,7 +23,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
+
+from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     from tests.wpt.runner import CaseResult
@@ -31,6 +33,14 @@ if TYPE_CHECKING:
 PATH = Path(__file__).with_name('expectations.json')
 
 HARNESS_KEY = '[harness]'
+
+# one status, or the statuses a flaky test may have
+Expected = Union[str, list[str]]
+
+
+class _File(TypedDict, total=False):
+    skip: dict[str, str]
+    results: dict[str, dict[str, Expected]]
 
 
 def _allowed(expected: str | list[str]) -> list[str]:
@@ -50,7 +60,7 @@ class Expectations:
     def load(cls) -> Expectations:
         if not PATH.exists():
             return cls()
-        data = json.loads(PATH.read_text())
+        data: _File = json.loads(PATH.read_text())
         return cls(skip=data.get('skip', {}), results=data.get('results', {}))
 
     def save(self) -> None:
@@ -73,7 +83,7 @@ class Expectations:
                 seen.setdefault(test['name'], set()).add(test['status'])
 
         previous = self.results.get(case, {})
-        entry = {}
+        entry: dict[str, Expected] = {}
         for name, statuses in seen.items():
             kept = previous.get(name)
             if isinstance(kept, list) and statuses <= set(kept):
@@ -83,7 +93,7 @@ class Expectations:
             elif statuses.isdisjoint({'PASS', 'OK'}):
                 entry[name] = statuses.pop()
 
-        if entry:
+        if len(entry) > 0:
             self.results[case] = dict(sorted(entry.items()))
         else:
             self.results.pop(case, None)
@@ -92,7 +102,7 @@ class Expectations:
         expected = dict(self.results.get(case, {}))
         expected_harness = expected.pop(HARNESS_KEY, 'OK')
 
-        problems = []
+        problems: list[str] = []
         harness = result['harness']
         if harness['status'] not in _allowed(expected_harness):
             problems.append(

@@ -27,6 +27,9 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: uvx ruff check
       - run: uvx ruff format --check
+      # the imports of the checked code, without building the extension: its stub is in stubs/
+      - run: uv sync --group dev --group wpt --no-install-project
+      - run: uvx pyrefly check
       - run: make format-check
       # clang-tidy reads the libwebrtc headers, from the cache the wheels use
       - uses: actions/cache@v6

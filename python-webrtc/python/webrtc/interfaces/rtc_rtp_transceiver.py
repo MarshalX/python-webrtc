@@ -56,7 +56,7 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
         return self._native_obj.direction
 
     @direction.setter
-    def direction(self, new_direction: webrtc.TransceiverDirection) -> None:
+    def direction(self, new_direction: webrtc.TransceiverDirection | webrtc.TransceiverDirectionValue) -> None:
         self._native_obj.direction = new_direction
 
     @property
@@ -91,11 +91,11 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
                 (like RTX or FEC) are given.
         """
         kind = self.kind
-        natives = []
+        natives: list[wrtc.RtpCodecCapability] = []
         for source in (wrtc.RTCRtpReceiver.getCapabilities(kind), wrtc.RTCRtpSender.getCapabilities(kind)):
             natives.extend(source.codecs if source is not None else [])
 
-        preferences = []
+        preferences: list[wrtc.RtpCodecCapability] = []
         for codec in codecs:
             native = next((n for n in natives if RTCRtpCodec._from_native(n)._matches(codec)), None)
             if native is None:
@@ -128,9 +128,9 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
                 extension is stopped.
         """
         current = {e.uri: e for e in self._native_obj.getHeaderExtensionsToNegotiate()}
-        natives = []
+        natives: list[wrtc.RtpHeaderExtensionCapability] = []
         for extension in extensions:
-            if not extension.uri:
+            if extension.uri == '':
                 msg = 'the URI of a header extension must not be empty'
                 raise ValueError(msg)
             native = wrtc.RtpHeaderExtensionCapability()

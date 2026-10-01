@@ -12,11 +12,21 @@ from __future__ import annotations
 import dataclasses
 import math
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, ClassVar, TypeVar
+
+from typing_extensions import TypedDict
 
 from webrtc import MediaType, RTCDegradationPreference, RTCPriorityType, TransceiverDirection, wrtc
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
+
+if TYPE_CHECKING:
+    from webrtc.enums import (
+        MediaTypeValue,
+        RTCDegradationPreferenceValue,
+        RTCPriorityTypeValue,
+        TransceiverDirectionValue,
+    )
 
 _NativeCodecT = TypeVar('_NativeCodecT', bound='wrtc.RtpCodec')
 
@@ -35,10 +45,10 @@ def _is_unsigned_long(value: object) -> bool:
 
 
 def _parse_fmtp(line: str | None) -> dict[str, str]:
-    parameters = {}
-    for raw_item in (line or '').split(';'):
+    parameters: dict[str, str] = {}
+    for raw_item in (line if line is not None else '').split(';'):
         item = raw_item.strip()
-        if not item:
+        if item == '':
             continue
         if '=' in item:
             key, _, value = item.partition('=')
@@ -50,16 +60,32 @@ def _parse_fmtp(line: str | None) -> dict[str, str]:
 
 
 def _format_fmtp(parameters: dict[str, str]) -> str | None:
-    if not parameters:
+    if len(parameters) == 0:
         return None
-    return ';'.join(f'{key}={value}' if key else value for key, value in parameters.items())
+    return ';'.join(f'{key}={value}' if key != '' else value for key, value in parameters.items())
 
 
-def _codec_members(native: wrtc.RtpCodec) -> dict[str, Any]:
+class _CodecMembers(TypedDict, closed=True):
+    mime_type: str
+    clock_rate: int
+    channels: int | None
+    sdp_fmtp_line: str | None
+
+
+def _channels_or_one(channels: int | None) -> int:
+    return channels if channels is not None and channels != 0 else 1
+
+
+def _codec_members(native: wrtc.RtpCodec) -> _CodecMembers:
     """The members RTCRtpCodec and RTCRtpCodecParameters share."""
+    clock_rate = native.clockRate
+    # libwebrtc sets it for every codec it reports, while the specification requires it
+    if clock_rate is None:
+        msg = f'{native.mimeType} has no clock rate'
+        raise ValueError(msg)
     return {
         'mime_type': native.mimeType,
-        'clock_rate': native.clockRate,
+        'clock_rate': clock_rate,
         'channels': native.numChannels,
         'sdp_fmtp_line': _format_fmtp(native.parameters),
     }
@@ -89,7 +115,7 @@ class RTCRtpCodec(Dictionary):
     def _to_native(self, native_class: type[_NativeCodecT]) -> _NativeCodecT:
         """Creates a native codec of a class: ``wrtc.RtpCodec`` or ``wrtc.RtpCodecCapability``."""
         kind, _, name = self.mime_type.partition('/')
-        if not name:
+        if name == '':
             msg = f'{self.mime_type!r} is not a valid MIME type of a codec'
             raise ValueError(msg)
         native = native_class()
@@ -105,7 +131,7 @@ class RTCRtpCodec(Dictionary):
         return (
             self.mime_type.lower() == other.mime_type.lower()
             and self.clock_rate == other.clock_rate
-            and (self.channels or 1) == (other.channels or 1)
+            and _channels_or_one(self.channels) == _channels_or_one(other.channels)
             and _parse_fmtp(self.sdp_fmtp_line) == _parse_fmtp(other.sdp_fmtp_line)
         )
 
@@ -206,8 +232,8 @@ class RTCRtpEncodingParameters(Dictionary):
     max_framerate: float | None = None
     rid: str | None = None
     scale_resolution_down_by: float | None = None
-    priority: RTCPriorityType = RTCPriorityType.low
-    network_priority: RTCPriorityType = RTCPriorityType.low
+    priority: RTCPriorityType | RTCPriorityTypeValue = RTCPriorityType.low
+    network_priority: RTCPriorityType | RTCPriorityTypeValue = RTCPriorityType.low
     scalability_mode: str | None = None
     adaptive_ptime: bool = False
     codec: RTCRtpCodec | None = None
@@ -222,7 +248,7 @@ class RTCRtpEncodingParameters(Dictionary):
             max_bitrate=native.maxBitrate,
             max_framerate=native.maxFramerate,
             scale_resolution_down_by=native.scaleResolutionDownBy,
-            rid=native.rid or None,
+            rid=native.rid if native.rid != '' else None,
             priority=priority,
             network_priority=native.networkPriority,
             scalability_mode=native.scalabilityMode,
@@ -265,7 +291,7 @@ class RTCRtpEncodingParameters(Dictionary):
 
     def _to_native(self) -> wrtc.RtpEncodingParameters:
         native = self._apply(wrtc.RtpEncodingParameters())
-        native.rid = self.rid or ''
+        native.rid = self.rid if self.rid is not None else ''
         return native
 
     #: Alias for :attr:`max_bitrate`
@@ -335,7 +361,7 @@ class RTCRtpSendParameters(Dictionary):
     codecs: list[RTCRtpCodecParameters] = field(default_factory=list)
     header_extensions: list[RTCRtpHeaderExtensionParameters] = field(default_factory=list)
     rtcp: RTCRtcpParameters = field(default_factory=RTCRtcpParameters)
-    degradation_preference: RTCDegradationPreference | None = None
+    degradation_preference: RTCDegradationPreference | RTCDegradationPreferenceValue | None = None
 
     _dictionaries: ClassVar = {
         'encodings': RTCRtpEncodingParameters,
@@ -374,7 +400,7 @@ class RTCRtpHeaderExtensionCapability(Dictionary):
     """
 
     uri: str
-    direction: TransceiverDirection = TransceiverDirection.sendrecv
+    direction: TransceiverDirection | TransceiverDirectionValue = TransceiverDirection.sendrecv
 
     @classmethod
     def _from_native(cls, native: wrtc.RtpHeaderExtensionCapability) -> RTCRtpHeaderExtensionCapability:
@@ -405,7 +431,7 @@ class RTCRtpCapabilities(Dictionary):
 
     @classmethod
     def _supported(
-        cls, native_class: type[wrtc.RTCRtpSender | wrtc.RTCRtpReceiver], kind: MediaType
+        cls, native_class: type[wrtc.RTCRtpSender | wrtc.RTCRtpReceiver], kind: MediaType | MediaTypeValue
     ) -> RTCRtpCapabilities | None:
         """The capabilities of ``wrtc.RTCRtpSender`` or ``wrtc.RTCRtpReceiver`` for a kind.
 

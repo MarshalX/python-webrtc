@@ -122,7 +122,7 @@ def _key_params(algorithm: AlgorithmIdentifier) -> _KeyParams:
     return key_params(algorithm)
 
 
-class RTCCertificate(WebRTCObject):
+class RTCCertificate(WebRTCObject[wrtc.RTCCertificate]):
     """A certificate a connection uses to authenticate with DTLS.
 
     Generated with :meth:`generate` and set with :attr:`webrtc.RTCConfiguration.certificates`. Without one,
@@ -155,7 +155,7 @@ class RTCCertificate(WebRTCObject):
             raise ValueError(msg)
         native = await asyncio.get_running_loop().run_in_executor(
             None,
-            cls._class.generate,
+            wrtc.RTCCertificate.generate,
             key_type,
             modulus_length,
             exponent,

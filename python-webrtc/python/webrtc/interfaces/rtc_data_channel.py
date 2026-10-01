@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
+
+from typing_extensions import override
 
 from webrtc import (
     BinaryType,
@@ -22,12 +24,14 @@ from webrtc import (
     WebRTCObject,
     wrtc,
 )
+from webrtc.exceptions import _event_error
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.events import EventTarget
 from webrtc.utils.names import Alias, alias
 
 if TYPE_CHECKING:
     import webrtc
+    from webrtc.enums import BinaryTypeValue, RTCPriorityTypeValue
 
 #: The maximum of an unsigned short, which limits the members of the init
 MAX_UNSIGNED_SHORT = 65535
@@ -68,7 +72,7 @@ class RTCDataChannelInit(Dictionary):
     protocol: str = ''
     negotiated: bool = False
     id: int | None = None
-    priority: RTCPriorityType | str = RTCPriorityType.low
+    priority: RTCPriorityType | RTCPriorityTypeValue = RTCPriorityType.low
 
     def _check(self) -> None:
         """Checks the members, as the specification requires.
@@ -122,31 +126,33 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget):
     _class = wrtc.RTCDataChannel
     _events = ('open', 'message', 'bufferedamountlow', 'error', 'closing', 'close')
 
+    @override
     def _on_event(self, name: str, *args: object) -> None:
         # readyState changes along with the events
         if name in {'open', 'closing', 'close'}:
-            (state,) = args
+            (state,) = cast('tuple[RTCDataChannelState]', args)
             self._native_obj._surfaceState(state)
         elif name == '_sent':
-            (size,) = args
+            (size,) = cast('tuple[int]', args)
             if self._native_obj._decreaseBufferedAmount(size):
                 # in the same task as the decrease, before anything that arrived meanwhile
                 self._dispatch('bufferedamountlow')
 
+    @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
         if name == 'open' and self.ready_state != RTCDataChannelState.open:
             # closed before it opened
             return None
         if name == 'message':
-            (message,) = args
-            data = message.data
+            (message,) = cast('tuple[wrtc.DataChannelMessage]', args)
+            data: str | bytes | Blob = message.data
             # binary_type as of delivery, per the specification
             if isinstance(data, bytes) and self._native_obj.binaryType == BinaryType.blob:
                 data = Blob([data])
             return MessageEvent(name, data, target=self)
         if name == 'error':
-            (error,) = args
-            return RTCErrorEvent(name, error.toPython(), target=self)
+            (error,) = cast('tuple[wrtc.RTCCallbackException]', args)
+            return RTCErrorEvent(name, _event_error(error), target=self)
         return super()._create_event(name, *args)
 
     @property
@@ -220,7 +226,7 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget):
         return BinaryType(self._native_obj.binaryType)
 
     @binary_type.setter
-    def binary_type(self, value: BinaryType | str) -> None:
+    def binary_type(self, value: BinaryType | BinaryTypeValue) -> None:
         self._native_obj.binaryType = BinaryType(value).value
 
     def send(self, data: str | bytes | bytearray | memoryview | Blob) -> None:

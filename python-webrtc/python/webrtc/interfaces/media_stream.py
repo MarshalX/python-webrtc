@@ -9,7 +9,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
+
+from typing_extensions import override
 
 from webrtc import MediaStreamTrack, MediaStreamTrackEvent, MediaType, WebRTCObject, wrtc
 from webrtc.utils.events import EventTarget
@@ -37,30 +39,37 @@ class MediaStream(WebRTCObject[wrtc.MediaStream], EventTarget):
 
     _class = wrtc.MediaStream
     _events = ('addtrack', 'removetrack')
+    #: The native tracks, kept here: the native stream keeps them weakly
+    _tracks: list[wrtc.MediaStreamTrack]
 
     def __init__(self, tracks: list[webrtc.MediaStreamTrack] | webrtc.MediaStream | None = None) -> None:
         if isinstance(tracks, MediaStream):
             tracks = tracks.get_tracks()
-        super().__init__(self._class.create([track._native_obj for track in tracks or []]))
+        super().__init__(wrtc.MediaStream.create([track._native_obj for track in tracks] if tracks is not None else []))
         self._keep_tracks()
 
     @classmethod
+    @override
     def _wrap(cls, item: wrtc.MediaStream) -> Self:
         stream = super()._wrap(item)
         stream._keep_tracks()
         return stream
 
-    def _keep_tracks(self) -> list[wrtc.MediaStreamTrack]:
-        """The native tracks, kept here: the native stream keeps them weakly."""
+    def _keep_tracks(self) -> None:
         self._tracks = self._native_obj.getTracks()
+
+    def _kept_tracks(self) -> list[wrtc.MediaStreamTrack]:
+        self._keep_tracks()
         return self._tracks
 
+    @override
     def _on_event(self, name: str, *_args: object) -> None:
         if name in {'addtrack', 'removetrack'}:
             self._keep_tracks()
 
+    @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
-        (track,) = args
+        (track,) = cast('tuple[wrtc.MediaStreamTrack]', args)
         return MediaStreamTrackEvent(name, MediaStreamTrack._wrap(track), target=self)
 
     @property
@@ -79,7 +88,7 @@ class MediaStream(WebRTCObject[wrtc.MediaStream], EventTarget):
         Returns:
             :obj:`list` of :obj:`webrtc.MediaStreamTrack`: The tracks.
         """
-        return MediaStreamTrack._wrap_many([t for t in self._keep_tracks() if t.kind == MediaType.audio])
+        return MediaStreamTrack._wrap_many([t for t in self._kept_tracks() if t.kind == MediaType.audio])
 
     def get_video_tracks(self) -> list[webrtc.MediaStreamTrack]:
         """Returns the video tracks of the stream, in no defined order.
@@ -87,7 +96,7 @@ class MediaStream(WebRTCObject[wrtc.MediaStream], EventTarget):
         Returns:
             :obj:`list` of :obj:`webrtc.MediaStreamTrack`: The tracks.
         """
-        return MediaStreamTrack._wrap_many([t for t in self._keep_tracks() if t.kind == MediaType.video])
+        return MediaStreamTrack._wrap_many([t for t in self._kept_tracks() if t.kind == MediaType.video])
 
     def get_tracks(self) -> list[webrtc.MediaStreamTrack]:
         """Returns all the tracks of the stream, in no defined order.
@@ -95,7 +104,7 @@ class MediaStream(WebRTCObject[wrtc.MediaStream], EventTarget):
         Returns:
             :obj:`list` of :obj:`webrtc.MediaStreamTrack`: The tracks.
         """
-        return MediaStreamTrack._wrap_many(self._keep_tracks())
+        return MediaStreamTrack._wrap_many(self._kept_tracks())
 
     def get_track_by_id(self, track_id: str) -> webrtc.MediaStreamTrack | None:
         """Returns the track of an ID, the first one if several tracks have it.

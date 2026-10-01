@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
+from typing import TYPE_CHECKING, Generic, TypeVar, overload
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -29,7 +29,7 @@ def snake_case(name: str) -> str:
     return ''.join(f'_{c.lower()}' if c.isupper() else c for c in name)
 
 
-def members(value: Mapping[str, Any], names: Iterable[str]) -> dict[str, Any]:
+def members(value: Mapping[str, object], names: Iterable[str]) -> dict[str, object]:
     """The members of a dictionary, with snake_case or camelCase names: unknown ones are ignored, as in WebIDL."""
     wanted = set(names)
     return {snake_case(name): member for name, member in value.items() if snake_case(name) in wanted}
@@ -62,7 +62,7 @@ class Alias(Generic[_T]):
         setattr(obj, self.name, value)
 
 
-def alias(name: str) -> Alias[Any]:
+def alias(name: str) -> Alias[_T]:
     """The :obj:`Alias` of an attribute, like :func:`dataclasses.field` for a field.
 
     Args:

@@ -11,11 +11,16 @@ from __future__ import annotations
 
 import array
 import struct
+from typing import TYPE_CHECKING
 
 import pytest
 
 import webrtc
+from tests.helpers import mistyped
 from webrtc import AudioSampleFormat
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def f32(*values: float) -> bytes:
@@ -23,7 +28,12 @@ def f32(*values: float) -> bytes:
 
 
 def audio_data(
-    *, format: str = 'f32-planar', channels: int = 2, frames: int = 5, data: bytes | None = None, **init: object
+    *,
+    format: webrtc.AudioSampleFormatValue = 'f32-planar',
+    channels: int = 2,
+    frames: int = 5,
+    data: bytes | None = None,
+    **init: object,
 ) -> webrtc.AudioData:
     size = {'u8': 1, 's16': 2}.get(format.split('-', maxsplit=1)[0], 4)
     return webrtc.AudioData(
@@ -52,7 +62,7 @@ def test_construct() -> None:
 
 def test_init_from_json() -> None:
     """The init comes from its JSON form with camelCase names, a dictionary isn't taken itself."""
-    init = {
+    init: dict[str, object] = {
         'format': 's16',
         'sampleRate': 48000,
         'numberOfFrames': 480,
@@ -69,18 +79,19 @@ def test_init_from_json() -> None:
 
 
 @pytest.mark.parametrize(
-    'change',
+    'create',
     [
-        {'format': 'x32'},
-        {'frames': 0},
-        {'channels': 0},
-        {'data': bytes(3)},
+        lambda: audio_data(format=mistyped('x32')),
+        lambda: audio_data(frames=0),
+        lambda: audio_data(channels=0),
+        lambda: audio_data(data=bytes(3)),
     ],
+    ids=['change0', 'change1', 'change2', 'change3'],
 )
-def test_invalid_init(change: dict[str, object]) -> None:
+def test_invalid_init(create: Callable[[], webrtc.AudioData]) -> None:
     """An invalid init, or data too small for it, is a TypeError."""
     with pytest.raises(TypeError):
-        audio_data(**change)
+        create()
 
 
 def test_close_and_clone() -> None:
@@ -157,7 +168,7 @@ VALUES = {
 
 @pytest.mark.parametrize('source', VALUES)
 @pytest.mark.parametrize('destination', VALUES)
-def test_sample_conversions(source: str, destination: str) -> None:
+def test_sample_conversions(source: webrtc.AudioSampleFormatValue, destination: webrtc.AudioSampleFormatValue) -> None:
     """Samples convert between types, scaled to their range."""
     values, code = VALUES[source]
     audio = audio_data(format=source, channels=1, frames=4, data=array.array(code, values).tobytes())
@@ -172,7 +183,7 @@ def test_sample_conversions(source: str, destination: str) -> None:
 
 
 @pytest.mark.parametrize('destination', ['u8', 's16', 's32'])
-def test_non_finite_f32_samples_convert(destination: str) -> None:
+def test_non_finite_f32_samples_convert(destination: webrtc.AudioSampleFormatValue) -> None:
     """NaN is silence and infinities are the extremes; converting NaN was undefined behavior (found by fuzzing)."""
     values = [float('nan'), float('inf'), float('-inf')]
     audio = audio_data(format='f32', channels=1, frames=3, data=array.array('f', values).tobytes())

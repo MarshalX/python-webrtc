@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import webrtc
-from tests.helpers import exchange_offer
+from tests.helpers import exchange_offer, mistyped
 
 if TYPE_CHECKING:
     from tests.helpers import CreatePC
@@ -159,9 +159,12 @@ async def test_always_negotiate_data_channels_and_header_encryption(create_pc: C
     assert 'a=cryptex' in offer.sdp
 
     pc.set_configuration(configuration)
-    for changed in ({'always_negotiate_data_channels': False}, {'rtp_header_encryption_policy': 'negotiate'}):
+    for changed in (
+        dataclasses.replace(configuration, always_negotiate_data_channels=False),
+        dataclasses.replace(configuration, rtp_header_encryption_policy='negotiate'),
+    ):
         with pytest.raises(webrtc.InvalidModificationError):
-            pc.set_configuration(dataclasses.replace(configuration, **changed))
+            pc.set_configuration(changed)
 
 
 @pytest.mark.asyncio
@@ -216,7 +219,9 @@ async def test_configured_certificate(create_pc: CreatePC) -> None:
     pc.add_transceiver(webrtc.MediaType.audio)
     offer = await pc.create_offer()
     assert fingerprint.value.upper() in offer.sdp
-    assert pc.get_configuration().certificates[0].get_fingerprints() == [fingerprint]
+    certificates = pc.get_configuration().certificates
+    assert certificates is not None
+    assert certificates[0].get_fingerprints() == [fingerprint]
 
 
 @pytest.mark.asyncio
@@ -282,8 +287,12 @@ def test_peer_reflexive_candidate_hides_its_address() -> None:
     candidate = webrtc.RTCIceCandidate._peer_reflexive({
         'candidate': 'candidate:1 1 udp 1853504767 redacted-ip.invalid 62341 typ prflx generation 0 ufrag a/b+',
         'sdp_mid': '0',
+        'sdp_m_line_index': 0,
+        'username_fragment': None,
+        'url': None,
+        'relay_protocol': None,
     })
-    assert not candidate.candidate
+    assert candidate.candidate == ''
     assert candidate.type == webrtc.RTCIceCandidateType.prflx
     assert candidate.address is None
     assert candidate.port == 62341
@@ -298,7 +307,7 @@ def test_rtc_error() -> None:
     assert error.sctp_cause_code == 12
     assert error.sdp_line_number is None
     with pytest.raises(ValueError, match='not a valid RTCErrorDetailType'):
-        webrtc.RTCErrorInit('nonsense')
+        webrtc.RTCErrorInit(mistyped('nonsense'))
 
 
 def test_rtc_error_init_from_json() -> None:
@@ -335,6 +344,8 @@ async def test_created_descriptions(pc: webrtc.RTCPeerConnection) -> None:
         )
     await pc.set_local_description(offer)
     # not compared by identity: gathered candidates change the description (and its object) between reads
+    assert pc.pending_local_description is not None
+    assert pc.local_description is not None
     assert pc.pending_local_description.type == pc.local_description.type == offer.type
     assert pc.current_local_description is None
 
@@ -349,10 +360,12 @@ async def test_provisional_answers_without_sdp(
 
     await callee.set_local_description(webrtc.RTCSessionDescriptionInit('pranswer'))
     assert callee.signaling_state == webrtc.RTCSignalingState.have_local_pranswer
+    assert callee.pending_local_description is not None
     assert callee.pending_local_description.type == webrtc.RTCSdpType.pranswer
     # without a type, the final answer
     await callee.set_local_description()
     assert callee.signaling_state == webrtc.RTCSignalingState.stable
+    assert callee.current_local_description is not None
     assert callee.current_local_description.type == webrtc.RTCSdpType.answer
 
 

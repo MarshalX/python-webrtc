@@ -20,6 +20,12 @@ import webrtc
 from tests.helpers import connect, wait_for_event, wait_until
 
 
+def local_parameters(transport: webrtc.RTCIceTransport) -> webrtc.RTCIceParameters:
+    parameters = transport.get_local_parameters()
+    assert parameters is not None
+    return parameters
+
+
 @pytest.mark.asyncio
 async def test_candidates_parameters_and_role(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
@@ -27,19 +33,22 @@ async def test_candidates_parameters_and_role(
     """A connection's transport learns its role from the answer, and has the signaled parameters and candidates."""
     caller.create_data_channel('ice')
     await caller.set_local_description()
+    assert caller.sctp is not None
     ice = caller.sctp.transport.ice_transport
     assert ice.role == webrtc.RTCIceRole.unknown
     assert ice.get_remote_parameters() is None
 
     await connect(caller, callee)
     await wait_until(lambda: ice.role == webrtc.RTCIceRole.controlling, 'the controlling role')
+    assert callee.sctp is not None
     remote_ice = callee.sctp.transport.ice_transport
     local, remote = ice.get_local_parameters(), ice.get_remote_parameters()
     assert isinstance(local, webrtc.RTCIceParameters)
-    assert local.username_fragment
-    assert local.password
-    assert remote.username_fragment == remote_ice.get_local_parameters().username_fragment
-    assert ice.get_local_candidates()
+    assert local.username_fragment != ''
+    assert local.password != ''
+    assert remote is not None
+    assert remote.username_fragment == local_parameters(remote_ice).username_fragment
+    assert len(ice.get_local_candidates()) > 0
     assert all(c.candidate for c in ice.get_local_candidates())
     assert {c.candidate for c in ice.get_remote_candidates()} <= {
         c.candidate for c in remote_ice.get_local_candidates()
@@ -51,6 +60,7 @@ async def test_component(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPee
     """RTP and RTCP are multiplexed on the transport of the RTP component."""
     transceiver = caller.add_transceiver(webrtc.MediaType.audio)
     await connect(caller, callee)
+    assert transceiver.sender.transport is not None
     assert transceiver.sender.transport.ice_transport.component == webrtc.RTCIceComponent.rtp
 
 
@@ -59,6 +69,7 @@ async def test_close_keeps_gathering_state(pc: webrtc.RTCPeerConnection) -> None
     """Closing a connection closes its transports, it doesn't complete their gathering."""
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
     await pc.set_local_description()
+    assert transceiver.sender.transport is not None
     ice = transceiver.sender.transport.ice_transport
     state = ice.gathering_state
     pc.close()
@@ -72,13 +83,13 @@ async def test_two_transports_connect() -> None:
     local, remote = webrtc.RTCIceTransport(), webrtc.RTCIceTransport()
     assert local.role is None
     assert local.state == webrtc.RTCIceTransportState.new
-    assert local.get_local_parameters()
+    assert local.get_local_parameters() is not None
     assert local.get_remote_parameters() is None
 
     for transport, other in ((local, remote), (remote, local)):
 
         def on_candidate(event: webrtc.RTCPeerConnectionIceEvent, other: webrtc.RTCIceTransport = other) -> None:
-            if event.candidate:
+            if event.candidate is not None:
                 other.add_remote_candidate(event.candidate)
 
         transport.on('icecandidate', on_candidate)
@@ -87,13 +98,14 @@ async def test_two_transports_connect() -> None:
     remote.gather()
     assert local.gathering_state == webrtc.CricketIceGatheringState.gathering
     # both take the controlling role: one of them switches
-    local.start(remote.get_local_parameters(), 'controlling')
-    remote.start(local.get_local_parameters(), 'controlling')
+    local.start(local_parameters(remote), 'controlling')
+    remote.start(local_parameters(local), 'controlling')
     await asyncio.gather(*connected)
 
     assert local.state == remote.state == webrtc.RTCIceTransportState.connected
     assert {local.role, remote.role} == {webrtc.RTCIceRole.controlling, webrtc.RTCIceRole.controlled}
     pair = local.get_selected_candidate_pair()
+    assert pair is not None
     assert pair.local.candidate in [c.candidate for c in local.get_local_candidates()]
     assert pair.remote.candidate in [c.candidate for c in local.get_remote_candidates()]
 

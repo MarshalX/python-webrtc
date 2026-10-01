@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import Callable, NamedTuple, TypeVar, overload
+from typing import TYPE_CHECKING, Callable, NamedTuple, Protocol, TypeVar, cast, overload
+
+from typing_extensions import Never
 
 import webrtc
 from webrtc.utils.task_queue import TaskQueue
 
 Handler = Callable[['webrtc.Event'], object]
-_H = TypeVar('_H', bound=Handler)
+# any one-argument callable: a handler takes the event subclass of its event, like RTCTrackEvent
+_H = TypeVar('_H', bound=Callable[[Never], object])
 
 #: The tasks of the coroutine handlers, referenced until they're done
 _handler_tasks: set[asyncio.Future[object]] = set()
@@ -48,7 +51,7 @@ class _Listeners:
 
     def __call__(self, name: str, *args: object) -> None:
         # a libwebrtc thread, with the GIL held: only schedule
-        registrations = self.__dict__.get('registrations')
+        registrations: dict[str, list[_Registration]] | None = self.__dict__.get('registrations')
         if registrations is None:
             # the garbage collector cleared this object (in a cycle with its target) before the native one let go
             return
@@ -58,7 +61,7 @@ class _Listeners:
             primary_loop = self.primary_loop = next(
                 (r.loop for regs in list(registrations.values()) for r in list(regs) if not r.loop.is_closed()), None
             )
-        loops = [primary_loop] if primary_loop else []
+        loops: list[asyncio.AbstractEventLoop] = [primary_loop] if primary_loop is not None else []
         for registration in registrations.get(name, ()):
             if registration.loop not in loops:
                 loops.append(registration.loop)
@@ -77,7 +80,7 @@ class _Listeners:
         if loop is self.primary_loop:
             self.target._on_event(name, *args)
         registrations = [r for r in self.registrations.get(name, ()) if r.loop is loop]
-        if not registrations:
+        if len(registrations) == 0:
             return
         event = self.target._create_event(name, *args)
         if event is None:
@@ -110,12 +113,18 @@ class _Listeners:
             return  # like addEventListener, a handler is registered once
         registrations.append(_Registration(handler, loop, once))
 
-    def remove(self, name: str, handler: Handler | None) -> None:
+    def remove(self, name: str, handler: Callable[[Never], object] | None) -> None:
         if handler is None:
-            self.registrations.pop(name, None)
+            _ = self.registrations.pop(name, None)
             return
         registrations = self.registrations.get(name, [])
         self.registrations[name] = [r for r in registrations if r.handler != handler]
+
+
+class _NativeEventTarget(Protocol):
+    """A native object that emits events, through the listeners it holds."""
+
+    _listeners: _Listeners | None
 
 
 class EventTarget:
@@ -137,13 +146,21 @@ class EventTarget:
     #: Names of the events the object emits
     _events: tuple[str, ...] = ()
 
-    def _listeners(self, *, create: bool) -> _Listeners | None:
+    if TYPE_CHECKING:
+
+        @property
+        def _native_obj(self) -> _NativeEventTarget: ...
+
+    def _listeners(self) -> _Listeners | None:
+        return self._native_obj._listeners
+
+    def _created_listeners(self) -> _Listeners:
         native = self._native_obj
         listeners = native._listeners
-        if listeners is None and create:
+        if listeners is None:
             listeners = _Listeners(self)
             # before the native object gets it: it delivers the events it held right away
-            listeners.ensure_primary_loop()
+            _ = listeners.ensure_primary_loop()
             native._listeners = listeners
         return listeners
 
@@ -154,7 +171,7 @@ class EventTarget:
         a loop.
         """
         if _running_loop() is not None:
-            self._listeners(create=True).ensure_primary_loop()
+            _ = self._created_listeners().ensure_primary_loop()
 
     def _check_event(self, name: str) -> None:
         if name not in self._events:
@@ -168,12 +185,13 @@ class EventTarget:
         return self._add_handler(name, handler, once=once)
 
     def _add_handler(self, name: str, handler: _H, *, once: bool) -> _H:
-        self._listeners(create=True).add(name, handler, once=once)
+        # the handler takes the event of its name, which only the native object knows
+        self._created_listeners().add(name, cast('Handler', handler), once=once)
         return handler
 
     def _dispatch(self, name: str, *args: object) -> None:
         """Delivers an event to the handlers on the running loop right away, from an event being delivered."""
-        listeners = self._listeners(create=False)
+        listeners = self._listeners()
         if listeners is not None:
             listeners.deliver(asyncio.get_running_loop(), name, args)
 
@@ -233,7 +251,7 @@ class EventTarget:
         """
         return self._add(name, handler, once=True)
 
-    def off(self, name: str, handler: Handler | None = None) -> None:
+    def off(self, name: str, handler: Callable[[Never], object] | None = None) -> None:
         """Removes a handler of an event, or every handler of the event.
 
         Args:
@@ -244,6 +262,6 @@ class EventTarget:
             ValueError: If the object has no such event.
         """
         self._check_event(name)
-        listeners = self._listeners(create=False)
+        listeners = self._listeners()
         if listeners is not None:
             listeners.remove(name, handler)

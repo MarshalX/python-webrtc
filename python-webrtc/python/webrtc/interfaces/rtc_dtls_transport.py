@@ -9,8 +9,13 @@
 
 from __future__ import annotations
 
+from typing import cast
+
+from typing_extensions import override
+
 import webrtc
-from webrtc import RTCErrorEvent, WebRTCObject, wrtc
+from webrtc import DtlsTransportState, RTCErrorEvent, WebRTCObject, wrtc
+from webrtc.exceptions import _event_error
 from webrtc.utils.events import EventTarget
 
 
@@ -28,16 +33,18 @@ class RTCDtlsTransport(WebRTCObject[wrtc.RTCDtlsTransport], EventTarget):
     _class = wrtc.RTCDtlsTransport
     _events = ('statechange', 'error')
 
+    @override
     def _on_event(self, name: str, *args: object) -> None:
         # the state changes along with its event
         if name == 'statechange':
-            (state,) = args
+            (state,) = cast('tuple[DtlsTransportState]', args)
             self._native_obj._surfaceState(state)
 
+    @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
         if name == 'error':
-            (error,) = args
-            return RTCErrorEvent(name, error.toPython(), target=self)
+            (error,) = cast('tuple[wrtc.RTCCallbackException]', args)
+            return RTCErrorEvent(name, _event_error(error), target=self)
         return super()._create_event(name, *args)
 
     @property

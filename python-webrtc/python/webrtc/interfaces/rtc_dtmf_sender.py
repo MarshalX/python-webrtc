@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
+
+from typing_extensions import override
 
 from webrtc import InvalidCharacterError, RTCDTMFToneChangeEvent, WebRTCObject, wrtc
 from webrtc.utils.events import EventTarget
@@ -32,13 +34,15 @@ class RTCDTMFSender(WebRTCObject[wrtc.RTCDTMFSender], EventTarget):
     _class = wrtc.RTCDTMFSender
     _events = ('tonechange',)
 
-    def _on_event(self, _name: str, *args: object) -> None:
-        _, tone_buffer, insertion = args
+    @override
+    def _on_event(self, name: str, *args: object) -> None:
+        _, tone_buffer, insertion = cast('tuple[str, str, int]', args)
         # the tone buffer is shortened along with the event
         self._native_obj._surfaceBuffer(tone_buffer, insertion)
 
+    @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
-        tone, _, _ = args
+        tone, _, _ = cast('tuple[str, str, int]', args)
         return RTCDTMFToneChangeEvent(name, tone, target=self)
 
     def insert_dtmf(self, tones: str, duration: int = 100, inter_tone_gap: int = 70) -> None:
@@ -54,7 +58,7 @@ class RTCDTMFSender(WebRTCObject[wrtc.RTCDTMFSender], EventTarget):
             webrtc.InvalidCharacterError: If ``tones`` has another character.
             webrtc.InvalidStateError: If the transceiver of the sender is stopped or doesn't send.
         """
-        if not _TONES.fullmatch(tones):
+        if _TONES.fullmatch(tones) is None:
             msg = f'{tones!r} has characters that are not DTMF tones'
             raise InvalidCharacterError(msg)
         duration = min(max(int(duration), 40), 6000)

@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import re
 import weakref
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
+
+from typing_extensions import override
 
 from webrtc import (
     CricketIceGatheringState,
@@ -77,22 +79,26 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
 
     def _remember(self, candidate: webrtc.RTCIceCandidate) -> None:
         """Makes a candidate the object of its native candidate, unless there's one already."""
-        _candidates.setdefault(self._native_obj, {}).setdefault(candidate.candidate, candidate)
+        _ = _candidates.setdefault(self._native_obj, {}).setdefault(candidate.candidate, candidate)
 
+    @override
     def _on_event(self, name: str, *args: object) -> None:
         # the states change along with their events
         if name == 'statechange':
-            (state,) = args
+            (state,) = cast('tuple[RTCIceTransportState]', args)
             self._native_obj._surfaceState(state)
         elif name == 'gatheringstatechange':
-            (state,) = args
-            self._native_obj._surfaceGatheringState(state)
-        elif name == 'icecandidate' and args and args[0] is not None:
+            (gathering_state,) = cast('tuple[CricketIceGatheringState]', args)
+            self._native_obj._surfaceGatheringState(gathering_state)
+        elif name == 'icecandidate' and len(args) > 0 and args[0] is not None:
             self._native_obj._surfaceCandidate()
 
+    @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
         if name == 'icecandidate':
-            candidate = self._candidate_of(args[0]) if args and args[0] is not None else None
+            # the end of candidates has none
+            native = cast('wrtc.IceCandidateInit | None', args[0]) if len(args) > 0 else None
+            candidate = self._candidate_of(native) if native is not None else None
             return RTCPeerConnectionIceEvent(name, candidate, None, target=self)
         return super()._create_event(name, *args)
 
@@ -109,7 +115,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
 
     def gather(
         self,
-        gather_policy: webrtc.RTCIceTransportPolicy | str = 'all',
+        gather_policy: webrtc.RTCIceTransportPolicy | webrtc.RTCIceTransportPolicyValue = 'all',
         ice_servers: Sequence[webrtc.RTCIceServer] | None = None,
     ) -> None:
         """Gathers the candidates of a standalone transport, sent in ``icecandidate`` events.
@@ -128,7 +134,9 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
         if self.gathering_state != CricketIceGatheringState.new:
             msg = 'The transport gathers its candidates already'
             raise InvalidStateError(msg)
-        self._native_obj.gather(gather_policy, RTCIceServer._to_native_list(ice_servers or ()))
+        self._native_obj.gather(
+            gather_policy, RTCIceServer._to_native_list(ice_servers if ice_servers is not None else ())
+        )
 
     def start(
         self,
@@ -151,10 +159,10 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
             ValueError: If the role is neither controlling nor controlled.
         """
         self._check_open('start')
-        if not _UFRAG.fullmatch(remote_parameters.username_fragment):
+        if _UFRAG.fullmatch(remote_parameters.username_fragment) is None:
             msg = f'{remote_parameters.username_fragment!r} is not a valid ICE username fragment'
             raise InvalidSyntaxError(msg)
-        if not _PASSWORD.fullmatch(remote_parameters.password):
+        if _PASSWORD.fullmatch(remote_parameters.password) is None:
             msg = 'the ICE password is not valid'
             raise InvalidSyntaxError(msg)
         if role not in {RTCIceRole.controlling, RTCIceRole.controlled}:
@@ -177,7 +185,10 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
         if not isinstance(candidate, RTCIceCandidate):
             candidate = RTCIceCandidate(*RTCIceCandidate._members_of(candidate))
         self._native_obj.addRemoteCandidate(
-            candidate.candidate, candidate.sdp_mid or '', candidate.sdp_m_line_index or 0, candidate.username_fragment
+            candidate.candidate,
+            candidate.sdp_mid if candidate.sdp_mid is not None else '',
+            candidate.sdp_m_line_index if candidate.sdp_m_line_index is not None else 0,
+            candidate.username_fragment,
         )
         self._remember(candidate)
 

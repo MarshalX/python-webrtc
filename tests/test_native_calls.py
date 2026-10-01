@@ -16,15 +16,17 @@ from typing import Callable
 
 import pytest
 
+import wrtc
+from tests.helpers import mistyped
 from webrtc.utils.native_calls import call_native
 
 OnSuccess = Callable[[object], None]
-OnFailure = Callable[[SimpleNamespace], None]
+OnFailure = Callable[[wrtc.RTCCallbackException], None]
 
 
-def _error(error: Exception) -> SimpleNamespace:
+def _error(error: Exception) -> wrtc.RTCCallbackException:
     """A stand-in of the native exception passed to on_failure."""
-    return SimpleNamespace(toPython=lambda: error)
+    return mistyped(SimpleNamespace(toPython=lambda: error))
 
 
 def _later(callback: Callable[..., None], *args: object, delay: float = 0.0) -> None:
@@ -41,7 +43,10 @@ async def test_result() -> None:
 
 @pytest.mark.asyncio
 async def test_no_result() -> None:
-    assert await call_native(lambda on_success, _: _later(on_success)) is None
+    def method(on_success: Callable[[], None], _on_failure: OnFailure) -> None:
+        _later(on_success)
+
+    assert await call_native(method) is None
 
 
 @pytest.mark.asyncio
@@ -57,7 +62,7 @@ async def test_failure_is_raised_as_python_error() -> None:
 async def test_late_result_after_cancel_is_dropped() -> None:
     """A result arriving after the caller was canceled doesn't reach the loop's exception handler."""
     loop = asyncio.get_running_loop()
-    errors = []
+    errors: list[dict[str, object]] = []
     loop.set_exception_handler(lambda _, context: errors.append(context))
     settled = threading.Event()
 

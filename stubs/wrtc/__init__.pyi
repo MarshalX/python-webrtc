@@ -1,10 +1,14 @@
 from __future__ import annotations
 import collections.abc
 import typing
+import typing_extensions
 import webrtc.enums
+import webrtc.exceptions
+import webrtc.models.media_track_constraints
+import webrtc.utils.events
 __all__: list[str] = ['ConfigurationInit', 'DataChannelMessage', 'IceCandidateInit', 'IceServerInit', 'MediaStream', 'MediaStreamTrack', 'MediaStreamTrackProcessor', 'PeerConnectionFactory', 'PythonWebRTCException', 'PythonWebRTCExceptionBase', 'RTCCallbackException', 'RTCCertificate', 'RTCDTMFSender', 'RTCDataChannel', 'RTCDtlsTransport', 'RTCIceTransport', 'RTCPeerConnection', 'RTCRtpReceiver', 'RTCRtpSender', 'RTCRtpTransceiver', 'RTCSctpTransport', 'RTCSessionDescription', 'RTCSessionDescriptionInit', 'RtcpParameters', 'RtpCapabilities', 'RtpCodec', 'RtpCodecCapability', 'RtpCodecParameters', 'RtpEncodingParameters', 'RtpExtension', 'RtpHeaderExtensionCapability', 'RtpParameters', 'RtpTransceiverInit', 'SdpParseException', 'TrackGenerator', 'VideoFrameBuffer', 'copyAudioSamples', 'getUserMedia', 'ping']
 class RTCCallbackException:
-    def toPython(self) -> typing.Any:
+    def toPython(self) -> webrtc.exceptions.RTCException:
         ...
 class PythonWebRTCExceptionBase(Exception):
     pass
@@ -14,8 +18,13 @@ class SdpParseException(PythonWebRTCExceptionBase):
     pass
 class RTCSessionDescriptionInit:
     sdp: str
-    type: webrtc.enums.RTCSdpType
-    def __init__(self, arg0: webrtc.enums.RTCSdpType, arg1: str) -> None:
+    @property
+    def type(self) -> webrtc.enums.RTCSdpType:
+        ...
+    @type.setter
+    def type(self, arg0: webrtc.enums.RTCSdpType | webrtc.enums.RTCSdpTypeValue) -> None:
+        ...
+    def __init__(self, arg0: webrtc.enums.RTCSdpType | webrtc.enums.RTCSdpTypeValue, arg1: str) -> None:
         ...
 class RTCSessionDescription:
     def __init__(self, arg0: RTCSessionDescriptionInit) -> None:
@@ -30,7 +39,7 @@ class RTCSessionDescription:
     def type(self) -> webrtc.enums.RTCSdpType:
         ...
 class IceCandidateInit:
-    def kwargs(self) -> dict:
+    def kwargs(self) -> _IceCandidateKwargs:
         ...
 class RTCCertificate:
     @staticmethod
@@ -54,10 +63,30 @@ class IceServerInit:
         ...
 class ConfigurationInit:
     alwaysNegotiateDataChannels: bool
-    bundlePolicy: webrtc.enums.RTCBundlePolicy
-    iceTransportPolicy: webrtc.enums.RTCIceTransportPolicy
-    rtcpMuxPolicy: webrtc.enums.RTCRtcpMuxPolicy
-    rtpHeaderEncryptionPolicy: webrtc.enums.RTCRtpHeaderEncryptionPolicy
+    @property
+    def bundlePolicy(self) -> webrtc.enums.RTCBundlePolicy:
+        ...
+    @bundlePolicy.setter
+    def bundlePolicy(self, arg0: webrtc.enums.RTCBundlePolicy | webrtc.enums.RTCBundlePolicyValue) -> None:
+        ...
+    @property
+    def iceTransportPolicy(self) -> webrtc.enums.RTCIceTransportPolicy:
+        ...
+    @iceTransportPolicy.setter
+    def iceTransportPolicy(self, arg0: webrtc.enums.RTCIceTransportPolicy | webrtc.enums.RTCIceTransportPolicyValue) -> None:
+        ...
+    @property
+    def rtcpMuxPolicy(self) -> webrtc.enums.RTCRtcpMuxPolicy:
+        ...
+    @rtcpMuxPolicy.setter
+    def rtcpMuxPolicy(self, arg0: webrtc.enums.RTCRtcpMuxPolicy | webrtc.enums.RTCRtcpMuxPolicyValue) -> None:
+        ...
+    @property
+    def rtpHeaderEncryptionPolicy(self) -> webrtc.enums.RTCRtpHeaderEncryptionPolicy:
+        ...
+    @rtpHeaderEncryptionPolicy.setter
+    def rtpHeaderEncryptionPolicy(self, arg0: webrtc.enums.RTCRtpHeaderEncryptionPolicy | webrtc.enums.RTCRtpHeaderEncryptionPolicyValue) -> None:
+        ...
     def __init__(self) -> None:
         ...
     @property
@@ -85,7 +114,12 @@ class ConfigurationInit:
     def portRange(self, arg0: tuple[typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex] | None) -> None:
         ...
 class RtpCodec:
-    kind: webrtc.enums.MediaType
+    @property
+    def kind(self) -> webrtc.enums.MediaType:
+        ...
+    @kind.setter
+    def kind(self, arg0: webrtc.enums.MediaType | webrtc.enums.MediaTypeValue) -> None:
+        ...
     name: str
     def __init__(self) -> None:
         ...
@@ -140,7 +174,12 @@ class RtpExtension:
     def id(self, arg1: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...
 class RtpHeaderExtensionCapability:
-    direction: webrtc.enums.TransceiverDirection
+    @property
+    def direction(self) -> webrtc.enums.TransceiverDirection:
+        ...
+    @direction.setter
+    def direction(self, arg0: webrtc.enums.TransceiverDirection | webrtc.enums.TransceiverDirectionValue) -> None:
+        ...
     uri: str
     def __init__(self) -> None:
         ...
@@ -159,7 +198,12 @@ class RtpEncodingParameters:
     active: bool
     adaptivePtime: bool
     codec: RtpCodec | None
-    networkPriority: webrtc.enums.RTCPriorityType
+    @property
+    def networkPriority(self) -> webrtc.enums.RTCPriorityType:
+        ...
+    @networkPriority.setter
+    def networkPriority(self, arg0: webrtc.enums.RTCPriorityType | webrtc.enums.RTCPriorityTypeValue) -> None:
+        ...
     requestKeyFrame: bool
     rid: str
     scalabilityMode: str | None
@@ -196,7 +240,12 @@ class RtpEncodingParameters:
     def ssrc(self, arg0: typing.SupportsInt | typing.SupportsIndex | None) -> None:
         ...
 class RtpParameters:
-    degradationPreference: webrtc.enums.RTCDegradationPreference | None
+    @property
+    def degradationPreference(self) -> webrtc.enums.RTCDegradationPreference | None:
+        ...
+    @degradationPreference.setter
+    def degradationPreference(self, arg0: webrtc.enums.RTCDegradationPreference | webrtc.enums.RTCDegradationPreferenceValue | None) -> None:
+        ...
     mid: str
     rtcp: RtcpParameters
     transactionId: str
@@ -236,7 +285,12 @@ class RtpCapabilities:
     def headerExtensions(self, arg0: collections.abc.Sequence[RtpHeaderExtensionCapability]) -> None:
         ...
 class RtpTransceiverInit:
-    direction: webrtc.enums.TransceiverDirection
+    @property
+    def direction(self) -> webrtc.enums.TransceiverDirection:
+        ...
+    @direction.setter
+    def direction(self, arg0: webrtc.enums.TransceiverDirection | webrtc.enums.TransceiverDirectionValue) -> None:
+        ...
     def __init__(self) -> None:
         ...
     @property
@@ -261,15 +315,15 @@ class PeerConnectionFactory:
     def __init__(self) -> None:
         ...
 class MediaStreamTrack:
-    _constraints: typing.Any
-    _listeners: typing.Any
+    _constraints: webrtc.models.media_track_constraints.MediaTrackConstraints | None
+    _listeners: webrtc.utils.events._Listeners | None
     contentHint: str
     enabled: bool
     def _camera(self) -> tuple[int, int, float] | None:
         ...
     def _reconfigureCamera(self, width: typing.SupportsInt | typing.SupportsIndex, height: typing.SupportsInt | typing.SupportsIndex, frameRate: typing.SupportsFloat | typing.SupportsIndex) -> bool:
         ...
-    def _settings(self) -> dict:
+    def _settings(self) -> _TrackSettings:
         ...
     def _surfaceEnded(self) -> None:
         ...
@@ -298,7 +352,7 @@ class MediaStreamTrack:
     def readyState(self) -> webrtc.enums.MediaStreamTrackState:
         ...
 class MediaStream:
-    _listeners: typing.Any
+    _listeners: webrtc.utils.events._Listeners | None
     @staticmethod
     def create(tracks: collections.abc.Sequence[MediaStreamTrack]) -> MediaStream:
         ...
@@ -323,7 +377,7 @@ class MediaStream:
     def id(self) -> str:
         ...
 class RTCIceTransport:
-    _listeners: typing.Any
+    _listeners: webrtc.utils.events._Listeners | None
     def __init__(self) -> None:
         ...
     def _surfaceCandidate(self) -> None:
@@ -334,7 +388,7 @@ class RTCIceTransport:
         ...
     def addRemoteCandidate(self, candidate: str, sdpMid: str, sdpMLineIndex: typing.SupportsInt | typing.SupportsIndex, usernameFragment: str | None) -> None:
         ...
-    def gather(self, policy: webrtc.enums.RTCIceTransportPolicy, iceServers: collections.abc.Sequence[IceServerInit]) -> None:
+    def gather(self, policy: webrtc.enums.RTCIceTransportPolicy | webrtc.enums.RTCIceTransportPolicyValue, iceServers: collections.abc.Sequence[IceServerInit]) -> None:
         ...
     def getLocalCandidates(self) -> list[IceCandidateInit]:
         ...
@@ -366,10 +420,10 @@ class RTCIceTransport:
     def state(self) -> webrtc.enums.RTCIceTransportState:
         ...
 class RTCDtlsTransport:
-    _listeners: typing.Any
+    _listeners: webrtc.utils.events._Listeners | None
     def _surfaceState(self, state: webrtc.enums.DtlsTransportState) -> None:
         ...
-    def getRemoteCertificates(self) -> list:
+    def getRemoteCertificates(self) -> list[bytes]:
         ...
     @property
     def iceTransport(self) -> RTCIceTransport:
@@ -378,7 +432,7 @@ class RTCDtlsTransport:
     def state(self) -> webrtc.enums.DtlsTransportState:
         ...
 class RTCSctpTransport:
-    _listeners: typing.Any
+    _listeners: webrtc.utils.events._Listeners | None
     def _surfaceState(self, state: webrtc.enums.SctpTransportState) -> None:
         ...
     @property
@@ -394,7 +448,7 @@ class RTCSctpTransport:
     def transport(self) -> RTCDtlsTransport:
         ...
 class RTCDTMFSender:
-    _listeners: typing.Any
+    _listeners: webrtc.utils.events._Listeners | None
     def _surfaceBuffer(self, buffer: str, insertion: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...
     def insertDTMF(self, tones: str, duration: typing.SupportsInt | typing.SupportsIndex, interToneGap: typing.SupportsInt | typing.SupportsIndex) -> None:
@@ -462,7 +516,12 @@ class RTCRtpReceiver:
     def transport(self) -> RTCDtlsTransport | None:
         ...
 class RTCRtpTransceiver:
-    direction: webrtc.enums.TransceiverDirection
+    @property
+    def direction(self) -> webrtc.enums.TransceiverDirection:
+        ...
+    @direction.setter
+    def direction(self, arg0: webrtc.enums.TransceiverDirection | webrtc.enums.TransceiverDirectionValue) -> None:
+        ...
     def getCodecPreferences(self) -> list[RtpCodecCapability]:
         ...
     def getHeaderExtensionsToNegotiate(self) -> list[RtpHeaderExtensionCapability]:
@@ -498,10 +557,10 @@ class RTCRtpTransceiver:
         ...
 class DataChannelMessage:
     @property
-    def data(self) -> typing.Any:
+    def data(self) -> str | bytes:
         ...
 class RTCDataChannel:
-    _listeners: typing.Any
+    _listeners: webrtc.utils.events._Listeners | None
     binaryType: str
     def _decreaseBufferedAmount(self, sent: typing.SupportsInt | typing.SupportsIndex) -> bool:
         ...
@@ -511,7 +570,7 @@ class RTCDataChannel:
         ...
     def close(self) -> None:
         ...
-    def send(self, data: str, binary: bool) -> None:
+    def send(self, data: str | bytes, binary: bool) -> None:
         ...
     @property
     def bufferedAmount(self) -> int:
@@ -550,7 +609,7 @@ class RTCDataChannel:
     def readyState(self) -> webrtc.enums.RTCDataChannelState:
         ...
 class RTCPeerConnection:
-    _listeners: typing.Any
+    _listeners: webrtc.utils.events._Listeners | None
     @staticmethod
     def _connectionOf(sender: RTCRtpSender) -> RTCPeerConnection | None:
         ...
@@ -579,7 +638,7 @@ class RTCPeerConnection:
     def addTrack(self, track: MediaStreamTrack, streams: collections.abc.Sequence[MediaStream]) -> RTCRtpSender:
         ...
     @typing.overload
-    def addTransceiver(self, kind: webrtc.enums.MediaType, init: RtpTransceiverInit | None) -> RTCRtpTransceiver:
+    def addTransceiver(self, kind: webrtc.enums.MediaType | webrtc.enums.MediaTypeValue, init: RtpTransceiverInit | None) -> RTCRtpTransceiver:
         ...
     @typing.overload
     def addTransceiver(self, track: MediaStreamTrack, init: RtpTransceiverInit | None) -> RTCRtpTransceiver:
@@ -588,7 +647,7 @@ class RTCPeerConnection:
         ...
     def createAnswer(self, onSuccess: collections.abc.Callable[[RTCSessionDescription], None], onFailure: collections.abc.Callable[[RTCCallbackException], None], voiceActivityDetection: bool) -> None:
         ...
-    def createDataChannel(self, label: str, ordered: bool, maxPacketLifeTime: typing.SupportsInt | typing.SupportsIndex | None, maxRetransmits: typing.SupportsInt | typing.SupportsIndex | None, protocol: str, negotiated: bool, id: typing.SupportsInt | typing.SupportsIndex | None, priority: webrtc.enums.RTCPriorityType) -> RTCDataChannel:
+    def createDataChannel(self, label: str, ordered: bool, maxPacketLifeTime: typing.SupportsInt | typing.SupportsIndex | None, maxRetransmits: typing.SupportsInt | typing.SupportsIndex | None, protocol: str, negotiated: bool, id: typing.SupportsInt | typing.SupportsIndex | None, priority: webrtc.enums.RTCPriorityType | webrtc.enums.RTCPriorityTypeValue) -> RTCDataChannel:
         ...
     def createOffer(self, onSuccess: collections.abc.Callable[[RTCSessionDescription], None], onFailure: collections.abc.Callable[[RTCCallbackException], None], iceRestart: bool, voiceActivityDetection: bool) -> None:
         ...
@@ -650,11 +709,11 @@ class RTCPeerConnection:
         ...
 class VideoFrameBuffer:
     @staticmethod
-    def fromData(format: str, width: typing.SupportsInt | typing.SupportsIndex, height: typing.SupportsInt | typing.SupportsIndex, data: collections.abc.Buffer, layout: collections.abc.Sequence[tuple[typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex]]) -> VideoFrameBuffer:
+    def fromData(format: str, width: typing.SupportsInt | typing.SupportsIndex, height: typing.SupportsInt | typing.SupportsIndex, data: typing_extensions.Buffer, layout: collections.abc.Sequence[tuple[typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex]]) -> VideoFrameBuffer:
         ...
-    def convertTo(self, destination: collections.abc.Buffer, format: str, x: typing.SupportsInt | typing.SupportsIndex, y: typing.SupportsInt | typing.SupportsIndex, width: typing.SupportsInt | typing.SupportsIndex, height: typing.SupportsInt | typing.SupportsIndex, offset: typing.SupportsInt | typing.SupportsIndex, stride: typing.SupportsInt | typing.SupportsIndex, matrix: str, fullRange: bool) -> None:
+    def convertTo(self, destination: typing_extensions.Buffer, format: str, x: typing.SupportsInt | typing.SupportsIndex, y: typing.SupportsInt | typing.SupportsIndex, width: typing.SupportsInt | typing.SupportsIndex, height: typing.SupportsInt | typing.SupportsIndex, offset: typing.SupportsInt | typing.SupportsIndex, stride: typing.SupportsInt | typing.SupportsIndex, matrix: str, fullRange: bool) -> None:
         ...
-    def copyPlanes(self, destination: collections.abc.Buffer, planes: collections.abc.Sequence[tuple[typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex]]) -> None:
+    def copyPlanes(self, destination: typing_extensions.Buffer, planes: collections.abc.Sequence[tuple[typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex]]) -> None:
         ...
     def withoutAlpha(self) -> VideoFrameBuffer:
         ...
@@ -668,14 +727,14 @@ class VideoFrameBuffer:
     def width(self) -> int:
         ...
 class MediaStreamTrackProcessor:
-    _listeners: typing.Any
+    _listeners: webrtc.utils.events._Listeners | None
     def __init__(self, track: MediaStreamTrack, maxBufferSize: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...
     def _ackWakeup(self) -> None:
         ...
     def cancel(self) -> None:
         ...
-    def read(self) -> typing.Any:
+    def read(self) -> tuple[VideoFrameBuffer, int, int, int] | tuple[bytes, int, int, int, int, int] | None:
         ...
     @property
     def discardedFrames(self) -> int:
@@ -709,10 +768,25 @@ def _alive() -> dict[str, int]:
     ...
 def _alive_factories() -> int:
     ...
-def copyAudioSamples(source: collections.abc.Buffer, sourceFormat: str, channels: typing.SupportsInt | typing.SupportsIndex, frames: typing.SupportsInt | typing.SupportsIndex, destination: collections.abc.Buffer, destinationFormat: str, planeIndex: typing.SupportsInt | typing.SupportsIndex, frameOffset: typing.SupportsInt | typing.SupportsIndex, frameCount: typing.SupportsInt | typing.SupportsIndex) -> None:
+def copyAudioSamples(source: typing_extensions.Buffer, sourceFormat: str, channels: typing.SupportsInt | typing.SupportsIndex, frames: typing.SupportsInt | typing.SupportsIndex, destination: typing_extensions.Buffer, destinationFormat: str, planeIndex: typing.SupportsInt | typing.SupportsIndex, frameOffset: typing.SupportsInt | typing.SupportsIndex, frameCount: typing.SupportsInt | typing.SupportsIndex) -> None:
     ...
 def getUserMedia(audio: bool, video: bool, width: typing.SupportsInt | typing.SupportsIndex, height: typing.SupportsInt | typing.SupportsIndex, frameRate: typing.SupportsFloat | typing.SupportsIndex) -> MediaStream:
     ...
 def ping() -> None:
     ...
 _sanitized: bool = False
+class _IceCandidateKwargs(typing_extensions.TypedDict, closed=True):
+    candidate: str
+    sdp_mid: str
+    sdp_m_line_index: int
+    username_fragment: str | None
+    url: str | None
+    relay_protocol: typing.Literal['udp', 'tcp', 'tls'] | None
+class _TrackSettings(typing.TypedDict, total=False):
+    width: int
+    height: int
+    frame_rate: float
+    device: typing.Literal['camera', 'microphone']
+    sample_rate: int
+    channel_count: int
+    sample_size: int

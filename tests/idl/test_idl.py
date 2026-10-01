@@ -28,10 +28,11 @@ EXPECTED = expectations.load()
 
 @pytest.fixture(scope='module')
 def differences() -> dict[str, list[str]]:
+    assert SPEC is not None
     return compare(SPEC, webrtc)
 
 
-@pytest.mark.parametrize('name', sorted(set(SPEC.definitions) | set(EXPECTED)) if SPEC else [])
+@pytest.mark.parametrize('name', sorted(set(SPEC.definitions) | set(EXPECTED)) if SPEC is not None else [])
 def test_definition(name: str, differences: dict[str, list[str]]) -> None:
     problems = expectations.mismatches(EXPECTED.get(name, []), differences.get(name, []))
-    assert not problems, '\n'.join([*problems, 'run `python -m tests.idl update` if the change is intended'])
+    assert len(problems) == 0, '\n'.join([*problems, 'run `python -m tests.idl update` if the change is intended'])

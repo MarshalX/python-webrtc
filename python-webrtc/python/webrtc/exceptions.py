@@ -10,11 +10,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from webrtc import RTCErrorDetailType, wrtc
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
+
+if TYPE_CHECKING:
+    from webrtc.enums import RTCErrorDetailTypeValue
 
 PythonWebRTCExceptionBase = wrtc.PythonWebRTCExceptionBase
 PythonWebRTCException = wrtc.PythonWebRTCException
@@ -70,7 +73,7 @@ class OverconstrainedError(RTCException):
     """
 
     def __init__(self, constraint: str, message: str = '') -> None:
-        super().__init__(message or f"The constraint {constraint} can't be satisfied")
+        super().__init__(message if message != '' else f"The constraint {constraint} can't be satisfied")
         self.constraint = constraint
 
 
@@ -90,7 +93,7 @@ class RTCErrorInit(Dictionary):
         ValueError: If ``error_detail`` isn't a member of :obj:`RTCErrorDetailType`.
     """
 
-    error_detail: RTCErrorDetailType
+    error_detail: RTCErrorDetailType | RTCErrorDetailTypeValue
     sdp_line_number: int | None = None
     sctp_cause_code: int | None = None
     received_alert: int | None = None
@@ -101,7 +104,7 @@ class RTCErrorInit(Dictionary):
         self.error_detail = RTCErrorDetailType(self.error_detail)
 
     #: Alias for :attr:`error_detail`
-    errorDetail: ClassVar[Alias[RTCErrorDetailType]] = alias('error_detail')
+    errorDetail: ClassVar[Alias[RTCErrorDetailType | RTCErrorDetailTypeValue]] = alias('error_detail')
     #: Alias for :attr:`sdp_line_number`
     sdpLineNumber: ClassVar[Alias[int | None]] = alias('sdp_line_number')
     #: Alias for :attr:`sctp_cause_code`
@@ -125,7 +128,7 @@ class RTCError(OperationError):
     def __init__(self, init: RTCErrorInit, message: str = '') -> None:
         super().__init__(message)
         self.message = message
-        self.error_detail = init.error_detail
+        self.error_detail = RTCErrorDetailType(init.error_detail)
         self.sdp_line_number = init.sdp_line_number
         self.sctp_cause_code = init.sctp_cause_code
         self.received_alert = init.received_alert
@@ -133,17 +136,17 @@ class RTCError(OperationError):
         self.http_request_status_code = init.http_request_status_code
 
     #: Alias for :attr:`error_detail`
-    errorDetail = alias('error_detail')
+    errorDetail: ClassVar[Alias[RTCErrorDetailType]] = alias('error_detail')
     #: Alias for :attr:`sdp_line_number`
-    sdpLineNumber = alias('sdp_line_number')
+    sdpLineNumber: ClassVar[Alias[int | None]] = alias('sdp_line_number')
     #: Alias for :attr:`sctp_cause_code`
-    sctpCauseCode = alias('sctp_cause_code')
+    sctpCauseCode: ClassVar[Alias[int | None]] = alias('sctp_cause_code')
     #: Alias for :attr:`received_alert`
-    receivedAlert = alias('received_alert')
+    receivedAlert: ClassVar[Alias[int | None]] = alias('received_alert')
     #: Alias for :attr:`sent_alert`
-    sentAlert = alias('sent_alert')
+    sentAlert: ClassVar[Alias[int | None]] = alias('sent_alert')
     #: Alias for :attr:`http_request_status_code`
-    httpRequestStatusCode = alias('http_request_status_code')
+    httpRequestStatusCode: ClassVar[Alias[int | None]] = alias('http_request_status_code')
 
 
 _BY_RTC_ERROR_TYPE = {
@@ -172,9 +175,18 @@ def _from_native(
     """Creates the exception for a webrtc::RTCError, called from cpp/src/exceptions.cpp."""
     if error_type == 'OPERATION_ERROR_WITH_DATA' or detail is not None:
         init = RTCErrorInit(
-            detail or RTCErrorDetailType.data_channel_failure,
+            detail if detail is not None else RTCErrorDetailType.data_channel_failure,
             sctp_cause_code=sctp_cause_code,
             sdp_line_number=sdp_line_number,
         )
         return RTCError(init, message)
     return _BY_RTC_ERROR_TYPE.get(error_type, OperationError)(message)
+
+
+def _event_error(native: wrtc.RTCCallbackException) -> RTCError:
+    """The error of an ``error`` event: libwebrtc fails channels and transports with errors that carry a detail."""
+    error = native.toPython()
+    if not isinstance(error, RTCError):
+        msg = f'an error event carries an RTCError, not {type(error).__name__}'
+        raise TypeError(msg)
+    return error

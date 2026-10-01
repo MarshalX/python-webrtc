@@ -14,18 +14,28 @@ import math
 import struct
 
 import pytest
+from typing_extensions import TypedDict, Unpack
 
 import webrtc
+from tests.helpers import mistyped
 from webrtc import PlaneLayout, VideoPixelFormat
 
 # a 4x2 I420 frame: 8 samples of Y, 2 of U, 2 of V
 I420_DATA = bytes(range(1, 13))
 
 
-def i420_4x2(data: bytes = I420_DATA, **init: object) -> webrtc.VideoFrame:
+class I420Init(TypedDict, total=False, closed=True):
+    duration: int | None
+    layout: list[PlaneLayout] | None
+    visible_rect: webrtc.DOMRectInit | None
+    display_width: int | None
+    display_height: int | None
+
+
+def i420_4x2(data: bytes | bytearray = I420_DATA, *, timestamp: int = 0, **init: Unpack[I420Init]) -> webrtc.VideoFrame:
     return webrtc.VideoFrame(
         data,
-        webrtc.VideoFrameBufferInit(**{'format': 'I420', 'coded_width': 4, 'coded_height': 2, 'timestamp': 0, **init}),
+        webrtc.VideoFrameBufferInit(format='I420', coded_width=4, coded_height=2, timestamp=timestamp, **init),
     )
 
 
@@ -69,8 +79,10 @@ def test_init_from_json() -> None:
 
 def test_buffer_needs_an_init() -> None:
     """A frame of a buffer has no defaults for its format and size."""
+    # a buffer, where only a frame may come without an init
+    buffer: webrtc.VideoFrame = mistyped(I420_DATA)
     with pytest.raises(TypeError, match='needs a VideoFrameBufferInit'):
-        webrtc.VideoFrame(I420_DATA)
+        webrtc.VideoFrame(buffer)
 
 
 @pytest.mark.parametrize(
@@ -161,7 +173,7 @@ async def test_copy_to_errors() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('format', ['RGBA', 'RGBX', 'BGRA', 'BGRX'])
-async def test_convert_i420_to_rgb(format: str) -> None:
+async def test_convert_i420_to_rgb(format: webrtc.VideoPixelFormatValue) -> None:
     """CopyTo converts YUV to the RGB formats, with the matrix and range of the frame."""
     # pure red in BT.601 limited range: Y 81, U 90, V 240
     data = bytes([81] * 16 + [90] * 4 + [240] * 4)
@@ -193,7 +205,7 @@ async def test_rgb_formats_swap_and_alpha() -> None:
         bytes([1, 2, 3, 4] * 4), webrtc.VideoFrameBufferInit(format='RGBA', coded_width=2, coded_height=2, timestamp=0)
     )
     assert frame.color_space.matrix == 'rgb'
-    assert frame.color_space.full_range
+    assert frame.color_space.full_range is True
     out = bytearray(16)
     await frame.copy_to(out, webrtc.VideoFrameCopyToOptions(format='BGRA'))
     assert list(out[:4]) == [3, 2, 1, 4]
@@ -214,7 +226,7 @@ async def test_rgb_formats_swap_and_alpha() -> None:
         ('NV12', 12),
     ],
 )
-async def test_other_formats_round_trip(format: str, size: int) -> None:
+async def test_other_formats_round_trip(format: webrtc.VideoPixelFormatValue, size: int) -> None:
     """Every planar format is kept as it is, and converts to RGBA."""
     data = bytes(i % 200 for i in range(size))
     frame = webrtc.VideoFrame(
@@ -244,6 +256,7 @@ def test_frame_from_frame() -> None:
     """A frame from another one shares its pixels, with a visible rect, display size, timestamp or alpha of its own."""
     frame = i420_4x2(timestamp=1234, display_width=8, display_height=2)
     crop = webrtc.VideoFrame(frame, webrtc.VideoFrameInit(visible_rect=webrtc.DOMRectInit(x=2, y=0, width=2, height=2)))
+    assert crop.visible_rect is not None
     assert (crop.coded_width, crop.visible_rect.x, crop.visible_rect.width) == (4, 2, 2)
     assert (crop.display_width, crop.display_height) == (4, 2)
     assert crop.timestamp == 1234
@@ -309,7 +322,8 @@ async def test_close_and_clone() -> None:
         frame.clone()
     with pytest.raises(webrtc.InvalidStateError):
         webrtc.VideoFrame(frame)
-    assert clone.format == VideoPixelFormat.I420
+    clone_format = clone.format
+    assert clone_format == VideoPixelFormat.I420
     with clone:
         assert clone.allocation_size() == 12
     assert clone.format is None

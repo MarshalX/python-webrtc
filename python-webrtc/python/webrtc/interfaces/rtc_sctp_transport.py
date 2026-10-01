@@ -9,6 +9,10 @@
 
 from __future__ import annotations
 
+from typing import cast
+
+from typing_extensions import override
+
 import webrtc
 from webrtc import WebRTCObject, wrtc
 from webrtc.utils.events import EventTarget
@@ -27,8 +31,9 @@ class RTCSctpTransport(WebRTCObject[wrtc.RTCSctpTransport], EventTarget):
     _class = wrtc.RTCSctpTransport
     _events = ('statechange',)
 
-    def _on_event(self, _name: str, *args: object) -> None:
-        (state,) = args
+    @override
+    def _on_event(self, name: str, *args: object) -> None:
+        (state,) = cast('tuple[webrtc.SctpTransportState]', args)
         # the state changes along with its event
         self._native_obj._surfaceState(state)
 

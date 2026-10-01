@@ -86,12 +86,13 @@ class MessageEvent(Event):
 
     Args:
         type (:obj:`str`): The name of the event.
-        data (:obj:`str` or :obj:`bytes`): The message, :obj:`bytes` if it was sent as binary.
+        data (:obj:`str`, :obj:`bytes` or :obj:`webrtc.Blob`): The message, :obj:`bytes` (or a :obj:`webrtc.Blob`
+            with the ``blob`` binary type) if it was sent as binary.
         target (:obj:`object`, optional): The object that emitted the event.
     """
 
     type: str
-    data: str | bytes
+    data: str | bytes | webrtc.Blob
     target: webrtc.EventTarget | None = None
 
 

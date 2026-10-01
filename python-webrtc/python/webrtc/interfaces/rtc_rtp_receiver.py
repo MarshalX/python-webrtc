@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from typing import TypeVar
+
 import webrtc
 from webrtc import (
     InvalidRangeError,
@@ -22,6 +24,8 @@ from webrtc import (
 )
 from webrtc.utils.native_calls import call_native
 
+_SourceT = TypeVar('_SourceT', bound=RTCRtpContributingSource)
+
 #: The maximum jitter_buffer_target, in milliseconds
 _MAX_JITTER_BUFFER_TARGET = 4000
 
@@ -31,8 +35,8 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
 
     _class = wrtc.RTCRtpReceiver
 
-    def _sources(self, *, synchronization: bool) -> list[webrtc.RTCRtpContributingSource]:
-        cls = RTCRtpSynchronizationSource if synchronization else RTCRtpContributingSource
+    def _sources(self, cls: type[_SourceT]) -> list[_SourceT]:
+        synchronization = cls is RTCRtpSynchronizationSource
         # each native source starts with whether it's an SSRC
         return [cls._from_native(source) for source in self._native_obj._getSources() if source[0] == synchronization]
 
@@ -70,7 +74,7 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
         return RTCRtpReceiveParameters._from_native(self._native_obj.getParameters())
 
     @staticmethod
-    def get_capabilities(kind: webrtc.MediaType) -> webrtc.RTCRtpCapabilities | None:
+    def get_capabilities(kind: webrtc.MediaType | webrtc.MediaTypeValue) -> webrtc.RTCRtpCapabilities | None:
         """Returns the codecs and header extensions receivers of a kind support.
 
         Args:
@@ -98,7 +102,7 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
         Returns:
             :obj:`list` of :obj:`webrtc.RTCRtpSynchronizationSource`: The sources, the most recent first.
         """
-        return self._sources(synchronization=True)
+        return self._sources(RTCRtpSynchronizationSource)
 
     def get_contributing_sources(self) -> list[webrtc.RTCRtpContributingSource]:
         """Returns the contributing sources (CSRCs) of the media received in the last 10 seconds.
@@ -108,7 +112,7 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
         Returns:
             :obj:`list` of :obj:`webrtc.RTCRtpContributingSource`: The sources, the most recent first.
         """
-        return self._sources(synchronization=False)
+        return self._sources(RTCRtpContributingSource)
 
     #: Alias for :attr:`get_stats`
     getStats = get_stats

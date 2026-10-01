@@ -58,13 +58,18 @@ def dominant_frequency(samples: list[float], rate: int) -> float:
     return (len(crossings) - 1) * rate / (crossings[-1] - crossings[0])
 
 
-async def read_frames(reader: webrtc.ReadableStreamDefaultReader, count: int) -> tuple[list[int], bytearray]:
+async def read_frames(
+    reader: webrtc.ReadableStreamDefaultReader[webrtc.VideoFrame | webrtc.AudioData], count: int
+) -> tuple[list[int], bytearray]:
     """Reads frames of the size, returns their timestamps and the last one in RGBA."""
-    timestamps = []
+    timestamps: list[int] = []
     for _ in range(count):
         frame = (await asyncio.wait_for(reader.read(), TIMEOUT)).value
+        assert isinstance(frame, webrtc.VideoFrame)
         assert (frame.coded_width, frame.coded_height) == (WIDTH, HEIGHT)
-        assert frame.metadata().rtp_timestamp > 0
+        rtp_timestamp = frame.metadata().rtp_timestamp
+        assert rtp_timestamp is not None
+        assert rtp_timestamp > 0
         timestamps.append(frame.timestamp)
         rgba = bytearray(frame.allocation_size(webrtc.VideoFrameCopyToOptions(format='RGBA')))
         await frame.copy_to(rgba, webrtc.VideoFrameCopyToOptions(format='RGBA'))
@@ -105,9 +110,10 @@ async def test_audio_through_a_connection(caller: webrtc.RTCPeerConnection, call
         reader = webrtc.MediaStreamTrackProcessor(
             webrtc.MediaStreamTrackProcessorInit(remote, max_buffer_size=100)
         ).readable.get_reader()
-        samples = []
+        samples: list[float] = []
         for chunk in range(150):
             audio = (await asyncio.wait_for(reader.read(), TIMEOUT)).value
+            assert isinstance(audio, webrtc.AudioData)
             assert audio.sample_rate == 48000
             plane = array.array('f', [0.0] * audio.number_of_frames)
             audio.copy_to(
@@ -133,7 +139,9 @@ async def test_remote_track_end_closes_the_processor(
     async with writing(write_video, generator, solid_i420(128, 128, 128), (WIDTH, HEIGHT)):
         remote = await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
         reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(remote)).readable.get_reader()
-        (await asyncio.wait_for(reader.read(), TIMEOUT)).value.close()
+        frame = (await asyncio.wait_for(reader.read(), TIMEOUT)).value
+        assert isinstance(frame, webrtc.VideoFrame)
+        frame.close()
         callee.close()
         await asyncio.wait_for(reader.closed, TIMEOUT)
     generator.track.stop()

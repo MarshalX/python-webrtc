@@ -19,6 +19,7 @@ from webrtc.models.dictionary import Dictionary
 from webrtc.streams import WritableStream
 
 if TYPE_CHECKING:
+    from webrtc.enums import MediaTypeValue
     from webrtc.streams import WritableStreamDefaultController
 
 
@@ -52,12 +53,14 @@ class _TrackSink:
             msg = 'The data is closed'
             raise TypeError(msg)
         audio = data._take()
-        if audio.format == AudioSampleFormat.s16:
-            samples = audio._data
+        data_bytes = audio._data
+        if audio.format == AudioSampleFormat.s16 and data_bytes is not None:
+            samples = data_bytes
         else:
-            samples = bytearray(audio.number_of_frames * audio.number_of_channels * 2)
-            audio.copy_to(samples, AudioDataCopyToOptions(plane_index=0, format=AudioSampleFormat.s16))
-            samples = bytes(samples)
+            # closed, copy_to() raises
+            buffer = bytearray(audio.number_of_frames * audio.number_of_channels * 2)
+            audio.copy_to(buffer, AudioDataCopyToOptions(plane_index=0, format=AudioSampleFormat.s16))
+            samples = bytes(buffer)
         # rates beyond an int are unsupported too: the native check rejects them
         rate = min(int(audio.sample_rate), 2**31 - 1)
         try:
@@ -125,7 +128,7 @@ class MediaStreamTrackGeneratorInit(Dictionary):
         kind (:obj:`webrtc.MediaType`): ``audio`` or ``video``.
     """
 
-    kind: MediaType
+    kind: MediaType | MediaTypeValue
 
 
 class MediaStreamTrackGenerator(MediaStreamTrack):
@@ -144,7 +147,7 @@ class MediaStreamTrackGenerator(MediaStreamTrack):
         TypeError: If the kind isn't audio or video.
     """
 
-    def __init__(self, kind: str | MediaType | MediaStreamTrackGeneratorInit) -> None:
+    def __init__(self, kind: MediaType | MediaTypeValue | MediaStreamTrackGeneratorInit) -> None:
         if isinstance(kind, MediaStreamTrackGeneratorInit):
             kind = kind.kind
         if kind not in {'audio', 'video'}:

@@ -129,7 +129,7 @@ async def send_audio_data(generator: webrtc.MediaStreamTrackGenerator, file: Bin
     start = loop.time()
     chunks = 0
 
-    while data := file.read(480 * 4):  # 480 frames of 2 channels of 16 bits
+    while (data := file.read(480 * 4)) != b'':  # 480 frames of 2 channels of 16 bits
         frames = len(data) // 4
         await writer.write(
             webrtc.AudioData(
@@ -168,7 +168,8 @@ async def main(input_peer: str, audio: BinaryIO) -> None:
             return
         if isinstance(update.call, GroupCallWrapper):
             answered.set()
-            answer = build_answer(json.loads(update.call.params.data))
+            params: CallParams = json.loads(update.call.params.data)
+            answer = build_answer(params)
             await pc.set_remote_description(
                 webrtc.RTCSessionDescription(webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, answer))
             )

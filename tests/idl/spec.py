@@ -15,7 +15,9 @@ import sys
 from dataclasses import dataclass, field
 from importlib.util import find_spec
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal, Union
+
+from typing_extensions import TypedDict, TypeGuard
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -52,7 +54,112 @@ FILES: dict[str, set[str] | None] = {
     'webcrypto.idl': set(),
 }
 
-Node = dict[str, Any]
+
+# the JSON AST of webidl2.js, as far as the comparison reads it
+class IdlType(TypedDict):
+    type: str | None
+    generic: str
+    nullable: bool
+    union: bool
+    idlType: str | list[IdlType]
+
+
+class Argument(TypedDict):
+    type: Literal['argument']
+    name: str
+    idlType: IdlType
+    optional: bool
+    variadic: bool
+
+
+class Attribute(TypedDict):
+    type: Literal['attribute']
+    name: str
+    idlType: IdlType
+    special: str
+    readonly: bool
+
+
+class Operation(TypedDict):
+    type: Literal['operation']
+    name: str
+    idlType: IdlType
+    arguments: list[Argument]
+    special: str
+
+
+class Constructor(TypedDict):
+    type: Literal['constructor']
+    arguments: list[Argument]
+
+
+class Const(TypedDict):
+    type: Literal['const']
+    name: str
+    idlType: IdlType
+
+
+class Field(TypedDict):
+    type: Literal['field']
+    name: str
+    idlType: IdlType
+    required: bool
+
+
+class Declaration(TypedDict):
+    type: Literal['iterable', 'async_iterable', 'maplike', 'setlike']
+    idlType: list[IdlType]
+    arguments: list[Argument]
+    readonly: bool
+
+
+Member = Union[Attribute, Operation, Constructor, Const, Field, Declaration]
+
+
+class Container(TypedDict):
+    type: Literal['interface', 'interface mixin', 'dictionary', 'namespace', 'callback interface']
+    name: str
+    inheritance: str | None
+    members: list[Member]
+    partial: bool
+    file: str
+
+
+class EnumValue(TypedDict):
+    type: Literal['enum-value']
+    value: str
+
+
+class Enum(TypedDict):
+    type: Literal['enum']
+    name: str
+    values: list[EnumValue]
+    file: str
+
+
+class Typedef(TypedDict):
+    type: Literal['typedef']
+    name: str
+    idlType: IdlType
+    file: str
+
+
+class Callback(TypedDict):
+    type: Literal['callback']
+    name: str
+    idlType: IdlType
+    arguments: list[Argument]
+    file: str
+
+
+class Includes(TypedDict):
+    type: Literal['includes']
+    target: str
+    includes: str
+    file: str
+
+
+Node = Union[Container, Enum, Typedef, Callback, Includes]
 
 
 @dataclass
@@ -60,46 +167,55 @@ class Definition:
     name: str
     kind: str  # interface, dictionary or enum
     parent: str | None = None
-    members: list[Node] = field(default_factory=list)
+    members: list[Member] = field(default_factory=list)
     values: list[str] = field(default_factory=list)
 
 
 @dataclass
 class Spec:
     definitions: dict[str, Definition]
-    typedefs: dict[str, Node]
+    typedefs: dict[str, IdlType]
 
     def lineage(self, name: str) -> list[Definition]:
         """The definition and its ancestors that are part of the spec, nearest first."""
-        chain = []
-        while name in self.definitions:
-            chain.append(self.definitions[name])
-            name = self.definitions[name].parent
+        chain: list[Definition] = []
+        current: str | None = name
+        while current is not None and current in self.definitions:
+            chain.append(self.definitions[current])
+            current = self.definitions[current].parent
         return chain
 
-    def members(self, name: str) -> list[Node]:
+    def members(self, name: str) -> list[Member]:
         """The members of a definition, inherited ones included."""
         return [member for definition in self.lineage(name) for member in definition.members]
 
-    def named_types(self, idl_type: Node | list[Node] | str, known: Callable[[str], bool] | None = None) -> set[str]:
+    def fields(self, name: str) -> list[Field]:
+        """The members of a dictionary, inherited ones included."""
+        return [member for member in self.members(name) if member['type'] == 'field']
+
+    def named_types(
+        self, idl_type: IdlType | list[IdlType] | str, known: Callable[[str], bool] | None = None
+    ) -> set[str]:
         """The definitions a type refers to through unions, generics and typedefs, but not ``known`` typedefs."""
         if isinstance(idl_type, list):
-            return set().union(*(self.named_types(item, known) for item in idl_type))
+            none: set[str] = set()
+            return none.union(*(self.named_types(item, known) for item in idl_type))
         if isinstance(idl_type, dict):
             return self.named_types(idl_type['idlType'], known)
         if idl_type in self.typedefs:
-            return set() if known and known(idl_type) else self.named_types(self.typedefs[idl_type], known)
+            skip = known is not None and known(idl_type)
+            return set() if skip else self.named_types(self.typedefs[idl_type], known)
         return {idl_type} if idl_type in self.definitions else set()
 
-    def dictionary(self, idl_type: Node) -> Definition | None:
+    def dictionary(self, idl_type: IdlType) -> Definition | None:
         """The dictionary a type is, unless it's a union or a generic."""
-        while not idl_type['union'] and not idl_type['generic'] and isinstance(idl_type['idlType'], str):
+        while not idl_type['union'] and idl_type['generic'] == '' and isinstance(idl_type['idlType'], str):
             name = idl_type['idlType']
             if name in self.typedefs:
                 idl_type = self.typedefs[name]
                 continue
             definition = self.definitions.get(name)
-            return definition if definition and definition.kind == 'dictionary' else None
+            return definition if definition is not None and definition.kind == 'dictionary' else None
         return None
 
 
@@ -110,7 +226,7 @@ def load() -> Spec:
 
 def parse(texts: dict[str, str], files: dict[str, set[str] | None]) -> Spec:
     """Parses IDL texts by file name and keeps the definitions each file takes, as in :data:`FILES`."""
-    nodes = json.loads(
+    nodes: list[Node] = json.loads(
         subprocess.run(
             [sys.executable, '-m', 'tests.idl.child'],
             input=json.dumps(texts),
@@ -120,55 +236,75 @@ def parse(texts: dict[str, str], files: dict[str, set[str] | None]) -> Spec:
         ).stdout
     )
     spec = Spec(_merge(nodes), {node['name']: node['idlType'] for node in nodes if node['type'] == 'typedef'})
-    taken = {
-        node['name']
-        for node in nodes
-        if node.get('name') in spec.definitions
-        and not node.get('partial')
-        and (files[node['file']] is None or node['name'] in files[node['file']])
-    }
+    taken: set[str] = set()
+    for node in nodes:
+        if node['type'] == 'includes' or node['name'] not in spec.definitions or _is_partial(node):
+            continue
+        wanted = files[node['file']]
+        if wanted is None or node['name'] in wanted:
+            taken.add(node['name'])
     return Spec({name: spec.definitions[name] for name in sorted(_used(spec, taken))}, spec.typedefs)
+
+
+def _is_partial(node: Node) -> TypeGuard[Container]:
+    return (
+        node['type'] in {'interface', 'interface mixin', 'dictionary', 'namespace', 'callback interface'}
+        and node['partial']
+    )
+
+
+def _definitions(nodes: list[Node]) -> dict[str, Definition]:
+    """The interfaces, dictionaries and enums, without their partials."""
+    definitions: dict[str, Definition] = {}
+    for node in nodes:
+        if node['type'] in {'interface', 'dictionary'} and not node['partial']:
+            definitions[node['name']] = Definition(
+                node['name'], node['type'], node['inheritance'], list(node['members'])
+            )
+        elif node['type'] == 'enum':
+            values = [value['value'] for value in node['values']]
+            definitions[node['name']] = Definition(node['name'], node['type'], values=values)
+    return definitions
 
 
 def _merge(nodes: list[Node]) -> dict[str, Definition]:
     """The interfaces, dictionaries and enums, with the members of their partials and mixins."""
-    definitions = {
-        node['name']: Definition(
-            node['name'],
-            node['type'],
-            node.get('inheritance'),
-            list(node.get('members', [])),
-            [value['value'] for value in node.get('values', [])],
-        )
-        for node in nodes
-        if node['type'] in {'interface', 'dictionary', 'enum'} and not node.get('partial')
-    }
-    mixins: dict[str, list[Node]] = {}
+    definitions = _definitions(nodes)
+    mixins: dict[str, list[Member]] = {}
     for node in nodes:
         if node['type'] == 'interface mixin':
             mixins.setdefault(node['name'], []).extend(node['members'])
     # partials and mixins extend definitions of any file, but only those that exist
     for node in nodes:
-        if node.get('partial') and node['name'] in definitions:
+        if node['type'] == 'includes':
+            if node['target'] in definitions:
+                definitions[node['target']].members.extend(mixins.get(node['includes'], []))
+        elif node['name'] in definitions and _is_partial(node):
             definitions[node['name']].members.extend(node['members'])
-        elif node['type'] == 'includes' and node['target'] in definitions:
-            definitions[node['target']].members.extend(mixins.get(node['includes'], []))
     return definitions
+
+
+def _types(member: Member) -> list[IdlType | list[IdlType]]:
+    """The type of a member and of its arguments."""
+    types: list[IdlType | list[IdlType]] = [] if member['type'] == 'constructor' else [member['idlType']]
+    if member['type'] not in {'attribute', 'const', 'field'}:
+        types += [argument['idlType'] for argument in member['arguments']]
+    return types
 
 
 def _used(spec: Spec, taken: set[str]) -> set[str]:
     """The taken definitions, their ancestors and the dictionaries and enums they use."""
     wanted = set(taken)
     queue = list(taken)
-    while queue:
+    while len(queue) > 0:
         definition = spec.definitions[queue.pop()]
-        used = {definition.parent} & spec.definitions.keys()
+        used: set[str] = set()
+        if definition.parent is not None and definition.parent in spec.definitions:
+            used.add(definition.parent)
         for member in definition.members:
-            types = [member.get('idlType')] + [argument['idlType'] for argument in member.get('arguments') or []]
             used |= {
                 name
-                for idl_type in types
-                if idl_type
+                for idl_type in _types(member)
                 for name in spec.named_types(idl_type)
                 if spec.definitions[name].kind != 'interface'
             }

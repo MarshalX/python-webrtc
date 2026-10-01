@@ -19,10 +19,11 @@ TIMEOUT = 20
 
 async def set_local_and_gather(
     pc: webrtc.RTCPeerConnection, description: webrtc.RTCSessionDescriptionInit
-) -> webrtc.RTCSessionDescription | None:
+) -> webrtc.RTCSessionDescription:
     """Non-trickle ICE: returns the local description once all candidates are gathered."""
     await pc.set_local_description(description)
     await wait_for_ice_gathering_complete(pc, TIMEOUT)
+    assert pc.local_description is not None
     return pc.local_description
 
 
@@ -43,6 +44,7 @@ async def test_peers_connect_and_send_audio(caller: webrtc.RTCPeerConnection, ca
 
     await callee.set_remote_description(offer)
     # libwebrtc drops a=end-of-candidates when it serializes a remote description
+    assert callee.remote_description is not None
     assert callee.remote_description.sdp == offer.sdp.replace('a=end-of-candidates\r\n', '')
     answer = await set_local_and_gather(callee, await callee.create_answer())
     await caller.set_remote_description(answer)

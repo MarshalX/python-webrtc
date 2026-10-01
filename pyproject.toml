@@ -11,6 +11,7 @@ license = "BSD-3-Clause"
 license-files = ["LICENSE.md", "THIRD_PARTY_LICENSES.md"]
 authors = [{ name = "Ilya (Marshal)", email = "ilya@marshal.dev" }]
 requires-python = ">=3.9"
+dependencies = ["typing_extensions>=4.10"]
 classifiers = [
     "Development Status :: 1 - Planning",
     "Natural Language :: English",
@@ -130,6 +131,7 @@ ignore = [
     "TRY003",  # a message per raise, not an exception class per message
     "D105", "D107",  # class docstrings document constructors, dunders explain themselves
     "DOC502",  # exceptions raised by native calls and helpers are documented too
+    "PLC1901",  # pyrefly's implicit-bool wants explicit comparisons, like != ''
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -175,3 +177,41 @@ max-public-methods = 20
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
 known-first-party = ["webrtc", "wrtc", "tests", "benchmarks"]
+
+[tool.pyrefly]
+required-version = ">=1.3.2"
+preset = "all"
+project-includes = [
+    "python-webrtc/python/webrtc/**/*.py", "tests/**/*.py", "examples/**/*.py", "benchmarks/**/*.py", "cmake/**/*.py",
+    "stubs/**/*.pyi",
+]
+# tests/fuzz runs with its directory on PYTHONPATH (.github/scripts/fuzz.sh)
+search-path = ["python-webrtc/python", "stubs", ".", "tests/fuzz"]
+python-version = "3.9"
+python-platform = "all"
+python-interpreter-path = ".venv/bin/python"
+strict-callable-subtyping = true
+infer-with-first-use = false
+permissive-ignores = false
+type-ignore-unknown-tag-behavior = "no-effect"
+# optional modules of the fuzzers and examples, not installed with the project
+ignore-missing-imports = ["atheris", "httpx", "pytgcalls", "pytgcalls.*", "pyrogram", "pyrogram.*", "sounddevice"]
+
+# like WebIDL, the library converts what callers pass (bool(), int(), str()), whatever the annotations say
+[[tool.pyrefly.sub-config]]
+matches = "python-webrtc/python/webrtc/**"
+errors = { unnecessary-type-conversion = false }
+
+# callers of browser-style APIs drop results, like the transceiver of add_track(); the library keeps the check
+[[tool.pyrefly.sub-config]]
+matches = "tests/**"
+errors = { unused-call-result = false }
+[[tool.pyrefly.sub-config]]
+matches = "examples/**"
+errors = { unused-call-result = false }
+[[tool.pyrefly.sub-config]]
+matches = "benchmarks/**"
+errors = { unused-call-result = false }
+[[tool.pyrefly.sub-config]]
+matches = "cmake/**"
+errors = { unused-call-result = false }

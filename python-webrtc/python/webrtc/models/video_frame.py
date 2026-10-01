@@ -14,17 +14,22 @@ import math
 import warnings
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, TypeVar
+from typing import TYPE_CHECKING, ClassVar, NamedTuple, TypeVar, cast, overload
 
 from webrtc import (
     AlphaOption,
+    AlphaOptionValue,
     InvalidStateError,
     NotSupportedError,
     RTCException,
     VideoColorPrimaries,
+    VideoColorPrimariesValue,
     VideoMatrixCoefficients,
+    VideoMatrixCoefficientsValue,
     VideoPixelFormat,
+    VideoPixelFormatValue,
     VideoTransferCharacteristics,
+    VideoTransferCharacteristicsValue,
     wrtc,
 )
 from webrtc.models.closable import Closable
@@ -32,10 +37,9 @@ from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
 
 if TYPE_CHECKING:
-    from typing_extensions import Buffer
+    from typing_extensions import Buffer, TypeGuard
 
 _EnumT = TypeVar('_EnumT', bound=Enum)
-_InitT = TypeVar('_InitT', 'VideoFrameBufferInit', 'VideoFrameInit')
 
 _MAX_UNSIGNED_LONG = 2**32 - 1
 _RGB_FORMATS = (VideoPixelFormat.RGBA, VideoPixelFormat.RGBX, VideoPixelFormat.BGRA, VideoPixelFormat.BGRX)
@@ -119,12 +123,12 @@ class VideoColorSpace:
         full_range (:obj:`bool`, optional): Whether the samples use the full range of their bits.
     """
 
-    primaries: VideoColorPrimaries | None = None
-    transfer: VideoTransferCharacteristics | None = None
-    matrix: VideoMatrixCoefficients | None = None
+    primaries: VideoColorPrimaries | VideoColorPrimariesValue | None = None
+    transfer: VideoTransferCharacteristics | VideoTransferCharacteristicsValue | None = None
+    matrix: VideoMatrixCoefficients | VideoMatrixCoefficientsValue | None = None
     full_range: bool | None = None
 
-    def to_json(self) -> dict[str, Any]:
+    def to_json(self) -> dict[str, str | bool | None]:
         """Returns the members as a dictionary with the camelCase names, like ``toJSON()``."""
         return {
             'primaries': self.primaries,
@@ -150,9 +154,9 @@ class VideoColorSpaceInit(Dictionary):
         full_range (:obj:`bool`, optional): Whether the samples use the full range of their bits.
     """
 
-    primaries: VideoColorPrimaries | None = None
-    transfer: VideoTransferCharacteristics | None = None
-    matrix: VideoMatrixCoefficients | None = None
+    primaries: VideoColorPrimaries | VideoColorPrimariesValue | None = None
+    transfer: VideoTransferCharacteristics | VideoTransferCharacteristicsValue | None = None
+    matrix: VideoMatrixCoefficients | VideoMatrixCoefficientsValue | None = None
     full_range: bool | None = None
 
     #: Alias for :attr:`full_range`
@@ -210,7 +214,7 @@ class VideoFrameBufferInit(Dictionary):
 
     _dictionaries: ClassVar = {'layout': PlaneLayout, 'visible_rect': DOMRectInit, 'color_space': VideoColorSpaceInit}
 
-    format: VideoPixelFormat
+    format: VideoPixelFormat | VideoPixelFormatValue
     coded_width: int
     coded_height: int
     timestamp: int
@@ -256,7 +260,7 @@ class VideoFrameInit(Dictionary):
 
     timestamp: int | None = None
     duration: int | None = None
-    alpha: AlphaOption = AlphaOption.keep
+    alpha: AlphaOption | AlphaOptionValue = AlphaOption.keep
     visible_rect: DOMRectInit | DOMRectReadOnly | None = None
     rotation: float = 0
     flip: bool = False
@@ -286,7 +290,7 @@ class VideoFrameCopyToOptions(Dictionary):
 
     rect: DOMRectInit | DOMRectReadOnly | None = None
     layout: list[PlaneLayout] | None = None
-    format: VideoPixelFormat | None = None
+    format: VideoPixelFormat | VideoPixelFormatValue | None = None
 
 
 class _Plane(NamedTuple):
@@ -342,9 +346,10 @@ def _optional_enum(cls: type[_EnumT], value: object) -> _EnumT | None:
     return None if value is None else _enum(cls, value)
 
 
-def _is_buffer(value: object) -> bool:
+def _is_buffer(value: object) -> TypeGuard[Buffer]:
     try:
-        memoryview(value)
+        # the buffer protocol has no runtime check of its own before Python 3.12: memoryview() is the check
+        _ = memoryview(cast('Buffer', value))
     except TypeError:
         return False
     return True
@@ -401,7 +406,7 @@ def _rotation(value: float) -> int:
     if not math.isfinite(value):
         msg = f'The rotation must be finite, not {value!r}'
         raise TypeError(msg)
-    return int(math.floor(value / 90 + 0.5) * 90) % 360
+    return math.floor(value / 90 + 0.5) * 90 % 360
 
 
 def _checked_rect(rect: DOMRectReadOnly, coded_size: tuple[int, int]) -> DOMRectReadOnly:
@@ -428,7 +433,7 @@ def _parse_visible_rect(
 ) -> DOMRectReadOnly:
     rect = default if override is None else _checked_rect(override, coded_size)
     for plane in _planes(format):
-        if rect.x % plane.subsampling_x or rect.y % plane.subsampling_y:
+        if rect.x % plane.subsampling_x != 0 or rect.y % plane.subsampling_y != 0:
             msg = f'The rect must be aligned to the subsampling of {format.value}'
             raise TypeError(msg)
     return rect
@@ -449,6 +454,7 @@ class _PlaneCopy(NamedTuple):
 
 
 class _CopyPlan(NamedTuple):
+    resource: wrtc.VideoFrameBuffer
     format: VideoPixelFormat
     rect: DOMRectReadOnly
     size: int
@@ -502,16 +508,6 @@ def _color_space(value: VideoColorSpaceInit | VideoColorSpace | None) -> VideoCo
         _optional_enum(VideoMatrixCoefficients, value.matrix),
         None if value.full_range is None else bool(value.full_range),
     )
-
-
-def _init_of(init: _InitT | None, cls: type[_InitT]) -> _InitT:
-    """The init of a constructor, which a frame of a buffer requires."""
-    if init is not None:
-        return init
-    if cls is VideoFrameInit:
-        return cls()
-    msg = f'A VideoFrame of a buffer needs a {cls.__name__}'
-    raise TypeError(msg)
 
 
 def _coded_size(init: VideoFrameBufferInit) -> tuple[int, int]:
@@ -578,6 +574,23 @@ class VideoFrame(Closable):
         )
     """
 
+    _resource: wrtc.VideoFrameBuffer | None
+    _format: VideoPixelFormat
+    _visible_rect: DOMRectReadOnly
+    _display: tuple[int, int]
+    _rotation: int
+    _flip: bool
+    _timestamp: int
+    _duration: int | None
+    _color_space: VideoColorSpace
+    _metadata: VideoFrameMetadata
+
+    @overload
+    def __init__(self, source: VideoFrame, init: VideoFrameInit | None = None) -> None: ...
+
+    @overload
+    def __init__(self, source: Buffer, init: VideoFrameBufferInit) -> None: ...
+
     def __init__(
         self,
         source: Buffer | VideoFrame,
@@ -585,9 +598,15 @@ class VideoFrame(Closable):
     ) -> None:
         self._resource = None
         if isinstance(source, VideoFrame):
-            self._init_from_frame(source, _init_of(init, VideoFrameInit))
+            if isinstance(init, VideoFrameBufferInit):
+                msg = 'A VideoFrame of a VideoFrame takes a VideoFrameInit'
+                raise TypeError(msg)
+            self._init_from_frame(source, init if init is not None else VideoFrameInit())
         elif _is_buffer(source):
-            self._init_from_buffer(source, _init_of(init, VideoFrameBufferInit))
+            if not isinstance(init, VideoFrameBufferInit):
+                msg = 'A VideoFrame of a buffer needs a VideoFrameBufferInit'
+                raise TypeError(msg)
+            self._init_from_buffer(source, init)
         else:
             msg = f'A VideoFrame is created from a buffer or a VideoFrame, not {type(source).__name__}'
             raise TypeError(msg)
@@ -602,13 +621,15 @@ class VideoFrame(Closable):
 
         resource, (width, height) = _visible_resource(data, init, format, coded_size=coded_size)
         rotation = _rotation(init.rotation)
-        color_space = _color_space(init.color_space) or (_SRGB if format in _RGB_FORMATS else _REC709)
+        color_space = _color_space(init.color_space)
+        if color_space is None:
+            color_space = _SRGB if format in _RGB_FORMATS else _REC709
         self._set(
             resource,
             format,
             geometry=_Geometry(
                 DOMRectReadOnly(0, 0, width, height),
-                display or _oriented(width, height, rotation),
+                display if display is not None else _oriented(width, height, rotation),
                 rotation,
                 flip=bool(init.flip),
             ),
@@ -678,7 +699,9 @@ class VideoFrame(Closable):
             geometry=_Geometry(
                 DOMRectReadOnly(0, 0, width, height), _oriented(width, height, rotation), rotation, flip=False
             ),
-            info=_FrameInfo(timestamp, None, _REC601, VideoFrameMetadata(rtp_timestamp or None)),
+            info=_FrameInfo(
+                timestamp, None, _REC601, VideoFrameMetadata(rtp_timestamp if rtp_timestamp != 0 else None)
+            ),
         )
         return frame
 
@@ -769,7 +792,8 @@ class VideoFrame(Closable):
         return VideoFrameMetadata(self._metadata.rtp_timestamp)
 
     def _plan_copy(self, options: VideoFrameCopyToOptions | None) -> _CopyPlan:
-        if self._resource is None:
+        resource = self._resource
+        if resource is None:
             msg = 'The frame is closed'
             raise InvalidStateError(msg)
         if options is None:
@@ -783,7 +807,7 @@ class VideoFrame(Closable):
         coded_size = (self.coded_width, self.coded_height)
         rect = _parse_visible_rect(self._visible_rect, _rect(options.rect), coded_size=coded_size, format=self._format)
         size, planes = _compute_layout(rect, format, _layout(options.layout))
-        return _CopyPlan(format, rect, size, planes)
+        return _CopyPlan(resource, format, rect, size, planes)
 
     def allocation_size(self, options: VideoFrameCopyToOptions | None = None) -> int:
         """Returns how many bytes :meth:`copy_to` needs.
@@ -824,11 +848,11 @@ class VideoFrame(Closable):
             msg = f'The destination must be at least {plan.size} bytes'
             raise TypeError(msg)
         if plan.format == self._format:
-            self._resource.copyPlanes(destination, [tuple(plane) for plane in plan.planes])
+            plan.resource.copyPlanes(destination, [tuple(plane) for plane in plan.planes])
         else:
             (plane,) = plan.planes
             rect, matrix = plan.rect, self._color_space.matrix
-            self._resource.convertTo(
+            plan.resource.convertTo(
                 destination,
                 plan.format.value,
                 int(rect.x),

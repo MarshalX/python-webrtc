@@ -15,6 +15,7 @@ import weakref
 from typing import TYPE_CHECKING, NoReturn
 
 import pytest
+from typing_extensions import override
 
 import webrtc
 from tests.helpers import wait_until
@@ -33,7 +34,7 @@ class Chunks:
 
     def pull(self, controller: webrtc.ReadableStreamDefaultController) -> None:
         self.pulls += 1
-        if self.chunks:
+        if len(self.chunks) > 0:
             controller.enqueue(self.chunks.pop(0))
         else:
             controller.close()
@@ -44,6 +45,8 @@ class Chunks:
 
 class Controlled:
     """An underlying source keeping its controller, for the test to enqueue or error."""
+
+    controller: webrtc.ReadableStreamDefaultController
 
     def start(self, controller: webrtc.ReadableStreamDefaultController) -> None:
         self.controller = controller
@@ -77,7 +80,7 @@ async def test_async_iteration_and_cancel() -> None:
     """Async for reads every chunk, and breaking out of it cancels the stream."""
     source = Chunks(range(10))
     stream = webrtc.ReadableStream(source)
-    seen = []
+    seen: list[object] = []
     async for chunk in stream:
         seen.append(chunk)
         if chunk == 2:
@@ -91,8 +94,13 @@ async def test_async_iteration_and_cancel() -> None:
 @pytest.mark.asyncio
 async def test_cancel_reaches_source() -> None:
     """Canceling a stream calls the source and settles pending reads as done."""
-    source = Chunks([])
-    source.pull = lambda _: None
+
+    class Idle(Chunks):
+        @override
+        def pull(self, controller: webrtc.ReadableStreamDefaultController) -> None:
+            pass
+
+    source = Idle([])
     stream = webrtc.ReadableStream(source, high_water_mark=0)
     reader = stream.get_reader()
     read = reader.read()
@@ -132,7 +140,7 @@ async def test_locked_stream() -> None:
 @pytest.mark.asyncio
 async def test_writer_backpressure_and_order() -> None:
     """Writes reach the sink in order, one at a time, and ready follows the queue."""
-    written = []
+    written: list[int] = []
 
     class Sink:
         @staticmethod
@@ -173,7 +181,7 @@ async def test_failed_write_errors_the_stream() -> None:
 @pytest.mark.asyncio
 async def test_abort_drops_queued_writes() -> None:
     """Aborting fails the writes not done yet and tells the sink."""
-    reasons = []
+    reasons: list[str] = []
 
     class Sink:
         @staticmethod
@@ -196,7 +204,7 @@ async def test_abort_drops_queued_writes() -> None:
 @pytest.mark.asyncio
 async def test_pipe_through_transform() -> None:
     """A readable stream piped through a transform stream into a writable one."""
-    written = []
+    written: list[int] = []
 
     class Double:
         @staticmethod
@@ -216,7 +224,7 @@ async def test_pipe_through_transform() -> None:
 @pytest.mark.asyncio
 async def test_pipe_to_aborts_on_error() -> None:
     """An error of the source aborts the destination."""
-    aborted = []
+    aborted: list[Exception] = []
 
     class Source:
         @staticmethod
@@ -245,6 +253,7 @@ class Woken:
     def __init__(self, waiting: weakref.WeakSet[asyncio.Future[None]]) -> None:
         self.waiting = waiting
         self.next = 0
+        self.woken: asyncio.Future[None] | None = None
 
     def pull(self, controller: webrtc.ReadableStreamDefaultController) -> asyncio.Future[None]:
         # kept by the source, as a processor keeps its pending read
@@ -272,12 +281,15 @@ async def test_pipe_goes_on_when_nothing_references_it() -> None:
     """A pipe nobody references goes on: a collected one errored its streams with GeneratorExit."""
     # what the source waits for, known only weakly, like a native object waking it
     waiting: weakref.WeakSet[asyncio.Future[None]] = weakref.WeakSet()
-    written = []
+    written: list[int] = []
+
+    def write(chunk: int, _controller: webrtc.WritableStreamDefaultController) -> None:
+        written.append(chunk)
 
     def start() -> asyncio.Future[None]:
         # only the last pipe is referenced
         source = webrtc.ReadableStream(Woken(waiting), high_water_mark=0)
-        sink = webrtc.WritableStream({'write': lambda chunk, _: written.append(chunk)})
+        sink = webrtc.WritableStream({'write': write})
         return source.pipe_through(webrtc.TransformStream()).pipe_to(sink)
 
     done = start()
@@ -293,11 +305,21 @@ async def test_pipe_goes_on_when_nothing_references_it() -> None:
 @pytest.mark.asyncio
 async def test_sources_sinks_and_transformers_as_dictionaries() -> None:
     """As in browsers, methods may be members of a dictionary: they were ignored, a transform changed nothing."""
-    written = []
-    source = webrtc.ReadableStream({'pull': lambda controller: controller.enqueue(2)})
-    transform = webrtc.TransformStream({'transform': lambda chunk, controller: controller.enqueue(chunk * 10)})
-    sink = webrtc.WritableStream({'write': lambda chunk, _: written.append(chunk)})
-    pipe = source.pipe_through(transform).pipe_to(sink)
+    written: list[int] = []
+
+    def pull(controller: webrtc.ReadableStreamDefaultController) -> None:
+        controller.enqueue(2)
+
+    def transform(chunk: int, controller: webrtc.TransformStreamDefaultController) -> None:
+        controller.enqueue(chunk * 10)
+
+    def write(chunk: int, _controller: webrtc.WritableStreamDefaultController) -> None:
+        written.append(chunk)
+
+    source = webrtc.ReadableStream({'pull': pull})
+    transform_stream = webrtc.TransformStream({'transform': transform})
+    sink = webrtc.WritableStream({'write': write})
+    pipe = source.pipe_through(transform_stream).pipe_to(sink)
     await wait_until(lambda: len(written) >= 3, 'chunks written')
     pipe.cancel()
     assert written[:3] == [20, 20, 20]

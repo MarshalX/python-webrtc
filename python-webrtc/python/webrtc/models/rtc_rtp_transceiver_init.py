@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
 from webrtc import wrtc
-from webrtc.enums import TransceiverDirection
+from webrtc.enums import TransceiverDirection, TransceiverDirectionValue
 from webrtc.models.dictionary import Dictionary
 from webrtc.models.rtp_parameters import RTCRtpEncodingParameters
 from webrtc.utils.names import Alias, alias
@@ -38,7 +38,7 @@ class RTCRtpTransceiverInit(Dictionary):
         ValueError: If the direction isn't a member of :obj:`webrtc.TransceiverDirection`.
     """
 
-    direction: TransceiverDirection = TransceiverDirection.sendrecv
+    direction: TransceiverDirection | TransceiverDirectionValue = TransceiverDirection.sendrecv
     streams: list[webrtc.MediaStream] = field(default_factory=list)
     send_encodings: list[RTCRtpEncodingParameters] = field(default_factory=list)
 

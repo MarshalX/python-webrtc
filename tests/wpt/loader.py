@@ -15,6 +15,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
+from typing_extensions import override
+
 WPT_ROOT = Path(__file__).resolve().parents[2] / 'wpt'
 # Platform globals the shell lacks, then the WebRTC API
 POLYFILLS = Path(__file__).with_name('polyfills.js')
@@ -77,28 +79,33 @@ class _HtmlCollector(HTMLParser):
         self._inline: list[str] | None = None
         self._in_title = False
 
+    @override
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self._start(tag, dict(attrs))
 
     def _start(self, tag: str, attrs: dict[str, str | None]) -> None:
         if tag == 'script':
-            if attrs.get('src'):
-                self.test_file.scripts.append(('src', attrs['src']))
+            src = attrs.get('src')
+            if src is not None and src != '':
+                self.test_file.scripts.append(('src', src))
             else:
                 self._inline = []
         elif tag == 'meta' and attrs.get('name') == 'variant':
-            self.test_file.variants.append(attrs.get('content') or '')
+            content = attrs.get('content')
+            self.test_file.variants.append(content if content is not None else '')
         elif tag == 'meta' and attrs.get('name') == 'timeout':
             self.test_file.long_timeout = attrs.get('content') == 'long'
         elif tag == 'title':
             self._in_title = True
 
+    @override
     def handle_data(self, data: str) -> None:
         if self._inline is not None:
             self._inline.append(data)
         elif self._in_title:
             self.test_file.title += data
 
+    @override
     def handle_endtag(self, tag: str) -> None:
         if tag == 'script' and self._inline is not None:
             self.test_file.scripts.append(('inline', ''.join(self._inline)))
@@ -118,7 +125,7 @@ def _load_js(path: Path) -> TestFile:
     test_file = TestFile(path, scripts=[('src', HARNESS)])
     for line in path.read_text(encoding='utf-8').splitlines():
         match = _META.match(line.strip())
-        if not match:
+        if match is None:
             continue
         key, value = match.group(1), match.group(2).strip()
         if key == 'script':
@@ -135,14 +142,16 @@ def _load_js(path: Path) -> TestFile:
 
 def load(path: Path) -> TestFile:
     test_file = _load_js(path) if path.name.endswith('.js') else _load_html(path)
-    test_file.variants = test_file.variants or ['']
-    test_file.title = test_file.title.strip() or path.name
+    if len(test_file.variants) == 0:
+        test_file.variants = ['']
+    title = test_file.title.strip()
+    test_file.title = title if title != '' else path.name
     return test_file
 
 
 def _is_test(path: Path) -> bool:
     parts = path.relative_to(WPT_ROOT).parts
-    if HELPER_DIRS.intersection(parts[:-1]):
+    if len(HELPER_DIRS.intersection(parts[:-1])) > 0:
         return False
     name = path.name
     if '-manual.' in name or name.endswith(('-ref.html', '-notref.html')):
@@ -153,7 +162,7 @@ def _is_test(path: Path) -> bool:
 
 def discover() -> list[str]:
     """Returns every test case as a path relative to the WPT root, followed by its variant, if any."""
-    cases = []
+    cases: list[str] = []
     for test_dir in TEST_DIRS:
         paths = WPT_ROOT.glob(test_dir) if '*' in test_dir else (WPT_ROOT / test_dir).rglob('*')
         for path in sorted(paths):
@@ -168,7 +177,7 @@ def case_id(path: Path, variant: str = '') -> str:
 
 def split_case(case: str) -> tuple[Path, str]:
     path, _, variant = case.partition('?')
-    return WPT_ROOT / path, '?' + variant if variant else ''
+    return WPT_ROOT / path, '?' + variant if variant != '' else ''
 
 
 def _resolve(src: str, test_path: Path) -> Path:
