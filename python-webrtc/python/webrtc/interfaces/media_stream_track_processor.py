@@ -138,6 +138,9 @@ class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], Ev
             self._source, QueuingStrategy(high_water_mark=0)
         )
         self._attach()
+        if self._native_obj._listeners is not None:
+            # media comes as soon as the sink is attached: a wakeup sent before the listeners were set was dropped
+            self._native_obj._ackWakeup()
 
     @override
     def _on_event(self, name: str, *_args: object) -> None:

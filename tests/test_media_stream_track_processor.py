@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import array
 import asyncio
+import time
 from typing import TypeVar
 
 import pytest
@@ -81,6 +82,29 @@ async def test_audio_data_of_a_microphone(audio_stream: webrtc.MediaStream) -> N
     audio.close()
     track.stop()
     await asyncio.wait_for(reader.closed, TIMEOUT)
+
+
+@pytest.mark.asyncio
+async def test_wakeup_sent_before_the_listeners_is_not_lost(
+    audio_stream: webrtc.MediaStream, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Media comes as soon as the sink is attached, before the listeners are: the wakeup it sends is dropped."""
+    attach = webrtc.MediaStreamTrackProcessor._attach
+
+    def attach_once_media_came(processor: webrtc.MediaStreamTrackProcessor) -> None:
+        deadline = time.monotonic() + 5
+        while processor._native_obj.totalFrames == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        attach(processor)
+
+    monkeypatch.setattr(webrtc.MediaStreamTrackProcessor, '_attach', attach_once_media_came)
+    init = webrtc.MediaStreamTrackProcessorInit(audio_stream.get_tracks()[0], max_buffer_size=1)
+    reader = webrtc.MediaStreamTrackProcessor(init).readable.get_reader()
+    for _ in range(5):
+        chunk = (await asyncio.wait_for(reader.read(), 5)).value
+        assert isinstance(chunk, webrtc.AudioData)
+        chunk.close()
+    await reader.cancel()
 
 
 def test_init_forms() -> None:
