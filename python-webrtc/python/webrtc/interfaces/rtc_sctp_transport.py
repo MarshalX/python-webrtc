@@ -9,16 +9,16 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Literal, cast
 
 from typing_extensions import override
 
 import webrtc
-from webrtc import WebRTCObject, wrtc
-from webrtc.utils.events import EventTarget
+from webrtc import Event, WebRTCObject, wrtc
+from webrtc.utils.events import UniformEventTarget
 
 
-class RTCSctpTransport(WebRTCObject[wrtc.RTCSctpTransport], EventTarget):
+class RTCSctpTransport(WebRTCObject[wrtc.RTCSctpTransport], UniformEventTarget[Literal['statechange'], Event]):
     """The Stream Control Transmission Protocol (SCTP) transport of a :obj:`webrtc.RTCPeerConnection`.
 
     It tells the limitations of the transport, and gives the Datagram Transport Layer Security (DTLS) transport
@@ -29,7 +29,6 @@ class RTCSctpTransport(WebRTCObject[wrtc.RTCSctpTransport], EventTarget):
     """
 
     _class = wrtc.RTCSctpTransport
-    _events = ('statechange',)
 
     @override
     def _on_event(self, name: str, *args: object) -> None:

@@ -10,13 +10,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, Callable, ClassVar, Literal, TypeVar, cast, overload
 
 from typing_extensions import override
 
 from webrtc import (
     BinaryType,
     Blob,
+    Event,
     MessageEvent,
     RTCDataChannelState,
     RTCErrorEvent,
@@ -27,7 +28,7 @@ from webrtc import (
 )
 from webrtc.exceptions import _event_error
 from webrtc.models.dictionary import Dictionary
-from webrtc.utils.events import EventTarget
+from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
 from webrtc.utils.names import Alias, alias
 
 if TYPE_CHECKING:
@@ -107,7 +108,12 @@ class RTCDataChannelInit(Dictionary):
     maxRetransmits: ClassVar[Alias[int | None]] = alias('max_retransmits')
 
 
-class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget):
+_DataChannelStateEvent = Literal['open', 'bufferedamountlow', 'closing', 'close']
+_DataChannelEvent = Literal[_DataChannelStateEvent, 'message', 'error']
+_R = TypeVar('_R')
+
+
+class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannelEvent]):
     """A bidirectional channel of messages between the peers.
 
     It's created with :meth:`webrtc.RTCPeerConnection.create_data_channel` or received with its ``datachannel``
@@ -125,7 +131,50 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget):
     """
 
     _class = wrtc.RTCDataChannel
-    _events = ('open', 'message', 'bufferedamountlow', 'error', 'closing', 'close')
+
+    @overload
+    def on(self, name: _DataChannelStateEvent, handler: None = None) -> HandlerDecorator[Event]: ...
+
+    @overload
+    def on(self, name: _DataChannelStateEvent, handler: Callable[[Event], _R]) -> Callable[[Event], _R]: ...
+
+    @overload
+    def on(self, name: Literal['message'], handler: None = None) -> HandlerDecorator[MessageEvent]: ...
+
+    @overload
+    def on(self, name: Literal['message'], handler: Callable[[MessageEvent], _R]) -> Callable[[MessageEvent], _R]: ...
+
+    @overload
+    def on(self, name: Literal['error'], handler: None = None) -> HandlerDecorator[RTCErrorEvent]: ...
+
+    @overload
+    def on(self, name: Literal['error'], handler: Callable[[RTCErrorEvent], _R]) -> Callable[[RTCErrorEvent], _R]: ...
+
+    def on(self, name: _DataChannelEvent, handler: AnyHandler | None = None) -> object:
+        """See :meth:`webrtc.UniformEventTarget.on`."""
+        return self._add(name, handler, once=False)
+
+    @overload
+    def once(self, name: _DataChannelStateEvent, handler: None = None) -> HandlerDecorator[Event]: ...
+
+    @overload
+    def once(self, name: _DataChannelStateEvent, handler: Callable[[Event], _R]) -> Callable[[Event], _R]: ...
+
+    @overload
+    def once(self, name: Literal['message'], handler: None = None) -> HandlerDecorator[MessageEvent]: ...
+
+    @overload
+    def once(self, name: Literal['message'], handler: Callable[[MessageEvent], _R]) -> Callable[[MessageEvent], _R]: ...
+
+    @overload
+    def once(self, name: Literal['error'], handler: None = None) -> HandlerDecorator[RTCErrorEvent]: ...
+
+    @overload
+    def once(self, name: Literal['error'], handler: Callable[[RTCErrorEvent], _R]) -> Callable[[RTCErrorEvent], _R]: ...
+
+    def once(self, name: _DataChannelEvent, handler: AnyHandler | None = None) -> object:
+        """See :meth:`webrtc.UniformEventTarget.once`."""
+        return self._add(name, handler, once=True)
 
     @override
     def _on_event(self, name: str, *args: object) -> None:

@@ -10,12 +10,12 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from typing_extensions import override
 
 from webrtc import InvalidCharacterError, RTCDTMFToneChangeEvent, RTCDTMFToneChangeEventInit, WebRTCObject, wrtc
-from webrtc.utils.events import EventTarget
+from webrtc.utils.events import UniformEventTarget
 
 if TYPE_CHECKING:
     import webrtc
@@ -23,7 +23,9 @@ if TYPE_CHECKING:
 _TONES = re.compile(r'[0-9A-Da-d#*,]*')
 
 
-class RTCDTMFSender(WebRTCObject[wrtc.RTCDTMFSender], EventTarget):
+class RTCDTMFSender(
+    WebRTCObject[wrtc.RTCDTMFSender], UniformEventTarget[Literal['tonechange'], RTCDTMFToneChangeEvent]
+):
     """Sends DTMF tones on an audio sender (:attr:`webrtc.RTCRtpSender.dtmf`).
 
     Events (see :meth:`on`):
@@ -32,7 +34,6 @@ class RTCDTMFSender(WebRTCObject[wrtc.RTCDTMFSender], EventTarget):
     """
 
     _class = wrtc.RTCDTMFSender
-    _events = ('tonechange',)
 
     @override
     def _on_event(self, name: str, *args: object) -> None:

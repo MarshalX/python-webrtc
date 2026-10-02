@@ -364,7 +364,7 @@ async def test_channel_handlers_do_not_dangle_after_close_and_gc() -> None:
     def on_close(_event: webrtc.Event) -> None:
         received.append('close')
 
-    channel.on('message', lambda event: received.append(event.data))
+    channel.on('message', lambda event: received.append(str(event.data)))
     channel.on('close', on_close)
 
     @callee.on('datachannel')

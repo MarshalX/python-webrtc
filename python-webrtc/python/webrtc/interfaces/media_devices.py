@@ -12,11 +12,12 @@ from __future__ import annotations
 import copy
 import dataclasses
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from typing_extensions import override
 
 from webrtc import (
+    DeviceChangeEvent,
     MediaDeviceKind,
     MediaStream,
     MediaStreamConstraints,
@@ -36,7 +37,7 @@ from webrtc.interfaces.media_stream_track import (
     _selected,
     _unsatisfied,
 )
-from webrtc.utils.events import EventTarget
+from webrtc.utils.events import UniformEventTarget
 from webrtc.utils.names import Alias, alias
 
 if TYPE_CHECKING:
@@ -179,7 +180,7 @@ def _capture_mode(
     )
 
 
-class MediaDevices(EventTarget):
+class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent]):
     """The media devices of the library: a synthetic microphone and camera, as :data:`webrtc.media_devices`.
 
     The microphone plays quiet noise, the camera draws a moving pattern (use :obj:`webrtc.VideoTrackGenerator` and
@@ -188,8 +189,6 @@ class MediaDevices(EventTarget):
     Events (see :meth:`on`):
         ``devicechange`` (:obj:`webrtc.DeviceChangeEvent`): The devices changed, which they never do.
     """
-
-    _events = ('devicechange',)
 
     def __init__(self) -> None:
         # the listeners of the events, which a native object holds for other targets

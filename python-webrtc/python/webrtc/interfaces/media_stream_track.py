@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from typing import TYPE_CHECKING, Union, cast
+from typing import TYPE_CHECKING, Literal, Union, cast
 
 from typing_extensions import override
 
@@ -22,6 +22,7 @@ from webrtc import (
     ConstrainDoubleRange,
     ConstrainULongRange,
     DoubleRange,
+    Event,
     MediaTrackCapabilities,
     MediaTrackConstraints,
     MediaTrackConstraintSet,
@@ -31,7 +32,7 @@ from webrtc import (
     WebRTCObject,
     wrtc,
 )
-from webrtc.utils.events import EventTarget
+from webrtc.utils.events import UniformEventTarget
 
 if TYPE_CHECKING:
     import webrtc
@@ -202,7 +203,9 @@ def _unsatisfied(
     return None
 
 
-class MediaStreamTrack(WebRTCObject[wrtc.MediaStreamTrack], EventTarget):
+class MediaStreamTrack(
+    WebRTCObject[wrtc.MediaStreamTrack], UniformEventTarget[Literal['mute', 'unmute', 'ended'], Event]
+):
     """A single audio or video track of media, within a stream.
 
     Events (see :meth:`on`):
@@ -213,7 +216,6 @@ class MediaStreamTrack(WebRTCObject[wrtc.MediaStreamTrack], EventTarget):
     """
 
     _class = wrtc.MediaStreamTrack
-    _events = ('mute', 'unmute', 'ended')
 
     @override
     def _on_event(self, name: str, *args: object) -> None:

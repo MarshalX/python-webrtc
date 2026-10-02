@@ -18,13 +18,14 @@ import re
 import weakref
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, NamedTuple, Union, cast
+from typing import TYPE_CHECKING, Callable, Literal, NamedTuple, Union, cast
 
 from typing_extensions import override
 
 from webrtc import (
     DataCloneError,
     InvalidStateError,
+    KeyFrameRequestEvent,
     NotAllowedError,
     NotFoundError,
     RTCEncodedAudioFrame,
@@ -37,7 +38,7 @@ from webrtc import (
 from webrtc.enums import EncodedVideoChunkType
 from webrtc.models.dictionary import Dictionary
 from webrtc.streams import QueuingStrategy, ReadableStream, WritableStream, _handled
-from webrtc.utils.events import EventTarget, _handler_tasks
+from webrtc.utils.events import UniformEventTarget, _handler_tasks
 
 if TYPE_CHECKING:
     from webrtc.enums import RTCRtpScriptTransformTypeValue
@@ -109,7 +110,7 @@ class _FrameSink:
         self._transformer._write(chunk)
 
 
-class RTCRtpScriptTransformer(EventTarget):
+class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], KeyFrameRequestEvent]):
     """The encoded frames of the sender or receiver of an :obj:`RTCRtpScriptTransform`, as streams.
 
     The worker of the transform gets it with the ``rtctransform`` event. Frames are read from :attr:`readable` and
@@ -119,8 +120,6 @@ class RTCRtpScriptTransformer(EventTarget):
     Events:
         ``keyframerequest`` (:obj:`webrtc.KeyFrameRequestEvent`): the remote peer asked for a key frame.
     """
-
-    _events = ('keyframerequest',)
 
     def __init__(self, transform: RTCRtpScriptTransform, options: object) -> None:
         self._transform = transform

@@ -9,12 +9,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from typing_extensions import override
 
 from webrtc import MediaStreamTrack, MediaStreamTrackEvent, MediaStreamTrackEventInit, MediaType, WebRTCObject, wrtc
-from webrtc.utils.events import EventTarget
+from webrtc.utils.events import UniformEventTarget
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -22,7 +22,9 @@ if TYPE_CHECKING:
     import webrtc
 
 
-class MediaStream(WebRTCObject[wrtc.MediaStream], EventTarget):
+class MediaStream(
+    WebRTCObject[wrtc.MediaStream], UniformEventTarget[Literal['addtrack', 'removetrack'], MediaStreamTrackEvent]
+):
     """The MediaStream interface represents a stream of media content.
 
     A stream consists of several tracks, such as video or audio tracks. Each track is specified as an instance of
@@ -38,7 +40,6 @@ class MediaStream(WebRTCObject[wrtc.MediaStream], EventTarget):
     """
 
     _class = wrtc.MediaStream
-    _events = ('addtrack', 'removetrack')
     #: The native tracks, kept here: the native stream keeps them weakly
     _tracks: list[wrtc.MediaStreamTrack]
 

@@ -16,9 +16,10 @@ import pathlib
 import subprocess
 import sys
 import textwrap
-from typing import TYPE_CHECKING, Callable, TypeVar, cast
+from typing import TYPE_CHECKING, Callable, Protocol, TypeVar, cast
 
 import pytest
+from typing_extensions import Never
 
 import webrtc
 import wrtc
@@ -107,8 +108,16 @@ async def wait_for_ice_gathering_complete(pc: webrtc.RTCPeerConnection, timeout:
     await wait_until(lambda: pc.ice_gathering_state == webrtc.RTCIceGatheringState.complete, 'ICE gathering', timeout)
 
 
+class NamedEvents(Protocol):
+    """An event target with untyped names."""
+
+    def on(self, name: str, handler: Callable[[webrtc.Event], object], /) -> object: ...
+
+    def off(self, name: str, handler: Callable[[webrtc.Event], object], /) -> None: ...
+
+
 def wait_for_event(
-    target: webrtc.EventTarget,
+    target: webrtc.EventTarget[Never],
     name: str,
     timeout: float = 10,
     *,
@@ -120,13 +129,14 @@ def wait_for_event(
         An awaitable of the event.
     """
     future = asyncio.get_running_loop().create_future()
+    events = cast('NamedEvents', target)
 
     def on_event(event: webrtc.Event) -> None:
         if not future.done() and (predicate is None or predicate(event)):
-            target.off(name, on_event)
+            events.off(name, on_event)
             future.set_result(event)
 
-    target.on(name, on_event)
+    _ = events.on(name, on_event)
     return asyncio.wait_for(future, timeout)
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import TYPE_CHECKING, ClassVar, Literal, Union, cast, overload
+from typing import TYPE_CHECKING, Callable, ClassVar, Literal, TypeVar, Union, cast, overload
 
 from typing_extensions import override
 
@@ -49,14 +49,13 @@ from webrtc import (
     wrtc,
 )
 from webrtc.interfaces.rtc_data_channel import RTCDataChannelInit, check_utf8_length
-from webrtc.utils.events import EventTarget
+from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
 from webrtc.utils.native_calls import call_native
 from webrtc.utils.operations import OperationsChain, later
 from webrtc.utils.task_queue import TaskQueue
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
-    from typing import Callable
 
     from typing_extensions import Self
 
@@ -82,7 +81,18 @@ _REMOTE_DESCRIPTION_STATES = {
 _RID = re.compile(r'[A-Za-z0-9]{1,16}')
 
 
-class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
+_PeerConnectionStateEvent = Literal[
+    'negotiationneeded',
+    'signalingstatechange',
+    'iceconnectionstatechange',
+    'icegatheringstatechange',
+    'connectionstatechange',
+]
+_PeerConnectionEvent = Literal[_PeerConnectionStateEvent, 'icecandidate', 'icecandidateerror', 'track', 'datachannel']
+_R = TypeVar('_R')
+
+
+class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerConnectionEvent]):
     """A WebRTC connection between the local computer and a remote peer.
 
     It connects to the remote peer, maintains and monitors the connection, and closes it once it's no longer needed.
@@ -111,17 +121,6 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
     """
 
     _class = wrtc.RTCPeerConnection
-    _events = (
-        'negotiationneeded',
-        'icecandidate',
-        'icecandidateerror',
-        'signalingstatechange',
-        'iceconnectionstatechange',
-        'icegatheringstatechange',
-        'connectionstatechange',
-        'track',
-        'datachannel',
-    )
 
     # the native method that surfaces the state of each state event
     _STATE_EVENTS: ClassVar[dict[str, str]] = {
@@ -143,6 +142,94 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
     _chain: OperationsChain | None = None
     #: The id of a negotiationneeded event that waits for the operations chain to empty
     _deferred_negotiation_id: int | None = None
+
+    @overload
+    def on(self, name: _PeerConnectionStateEvent, handler: None = None) -> HandlerDecorator[Event]: ...
+
+    @overload
+    def on(self, name: _PeerConnectionStateEvent, handler: Callable[[Event], _R]) -> Callable[[Event], _R]: ...
+
+    @overload
+    def on(
+        self, name: Literal['icecandidate'], handler: None = None
+    ) -> HandlerDecorator[RTCPeerConnectionIceEvent]: ...
+
+    @overload
+    def on(
+        self, name: Literal['icecandidate'], handler: Callable[[RTCPeerConnectionIceEvent], _R]
+    ) -> Callable[[RTCPeerConnectionIceEvent], _R]: ...
+
+    @overload
+    def on(
+        self, name: Literal['icecandidateerror'], handler: None = None
+    ) -> HandlerDecorator[RTCPeerConnectionIceErrorEvent]: ...
+
+    @overload
+    def on(
+        self, name: Literal['icecandidateerror'], handler: Callable[[RTCPeerConnectionIceErrorEvent], _R]
+    ) -> Callable[[RTCPeerConnectionIceErrorEvent], _R]: ...
+
+    @overload
+    def on(self, name: Literal['track'], handler: None = None) -> HandlerDecorator[RTCTrackEvent]: ...
+
+    @overload
+    def on(self, name: Literal['track'], handler: Callable[[RTCTrackEvent], _R]) -> Callable[[RTCTrackEvent], _R]: ...
+
+    @overload
+    def on(self, name: Literal['datachannel'], handler: None = None) -> HandlerDecorator[RTCDataChannelEvent]: ...
+
+    @overload
+    def on(
+        self, name: Literal['datachannel'], handler: Callable[[RTCDataChannelEvent], _R]
+    ) -> Callable[[RTCDataChannelEvent], _R]: ...
+
+    def on(self, name: _PeerConnectionEvent, handler: AnyHandler | None = None) -> object:
+        """See :meth:`webrtc.UniformEventTarget.on`."""
+        return self._add(name, handler, once=False)
+
+    @overload
+    def once(self, name: _PeerConnectionStateEvent, handler: None = None) -> HandlerDecorator[Event]: ...
+
+    @overload
+    def once(self, name: _PeerConnectionStateEvent, handler: Callable[[Event], _R]) -> Callable[[Event], _R]: ...
+
+    @overload
+    def once(
+        self, name: Literal['icecandidate'], handler: None = None
+    ) -> HandlerDecorator[RTCPeerConnectionIceEvent]: ...
+
+    @overload
+    def once(
+        self, name: Literal['icecandidate'], handler: Callable[[RTCPeerConnectionIceEvent], _R]
+    ) -> Callable[[RTCPeerConnectionIceEvent], _R]: ...
+
+    @overload
+    def once(
+        self, name: Literal['icecandidateerror'], handler: None = None
+    ) -> HandlerDecorator[RTCPeerConnectionIceErrorEvent]: ...
+
+    @overload
+    def once(
+        self, name: Literal['icecandidateerror'], handler: Callable[[RTCPeerConnectionIceErrorEvent], _R]
+    ) -> Callable[[RTCPeerConnectionIceErrorEvent], _R]: ...
+
+    @overload
+    def once(self, name: Literal['track'], handler: None = None) -> HandlerDecorator[RTCTrackEvent]: ...
+
+    @overload
+    def once(self, name: Literal['track'], handler: Callable[[RTCTrackEvent], _R]) -> Callable[[RTCTrackEvent], _R]: ...
+
+    @overload
+    def once(self, name: Literal['datachannel'], handler: None = None) -> HandlerDecorator[RTCDataChannelEvent]: ...
+
+    @overload
+    def once(
+        self, name: Literal['datachannel'], handler: Callable[[RTCDataChannelEvent], _R]
+    ) -> Callable[[RTCDataChannelEvent], _R]: ...
+
+    def once(self, name: _PeerConnectionEvent, handler: AnyHandler | None = None) -> object:
+        """See :meth:`webrtc.UniformEventTarget.once`."""
+        return self._add(name, handler, once=True)
 
     def __init__(self, configuration: webrtc.RTCConfiguration | None = None) -> None:
         super().__init__(wrtc.RTCPeerConnection(configuration._to_native() if configuration is not None else None))

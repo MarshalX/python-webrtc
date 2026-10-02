@@ -60,10 +60,88 @@ async def test_async_handlers_run_as_tasks(pc: webrtc.RTCPeerConnection) -> None
     assert await asyncio.wait_for(done, 5) == 'negotiationneeded'
 
 
+@pytest.mark.asyncio
+async def test_listeners_and_their_removal(pc: webrtc.RTCPeerConnection) -> None:
+    """Listing and removing handlers."""
+
+    def first(_event: webrtc.Event) -> None: ...
+
+    def second(_event: webrtc.Event) -> None: ...
+
+    def on_track(_event: webrtc.RTCTrackEvent) -> None: ...
+
+    assert pc.event_names() == set()
+    assert pc.listeners('negotiationneeded') == []
+
+    _ = pc.on('negotiationneeded', first)
+    _ = pc.once('negotiationneeded', second)
+    _ = pc.on('negotiationneeded', first)  # no duplicates
+    _ = pc.on('track', on_track)
+    assert pc.listeners('negotiationneeded') == [first, second]
+    assert pc.event_names() == {'negotiationneeded', 'track'}
+
+    pc.add_transceiver(webrtc.MediaType.audio)
+    _ = await wait_for_event(pc, 'negotiationneeded')
+    assert pc.listeners('negotiationneeded') == [first]
+
+    _ = pc.on('negotiationneeded', second)
+    pc.remove_listener('negotiationneeded', first)
+    assert pc.listeners('negotiationneeded') == [second]
+    pc.remove_all_listeners('negotiationneeded')
+    assert pc.event_names() == {'track'}
+
+    _ = pc.on('negotiationneeded', first)
+    pc.off()
+    assert pc.event_names() == set()
+    assert pc.listeners('track') == []
+
+    _ = pc.on('negotiationneeded', first)
+    pc.remove_all_listeners()
+    assert pc.event_names() == set()
+
+
+@pytest.mark.asyncio
+async def test_off_everything_stops_delivery(pc: webrtc.RTCPeerConnection) -> None:
+    """off() removes every handler."""
+    calls: list[str] = []
+    _ = pc.on('negotiationneeded', lambda event: calls.append(event.type))
+    _ = pc.on('signalingstatechange', lambda event: calls.append(event.type))
+    pc.off()
+
+    pc.add_transceiver(webrtc.MediaType.audio)
+    await pc.set_local_description(await pc.create_offer())
+    await asyncio.sleep(QUIET_PERIOD)
+    assert calls == []
+
+
+def test_event_names_come_from_the_literal() -> None:
+    """Event names come from the Literal parameter."""
+    assert webrtc.MediaStream._events == ('addtrack', 'removetrack')
+    assert set(webrtc.RTCPeerConnection._events) == {
+        'negotiationneeded',
+        'signalingstatechange',
+        'iceconnectionstatechange',
+        'icegatheringstatechange',
+        'connectionstatechange',
+        'icecandidate',
+        'icecandidateerror',
+        'track',
+        'datachannel',
+    }
+    assert webrtc.MediaStreamTrackProcessor._events == ()
+
+
+@pytest.mark.parametrize('method', ['listeners', 'remove_all_listeners', 'off'])
+def test_unknown_event_in_removal(pc: webrtc.RTCPeerConnection, method: str) -> None:
+    """Unknown events are rejected."""
+    with pytest.raises(ValueError, match="no event 'nosuchevent'"):
+        getattr(pc, method)('nosuchevent')
+
+
 def test_unknown_event(pc: webrtc.RTCPeerConnection) -> None:
     """Registering a handler of an event the object doesn't have is a ValueError."""
     with pytest.raises(ValueError, match="no event 'nosuchevent'"):
-        pc.on('nosuchevent', lambda _: None)
+        pc.on('nosuchevent', lambda _: None)  # pyrefly: ignore[no-matching-overload, implicit-any-lambda]
 
 
 def test_handlers_need_a_running_loop(pc: webrtc.RTCPeerConnection) -> None:

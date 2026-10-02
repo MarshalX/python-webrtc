@@ -24,7 +24,7 @@ import random
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING, ClassVar, TypeVar
+from typing import TYPE_CHECKING, ClassVar, Literal, TypeVar
 
 import webrtc
 import wrtc
@@ -145,7 +145,8 @@ class ConnectionSteps(State):
         pc = self.pick(self.connections)
         if pc is not None:
             channel = pc.create_data_channel(f'chaos{self.random.randrange(1000)}')
-            channel.on(self.random.choice(['open', 'message', 'close']), self.handler())
+            names: list[Literal['open', 'message', 'close']] = ['open', 'message', 'close']
+            _ = channel.on(self.random.choice(names), self.handler())
             self.channels.append(channel)
 
     async def send(self) -> None:
@@ -171,7 +172,13 @@ class ConnectionSteps(State):
     async def handle_connection_event(self) -> None:
         pc = self.pick(self.connections)
         if pc is not None:
-            pc.on(self.random.choice(['connectionstatechange', 'icecandidate', 'track', 'datachannel']), self.handler())
+            names: list[Literal['connectionstatechange', 'icecandidate', 'track', 'datachannel']] = [
+                'connectionstatechange',
+                'icecandidate',
+                'track',
+                'datachannel',
+            ]
+            _ = pc.on(self.random.choice(names), self.handler())
 
     async def replace_track(self) -> None:
         pc = self.pick(self.connections)

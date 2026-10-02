@@ -9,17 +9,20 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Callable, Literal, TypeVar, cast, overload
 
 from typing_extensions import override
 
 import webrtc
-from webrtc import RTCDtlsTransportState, RTCErrorEvent, RTCErrorEventInit, WebRTCObject, wrtc
+from webrtc import Event, RTCDtlsTransportState, RTCErrorEvent, RTCErrorEventInit, WebRTCObject, wrtc
 from webrtc.exceptions import _event_error
-from webrtc.utils.events import EventTarget
+from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
+
+_DtlsTransportEvent = Literal['statechange', 'error']
+_R = TypeVar('_R')
 
 
-class RTCDtlsTransport(WebRTCObject[wrtc.RTCDtlsTransport], EventTarget):
+class RTCDtlsTransport(WebRTCObject[wrtc.RTCDtlsTransport], EventTarget[_DtlsTransportEvent]):
     """The Datagram Transport Layer Security (DTLS) transport of a :obj:`webrtc.RTCPeerConnection`.
 
     The RTP and RTCP packets of its :obj:`webrtc.RTCRtpSender` and :obj:`webrtc.RTCRtpReceiver` objects are sent and
@@ -31,7 +34,38 @@ class RTCDtlsTransport(WebRTCObject[wrtc.RTCDtlsTransport], EventTarget):
     """
 
     _class = wrtc.RTCDtlsTransport
-    _events = ('statechange', 'error')
+
+    @overload
+    def on(self, name: Literal['statechange'], handler: None = None) -> HandlerDecorator[Event]: ...
+
+    @overload
+    def on(self, name: Literal['statechange'], handler: Callable[[Event], _R]) -> Callable[[Event], _R]: ...
+
+    @overload
+    def on(self, name: Literal['error'], handler: None = None) -> HandlerDecorator[RTCErrorEvent]: ...
+
+    @overload
+    def on(self, name: Literal['error'], handler: Callable[[RTCErrorEvent], _R]) -> Callable[[RTCErrorEvent], _R]: ...
+
+    def on(self, name: _DtlsTransportEvent, handler: AnyHandler | None = None) -> object:
+        """See :meth:`webrtc.UniformEventTarget.on`."""
+        return self._add(name, handler, once=False)
+
+    @overload
+    def once(self, name: Literal['statechange'], handler: None = None) -> HandlerDecorator[Event]: ...
+
+    @overload
+    def once(self, name: Literal['statechange'], handler: Callable[[Event], _R]) -> Callable[[Event], _R]: ...
+
+    @overload
+    def once(self, name: Literal['error'], handler: None = None) -> HandlerDecorator[RTCErrorEvent]: ...
+
+    @overload
+    def once(self, name: Literal['error'], handler: Callable[[RTCErrorEvent], _R]) -> Callable[[RTCErrorEvent], _R]: ...
+
+    def once(self, name: _DtlsTransportEvent, handler: AnyHandler | None = None) -> object:
+        """See :meth:`webrtc.UniformEventTarget.once`."""
+        return self._add(name, handler, once=True)
 
     @override
     def _on_event(self, name: str, *args: object) -> None:

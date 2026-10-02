@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import re
 import weakref
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Callable, Literal, TypeVar, cast, overload
 
 from typing_extensions import override
 
 from webrtc import (
+    Event,
     InvalidStateError,
     InvalidSyntaxError,
     RTCIceCandidate,
@@ -32,7 +33,7 @@ from webrtc import (
     WebRTCObject,
     wrtc,
 )
-from webrtc.utils.events import EventTarget
+from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
 
 if TYPE_CHECKING:
     import webrtc
@@ -48,7 +49,12 @@ _candidates: weakref.WeakKeyDictionary[wrtc.RTCIceTransport, dict[str, webrtc.RT
 )
 
 
-class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
+_IceTransportStateEvent = Literal['statechange', 'gatheringstatechange', 'selectedcandidatepairchange', 'error']
+_IceTransportEvent = Literal[_IceTransportStateEvent, 'icecandidate']
+_R = TypeVar('_R')
+
+
+class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransportEvent]):
     """The ICE transport a :obj:`webrtc.RTCDtlsTransport` of a connection runs over, or a standalone transport.
 
     A standalone one (``RTCIceTransport()``) connects after :meth:`gather`, :meth:`start` and
@@ -64,7 +70,46 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
     """
 
     _class = wrtc.RTCIceTransport
-    _events = ('statechange', 'gatheringstatechange', 'selectedcandidatepairchange', 'icecandidate', 'error')
+
+    @overload
+    def on(self, name: _IceTransportStateEvent, handler: None = None) -> HandlerDecorator[Event]: ...
+
+    @overload
+    def on(self, name: _IceTransportStateEvent, handler: Callable[[Event], _R]) -> Callable[[Event], _R]: ...
+
+    @overload
+    def on(
+        self, name: Literal['icecandidate'], handler: None = None
+    ) -> HandlerDecorator[RTCPeerConnectionIceEvent]: ...
+
+    @overload
+    def on(
+        self, name: Literal['icecandidate'], handler: Callable[[RTCPeerConnectionIceEvent], _R]
+    ) -> Callable[[RTCPeerConnectionIceEvent], _R]: ...
+
+    def on(self, name: _IceTransportEvent, handler: AnyHandler | None = None) -> object:
+        """See :meth:`webrtc.UniformEventTarget.on`."""
+        return self._add(name, handler, once=False)
+
+    @overload
+    def once(self, name: _IceTransportStateEvent, handler: None = None) -> HandlerDecorator[Event]: ...
+
+    @overload
+    def once(self, name: _IceTransportStateEvent, handler: Callable[[Event], _R]) -> Callable[[Event], _R]: ...
+
+    @overload
+    def once(
+        self, name: Literal['icecandidate'], handler: None = None
+    ) -> HandlerDecorator[RTCPeerConnectionIceEvent]: ...
+
+    @overload
+    def once(
+        self, name: Literal['icecandidate'], handler: Callable[[RTCPeerConnectionIceEvent], _R]
+    ) -> Callable[[RTCPeerConnectionIceEvent], _R]: ...
+
+    def once(self, name: _IceTransportEvent, handler: AnyHandler | None = None) -> object:
+        """See :meth:`webrtc.UniformEventTarget.once`."""
+        return self._add(name, handler, once=True)
 
     def __init__(self) -> None:
         super().__init__()
