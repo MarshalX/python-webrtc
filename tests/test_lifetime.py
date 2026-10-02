@@ -603,36 +603,72 @@ def test_stream_keeps_the_state_of_its_tracks() -> None:
     assert len(stream.get_audio_tracks()) == len(stream.get_video_tracks()) == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason='known leak: the native sender and receiver keep the wrappers of their tracks, whose state (like the id of '
-    'a remote track) is theirs, so handlers of the track referencing its sender or receiver are a cycle through C++',
-)
+async def owner_with_handler_on_its_track(
+    part: str, *, holds_track: bool
+) -> tuple[webrtc.RTCPeerConnection, webrtc.RTCRtpSender | webrtc.RTCRtpReceiver]:
+    pc = webrtc.RTCPeerConnection()
+    owner: webrtc.RTCRtpSender | webrtc.RTCRtpReceiver
+    if part == 'sender':
+        stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))
+        owner = pc.add_track(stream.get_tracks()[0])
+    else:
+        owner = pc.add_transceiver(webrtc.MediaType.audio).receiver
+    track = owner.track
+    assert track is not None
+
+    def on_ended(_event: webrtc.Event) -> object:
+        # like a handler holding its track event, which has both
+        return (owner.track, track) if holds_track else owner.track
+
+    track.on('ended', on_ended)
+    return pc, owner
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize('holds_track', [False, True])
 @pytest.mark.parametrize('part', ['sender', 'receiver'])
-async def test_handler_of_a_track_referencing_its_sender_or_receiver(part: str) -> None:
+async def test_handler_of_a_track_referencing_its_sender_or_receiver(part: str, *, holds_track: bool) -> None:
+    """Handlers of a track are released once it ends, so they don't keep its sender or receiver alive."""
     baseline = alive_factories()
 
     async def create() -> weakref.ref[webrtc.RTCRtpSender | webrtc.RTCRtpReceiver]:
-        pc = webrtc.RTCPeerConnection()
+        pc, owner = await owner_with_handler_on_its_track(part, holds_track=holds_track)
+        pc.close()
         if part == 'sender':
-            stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))
-            owner = pc.add_track(stream.get_tracks()[0])
-            del stream
-        else:
-            owner = pc.add_transceiver(webrtc.MediaType.audio).receiver
-        track = owner.track
-        assert track is not None
+            # a local track outlives the connection
+            track = owner.track
+            assert track is not None
+            track.stop()
+        return weakref.ref(owner)
 
-        def on_ended(_event: webrtc.Event) -> webrtc.MediaStreamTrack | None:
-            return owner.track
+    ref = await create()
+    await asyncio.sleep(QUIET_PERIOD)
+    collect()
 
-        track.on('ended', on_ended)
+    assert ref() is None
+    assert alive_factories() == baseline
+
+
+@pytest.mark.asyncio
+async def test_handlers_of_a_live_track_keep_its_sender_alive() -> None:
+    """Like in a browser, a live track keeps the handlers that may still be called, until it's stopped."""
+    baseline = alive_factories()
+
+    async def create() -> weakref.ref[webrtc.RTCRtpSender | webrtc.RTCRtpReceiver]:
+        pc, owner = await owner_with_handler_on_its_track('sender', holds_track=False)
         pc.close()
         return weakref.ref(owner)
 
     ref = await create()
     await asyncio.sleep(QUIET_PERIOD)
+    collect()
+
+    sender = ref()
+    assert sender is not None
+    track = sender.track
+    assert track is not None
+    track.stop()
+    del sender, track
     collect()
 
     assert ref() is None
