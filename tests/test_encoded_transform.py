@@ -441,10 +441,23 @@ async def test_nobody_reading(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPe
     sender = caller.add_track(await local_track('video'))
     sender.transform = webrtc.RTCRtpScriptTransform(started.append)
     await connect(caller, callee)
-    await asyncio.sleep(1)
+
+    async def queue_overflowed() -> bool:
+        # past the 120 frames a transformer queues, the oldest are dropped
+        stats = (await sender.get_stats()).values()
+        encoded = [s.frames_encoded for s in stats if isinstance(s, webrtc.RTCOutboundRtpStreamStats)]
+        return any(frames is not None and frames > 130 for frames in encoded)
+
+    await wait_until(queue_overflowed, 'more frames than the queue keeps', 30)
     assert len(started) == 1
     caller.close()
     callee.close()
+
+
+def released_to(baseline: dict[str, int]) -> bool:
+    """Whether the native objects are back to the baseline, polled without blocking the loop."""
+    gc.collect()
+    return all(count <= baseline.get(name, 0) for name, count in wrtc._alive().items())
 
 
 def alive_objects() -> dict[str, int]:
@@ -481,5 +494,4 @@ async def test_closing_releases_transforms() -> None:
         await asyncio.wait_for(asyncio.gather(sending.done, receiving.done), TIMEOUT)
 
     await session()
-    await asyncio.sleep(0.2)
-    assert alive_objects() == baseline
+    await wait_until(lambda: released_to(baseline), 'the transforms released', TIMEOUT)

@@ -75,6 +75,7 @@ class State:
         """A handler doing something to a random object: closing, raising, referencing (a cycle), collecting."""
         target = self.pick([*self.connections, *self.channels, *self.tracks])
         action = self.random.randrange(5)
+        collected = [float('-inf')]
 
         def handle(_event: webrtc.Event) -> str | None:
             if action == 0 and target is not None:
@@ -82,7 +83,9 @@ class State:
             elif action == 1:
                 msg = 'a handler raises'
                 raise RuntimeError(msg)
-            elif action == 2:
+            # at most once a second: per event, as SFrame errors come for every frame, it would starve the loop
+            elif action == 2 and time.monotonic() - collected[0] > 1:
+                collected[0] = time.monotonic()
                 gc.collect()
             elif action == 3:
                 return repr(target)

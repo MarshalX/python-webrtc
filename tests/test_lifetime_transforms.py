@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Union
 import pytest
 
 import webrtc
+import wrtc
 from tests.helpers import QUIET_PERIOD, connect, copy_frame, wait_until
 from tests.test_lifetime import alive_factories, alive_objects, collect
 
@@ -137,7 +138,8 @@ async def settled(baseline: dict[str, int]) -> dict[str, int]:
     deadline = asyncio.get_running_loop().time() + 10
     while True:
         await asyncio.sleep(QUIET_PERIOD)
-        alive = alive_objects()
+        collect()
+        alive = wrtc._alive()
         if alive == baseline or asyncio.get_running_loop().time() > deadline:
             return alive
 
@@ -173,6 +175,9 @@ async def test_sframe_transforms_of_connections_dropped_without_close() -> None:
         for decryptor in decryptors:
             decryptor.on('error', errors.append)
         await wait_until(lambda: len(errors) > 5, 'errors', TIMEOUT)
+        # the right key stops the errors, which every frame makes: --gc-on-emit collects for each one
+        for decryptor in decryptors:
+            await decryptor.add_decryption_key(KEY, 1)
         return weakref.ref(decryptors[0])
 
     ref = await session()

@@ -19,7 +19,7 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import connect, mistyped
+from tests.helpers import connect, mistyped, wait_until
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -201,6 +201,14 @@ class Errors:
             self._waiters.append(waiter)
             await asyncio.wait_for(waiter, TIMEOUT)
         return self.events[-1]
+
+    async def wait_for(self, error_type: webrtc.SFrameTransformErrorEventType, key_id: int) -> None:
+        """Waits for an error of a type and key id, as errors of frames sent before a key change may come first."""
+        await wait_until(
+            lambda: any(e.error_type == error_type and e.key_id == key_id for e in self.events),
+            f'a {error_type.value} error of key {key_id}',
+            TIMEOUT,
+        )
 
 
 def options(suite: webrtc.SFrameCipherSuite) -> webrtc.SFrameTransformOptions:
@@ -536,12 +544,12 @@ async def test_frames_are_encrypted_on_the_wire(
         caller, callee, kind, encryptor=encryptor, receiver_transform=webrtc.RTCRtpScriptTransform(inspector)
     )
     await read_media(receiver.track, 10)
+    # audio playout conceals missing packets, so decoded audio doesn't mean frames arrived yet
+    await wait_until(lambda: len({counter for _, counter, _ in inspector.headers}) >= 5, 'five frames', TIMEOUT)
 
-    assert len(inspector.headers) >= 5
     assert all(key_id == 9 for key_id, _, _ in inspector.headers)
-    counters = [counter for _, counter, _ in inspector.headers]
-    assert counters == sorted(counters)
-    assert len(set(counters)) == len(counters)
+    # retransmitted packets may assemble a received frame again, out of order
+    assert len({counter for _, counter, _ in inspector.headers}) >= 5
     assert errors.events == []
 
 
@@ -562,11 +570,7 @@ async def test_decryption_errors(pair: tuple[webrtc.RTCPeerConnection, webrtc.RT
     assert event.target == decryptor
 
     await encryptor.set_encryption_key(KEY, 2**64 - 1)
-    await asyncio.sleep(0.5)
-    errors.events.clear()
-    event = await errors.wait()
-    assert event.error_type == webrtc.SFrameTransformErrorEventType.key_id
-    assert event.key_id == 2**64 - 1
+    await errors.wait_for(webrtc.SFrameTransformErrorEventType.key_id, 2**64 - 1)
 
     await decryptor.add_decryption_key(KEY, 2**64 - 1)
     await read_media(receiver.track, 5)
@@ -585,16 +589,15 @@ async def test_key_rotation(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeer
     await read_media(receiver.track, 10)
 
     await encryptor.set_encryption_key(OTHER_KEY, 2)
-    await asyncio.sleep(0.3)
     await decryptor.remove_decryption_key(1)
     await read_media(receiver.track, 10)
-    assert errors.events == []
+    # only frames sent before the key change may fail, with the key removed
+    key_id = webrtc.SFrameTransformErrorEventType.key_id
+    assert all(e.error_type == key_id and e.key_id == 1 for e in errors.events)
 
     await decryptor.remove_decryption_key(2)
-    event = await errors.wait()
-    assert event.error_type == webrtc.SFrameTransformErrorEventType.key_id
-    assert event.key_id == 2
-    assert isinstance(event.frame, webrtc.RTCEncodedAudioFrame)
+    await errors.wait_for(key_id, 2)
+    assert all(isinstance(e.frame, webrtc.RTCEncodedAudioFrame) for e in errors.events)
 
 
 @pytest.mark.asyncio
@@ -645,6 +648,12 @@ def test_transform_attribute_types(pair: tuple[webrtc.RTCPeerConnection, webrtc.
     assert audio.receiver.transform is None
 
 
+def released_to(baseline: int) -> bool:
+    """Whether the native SFrame transforms are back to the baseline, polled without blocking the loop."""
+    gc.collect()
+    return wrtc._alive()['SFrameTransform'] <= baseline
+
+
 def alive_transforms() -> int:
     """The native SFrame transforms alive, once releases on helper threads are done."""
     gc.collect()
@@ -672,11 +681,12 @@ async def test_closing_releases_transforms() -> None:
         errors = Errors(decryptor)
         await encrypted_call(caller, callee, 'video', encryptor=encryptor, receiver_transform=decryptor)
         await errors.wait()
+        # the right key stops the errors, which every frame makes
+        await decryptor.add_decryption_key(KEY, 1)
         stream = webrtc.SFrameDecryptorStream(webrtc.SFrameTransformOptions('AES_128_GCM_SHA256_128'))
         Errors(stream)
         caller.close()
         callee.close()
 
     await session()
-    await asyncio.sleep(0.2)
-    assert alive_transforms() == baseline
+    await wait_until(lambda: released_to(baseline), 'the transforms released', TIMEOUT)
