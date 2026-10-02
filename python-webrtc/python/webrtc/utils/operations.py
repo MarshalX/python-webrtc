@@ -52,12 +52,20 @@ class OperationsChain:
         self._last = done
         try:
             if previous is not None and not previous.done():
-                await previous
+                # shielded: cancelling this operation must not cancel the end of the previous one
+                await asyncio.shield(previous)
             yield
         finally:
-            done.set_result(None)
-            if self._last is done:
-                self._on_empty()
+            if previous is not None and not previous.done():
+                # cancelled while waiting: the next operations still wait for the previous one
+                previous.add_done_callback(lambda _: self._end(done))
+            else:
+                self._end(done)
+
+    def _end(self, done: asyncio.Future[None]) -> None:
+        done.set_result(None)
+        if self._last is done:
+            self._on_empty()
 
 
 async def later() -> None:

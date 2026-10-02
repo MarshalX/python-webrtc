@@ -1,4 +1,80 @@
-.sidebar-container {
-    box-sizing: border-box;
-    width: unset;
+/* Qualified names are long enough to run under the right sidebar. */
+dl.py > dt,
+dl.py > dt .sig-name,
+dl.py > dt .sig-prename {
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+#right-sidebar a code,
+#right-sidebar a {
+    overflow-wrap: anywhere;
+}
+
+/* API signatures. */
+:root {
+    --sig-accent: #b3123c;
+    --sig-keyword: #64748b;
+    --sig-link: #0550ae;
+    --sig-type: #475569;
+    --sig-rule: #e2e8f0;
+}
+
+html.dark {
+    --sig-accent: #fb7185;
+    --sig-keyword: #94a3b8;
+    --sig-link: #79c0ff;
+    --sig-type: #a8b5c6;
+    --sig-rule: #334155;
+}
+
+dl.py > dt .sig-prename,
+dl.py > dt .sig-name {
+    color: var(--sig-accent);
+}
+
+dl.py > dt .sig-name {
+    font-weight: 700;
+}
+
+dl.py > dt > .property:first-child {
+    color: var(--sig-keyword);
+}
+
+dl.py > dt .property {
+    font-weight: 400;
+    color: var(--sig-type);
+}
+
+dl.py a.reference,
+dl.py a.reference .pre {
+    color: var(--sig-link);
+}
+
+dl.py > dt .sig-prename {
+    font-size: 0.85em;
+    font-weight: 400;
+    opacity: 0.6;
+}
+
+dl.py.class > dd {
+    border-left: 2px solid var(--sig-rule);
+    padding-left: 1.15rem;
+}
+
+main table.docutils {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+/* Enum members have no docs: list them tightly. */
+dl.py.class > dd > dl.py.attribute:not(:has(> dd > *)) {
+    margin-top: 0;
+    border-top: 0;
+}
+
+dl.py.class > dd > dl.py.attribute:not(:has(> dd > *)) > dt {
+    padding-top: 0.35rem;
+    border-top: 0;
 }

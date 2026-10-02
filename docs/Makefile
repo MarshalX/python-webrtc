@@ -1,13 +1,9 @@
 # makefile for Sphinx documentation
 
-SPHINXOPTS ?=
+SPHINXOPTS ?= -j auto
 SPHINXBUILD ?= sphinx-build
-SPHINXGENERATE ?= sphinx-apidoc
-MODULEPATH = ../python-webrtc/python/webrtc
-EXCLUDEPATTERN = ../python-webrtc/python/webrtc/utils/**
 SOURCEDIR = source
 BUILDDIR = build
-TEMPLATEDIR = source/templates
 
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
@@ -15,9 +11,14 @@ help:
 .PHONY: help Makefile
 
 gen:
-	@$(SPHINXGENERATE) -f -e -M -o "$(SOURCEDIR)" -t "$(TEMPLATEDIR)" "$(MODULEPATH)" "$(EXCLUDEPATTERN)" $(O)
+	@python3 gen_api_docs.py
 
-.PHONY: gen Makefile
+.PHONY: gen
+
+html:
+	@$(SPHINXBUILD) -M dirhtml "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
+
+.PHONY: html
 
 %: Makefile
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)

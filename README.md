@@ -9,7 +9,7 @@
         Examples
     </a>
     •
-    <a href="https://wrtc.rtfd.io/">
+    <a href="https://wrtc.marshal.dev/">
         Documentation
     </a>
     •
@@ -81,12 +81,12 @@ Pass `-Ccmake.define.LIBWEBRTC_ROOT=/path/to/libwebrtc` to use your own libwebrt
 
 Pre-built wheel:
 ``` bash
-pip install --pre wrtc
+pip install wrtc
 ```
 
 Build from sources:
 ``` bash
-pip install --pre wrtc --no-binary wrtc
+pip install wrtc --no-binary wrtc
 ```
 
 ### Development
@@ -121,7 +121,7 @@ The libwebrtc version and archive hashes are pinned in `cmake/libwebrtc.cmake`:
 
 ### Documentation
 
-The documentation is live at [readthedocs.io](https://wrtc.rtfd.io/).
+The documentation is live at [wrtc.marshal.dev](https://wrtc.marshal.dev/).
 
 ### Getting help
 

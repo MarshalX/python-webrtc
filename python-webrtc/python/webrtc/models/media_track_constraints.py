@@ -191,7 +191,7 @@ class MediaTrackSettings(Dictionary):
         aspect_ratio (:obj:`float`, optional): The width divided by the height.
         frame_rate (:obj:`float`, optional): The frames per second, measured over the last frames.
         resize_mode (:obj:`str`, optional): How the source is resized, ``'none'`` for the synthetic camera.
-        device_id (:obj:`str`, optional): The device of the track, for :func:`webrtc.get_user_media`.
+        device_id (:obj:`str`, optional): The device of the track, for :meth:`webrtc.MediaDevices.get_user_media`.
         group_id (:obj:`str`, optional): The group of the device.
         sample_rate (:obj:`int`, optional): The samples per second of the audio.
         sample_size (:obj:`int`, optional): The bits per sample of the audio.
@@ -253,8 +253,8 @@ class MediaTrackSettings(Dictionary):
 class MediaTrackCapabilities(Dictionary):
     """What the source of a track can do (:meth:`webrtc.MediaStreamTrack.get_capabilities`).
 
-    The synthetic camera and microphone of :func:`webrtc.get_user_media` have capabilities, other tracks don't control
-    their source.
+    The synthetic camera and microphone of :meth:`webrtc.MediaDevices.get_user_media` have capabilities, other tracks
+    don't control their source.
 
     Args:
         width (:obj:`ULongRange`, optional): The widths of the video.

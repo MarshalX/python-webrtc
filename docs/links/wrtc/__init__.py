@@ -1,1 +1,0 @@
-../../../stubs/wrtc/__init__.pyi

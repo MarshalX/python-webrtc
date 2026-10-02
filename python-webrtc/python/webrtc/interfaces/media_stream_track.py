@@ -45,9 +45,9 @@ _Parameters = Union[
     ConstrainBooleanOrDOMStringParameters,
 ]
 
-#: The device of the video tracks of :func:`webrtc.get_user_media`
+#: The device of the video tracks of :meth:`webrtc.MediaDevices.get_user_media`
 CAMERA_DEVICE_ID = 'synthetic-camera'
-#: The device of the audio tracks of :func:`webrtc.get_user_media`
+#: The device of the audio tracks of :meth:`webrtc.MediaDevices.get_user_media`
 MICROPHONE_DEVICE_ID = 'synthetic-microphone'
 _GROUP_ID = 'synthetic'
 
@@ -282,7 +282,7 @@ class MediaStreamTrack(
         """Returns what the track carries.
 
         The size and frame rate of the frames last seen, the format of the audio, and the device of the tracks of
-        :func:`webrtc.get_user_media`.
+        :meth:`webrtc.MediaDevices.get_user_media`.
 
         Returns:
             :obj:`webrtc.MediaTrackSettings`: The settings.
@@ -311,8 +311,8 @@ class MediaStreamTrack(
     def get_capabilities(self) -> MediaTrackCapabilities:
         """Returns what the source of the track can do.
 
-        The synthetic camera and microphone of :func:`webrtc.get_user_media` have capabilities, other tracks (remote,
-        generated) have none.
+        The synthetic camera and microphone of :meth:`webrtc.MediaDevices.get_user_media` have capabilities, other
+        tracks (remote, generated) have none.
 
         Returns:
             :obj:`webrtc.MediaTrackCapabilities`: The capabilities.
@@ -325,7 +325,7 @@ class MediaStreamTrack(
         return MediaTrackCapabilities()
 
     def get_constraints(self) -> MediaTrackConstraints:
-        """Returns the constraints applied last, with :meth:`apply_constraints` or :func:`webrtc.get_user_media`.
+        """Returns the last constraints of :meth:`apply_constraints` or :meth:`~webrtc.MediaDevices.get_user_media`.
 
         Returns:
             :obj:`webrtc.MediaTrackConstraints`: The constraints, none by default.
@@ -336,8 +336,8 @@ class MediaStreamTrack(
     def apply_constraints(self, constraints: MediaTrackConstraints | None = None) -> asyncio.Future[None]:
         """Applies constraints to the track.
 
-        The synthetic camera of :func:`webrtc.get_user_media` changes its size and frame rate, the source of other
-        tracks stays as it is.
+        The synthetic camera of :meth:`webrtc.MediaDevices.get_user_media` changes its size and frame rate, the source
+        of other tracks stays as it is.
 
         Args:
             constraints (:obj:`webrtc.MediaTrackConstraints`, optional): The constraints, none to remove them.
