@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import typing
 from typing import TYPE_CHECKING, Callable, Generic, NamedTuple, Protocol, TypeVar, cast, overload
 
 from typing_extensions import Literal, Never, get_args, get_origin
@@ -309,13 +310,17 @@ class EventTarget(Generic[_N_contra]):
         return {name for name, registrations in listeners.registrations.items() if len(registrations) > 0}
 
 
+# distinct objects before Python 3.10
+_LITERALS = (typing.Literal, Literal)
+
+
 def _literal_names(literal: object) -> tuple[str, ...]:
     """The strings of a possibly nested ``Literal``."""
-    if get_origin(literal) is not Literal:
+    if get_origin(literal) not in _LITERALS:
         return ()
     names: list[str] = []
     for arg in cast('tuple[object, ...]', get_args(literal)):
-        names.extend(_literal_names(arg) if get_origin(arg) is Literal else [arg] if isinstance(arg, str) else [])
+        names.extend(_literal_names(arg) if get_origin(arg) in _LITERALS else [arg] if isinstance(arg, str) else [])
     return tuple(dict.fromkeys(names))
 
 
