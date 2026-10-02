@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.9"
-# dependencies = ["wrtc>=0.0.0.dev10", "sounddevice", "httpx"]
+# dependencies = ["wrtc>=0.0.1", "sounddevice", "httpx"]
 # ///
 #
 #  Copyright 2026 Ilya (Marshal) <https://github.com/MarshalX>.

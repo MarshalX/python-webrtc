@@ -99,7 +99,7 @@ class RTCErrorInit(Dictionary):
     """The WebRTC-specific information of an :obj:`RTCError`.
 
     Args:
-        error_detail (:obj:`RTCErrorDetailType`): The WebRTC-specific error code.
+        error_detail (:obj:`webrtc.RTCErrorDetailType`): The WebRTC-specific error code.
         sdp_line_number (:obj:`int`, optional): The line of the SDP where a syntax error occurred.
         sctp_cause_code (:obj:`int`, optional): The SCTP cause code of a failed SCTP negotiation.
         received_alert (:obj:`int`, optional): The DTLS alert received from the remote peer.
@@ -107,7 +107,7 @@ class RTCErrorInit(Dictionary):
         http_request_status_code (:obj:`int`, optional): The HTTP status code of a failed request.
 
     Raises:
-        ValueError: If ``error_detail`` isn't a member of :obj:`RTCErrorDetailType`.
+        ValueError: If ``error_detail`` isn't a member of :obj:`webrtc.RTCErrorDetailType`.
     """
 
     error_detail: RTCErrorDetailType | RTCErrorDetailTypeValue

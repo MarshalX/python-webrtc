@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.9"
-# dependencies = ["wrtc>=0.0.0.dev10", "sounddevice", "httpx"]
+# dependencies = ["wrtc>=0.0.1", "sounddevice", "httpx"]
 # ///
 #
 #  Copyright 2026 Ilya (Marshal) <https://github.com/MarshalX>.
@@ -157,20 +157,26 @@ class Speakers:
         out[:] = chunk.ljust(len(out), b'\0')
 
 
-def draw(rgbx: bytes | bytearray, width: int, height: int) -> None:
-    """Draws a frame with ▀, whose foreground color is the upper pixel and background the lower one."""
-    columns, rows = shutil.get_terminal_size()
+def draw(rgbx: bytes | bytearray, width: int, height: int, *, slot: int, slots: int) -> None:
+    """Draws a frame in its slot of the screen with ▀, its foreground is the upper pixel, background the lower one."""
+    total, rows = shutil.get_terminal_size()
+    left = total * slot // slots
+    columns = total * (slot + 1) // slots - left
     scale = max(width / columns, height / rows / 2)
 
     def color(x: int, y: int) -> str:
         i = (int(y * scale) * width + int(x * scale)) * 4
         return '{};{};{}'.format(*rgbx[i : i + 3])
 
-    lines = (
-        ''.join(f'\033[38;2;{color(x, 2 * y)}m\033[48;2;{color(x, 2 * y + 1)}m▀' for x in range(int(width / scale)))
+    shown = int(width / scale)
+    lines = [
+        ''.join(f'\033[38;2;{color(x, 2 * y)}m\033[48;2;{color(x, 2 * y + 1)}m▀' for x in range(shown))
         for y in range(int(height / scale / 2))
-    )
-    sys.stdout.write('\033[H' + '\033[0m\033[K\n'.join(lines) + '\033[0m\033[J')
+    ]
+    # pads with blanks rather than clearing, which would erase the other columns
+    lines = [line + '\033[0m' + ' ' * (columns - shown) for line in lines]
+    lines += [' ' * columns] * (rows - len(lines))
+    sys.stdout.write(''.join(f'\033[{y + 1};{left + 1}H{line}' for y, line in enumerate(lines)))
     sys.stdout.flush()
 
 
@@ -184,8 +190,8 @@ def fullscreen() -> Generator[None, None, None]:
         sys.stdout.write('\033[?25h\033[?1049l')
 
 
-async def watch(track: webrtc.MediaStreamTrack) -> None:
-    """Draws the frames of the video track until it ends."""
+async def watch(track: webrtc.MediaStreamTrack, videos: list[webrtc.MediaStreamTrack]) -> None:
+    """Draws the frames of the video track until it ends, side by side with the other videos."""
     # a buffer of one frame drops the frames the terminal is too slow for
     async for frame in webrtc.MediaStreamTrackProcessor(
         webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=1)
@@ -201,7 +207,7 @@ async def watch(track: webrtc.MediaStreamTrack) -> None:
         if size is None:
             msg = 'the frame has no visible rect'
             raise RuntimeError(msg)
-        draw(rgbx, int(size.width), int(size.height))
+        draw(rgbx, int(size.width), int(size.height), slot=videos.index(track), slots=len(videos))
 
 
 async def listen(track: webrtc.MediaStreamTrack) -> None:
@@ -263,11 +269,15 @@ async def main(stream_id: int | None) -> None:
     """Watches the stream until interrupted."""
     pc = webrtc.RTCPeerConnection()
     tasks: list[asyncio.Future[None]] = []
+    videos: list[webrtc.MediaStreamTrack] = []
 
     @pc.on('track')
     def on_track(event: webrtc.RTCTrackEvent) -> None:
-        play = watch if event.track.kind == 'video' else listen
-        tasks.append(asyncio.ensure_future(play(event.track)))
+        if event.track.kind == 'video':
+            videos.append(event.track)
+            tasks.append(asyncio.ensure_future(watch(event.track, videos)))
+        else:
+            tasks.append(asyncio.ensure_future(listen(event.track)))
 
     async with Janus() as janus:
         if stream_id is None:

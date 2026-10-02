@@ -379,7 +379,7 @@ class RTCErrorDetailType(_StrEnum):
     hardware_encoder_error = 'hardware-encoder-error'
 
 
-#: The values of :obj:`RTCErrorDetailType`, which parameters taking it take too
+#: The values of :obj:`webrtc.RTCErrorDetailType`, which parameters taking it take too
 RTCErrorDetailTypeValue = Literal[
     'data-channel-failure',
     'dtls-failure',

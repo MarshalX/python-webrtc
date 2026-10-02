@@ -56,7 +56,8 @@ wheels:
 	uvx cibuildwheel==4.2.1 --output-dir wheelhouse
 
 doc:
-	cd docs && make gen && make html
+	UV_PROJECT_ENVIRONMENT=build/docs-venv uv sync --frozen --only-group docs --python 3.13
+	cd docs && make gen && make html SPHINXBUILD=../build/docs-venv/bin/sphinx-build
 
 clean:
 	rm -rf build dist wheelhouse
