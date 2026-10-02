@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
+from typing_extensions import Never
+
 from webrtc.enums import SFrameTransformErrorEventType
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
@@ -33,7 +35,7 @@ class Event:
 
     def __init__(self, type: str) -> None:
         self.type = type
-        self.target: webrtc.EventTarget | None = None
+        self.target: webrtc.EventTarget[Never] | None = None
 
     def __repr__(self) -> str:
         fields = ', '.join(f'{k}={v!r}' for k, v in vars(self).items() if k != 'target')

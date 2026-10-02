@@ -110,7 +110,7 @@ from .exceptions import (
     RTCError,
     RTCErrorInit,
 )
-from .utils.events import EventTarget
+from .utils.events import EventTarget, HandlerDecorator, UniformEventTarget
 from .models.events import (
     Event,
     RTCPeerConnectionIceEvent,
@@ -315,6 +315,7 @@ __all__ = [
     'EndingTypeValue',
     'Event',
     'EventTarget',
+    'HandlerDecorator',
     'InputDeviceInfo',
     'InvalidAccessError',
     'InvalidCharacterError',
@@ -515,6 +516,7 @@ __all__ = [
     'TransformStream',
     'TransformStreamDefaultController',
     'ULongRange',
+    'UniformEventTarget',
     'VideoColorPrimaries',
     'VideoColorPrimariesValue',
     'VideoColorSpace',

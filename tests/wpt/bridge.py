@@ -18,9 +18,10 @@ import enum
 import inspect
 import sys
 import time
-from typing import TYPE_CHECKING, Callable, TypeVar, Union
+from typing import TYPE_CHECKING, Callable, Protocol, TypeVar, Union, cast
 
 import pythonmonkey as pm
+from typing_extensions import Never
 
 import webrtc
 import webrtc.enums
@@ -353,7 +354,15 @@ def now() -> float:
     return time.time() * 1000
 
 
-def subscribe(obj: webrtc.EventTarget, name: str, callback: Callable[[object], object]) -> Result:
+class NamedEvents(Protocol):
+    """An event target with untyped names."""
+
+    def on(self, name: str, handler: Callable[[webrtc.Event], object], /) -> object: ...
+
+    def off(self, name: str, handler: Callable[[webrtc.Event], object], /) -> None: ...
+
+
+def subscribe(obj: webrtc.EventTarget[Never], name: str, callback: Callable[[object], object]) -> Result:
     """Delivers the events of a type to a JS callback, which dispatches them to the JS listeners."""
 
     def deliver(event: webrtc.Event) -> None:
@@ -361,7 +370,7 @@ def subscribe(obj: webrtc.EventTarget, name: str, callback: Callable[[object], o
 
     def add_listener() -> None:
         # nothing to return to JS: on() returns the handler
-        obj.on(name, deliver)
+        _ = cast('NamedEvents', obj).on(name, deliver)
 
     return _guard(add_listener)
 

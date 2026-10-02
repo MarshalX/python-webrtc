@@ -88,11 +88,11 @@ namespace python_webrtc {
     if (_ended) {
       return;
     }
-    _totalFrames++;
     while (_queue.size() >= _maxBufferSize) {
       _queue.pop_front();
       _discardedFrames++;
     }
+    _totalFrames++;
     _queue.push_back(std::move(item));
     WakeLocked();
   }

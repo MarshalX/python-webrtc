@@ -15,7 +15,7 @@ VP8, VP9 and Opus do.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Generic, Union, cast
+from typing import TYPE_CHECKING, Generic, Literal, Union, cast
 
 from typing_extensions import Buffer, TypeVar
 
@@ -33,7 +33,7 @@ from webrtc import (
 from webrtc.enums import SFrameCipherSuite, SFrameTransformErrorEventType, SFrameType
 from webrtc.models.sframe_transform_options import RTCRtpSFrameEncryptorOptions, SFrameTransformOptions
 from webrtc.streams import ReadableStream, TransformStream, WritableStream
-from webrtc.utils.events import EventTarget
+from webrtc.utils.events import UniformEventTarget
 
 if TYPE_CHECKING:
     from webrtc.streams import TransformStreamDefaultController
@@ -138,8 +138,6 @@ class _SFrameDecryptorManager:
         @property
         def _native_obj(self) -> wrtc.SFrameTransform: ...
 
-    _events: tuple[str, ...] = ('error',)
-
     async def add_decryption_key(self, key: Buffer, key_id: int) -> None:
         """Decrypts the frames of a key id with a key, in place of the previous key of that id.
 
@@ -206,7 +204,11 @@ class RTCRtpSFrameEncryptor(_SFrameEncryptorManager, WebRTCObject[wrtc.SFrameTra
         super().__init__(native)
 
 
-class RTCRtpSFrameDecryptor(_SFrameDecryptorManager, WebRTCObject[wrtc.SFrameTransform], EventTarget):
+class RTCRtpSFrameDecryptor(
+    _SFrameDecryptorManager,
+    WebRTCObject[wrtc.SFrameTransform],
+    UniformEventTarget[Literal['error'], SFrameTransformErrorEvent],
+):
     """Decrypts the SFrame frames of a receiver, set as its ``transform``.
 
     Frames are decrypted on the threads of libwebrtc. Frames that don't decrypt are dropped, each reported by an
@@ -310,7 +312,9 @@ class SFrameEncryptorStream(_SFrameEncryptorManager, _SFrameStream[_C]):
         super().__init__(_native(options, encrypting=True), encrypting=True)
 
 
-class SFrameDecryptorStream(_SFrameDecryptorManager, _SFrameStream[_C], EventTarget):
+class SFrameDecryptorStream(
+    _SFrameDecryptorManager, _SFrameStream[_C], UniformEventTarget[Literal['error'], SFrameTransformErrorEvent]
+):
     """Decrypts the SFrame frames or buffers written to it, like a :obj:`webrtc.TransformStream`.
 
     A frame is read back with its data decrypted, a buffer as the :obj:`bytes` of the plaintext. Chunks that don't

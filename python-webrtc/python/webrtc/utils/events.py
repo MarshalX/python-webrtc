@@ -11,16 +11,32 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import TYPE_CHECKING, Callable, NamedTuple, Protocol, TypeVar, cast, overload
+import typing
+from typing import TYPE_CHECKING, Callable, Generic, NamedTuple, Protocol, TypeVar, cast, overload
 
-from typing_extensions import Never
+from typing_extensions import Literal, Never, get_args, get_origin
 
 import webrtc
 from webrtc.utils.task_queue import TaskQueue
 
 Handler = Callable[['webrtc.Event'], object]
 # any one-argument callable: a handler takes the event subclass of its event, like RTCTrackEvent
-_H = TypeVar('_H', bound=Callable[[Never], object])
+AnyHandler = Callable[[Never], object]
+
+#: Event names, a ``Literal``; ``EventTarget[Never]`` is any target
+_N_contra = TypeVar('_N_contra', bound=str, contravariant=True)
+_E = TypeVar('_E', bound='webrtc.Event')
+_E_contra = TypeVar('_E_contra', bound='webrtc.Event', contravariant=True)
+_R = TypeVar('_R')
+
+
+class HandlerDecorator(Protocol[_E_contra]):
+    """Registers the decorated handler."""
+
+    def __call__(self, handler: Callable[[_E_contra], _R], /) -> Callable[[_E_contra], _R]:
+        """Registers the handler."""
+        ...
+
 
 #: The tasks of the coroutine handlers, referenced until they're done
 _handler_tasks: set[asyncio.Future[object]] = set()
@@ -42,7 +58,7 @@ class _Registration(NamedTuple):
 class _Listeners:
     """Handlers of one native object, called by it with the name and the native arguments of an event."""
 
-    def __init__(self, target: EventTarget) -> None:
+    def __init__(self, target: EventTarget[Never]) -> None:
         self.target = target
         self.registrations: dict[str, list[_Registration]] = {}
         # the loop of the first handler, which delivers every event, even without handlers for it,
@@ -121,12 +137,17 @@ class _Listeners:
             return  # like addEventListener, a handler is registered once
         registrations.append(_Registration(handler, loop, once))
 
-    def remove(self, name: str, handler: Callable[[Never], object] | None) -> None:
-        if handler is None:
-            _ = self.registrations.pop(name, None)
-            return
-        registrations = self.registrations.get(name, [])
-        self.registrations[name] = [r for r in registrations if r.handler != handler]
+    def remove(self, name: str | None, handler: AnyHandler | None) -> None:
+        # replaced, not mutated: libwebrtc threads read it
+        names = list(self.registrations) if name is None else [name]
+        registrations = dict(self.registrations)
+        for each in names:
+            kept = [r for r in registrations.get(each, ()) if handler is not None and r.handler != handler]
+            if len(kept) > 0:
+                registrations[each] = kept
+            else:
+                _ = registrations.pop(each, None)
+        self.registrations = registrations
 
 
 class _NativeEventTarget(Protocol):
@@ -135,7 +156,7 @@ class _NativeEventTarget(Protocol):
     _listeners: _Listeners | None
 
 
-class EventTarget:
+class EventTarget(Generic[_N_contra]):
     """Mixin of :obj:`webrtc.WebRTCObject` subclasses that emit events.
 
     Handlers are called with one event object, on the event loop they were registered from.
@@ -151,8 +172,15 @@ class EventTarget:
         pc.on('track', lambda event: print(event.track))
     """
 
-    #: Names of the events the object emits
+    #: Event names, from the ``Literal`` parameter
     _events: tuple[str, ...] = ()
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        for base in cast('tuple[object, ...]', cls.__dict__.get('__orig_bases__', ())):
+            names = _literal_names(get_args(base)[0]) if _is_target_base(base) else ()
+            if len(names) > 0:
+                cls._events = names
 
     if TYPE_CHECKING:
 
@@ -186,13 +214,18 @@ class EventTarget:
             msg = f'{type(self).__name__} has no event {name!r}, its events are: {", ".join(self._events)}'
             raise ValueError(msg)
 
-    def _add(self, name: str, handler: _H | None, *, once: bool) -> _H | Callable[[_H], _H]:
+    def _add(self, name: str, handler: AnyHandler | None, *, once: bool) -> object:
+        """Registers a handler, or returns a decorator."""
         self._check_event(name)
         if handler is None:
-            return lambda func: self._add_handler(name, func, once=once)
+
+            def decorator(func: AnyHandler) -> AnyHandler:
+                return self._add_handler(name, func, once=once)
+
+            return decorator
         return self._add_handler(name, handler, once=once)
 
-    def _add_handler(self, name: str, handler: _H, *, once: bool) -> _H:
+    def _add_handler(self, name: str, handler: AnyHandler, *, once: bool) -> AnyHandler:
         # the handler takes the event of its name, which only the native object knows
         self._created_listeners().add(name, cast('Handler', handler), once=once)
         return handler
@@ -215,13 +248,98 @@ class EventTarget:
         """Creates the event object from the native arguments of an event, or returns :obj:`None` to drop it."""
         return webrtc.Event(name)
 
-    @overload
-    def on(self, name: str, handler: None = None) -> Callable[[_H], _H]: ...
+    def off(self, name: _N_contra | None = None, handler: AnyHandler | None = None) -> None:
+        """Removes handlers.
+
+        Args:
+            name (:obj:`str`, optional): The name of the event. If omitted, every event.
+            handler (:obj:`callable`, optional): The handler to remove. If omitted, every handler.
+
+        Raises:
+            ValueError: If the object has no such event.
+        """
+        if name is not None:
+            self._check_event(name)
+        listeners = self._listeners()
+        if listeners is not None:
+            listeners.remove(name, handler)
+
+    def remove_listener(self, name: _N_contra, handler: AnyHandler) -> None:
+        """Removes a handler of an event.
+
+        Args:
+            name (:obj:`str`): The name of the event.
+            handler (:obj:`callable`): The handler to remove.
+
+        Raises:
+            ValueError: If the object has no such event.
+        """
+        self.off(name, handler)
+
+    def remove_all_listeners(self, name: _N_contra | None = None) -> None:
+        """Removes every handler of an event, or of all events.
+
+        Args:
+            name (:obj:`str`, optional): The name of the event. If omitted, every event.
+
+        Raises:
+            ValueError: If the object has no such event.
+        """
+        self.off(name)
+
+    def listeners(self, name: _N_contra) -> list[AnyHandler]:
+        """Returns the handlers of an event.
+
+        Args:
+            name (:obj:`str`): The name of the event.
+
+        Raises:
+            ValueError: If the object has no such event.
+        """
+        self._check_event(name)
+        listeners = self._listeners()
+        if listeners is None:
+            return []
+        return [r.handler for r in listeners.registrations.get(name, ())]
+
+    def event_names(self) -> set[str]:
+        """Returns the names of the events that have handlers."""
+        listeners = self._listeners()
+        if listeners is None:
+            return set()
+        return {name for name, registrations in listeners.registrations.items() if len(registrations) > 0}
+
+
+# distinct objects before Python 3.10
+_LITERALS = (typing.Literal, Literal)
+
+
+def _literal_names(literal: object) -> tuple[str, ...]:
+    """The strings of a possibly nested ``Literal``."""
+    if get_origin(literal) not in _LITERALS:
+        return ()
+    names: list[str] = []
+    for arg in cast('tuple[object, ...]', get_args(literal)):
+        names.extend(_literal_names(arg) if get_origin(arg) in _LITERALS else [arg] if isinstance(arg, str) else [])
+    return tuple(dict.fromkeys(names))
+
+
+def _is_target_base(base: object) -> bool:
+    """Whether a base is a parametrized :obj:`EventTarget`."""
+    origin = get_origin(base)
+    return isinstance(origin, type) and issubclass(origin, EventTarget)
+
+
+class UniformEventTarget(EventTarget[_N_contra], Generic[_N_contra, _E]):
+    """An :obj:`EventTarget` whose events share one event class."""
 
     @overload
-    def on(self, name: str, handler: _H) -> _H: ...
+    def on(self, name: _N_contra, handler: None = None) -> HandlerDecorator[_E]: ...
 
-    def on(self, name: str, handler: _H | None = None) -> _H | Callable[[_H], _H]:
+    @overload
+    def on(self, name: _N_contra, handler: Callable[[_E], _R]) -> Callable[[_E], _R]: ...
+
+    def on(self, name: _N_contra, handler: Callable[[_E], _R] | None = None) -> object:
         """Registers a handler of an event. Can be used as a decorator.
 
         Args:
@@ -239,12 +357,12 @@ class EventTarget:
         return self._add(name, handler, once=False)
 
     @overload
-    def once(self, name: str, handler: None = None) -> Callable[[_H], _H]: ...
+    def once(self, name: _N_contra, handler: None = None) -> HandlerDecorator[_E]: ...
 
     @overload
-    def once(self, name: str, handler: _H) -> _H: ...
+    def once(self, name: _N_contra, handler: Callable[[_E], _R]) -> Callable[[_E], _R]: ...
 
-    def once(self, name: str, handler: _H | None = None) -> _H | Callable[[_H], _H]:
+    def once(self, name: _N_contra, handler: Callable[[_E], _R] | None = None) -> object:
         """Registers a handler that is removed after it's called for the first time. Can be used as a decorator.
 
         Args:
@@ -259,18 +377,3 @@ class EventTarget:
             RuntimeError: If called outside of a running event loop.
         """
         return self._add(name, handler, once=True)
-
-    def off(self, name: str, handler: Callable[[Never], object] | None = None) -> None:
-        """Removes a handler of an event, or every handler of the event.
-
-        Args:
-            name (:obj:`str`): The name of the event.
-            handler (:obj:`callable`, optional): The handler to remove. If omitted, all handlers of the event are.
-
-        Raises:
-            ValueError: If the object has no such event.
-        """
-        self._check_event(name)
-        listeners = self._listeners()
-        if listeners is not None:
-            listeners.remove(name, handler)

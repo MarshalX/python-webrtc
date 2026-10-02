@@ -286,6 +286,9 @@ class _Class(_Types):
         inherited = set()
         for base in self.cls.__mro__[1:]:
             inherited |= _names(base)
+        # multi-event-class targets define on() and once() themselves
+        if any(base.__name__ == 'EventTarget' for base in self.cls.__mro__):
+            inherited |= {'on', 'once'}
         extra = self.names - self.expected - inherited
         # a snake_case name and its camelCase alias are one member
         return [f'{name}: extra member' for name in extra if snake_case(name) == name or snake_case(name) not in extra]

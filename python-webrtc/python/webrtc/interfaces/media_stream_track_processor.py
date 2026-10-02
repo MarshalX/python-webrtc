@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
-from typing_extensions import override
+from typing_extensions import Never, override
 
 from webrtc import AudioData, MediaStreamTrack, MediaType, VideoFrame, WebRTCObject, wrtc
 from webrtc.models.dictionary import Dictionary
@@ -91,7 +91,7 @@ class _TrackSource:
             controller.close()
 
 
-class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], EventTarget):
+class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], EventTarget[Never]):
     """Reads the media of a track as a stream, as Chrome does.
 
     See https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrackProcessor. It reads
