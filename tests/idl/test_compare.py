@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.idl.compare import compare, snake_case
+from tests.idl.compare import compare, python_name, snake_case
 from tests.idl.spec import AVAILABLE, parse
 
 if TYPE_CHECKING:
@@ -43,7 +43,18 @@ interface Thing : Base {
   undefined stopAll();
 };
 interface Report { readonly maplike<DOMString, object>; };
+interface Stream {
+  constructor();
+  constructor(Stream other);
+  constructor(sequence<DOMString> items);
+  async_iterable<DOMString>;
+  Options toJSON();
+};
 interface Unused {};
+interface Source {
+  static Source from(sequence<DOMString> items);
+  undefined import(DOMString async);
+};
 """
 
 
@@ -107,6 +118,11 @@ def test_snake_case() -> None:
     assert snake_case('sdpMLineIndex') == 'sdp_m_line_index'
 
 
+def test_python_name() -> None:
+    assert python_name('from') == 'from_'
+    assert python_name('frame') == 'frame'
+
+
 def test_missing_definitions() -> None:
     found = differences()
     assert found['Unused'] == ['missing interface']
@@ -141,7 +157,7 @@ def test_type_and_rename() -> None:
     class Other:
         color: str
 
-        def move(self, where: Options, /) -> None: ...
+        def move(self, where: Options) -> None: ...
 
         async def create(self) -> None: ...
 
@@ -166,3 +182,73 @@ def test_future_counts_as_async() -> None:
             raise NotImplementedError
 
     assert 'start: should be async' not in differences(Thing=Thing)['Thing']
+
+
+class Stream:
+    def __init__(self, items: list[str] | Stream | None = None) -> None: ...
+
+    def __aiter__(self) -> Stream:
+        return self
+
+    def values(self) -> Stream:
+        return self
+
+    def to_json(self) -> dict[str, object]:
+        return dict(vars(self))
+
+
+Stream.toJSON = Stream.to_json
+
+
+def test_overloads_merge_into_optional_parameters() -> None:
+    assert 'Stream' not in differences(Stream=Stream)
+
+
+def test_positional_only_parameters_match_by_position() -> None:
+    class Renamed:
+        def __init__(self, source: list[str] | None = None, /) -> None: ...
+
+        def __aiter__(self) -> Renamed:
+            return self
+
+        def values(self) -> Renamed:
+            return self
+
+        def to_json(self) -> Options:
+            return Options(**vars(self))
+
+    Renamed.toJSON = Renamed.to_json
+    assert differences(Stream=Renamed)['Stream'] == ['toJSON(): should return a dict']
+
+
+def test_async_iterable() -> None:
+    class Plain:
+        def to_json(self) -> dict[str, object]:
+            return dict(vars(self))
+
+    Plain.toJSON = Plain.to_json
+    assert differences(Stream=Plain)['Stream'] == [
+        'async_iterable: missing __aiter__',
+        'async_iterable: missing values',
+    ]
+
+
+def test_extras_of_a_base_are_reported_once() -> None:
+    class Loud(Thing):
+        pass
+
+    found = differences(Base=Thing, Thing=Loud, Color=Color)
+    assert 'extra: extra member' in found['Base']
+    assert 'extra: extra member' not in found['Thing']
+
+
+def test_keywords_take_a_trailing_underscore() -> None:
+    class Source:
+        @staticmethod
+        def from_(items: list[str]) -> Source:
+            raise NotImplementedError
+
+        def import_(self, async_: str) -> None: ...
+
+    assert 'Source' not in differences(Source=Source)
+    assert differences(Source=type('Source', (), {}))['Source'] == ['from: missing method', 'import: missing method']

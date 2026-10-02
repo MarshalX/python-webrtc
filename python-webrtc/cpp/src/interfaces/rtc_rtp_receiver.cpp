@@ -35,6 +35,7 @@ namespace python_webrtc {
 
   RTCRtpReceiver::~RTCRtpReceiver() {
     const BlockingDestructor release("RTCRtpReceiver");
+    _transform.Release();
 
     // callbacks run on the signaling thread, so after this none of them can be running or start again
     _factory->signalingThread()->BlockingCall([this]() {
@@ -63,6 +64,7 @@ namespace python_webrtc {
         .def("getStats", WithCallbacks(&RTCRtpReceiver::GetStats), pybind11::arg("onSuccess"),
              pybind11::arg("onFailure"))
         .def_static("getCapabilities", &RTCRtpReceiver::GetCapabilities, nogil(), pybind11::arg("kind"))
+        .def_property("transform", nogil_fn(&RTCRtpReceiver::GetTransform), nogil_fn(&RTCRtpReceiver::SetTransform))
         .def("_getSources", &RTCRtpReceiver::GetSources, nogil());
   }
 
@@ -155,6 +157,33 @@ namespace python_webrtc {
                            level ? std::optional<int>(*level) : std::nullopt);
     }
     return sources;
+  }
+
+  FrameSource RTCRtpReceiver::TransformSource() {
+    FrameSource source;
+    source.sender = false;
+    source.video = _receiver->media_type() == webrtc::MediaType::VIDEO;
+    source.sendKeyFrameRequest = [weak = weak_from_this()]() {
+      auto self = weak.lock();
+      if (!self) {
+        return;
+      }
+      // the source of a remote video track asks the receiver's stream for a key frame (a PLI)
+      auto track = self->_receiver->track();
+      auto *video = dynamic_cast<webrtc::VideoTrackInterface *>(track.get());
+      if (video != nullptr && video->GetSource() != nullptr) {
+        video->GetSource()->GenerateKeyFrame();
+      }
+    };
+    return source;
+  }
+
+  void RTCRtpReceiver::SetTransform(const std::shared_ptr<RtpTransform> &transform) {
+    _transform.Set(
+        transform, [this]() { return TransformSource(); },
+        [this](const webrtc::scoped_refptr<FrameTransformerBridge> &bridge) {
+          _receiver->SetFrameTransformer(bridge);
+        });
   }
 
   std::optional<webrtc::RtpCapabilities> RTCRtpReceiver::GetCapabilities(const std::string &kind) {

@@ -53,16 +53,16 @@ def test_native_getters_return_members(pc: webrtc.RTCPeerConnection) -> None:
     """The native API returns members."""
     assert pc.signaling_state is webrtc.RTCSignalingState.stable
     transceiver = pc.add_transceiver('audio')
-    assert transceiver.kind is webrtc.MediaType.audio
-    assert transceiver.direction is webrtc.TransceiverDirection.sendrecv
+    assert transceiver.receiver.track.kind is webrtc.MediaType.audio
+    assert transceiver.direction is webrtc.RTCRtpTransceiverDirection.sendrecv
 
 
 def test_native_setters_take_members_and_values(pc: webrtc.RTCPeerConnection) -> None:
     """The native API takes members and their values."""
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
     transceiver.direction = 'recvonly'
-    assert transceiver.direction is webrtc.TransceiverDirection.recvonly
-    transceiver.direction = webrtc.TransceiverDirection.inactive
+    assert transceiver.direction is webrtc.RTCRtpTransceiverDirection.recvonly
+    transceiver.direction = webrtc.RTCRtpTransceiverDirection.inactive
     assert transceiver.direction == 'inactive'
 
 

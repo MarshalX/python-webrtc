@@ -32,6 +32,20 @@ CreatePC = Callable[..., webrtc.RTCPeerConnection]
 _T = TypeVar('_T')
 
 
+def stats_of_type(report: webrtc.RTCStatsReport, stats_type: str) -> list[webrtc.RTCStats]:
+    """The stats of a type in a report."""
+    return [stats for stats in report.values() if stats.type == stats_type]
+
+
+def copy_frame(
+    frame: webrtc.RTCEncodedVideoFrame | webrtc.RTCEncodedAudioFrame,
+) -> webrtc.RTCEncodedVideoFrame | webrtc.RTCEncodedAudioFrame:
+    """A copy of an encoded frame, by the constructor of its kind."""
+    if isinstance(frame, webrtc.RTCEncodedVideoFrame):
+        return webrtc.RTCEncodedVideoFrame(frame)
+    return webrtc.RTCEncodedAudioFrame(frame)
+
+
 def mistyped(value: object) -> _T:
     """A value of the wrong type, passed where a test checks that the library rejects it at runtime."""
     return cast('_T', value)

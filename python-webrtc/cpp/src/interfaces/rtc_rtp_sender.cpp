@@ -8,6 +8,7 @@
 #include "rtc_rtp_sender.h"
 #include "../utils/python_callback.h"
 
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include <utility>
@@ -62,6 +63,10 @@ namespace python_webrtc {
                              webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender)
       : _factory(std::move(factory)), _sender(std::move(sender)) {}
 
+  RTCRtpSender::~RTCRtpSender() {
+    _transform.Release();
+  }
+
   void RTCRtpSender::Init(pybind11::module &m) {
     pybind11::class_<RTCRtpSender, std::shared_ptr<RTCRtpSender>>(m, "RTCRtpSender")
         .def_property_readonly("track", nogil_fn(&RTCRtpSender::GetTrack))
@@ -76,6 +81,7 @@ namespace python_webrtc {
         .def("getStreamIds", &RTCRtpSender::GetStreamIds, nogil())
         .def("getStats", WithCallbacks(&RTCRtpSender::GetStats), pybind11::arg("onSuccess"), pybind11::arg("onFailure"))
         .def_static("getCapabilities", &RTCRtpSender::GetCapabilities, nogil(), pybind11::arg("kind"))
+        .def_property("transform", nogil_fn(&RTCRtpSender::GetTransform), nogil_fn(&RTCRtpSender::SetTransform))
         .def("_transceiverStopped", &RTCRtpSender::IsTransceiverStopped, nogil())
         .def("_lastParameters", &RTCRtpSender::GetLastParameters, nogil())
         .def("_expireParameters", &RTCRtpSender::ExpireParameters, nogil(),
@@ -259,6 +265,36 @@ namespace python_webrtc {
     auto connection = GetConnection();
     auto transceiver = connection ? connection->TransceiverOf(_sender) : nullptr;
     return !transceiver || transceiver->stopping() || transceiver->stopped();
+  }
+
+  FrameSource RTCRtpSender::TransformSource() {
+    FrameSource source;
+    source.sender = true;
+    source.video = _sender->media_type() == webrtc::MediaType::VIDEO;
+    source.generateKeyFrame = [weak = weak_from_this()](const std::vector<std::string> &rids) {
+      auto self = weak.lock();
+      if (!self) {
+        return FrameSource::KeyFrameResult::kRequested;
+      }
+      auto encodings = self->_sender->GetParameters().encodings;
+      for (const auto &rid : rids) {
+        // a single encoding is no layer of a rid, even if it kept the rid of simulcast negotiated away
+        if (encodings.size() < 2 ||
+            std::ranges::none_of(encodings, [&](const auto &encoding) { return encoding.rid == rid; })) {
+          return FrameSource::KeyFrameResult::kUnknownRid;
+        }
+      }
+      // fails only for a rid, checked above
+      (void)self->_sender->GenerateKeyFrame(rids);
+      return FrameSource::KeyFrameResult::kRequested;
+    };
+    return source;
+  }
+
+  void RTCRtpSender::SetTransform(const std::shared_ptr<RtpTransform> &transform) {
+    _transform.Set(
+        transform, [this]() { return TransformSource(); },
+        [this](const webrtc::scoped_refptr<FrameTransformerBridge> &bridge) { _sender->SetFrameTransformer(bridge); });
   }
 
   std::optional<webrtc::RtpCapabilities> RTCRtpSender::GetCapabilities(const std::string &kind) {

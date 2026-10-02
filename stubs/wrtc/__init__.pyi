@@ -6,7 +6,7 @@ import webrtc.enums
 import webrtc.exceptions
 import webrtc.models.media_track_constraints
 import webrtc.utils.events
-__all__: list[str] = ['ConfigurationInit', 'DataChannelMessage', 'IceCandidateInit', 'IceServerInit', 'MediaStream', 'MediaStreamTrack', 'MediaStreamTrackProcessor', 'PeerConnectionFactory', 'PythonWebRTCException', 'PythonWebRTCExceptionBase', 'RTCCallbackException', 'RTCCertificate', 'RTCDTMFSender', 'RTCDataChannel', 'RTCDtlsTransport', 'RTCIceTransport', 'RTCPeerConnection', 'RTCRtpReceiver', 'RTCRtpSender', 'RTCRtpTransceiver', 'RTCSctpTransport', 'RTCSessionDescription', 'RTCSessionDescriptionInit', 'RtcpParameters', 'RtpCapabilities', 'RtpCodec', 'RtpCodecCapability', 'RtpCodecParameters', 'RtpEncodingParameters', 'RtpExtension', 'RtpHeaderExtensionCapability', 'RtpParameters', 'RtpTransceiverInit', 'SdpParseException', 'TrackGenerator', 'VideoFrameBuffer', 'copyAudioSamples', 'getUserMedia', 'ping']
+__all__: list[str] = ['ConfigurationInit', 'DataChannelMessage', 'IceCandidateInit', 'IceServerInit', 'MediaStream', 'MediaStreamTrack', 'MediaStreamTrackProcessor', 'PeerConnectionFactory', 'PythonWebRTCException', 'PythonWebRTCExceptionBase', 'RTCCallbackException', 'RTCCertificate', 'RTCDTMFSender', 'RTCDataChannel', 'RTCDtlsTransport', 'RTCEncodedFrame', 'RTCIceTransport', 'RTCPeerConnection', 'RTCRtpReceiver', 'RTCRtpScriptTransform', 'RTCRtpSender', 'RTCRtpTransceiver', 'RTCSctpTransport', 'RTCSessionDescription', 'RTCSessionDescriptionInit', 'RtcpParameters', 'RtpCapabilities', 'RtpCodec', 'RtpCodecCapability', 'RtpCodecParameters', 'RtpEncodingParameters', 'RtpExtension', 'RtpHeaderExtensionCapability', 'RtpParameters', 'RtpTransceiverInit', 'SFrameTransform', 'SdpParseException', 'TrackGenerator', 'VideoFrameBuffer', 'copyAudioSamples', 'getUserMedia', 'ping']
 class RTCCallbackException:
     def toPython(self) -> webrtc.exceptions.RTCException:
         ...
@@ -22,12 +22,12 @@ class RTCSessionDescriptionInit:
     def type(self) -> webrtc.enums.RTCSdpType:
         ...
     @type.setter
-    def type(self, arg0: webrtc.enums.RTCSdpType | webrtc.enums.RTCSdpTypeValue) -> None:
+    def type(self, value: webrtc.enums.RTCSdpType | webrtc.enums.RTCSdpTypeValue) -> None:
         ...
-    def __init__(self, arg0: webrtc.enums.RTCSdpType | webrtc.enums.RTCSdpTypeValue, arg1: str) -> None:
+    def __init__(self, type: webrtc.enums.RTCSdpType | webrtc.enums.RTCSdpTypeValue, sdp: str) -> None:
         ...
 class RTCSessionDescription:
-    def __init__(self, arg0: RTCSessionDescriptionInit) -> None:
+    def __init__(self, descriptionInitDict: RTCSessionDescriptionInit) -> None:
         ...
     @property
     def init(self) -> RTCSessionDescriptionInit:
@@ -59,7 +59,7 @@ class IceServerInit:
     def urls(self) -> list[str]:
         ...
     @urls.setter
-    def urls(self, arg0: collections.abc.Sequence[str]) -> None:
+    def urls(self, value: collections.abc.Sequence[str]) -> None:
         ...
 class ConfigurationInit:
     alwaysNegotiateDataChannels: bool
@@ -67,25 +67,25 @@ class ConfigurationInit:
     def bundlePolicy(self) -> webrtc.enums.RTCBundlePolicy:
         ...
     @bundlePolicy.setter
-    def bundlePolicy(self, arg0: webrtc.enums.RTCBundlePolicy | webrtc.enums.RTCBundlePolicyValue) -> None:
+    def bundlePolicy(self, value: webrtc.enums.RTCBundlePolicy | webrtc.enums.RTCBundlePolicyValue) -> None:
         ...
     @property
     def iceTransportPolicy(self) -> webrtc.enums.RTCIceTransportPolicy:
         ...
     @iceTransportPolicy.setter
-    def iceTransportPolicy(self, arg0: webrtc.enums.RTCIceTransportPolicy | webrtc.enums.RTCIceTransportPolicyValue) -> None:
+    def iceTransportPolicy(self, value: webrtc.enums.RTCIceTransportPolicy | webrtc.enums.RTCIceTransportPolicyValue) -> None:
         ...
     @property
     def rtcpMuxPolicy(self) -> webrtc.enums.RTCRtcpMuxPolicy:
         ...
     @rtcpMuxPolicy.setter
-    def rtcpMuxPolicy(self, arg0: webrtc.enums.RTCRtcpMuxPolicy | webrtc.enums.RTCRtcpMuxPolicyValue) -> None:
+    def rtcpMuxPolicy(self, value: webrtc.enums.RTCRtcpMuxPolicy | webrtc.enums.RTCRtcpMuxPolicyValue) -> None:
         ...
     @property
     def rtpHeaderEncryptionPolicy(self) -> webrtc.enums.RTCRtpHeaderEncryptionPolicy:
         ...
     @rtpHeaderEncryptionPolicy.setter
-    def rtpHeaderEncryptionPolicy(self, arg0: webrtc.enums.RTCRtpHeaderEncryptionPolicy | webrtc.enums.RTCRtpHeaderEncryptionPolicyValue) -> None:
+    def rtpHeaderEncryptionPolicy(self, value: webrtc.enums.RTCRtpHeaderEncryptionPolicy | webrtc.enums.RTCRtpHeaderEncryptionPolicyValue) -> None:
         ...
     def __init__(self) -> None:
         ...
@@ -93,32 +93,32 @@ class ConfigurationInit:
     def certificates(self) -> list[RTCCertificate] | None:
         ...
     @certificates.setter
-    def certificates(self, arg0: collections.abc.Sequence[RTCCertificate] | None) -> None:
+    def certificates(self, value: collections.abc.Sequence[RTCCertificate] | None) -> None:
         ...
     @property
     def iceCandidatePoolSize(self) -> int:
         ...
     @iceCandidatePoolSize.setter
-    def iceCandidatePoolSize(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
+    def iceCandidatePoolSize(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...
     @property
     def iceServers(self) -> list[IceServerInit]:
         ...
     @iceServers.setter
-    def iceServers(self, arg0: collections.abc.Sequence[IceServerInit]) -> None:
+    def iceServers(self, value: collections.abc.Sequence[IceServerInit]) -> None:
         ...
     @property
     def portRange(self) -> tuple[int, int] | None:
         ...
     @portRange.setter
-    def portRange(self, arg0: tuple[typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex] | None) -> None:
+    def portRange(self, value: tuple[typing.SupportsInt | typing.SupportsIndex, typing.SupportsInt | typing.SupportsIndex] | None) -> None:
         ...
 class RtpCodec:
     @property
     def kind(self) -> webrtc.enums.MediaType:
         ...
     @kind.setter
-    def kind(self, arg0: webrtc.enums.MediaType | webrtc.enums.MediaTypeValue) -> None:
+    def kind(self, value: webrtc.enums.MediaType | webrtc.enums.MediaTypeValue) -> None:
         ...
     name: str
     def __init__(self) -> None:
@@ -127,7 +127,7 @@ class RtpCodec:
     def clockRate(self) -> int | None:
         ...
     @clockRate.setter
-    def clockRate(self, arg0: typing.SupportsInt | typing.SupportsIndex | None) -> None:
+    def clockRate(self, value: typing.SupportsInt | typing.SupportsIndex | None) -> None:
         ...
     @property
     def mimeType(self) -> str:
@@ -136,13 +136,13 @@ class RtpCodec:
     def numChannels(self) -> int | None:
         ...
     @numChannels.setter
-    def numChannels(self, arg0: typing.SupportsInt | typing.SupportsIndex | None) -> None:
+    def numChannels(self, value: typing.SupportsInt | typing.SupportsIndex | None) -> None:
         ...
     @property
     def parameters(self) -> dict[str, str]:
         ...
     @parameters.setter
-    def parameters(self, arg1: collections.abc.Mapping[str, str]) -> None:
+    def parameters(self, value: collections.abc.Mapping[str, str]) -> None:
         ...
 class RtpCodecCapability(RtpCodec):
     def __init__(self) -> None:
@@ -151,7 +151,7 @@ class RtpCodecCapability(RtpCodec):
     def preferredPayloadType(self) -> int | None:
         ...
     @preferredPayloadType.setter
-    def preferredPayloadType(self, arg0: typing.SupportsInt | typing.SupportsIndex | None) -> None:
+    def preferredPayloadType(self, value: typing.SupportsInt | typing.SupportsIndex | None) -> None:
         ...
 class RtpCodecParameters(RtpCodec):
     def __init__(self) -> None:
@@ -160,7 +160,7 @@ class RtpCodecParameters(RtpCodec):
     def payloadType(self) -> int:
         ...
     @payloadType.setter
-    def payloadType(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
+    def payloadType(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...
 class RtpExtension:
     encrypt: bool
@@ -171,14 +171,14 @@ class RtpExtension:
     def id(self) -> int:
         ...
     @id.setter
-    def id(self, arg1: typing.SupportsInt | typing.SupportsIndex) -> None:
+    def id(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...
 class RtpHeaderExtensionCapability:
     @property
-    def direction(self) -> webrtc.enums.TransceiverDirection:
+    def direction(self) -> webrtc.enums.RTCRtpTransceiverDirection:
         ...
     @direction.setter
-    def direction(self, arg0: webrtc.enums.TransceiverDirection | webrtc.enums.TransceiverDirectionValue) -> None:
+    def direction(self, value: webrtc.enums.RTCRtpTransceiverDirection | webrtc.enums.RTCRtpTransceiverDirectionValue) -> None:
         ...
     uri: str
     def __init__(self) -> None:
@@ -187,7 +187,7 @@ class RtpHeaderExtensionCapability:
     def preferredId(self) -> int | None:
         ...
     @preferredId.setter
-    def preferredId(self, arg1: typing.SupportsInt | typing.SupportsIndex | None) -> None:
+    def preferredId(self, value: typing.SupportsInt | typing.SupportsIndex | None) -> None:
         ...
 class RtcpParameters:
     cname: str
@@ -202,7 +202,7 @@ class RtpEncodingParameters:
     def networkPriority(self) -> webrtc.enums.RTCPriorityType:
         ...
     @networkPriority.setter
-    def networkPriority(self, arg0: webrtc.enums.RTCPriorityType | webrtc.enums.RTCPriorityTypeValue) -> None:
+    def networkPriority(self, value: webrtc.enums.RTCPriorityType | webrtc.enums.RTCPriorityTypeValue) -> None:
         ...
     requestKeyFrame: bool
     rid: str
@@ -213,38 +213,38 @@ class RtpEncodingParameters:
     def bitratePriority(self) -> float:
         ...
     @bitratePriority.setter
-    def bitratePriority(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+    def bitratePriority(self, value: typing.SupportsFloat | typing.SupportsIndex) -> None:
         ...
     @property
     def maxBitrate(self) -> int | None:
         ...
     @maxBitrate.setter
-    def maxBitrate(self, arg0: typing.SupportsInt | typing.SupportsIndex | None) -> None:
+    def maxBitrate(self, value: typing.SupportsInt | typing.SupportsIndex | None) -> None:
         ...
     @property
     def maxFramerate(self) -> float | None:
         ...
     @maxFramerate.setter
-    def maxFramerate(self, arg0: typing.SupportsFloat | typing.SupportsIndex | None) -> None:
+    def maxFramerate(self, value: typing.SupportsFloat | typing.SupportsIndex | None) -> None:
         ...
     @property
     def scaleResolutionDownBy(self) -> float | None:
         ...
     @scaleResolutionDownBy.setter
-    def scaleResolutionDownBy(self, arg0: typing.SupportsFloat | typing.SupportsIndex | None) -> None:
+    def scaleResolutionDownBy(self, value: typing.SupportsFloat | typing.SupportsIndex | None) -> None:
         ...
     @property
     def ssrc(self) -> int | None:
         ...
     @ssrc.setter
-    def ssrc(self, arg0: typing.SupportsInt | typing.SupportsIndex | None) -> None:
+    def ssrc(self, value: typing.SupportsInt | typing.SupportsIndex | None) -> None:
         ...
 class RtpParameters:
     @property
     def degradationPreference(self) -> webrtc.enums.RTCDegradationPreference | None:
         ...
     @degradationPreference.setter
-    def degradationPreference(self, arg0: webrtc.enums.RTCDegradationPreference | webrtc.enums.RTCDegradationPreferenceValue | None) -> None:
+    def degradationPreference(self, value: webrtc.enums.RTCDegradationPreference | webrtc.enums.RTCDegradationPreferenceValue | None) -> None:
         ...
     mid: str
     rtcp: RtcpParameters
@@ -255,19 +255,19 @@ class RtpParameters:
     def codecs(self) -> list[RtpCodecParameters]:
         ...
     @codecs.setter
-    def codecs(self, arg0: collections.abc.Sequence[RtpCodecParameters]) -> None:
+    def codecs(self, value: collections.abc.Sequence[RtpCodecParameters]) -> None:
         ...
     @property
     def encodings(self) -> list[RtpEncodingParameters]:
         ...
     @encodings.setter
-    def encodings(self, arg0: collections.abc.Sequence[RtpEncodingParameters]) -> None:
+    def encodings(self, value: collections.abc.Sequence[RtpEncodingParameters]) -> None:
         ...
     @property
     def headerExtensions(self) -> list[RtpExtension]:
         ...
     @headerExtensions.setter
-    def headerExtensions(self, arg0: collections.abc.Sequence[RtpExtension]) -> None:
+    def headerExtensions(self, value: collections.abc.Sequence[RtpExtension]) -> None:
         ...
 class RtpCapabilities:
     def __init__(self) -> None:
@@ -276,20 +276,20 @@ class RtpCapabilities:
     def codecs(self) -> list[RtpCodecCapability]:
         ...
     @codecs.setter
-    def codecs(self, arg0: collections.abc.Sequence[RtpCodecCapability]) -> None:
+    def codecs(self, value: collections.abc.Sequence[RtpCodecCapability]) -> None:
         ...
     @property
     def headerExtensions(self) -> list[RtpHeaderExtensionCapability]:
         ...
     @headerExtensions.setter
-    def headerExtensions(self, arg0: collections.abc.Sequence[RtpHeaderExtensionCapability]) -> None:
+    def headerExtensions(self, value: collections.abc.Sequence[RtpHeaderExtensionCapability]) -> None:
         ...
 class RtpTransceiverInit:
     @property
-    def direction(self) -> webrtc.enums.TransceiverDirection:
+    def direction(self) -> webrtc.enums.RTCRtpTransceiverDirection:
         ...
     @direction.setter
-    def direction(self, arg0: webrtc.enums.TransceiverDirection | webrtc.enums.TransceiverDirectionValue) -> None:
+    def direction(self, value: webrtc.enums.RTCRtpTransceiverDirection | webrtc.enums.RTCRtpTransceiverDirectionValue) -> None:
         ...
     def __init__(self) -> None:
         ...
@@ -297,13 +297,13 @@ class RtpTransceiverInit:
     def sendEncodings(self) -> list[RtpEncodingParameters]:
         ...
     @sendEncodings.setter
-    def sendEncodings(self, arg0: collections.abc.Sequence[RtpEncodingParameters]) -> None:
+    def sendEncodings(self, value: collections.abc.Sequence[RtpEncodingParameters]) -> None:
         ...
     @property
     def streamIds(self) -> list[str]:
         ...
     @streamIds.setter
-    def streamIds(self, arg0: collections.abc.Sequence[str]) -> None:
+    def streamIds(self, value: collections.abc.Sequence[str]) -> None:
         ...
 class PeerConnectionFactory:
     @staticmethod
@@ -382,7 +382,7 @@ class RTCIceTransport:
         ...
     def _surfaceCandidate(self) -> None:
         ...
-    def _surfaceGatheringState(self, state: webrtc.enums.CricketIceGatheringState) -> None:
+    def _surfaceGatheringState(self, state: webrtc.enums.RTCIceGathererState) -> None:
         ...
     def _surfaceState(self, state: webrtc.enums.RTCIceTransportState) -> None:
         ...
@@ -411,7 +411,7 @@ class RTCIceTransport:
     def component(self) -> webrtc.enums.RTCIceComponent:
         ...
     @property
-    def gatheringState(self) -> webrtc.enums.CricketIceGatheringState:
+    def gatheringState(self) -> webrtc.enums.RTCIceGathererState:
         ...
     @property
     def role(self) -> webrtc.enums.RTCIceRole:
@@ -421,7 +421,7 @@ class RTCIceTransport:
         ...
 class RTCDtlsTransport:
     _listeners: webrtc.utils.events._Listeners | None
-    def _surfaceState(self, state: webrtc.enums.DtlsTransportState) -> None:
+    def _surfaceState(self, state: webrtc.enums.RTCDtlsTransportState) -> None:
         ...
     def getRemoteCertificates(self) -> list[bytes]:
         ...
@@ -429,11 +429,11 @@ class RTCDtlsTransport:
     def iceTransport(self) -> RTCIceTransport:
         ...
     @property
-    def state(self) -> webrtc.enums.DtlsTransportState:
+    def state(self) -> webrtc.enums.RTCDtlsTransportState:
         ...
 class RTCSctpTransport:
     _listeners: webrtc.utils.events._Listeners | None
-    def _surfaceState(self, state: webrtc.enums.SctpTransportState) -> None:
+    def _surfaceState(self, state: webrtc.enums.RTCSctpTransportState) -> None:
         ...
     @property
     def maxChannels(self) -> int | None:
@@ -442,7 +442,7 @@ class RTCSctpTransport:
     def maxMessageSize(self) -> float | None:
         ...
     @property
-    def state(self) -> webrtc.enums.SctpTransportState:
+    def state(self) -> webrtc.enums.RTCSctpTransportState:
         ...
     @property
     def transport(self) -> RTCDtlsTransport:
@@ -460,6 +460,12 @@ class RTCDTMFSender:
     def toneBuffer(self) -> str:
         ...
 class RTCRtpSender:
+    @property
+    def transform(self) -> _RtpTransform | None:
+        ...
+    @transform.setter
+    def transform(self, value: _RtpTransform | None) -> None:
+        ...
     @staticmethod
     def getCapabilities(kind: str) -> RtpCapabilities | None:
         ...
@@ -494,6 +500,12 @@ class RTCRtpSender:
     def transport(self) -> RTCDtlsTransport | None:
         ...
 class RTCRtpReceiver:
+    @property
+    def transform(self) -> _RtpTransform | None:
+        ...
+    @transform.setter
+    def transform(self, value: _RtpTransform | None) -> None:
+        ...
     @staticmethod
     def getCapabilities(kind: str) -> RtpCapabilities | None:
         ...
@@ -507,7 +519,7 @@ class RTCRtpReceiver:
     def jitterBufferTarget(self) -> float | None:
         ...
     @jitterBufferTarget.setter
-    def jitterBufferTarget(self, arg1: typing.SupportsFloat | typing.SupportsIndex | None) -> None:
+    def jitterBufferTarget(self, value: typing.SupportsFloat | typing.SupportsIndex | None) -> None:
         ...
     @property
     def track(self) -> MediaStreamTrack:
@@ -517,10 +529,10 @@ class RTCRtpReceiver:
         ...
 class RTCRtpTransceiver:
     @property
-    def direction(self) -> webrtc.enums.TransceiverDirection:
+    def direction(self) -> webrtc.enums.RTCRtpTransceiverDirection:
         ...
     @direction.setter
-    def direction(self, arg0: webrtc.enums.TransceiverDirection | webrtc.enums.TransceiverDirectionValue) -> None:
+    def direction(self, value: webrtc.enums.RTCRtpTransceiverDirection | webrtc.enums.RTCRtpTransceiverDirectionValue) -> None:
         ...
     def getCodecPreferences(self) -> list[RtpCodecCapability]:
         ...
@@ -535,7 +547,7 @@ class RTCRtpTransceiver:
     def stop(self) -> None:
         ...
     @property
-    def currentDirection(self) -> webrtc.enums.TransceiverDirection | None:
+    def currentDirection(self) -> webrtc.enums.RTCRtpTransceiverDirection | None:
         ...
     @property
     def kind(self) -> webrtc.enums.MediaType:
@@ -579,7 +591,7 @@ class RTCDataChannel:
     def bufferedAmountLowThreshold(self) -> int:
         ...
     @bufferedAmountLowThreshold.setter
-    def bufferedAmountLowThreshold(self, arg1: typing.SupportsInt | typing.SupportsIndex) -> None:
+    def bufferedAmountLowThreshold(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...
     @property
     def id(self) -> int | None:
@@ -613,7 +625,7 @@ class RTCPeerConnection:
     @staticmethod
     def _connectionOf(sender: RTCRtpSender) -> RTCPeerConnection | None:
         ...
-    def __init__(self, arg0: ConfigurationInit | None) -> None:
+    def __init__(self, configuration: ConfigurationInit | None) -> None:
         ...
     def _applyDescriptions(self, snapshot: typing.SupportsInt | typing.SupportsIndex | None = None) -> None:
         ...
@@ -645,11 +657,11 @@ class RTCPeerConnection:
         ...
     def close(self) -> None:
         ...
-    def createAnswer(self, onSuccess: collections.abc.Callable[[RTCSessionDescription], None], onFailure: collections.abc.Callable[[RTCCallbackException], None], voiceActivityDetection: bool) -> None:
+    def createAnswer(self, onSuccess: collections.abc.Callable[[RTCSessionDescription], None], onFailure: collections.abc.Callable[[RTCCallbackException], None]) -> None:
         ...
     def createDataChannel(self, label: str, ordered: bool, maxPacketLifeTime: typing.SupportsInt | typing.SupportsIndex | None, maxRetransmits: typing.SupportsInt | typing.SupportsIndex | None, protocol: str, negotiated: bool, id: typing.SupportsInt | typing.SupportsIndex | None, priority: webrtc.enums.RTCPriorityType | webrtc.enums.RTCPriorityTypeValue) -> RTCDataChannel:
         ...
-    def createOffer(self, onSuccess: collections.abc.Callable[[RTCSessionDescription], None], onFailure: collections.abc.Callable[[RTCCallbackException], None], iceRestart: bool, voiceActivityDetection: bool) -> None:
+    def createOffer(self, onSuccess: collections.abc.Callable[[RTCSessionDescription], None], onFailure: collections.abc.Callable[[RTCCallbackException], None], iceRestart: bool) -> None:
         ...
     def getConfiguration(self) -> ConfigurationInit:
         ...
@@ -745,6 +757,56 @@ class MediaStreamTrackProcessor:
     @property
     def totalFrames(self) -> int:
         ...
+class _RtpTransform:
+    pass
+class RTCEncodedFrame:
+    def getData(self) -> bytes:
+        ...
+    def getMetadata(self) -> dict[str, object]:
+        ...
+    @property
+    def video(self) -> bool:
+        ...
+class RTCRtpScriptTransform(_RtpTransform):
+    _listeners: webrtc.utils.events._Listeners | None
+    def __init__(self) -> None:
+        ...
+    def _ackWakeup(self) -> None:
+        ...
+    def generateKeyFrame(self, rid: str | None) -> int:
+        ...
+    def read(self) -> RTCEncodedFrame | None:
+        ...
+    def sendKeyFrameRequest(self) -> bool:
+        ...
+    def write(self, frame: RTCEncodedFrame, data: typing_extensions.Buffer | None) -> bool:
+        ...
+    @property
+    def sourceId(self) -> int:
+        ...
+    @property
+    def sourceKind(self) -> tuple[bool, bool] | None:
+        ...
+    @property
+    def state(self) -> int:
+        ...
+class SFrameTransform(_RtpTransform):
+    _listeners: webrtc.utils.events._Listeners | None
+    def __init__(self, cipherSuite: typing.SupportsInt | typing.SupportsIndex, encrypting: bool) -> None:
+        ...
+    def addDecryptionKey(self, key: typing_extensions.Buffer, keyId: typing.SupportsInt | typing.SupportsIndex) -> bool:
+        ...
+    def decrypt(self, data: typing_extensions.Buffer) -> tuple[bytes | None, int, int | None]:
+        ...
+    def encrypt(self, data: typing_extensions.Buffer) -> bytes | None:
+        ...
+    def removeDecryptionKey(self, keyId: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def setEncryptionKey(self, key: typing_extensions.Buffer, keyId: typing.SupportsInt | typing.SupportsIndex) -> bool:
+        ...
+    @property
+    def encrypting(self) -> bool:
+        ...
 class TrackGenerator:
     muted: bool
     def __init__(self, kind: str) -> None:
@@ -767,6 +829,16 @@ class TrackGenerator:
 def _alive() -> dict[str, int]:
     ...
 def _alive_factories() -> int:
+    ...
+def _sframeDecrypt(cipherSuite: typing.SupportsInt | typing.SupportsIndex, baseKey: typing_extensions.Buffer, metadata: typing_extensions.Buffer, ciphertext: typing_extensions.Buffer) -> bytes | None:
+    ...
+def _sframeDerive(cipherSuite: typing.SupportsInt | typing.SupportsIndex, baseKey: typing_extensions.Buffer, keyId: typing.SupportsInt | typing.SupportsIndex) -> tuple[bytes, bytes]:
+    ...
+def _sframeEncrypt(cipherSuite: typing.SupportsInt | typing.SupportsIndex, baseKey: typing_extensions.Buffer, keyId: typing.SupportsInt | typing.SupportsIndex, counter: typing.SupportsInt | typing.SupportsIndex, metadata: typing_extensions.Buffer, plaintext: typing_extensions.Buffer) -> bytes:
+    ...
+def _sframeHeader(keyId: typing.SupportsInt | typing.SupportsIndex, counter: typing.SupportsInt | typing.SupportsIndex) -> bytes:
+    ...
+def _sframeParseHeader(data: typing_extensions.Buffer) -> tuple[int, int, int] | None:
     ...
 def copyAudioSamples(source: typing_extensions.Buffer, sourceFormat: str, channels: typing.SupportsInt | typing.SupportsIndex, frames: typing.SupportsInt | typing.SupportsIndex, destination: typing_extensions.Buffer, destinationFormat: str, planeIndex: typing.SupportsInt | typing.SupportsIndex, frameOffset: typing.SupportsInt | typing.SupportsIndex, frameCount: typing.SupportsInt | typing.SupportsIndex) -> None:
     ...

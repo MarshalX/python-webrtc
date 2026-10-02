@@ -92,7 +92,9 @@ async def main() -> None:
     """Echoes the camera of the caller back to it."""
     caller, echo = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
     trickle(caller, echo)
-    camera = webrtc.get_user_media(audio=False, video=True).get_video_tracks()[0]
+    camera = (await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=True))).get_video_tracks()[
+        0
+    ]
     caller.add_track(camera)
     generator = webrtc.VideoTrackGenerator()
     echoed = asyncio.get_running_loop().create_future()

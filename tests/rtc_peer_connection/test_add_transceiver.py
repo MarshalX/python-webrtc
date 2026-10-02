@@ -30,7 +30,7 @@ def _create_and_test_transceiver(pc: webrtc.RTCPeerConnection, kind: webrtc.Medi
 
     assert transceiver.mid is None
     assert transceiver.stopped is False
-    assert transceiver.direction == webrtc.TransceiverDirection.sendrecv
+    assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.sendrecv
     assert transceiver.current_direction is None
 
     assert [transceiver] == pc.get_transceivers(), (
@@ -71,15 +71,15 @@ def test_3(pc: webrtc.RTCPeerConnection) -> None:
 
 def test_4(pc: webrtc.RTCPeerConnection) -> None:
     """add_transceiver with direction inactive should have result transceiver.direction be the same."""
-    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.TransceiverDirection.inactive)
+    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.RTCRtpTransceiverDirection.inactive)
     transceiver = pc.add_transceiver(webrtc.MediaType.audio, init)
 
-    assert transceiver.direction == webrtc.TransceiverDirection.inactive
+    assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.inactive
 
 
 def test_5() -> None:
     """An init with an invalid direction can't be created, so add_transceiver can't get one."""
-    with pytest.raises(ValueError, match='not a valid TransceiverDirection'):
+    with pytest.raises(ValueError, match='not a valid RTCRtpTransceiverDirection'):
         webrtc.RTCRtpTransceiverInit(direction=mistyped('invalid'))
 
 
@@ -182,10 +182,10 @@ def test_11(pc: webrtc.RTCPeerConnection) -> None:
 
 def test_12(pc: webrtc.RTCPeerConnection) -> None:
     """add_transceiver with direction sendonly should have result transceiver.direction be the same."""
-    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.TransceiverDirection.sendonly)
+    init = webrtc.RTCRtpTransceiverInit(direction=webrtc.RTCRtpTransceiverDirection.sendonly)
     transceiver = pc.add_transceiver(webrtc.MediaType.audio, init)
 
-    assert transceiver.direction == webrtc.TransceiverDirection.sendonly
+    assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.sendonly
 
 
 def test_13(pc: webrtc.RTCPeerConnection) -> None:

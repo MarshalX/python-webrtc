@@ -40,7 +40,7 @@ import webrtc
 async def main():
     pc = webrtc.RTCPeerConnection()
 
-    stream = webrtc.get_user_media()
+    stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))
     for track in stream.get_tracks():
         pc.add_track(track, stream)
 

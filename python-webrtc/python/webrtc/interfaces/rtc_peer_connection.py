@@ -17,20 +17,26 @@ from typing_extensions import override
 
 import webrtc
 from webrtc import (
-    CricketIceGatheringState,
     Event,
     InvalidAccessError,
     InvalidStateError,
     MediaType,
     OperationError,
+    RTCAnswerOptions,
     RTCCertificate,
     RTCConfiguration,
     RTCDataChannelEvent,
+    RTCDataChannelEventInit,
     RTCIceCandidate,
+    RTCIceGathererState,
     RTCLocalSessionDescriptionInit,
+    RTCOfferOptions,
     RTCPeerConnectionIceErrorEvent,
+    RTCPeerConnectionIceErrorEventInit,
     RTCPeerConnectionIceEvent,
+    RTCPeerConnectionIceEventInit,
     RTCRtpCodec,
+    RTCRtpTransceiverDirection,
     RTCRtpTransceiverInit,
     RTCSdpType,
     RTCSessionDescription,
@@ -38,7 +44,7 @@ from webrtc import (
     RTCSignalingState,
     RTCStatsReport,
     RTCTrackEvent,
-    TransceiverDirection,
+    RTCTrackEventInit,
     WebRTCObject,
     wrtc,
 )
@@ -211,7 +217,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         """
         ice_transports = webrtc.RTCIceTransport._wrap_many(transports)
         for ice_transport in ice_transports:
-            ice_transport._native_obj._surfaceGatheringState(CricketIceGatheringState(state))
+            ice_transport._native_obj._surfaceGatheringState(RTCIceGathererState(state))
         self._native_obj._surfaceIceGatheringState(state)
         self._native_obj._refreshDescriptions()
         for ice_transport in ice_transports:
@@ -238,40 +244,44 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             return None
         if not self._native_obj._shouldFireNegotiationNeededEvent(event_id):
             return None
-        return Event('negotiationneeded', self)
+        return Event('negotiationneeded')
 
-    def _ice_candidate_event(self, candidate: wrtc.IceCandidateInit | None = None) -> webrtc.Event:
+    @staticmethod
+    def _ice_candidate_event(candidate: wrtc.IceCandidateInit | None = None) -> webrtc.Event:
         if candidate is None:
-            return RTCPeerConnectionIceEvent('icecandidate', None, None, target=self)
+            return RTCPeerConnectionIceEvent('icecandidate')
         kwargs = candidate.kwargs()
-        return RTCPeerConnectionIceEvent('icecandidate', RTCIceCandidate(**kwargs), kwargs['url'], target=self)
+        return RTCPeerConnectionIceEvent(
+            'icecandidate', RTCPeerConnectionIceEventInit(RTCIceCandidate(**kwargs), kwargs['url'])
+        )
 
-    def _ice_candidate_error_event(self, *native: object) -> webrtc.Event:
+    @staticmethod
+    def _ice_candidate_error_event(*native: object) -> webrtc.Event:
         address, port, url, error_code, error_text = cast('tuple[str, int, str, int, str]', native)
         return RTCPeerConnectionIceErrorEvent(
             'icecandidateerror',
-            address if address != '' else None,
-            port if port != 0 else None,
-            url,
-            error_code,
-            error_text,
-            target=self,
+            RTCPeerConnectionIceErrorEventInit(
+                error_code, address if address != '' else None, port if port != 0 else None, url, error_text
+            ),
         )
 
-    def _data_channel_event(self, channel: wrtc.RTCDataChannel) -> webrtc.Event:
-        return RTCDataChannelEvent('datachannel', webrtc.RTCDataChannel._wrap(channel), target=self)
+    @staticmethod
+    def _data_channel_event(channel: wrtc.RTCDataChannel) -> webrtc.Event:
+        return RTCDataChannelEvent('datachannel', RTCDataChannelEventInit(webrtc.RTCDataChannel._wrap(channel)))
 
+    @staticmethod
     def _track_event(
-        self, transceiver: wrtc.RTCRtpTransceiver, receiver: wrtc.RTCRtpReceiver, streams: list[wrtc.MediaStream]
+        transceiver: wrtc.RTCRtpTransceiver, receiver: wrtc.RTCRtpReceiver, streams: list[wrtc.MediaStream]
     ) -> webrtc.Event:
         wrapped_receiver = webrtc.RTCRtpReceiver._wrap(receiver)
         return RTCTrackEvent(
             'track',
-            wrapped_receiver,
-            wrapped_receiver.track,
-            webrtc.MediaStream._wrap_many(streams),
-            webrtc.RTCRtpTransceiver._wrap(transceiver),
-            target=self,
+            RTCTrackEventInit(
+                wrapped_receiver,
+                wrapped_receiver.track,
+                webrtc.RTCRtpTransceiver._wrap(transceiver),
+                webrtc.MediaStream._wrap_many(streams),
+            ),
         )
 
     def _apply_legacy_offer_option(self, kind: webrtc.MediaType, *, receive: bool | None) -> None:
@@ -281,7 +291,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         """
         if receive is None:
             return
-        directions = TransceiverDirection
+        directions = RTCRtpTransceiverDirection
         transceivers = [t for t in self.get_transceivers() if not t.stopped and t.receiver.track.kind == kind]
         if not receive:
             for transceiver in transceivers:
@@ -300,14 +310,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         for sender in self._native_obj.getSenders():
             sender._expireParameters()
 
-    async def create_offer(
-        self,
-        *,
-        ice_restart: bool = False,
-        offer_to_receive_audio: bool | None = None,
-        offer_to_receive_video: bool | None = None,
-        voice_activity_detection: bool = True,
-    ) -> webrtc.RTCSessionDescriptionInit:
+    async def create_offer(self, options: webrtc.RTCOfferOptions | None = None) -> webrtc.RTCSessionDescriptionInit:
         """Initiates the creation of an SDP offer for the purpose of starting a new WebRTC connection to a remote peer.
 
         The SDP offer includes information about any MediaStreamTrack objects already attached to the WebRTC session,
@@ -316,13 +319,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         the configuration of an existing connection.
 
         Args:
-            ice_restart (:obj:`bool`, optional): Whether to restart ICE, gathering new credentials and candidates.
-                :meth:`restart_ice` is the preferred way.
-            offer_to_receive_audio (:obj:`bool`, optional): Legacy: :obj:`True` adds a receiving audio transceiver
-                if there's none, :obj:`False` stops receiving audio on the existing ones.
-                :meth:`add_transceiver` is the preferred way.
-            offer_to_receive_video (:obj:`bool`, optional): The same for video.
-            voice_activity_detection (:obj:`bool`, optional): Whether audio codecs may use voice activity detection.
+            options (:obj:`webrtc.RTCOfferOptions`, optional): How to create the offer.
 
         Returns:
             :obj:`webrtc.RTCSessionDescriptionInit`: The offer, to set with :meth:`set_local_description`.
@@ -332,32 +329,38 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         """
         async with self._operation():
             self._check_state('create an offer', RTCSignalingState.stable, RTCSignalingState.have_local_offer)
-            self._apply_legacy_offer_option(MediaType.audio, receive=offer_to_receive_audio)
-            self._apply_legacy_offer_option(MediaType.video, receive=offer_to_receive_video)
+            options = options if options is not None else RTCOfferOptions()
+            self._apply_legacy_offer_option(MediaType.audio, receive=options.offer_to_receive_audio)
+            self._apply_legacy_offer_option(MediaType.video, receive=options.offer_to_receive_video)
             await later()
-            return _init_of(await call_native(self._native_obj.createOffer, ice_restart, voice_activity_detection))
+            return _init_of(await call_native(self._native_obj.createOffer, options.ice_restart))
 
-    async def create_answer(self, *, voice_activity_detection: bool = True) -> webrtc.RTCSessionDescriptionInit:
+    async def create_answer(self, options: webrtc.RTCAnswerOptions | None = None) -> webrtc.RTCSessionDescriptionInit:
         """Creates an SDP answer to an offer received from the remote peer.
 
         The answer contains information about any media already attached to the session, codecs and options supported
         by the machine, and any ICE candidates already gathered.
 
         Args:
-            voice_activity_detection (:obj:`bool`, optional): Whether audio codecs may use voice activity detection.
+            options (:obj:`webrtc.RTCAnswerOptions`, optional): How to create the answer.
 
         Returns:
             :obj:`webrtc.RTCSessionDescriptionInit`: The answer, to set with :meth:`set_local_description`.
 
         Raises:
+            TypeError: If the options aren't an :obj:`webrtc.RTCAnswerOptions`.
             webrtc.InvalidStateError: If the connection is closed or has no remote offer.
         """
+        # the options have no members yet, only their type is checked
+        if options is not None and not isinstance(options, RTCAnswerOptions):
+            msg = f'options must be an RTCAnswerOptions, not {type(options).__name__}'
+            raise TypeError(msg)
         async with self._operation():
             self._check_state(
                 'create an answer', RTCSignalingState.have_remote_offer, RTCSignalingState.have_local_pranswer
             )
             await later()
-            return _init_of(await call_native(self._native_obj.createAnswer, voice_activity_detection))
+            return _init_of(await call_native(self._native_obj.createAnswer))
 
     async def set_local_description(
         self, description: _Description | RTCLocalSessionDescriptionInit | None = None
@@ -387,7 +390,9 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             await call_native(self._native_obj.setLocalDescription, init)
             self._completed_description()
 
-    async def set_remote_description(self, description: _Description) -> None:
+    async def set_remote_description(
+        self, description: webrtc.RTCSessionDescriptionInit | webrtc.RTCSessionDescription
+    ) -> None:
         """Sets the specified session description as the remote peer's current offer or answer.
 
         The description specifies the properties of the remote end of the connection, including the media format.
@@ -395,9 +400,9 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         An offer set while there's a local offer rolls the local one back first.
 
         Args:
-            description (:obj:`webrtc.RTCSessionDescription`): The description received from the remote peer.
-                An :obj:`webrtc.RTCSessionDescriptionInit` is accepted too, like one from
-                :meth:`webrtc.RTCSessionDescriptionInit.from_json`.
+            description (:obj:`webrtc.RTCSessionDescriptionInit`): The description received from the remote peer,
+                like one from :meth:`webrtc.RTCSessionDescriptionInit.from_json`. An
+                :obj:`webrtc.RTCSessionDescription` is accepted too.
 
         Raises:
             webrtc.InvalidStateError: If the type doesn't match the signaling state, or the connection is closed.
@@ -411,30 +416,20 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             await call_native(self._native_obj.setRemoteDescription, init)
             self._completed_description()
 
-    def add_track(
-        self,
-        track: webrtc.MediaStreamTrack,
-        stream: webrtc.MediaStream | list[webrtc.MediaStream] | None = None,
-    ) -> webrtc.RTCRtpSender:
+    def add_track(self, track: webrtc.MediaStreamTrack, *streams: webrtc.MediaStream) -> webrtc.RTCRtpSender:
         """Adds a new :obj:`webrtc.MediaStreamTrack` to the set of tracks which will be transmitted to the other peer.
 
         Args:
             track (:obj:`webrtc.MediaStreamTrack`): A :obj:`webrtc.MediaStreamTrack` object representing the media track
                 to add to the peer connection.
-            stream (:obj:`webrtc.MediaStream` or :obj:`list` of :obj:`webrtc.MediaStream`, optional): One or more
-                local :obj:`webrtc.MediaStream` objects to which the track should be added.
+            *streams (:obj:`webrtc.MediaStream`): The local streams the remote peer receives the track in.
 
         Returns:
             :obj:`webrtc.RTCRtpSender`: The :obj:`webrtc.RTCRtpSender` object which will be used to
             transmit the media data.
         """
-        if stream is None or (isinstance(stream, list) and len(stream) == 0):
-            sender = self._native_obj.addTrack(track._native_obj, None)
-        elif isinstance(stream, list):
-            native_objects = [s._native_obj for s in stream]
-            sender = self._native_obj.addTrack(track._native_obj, native_objects)
-        else:
-            sender = self._native_obj.addTrack(track._native_obj, stream._native_obj)
+        native_streams = [stream._native_obj for stream in streams] if len(streams) > 0 else None
+        sender = self._native_obj.addTrack(track._native_obj, native_streams)
 
         return webrtc.RTCRtpSender._wrap(sender)
 
@@ -569,7 +564,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             await call_native(self._native_obj.addIceCandidate, candidate_str, sdp_mid, sdp_m_line_index, ufrag)
 
     def create_data_channel(
-        self, label: str, options: webrtc.RTCDataChannelInit | None = None
+        self, label: str, data_channel_dict: webrtc.RTCDataChannelInit | None = None
     ) -> webrtc.RTCDataChannel:
         """Creates a channel to send messages to the remote peer, negotiated with the next offer.
 
@@ -577,7 +572,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
 
         Args:
             label (:obj:`str`): The name of the channel, up to 65535 bytes in UTF-8.
-            options (:obj:`webrtc.RTCDataChannelInit`, optional): How to create the channel.
+            data_channel_dict (:obj:`webrtc.RTCDataChannelInit`, optional): How to create the channel.
 
         Returns:
             :obj:`webrtc.RTCDataChannel`: The channel.
@@ -588,7 +583,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
             webrtc.InvalidStateError: If the connection is closed.
             webrtc.OperationError: If the ``id`` is in use, or no id is left.
         """
-        init = options if options is not None else RTCDataChannelInit()
+        init = data_channel_dict if data_channel_dict is not None else RTCDataChannelInit()
         check_utf8_length('label', label)
         init._check()
         native = self._native_obj.createDataChannel(
@@ -631,25 +626,24 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget):
         return RTCStatsReport._from_native(await call_native(self._native_obj.getStats), self.get_receivers())
 
     @staticmethod
-    async def generate_certificate(
-        algorithm: AlgorithmIdentifier = 'ECDSA', expires: float | None = None
-    ) -> webrtc.RTCCertificate:
-        """Generates a certificate for :attr:`webrtc.RTCConfiguration.certificates`.
-
-        The same as :meth:`webrtc.RTCCertificate.generate`.
+    async def generate_certificate(keygen_algorithm: AlgorithmIdentifier) -> webrtc.RTCCertificate:
+        """Generates a key and a self-signed certificate on a worker thread, for :attr:`RTCConfiguration.certificates`.
 
         Args:
-            algorithm (:obj:`str` or :obj:`webrtc.Algorithm`, optional): The WebCrypto algorithm of the key.
-            expires (:obj:`float`, optional): In how many milliseconds the certificate expires.
+            keygen_algorithm (:obj:`str` or :obj:`webrtc.Algorithm`): A WebCrypto algorithm: ``'ECDSA'``
+                (with the P-256 curve), an :obj:`webrtc.EcKeyGenParams`, or an :obj:`webrtc.RsaHashedKeyGenParams`
+                like ``RsaHashedKeyGenParams('RSASSA-PKCS1-v1_5', modulus_length=2048,
+                public_exponent=bytes([1, 0, 1]), hash='SHA-256')``. Its ``expires`` is in how many milliseconds
+                the certificate expires, at most a year (30 days by default).
 
         Returns:
             :obj:`webrtc.RTCCertificate`: The certificate.
 
         Raises:
             webrtc.NotSupportedError: If the algorithm isn't supported.
-            ValueError: If ``expires`` is negative.
+            TypeError: If ``expires`` isn't an unsigned 64-bit integer.
         """
-        return await RTCCertificate.generate(algorithm, expires)
+        return await RTCCertificate._generate(keygen_algorithm)
 
     def get_configuration(self) -> webrtc.RTCConfiguration:
         """Returns the configuration of the connection, as it was last set.

@@ -90,7 +90,6 @@ namespace python_webrtc {
         {State::kIceConnectionFailed, "failed"},
         {State::kIceConnectionDisconnected, "disconnected"},
         {State::kIceConnectionClosed, "closed"},
-        {State::kIceConnectionMax, "max"},
     });
   };
 
@@ -129,7 +128,7 @@ namespace python_webrtc {
   template <>
   struct StrEnum<webrtc::RtpTransceiverDirection> {
     using Direction = webrtc::RtpTransceiverDirection;
-    static constexpr auto name = pybind11::detail::const_name("TransceiverDirection");
+    static constexpr auto name = pybind11::detail::const_name("RTCRtpTransceiverDirection");
     static constexpr auto values = std::to_array<std::pair<Direction, const char *>>({
         {Direction::kSendRecv, "sendrecv"},
         {Direction::kSendOnly, "sendonly"},
@@ -186,7 +185,7 @@ namespace python_webrtc {
 
   template <>
   struct StrEnum<webrtc::IceGatheringState> {
-    static constexpr auto name = pybind11::detail::const_name("CricketIceGatheringState");
+    static constexpr auto name = pybind11::detail::const_name("RTCIceGathererState");
     static constexpr auto values = std::to_array<std::pair<webrtc::IceGatheringState, const char *>>({
         {webrtc::IceGatheringState::kIceGatheringNew, "new"},
         {webrtc::IceGatheringState::kIceGatheringGathering, "gathering"},
@@ -197,7 +196,7 @@ namespace python_webrtc {
   template <>
   struct StrEnum<webrtc::DtlsTransportState> {
     using State = webrtc::DtlsTransportState;
-    static constexpr auto name = pybind11::detail::const_name("DtlsTransportState");
+    static constexpr auto name = pybind11::detail::const_name("RTCDtlsTransportState");
     static constexpr auto values = std::to_array<std::pair<State, const char *>>({
         {State::kNew, "new"},
         {State::kConnecting, "connecting"},
@@ -210,10 +209,11 @@ namespace python_webrtc {
   template <>
   struct StrEnum<webrtc::SctpTransportState> {
     using State = webrtc::SctpTransportState;
-    static constexpr auto name = pybind11::detail::const_name("SctpTransportState");
+    static constexpr auto name = pybind11::detail::const_name("RTCSctpTransportState");
     static constexpr auto values = std::to_array<std::pair<State, const char *>>({
-        {State::kNew, "new"},
         {State::kConnecting, "connecting"},
+        // libwebrtc only: the transport is connecting from its creation in the specification
+        {State::kNew, "connecting"},
         {State::kConnected, "connected"},
         {State::kClosed, "closed"},
     });

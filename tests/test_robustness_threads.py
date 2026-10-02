@@ -18,12 +18,14 @@ def test_constructors_from_many_threads() -> None:
     """Constructors register their Python object with the GIL: pybind11's registry was corrupted."""
     output = run_isolated(
         """
+        import asyncio
         import gc
         import threading
         import time
         import webrtc
 
-        track = webrtc.get_user_media(audio=False, video=True).get_tracks()[0]
+        constraints = webrtc.MediaStreamConstraints(video=True)
+        track = asyncio.run(webrtc.media_devices.get_user_media(constraints)).get_tracks()[0]
         stop = threading.Event()
         errors = []
 
@@ -125,12 +127,15 @@ def test_wrappers_created_and_released_on_many_threads() -> None:
 
             def create():
                 while not stop.is_set():
-                    for track in webrtc.get_user_media(audio=True, video=True).get_tracks():
+                    constraints = webrtc.MediaStreamConstraints(audio=True, video=True)
+                    for track in asyncio.run(webrtc.media_devices.get_user_media(constraints)).get_tracks():
                         track.stop()
 
             def release():
                 while not stop.is_set():
-                    tracks = [webrtc.get_user_media(audio=True, video=False).get_tracks()[0] for _ in range(5)]
+                    constraints = webrtc.MediaStreamConstraints(audio=True)
+                    get = webrtc.media_devices.get_user_media
+                    tracks = [asyncio.run(get(constraints)).get_tracks()[0] for _ in range(5)]
                     del tracks
 
             threads = [threading.Thread(target=f, daemon=True) for f in (create, create, release, release)]
@@ -167,7 +172,7 @@ def test_wrappers_created_while_a_description_wraps_them() -> None:
         from tests.helpers import exchange_offer_answer
 
         async def main():
-            stream = webrtc.get_user_media(audio=True, video=True)
+            stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True, video=True))
             stop = threading.Event()
 
             def create():
@@ -215,7 +220,7 @@ def test_objects_of_connections_read_while_they_connect() -> None:
         from tests.helpers import connect
 
         async def main():
-            stream = webrtc.get_user_media(audio=True, video=True)
+            stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True, video=True))
             connections = []
             stop = threading.Event()
 

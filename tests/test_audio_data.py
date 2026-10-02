@@ -22,6 +22,8 @@ from webrtc import AudioSampleFormat
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from typing_extensions import Buffer
+
 
 def f32(*values: float) -> bytes:
     return array.array('f', values).tobytes()
@@ -32,8 +34,8 @@ def audio_data(
     format: webrtc.AudioSampleFormatValue = 'f32-planar',
     channels: int = 2,
     frames: int = 5,
-    data: bytes | None = None,
-    **init: object,
+    data: bytes | bytearray | None = None,
+    transfer: list[Buffer] | None = None,
 ) -> webrtc.AudioData:
     size = {'u8': 1, 's16': 2}.get(format.split('-', maxsplit=1)[0], 4)
     return webrtc.AudioData(
@@ -44,7 +46,7 @@ def audio_data(
             number_of_channels=channels,
             timestamp=1234,
             data=data if data is not None else bytes(channels * frames * size),
-            **init,
+            transfer=transfer if transfer is not None else [],
         )
     )
 
@@ -201,3 +203,38 @@ def test_s16_bytes_are_little_endian() -> None:
     audio.copy_to(out, webrtc.AudioDataCopyToOptions(plane_index=0, format='f32'))
     assert array.array('f', out).tolist() == [1 / 32768, -1 / 32768]
     audio.close()
+
+
+def test_transfer_keeps_the_buffer() -> None:
+    """Transferred data is kept without a copy, and the buffer can't be resized while kept."""
+    data = bytearray(f32(1, 2))
+    audio = audio_data(format='f32', channels=1, frames=2, data=data, transfer=[data])
+    with pytest.raises(BufferError):
+        data.append(0)
+    out = bytearray(8)
+    audio.copy_to(out, webrtc.AudioDataCopyToOptions(plane_index=0))
+    assert bytes(out) == f32(1, 2)
+    audio.close()
+
+
+def test_data_is_copied_unless_transferred() -> None:
+    """Data not in transfer is copied, while transferred memoryviews are released."""
+    data = bytearray(f32(1, 2))
+    other = bytearray(4)
+    view = memoryview(other)
+    audio = audio_data(format='f32', channels=1, frames=2, data=data, transfer=[view])
+    data[:4] = f32(9)
+    with pytest.raises(ValueError, match='released'):
+        view.tobytes()
+    other.append(0)
+    out = bytearray(8)
+    audio.copy_to(out, webrtc.AudioDataCopyToOptions(plane_index=0))
+    assert bytes(out) == f32(1, 2)
+    audio.close()
+
+
+def test_transfer_twice() -> None:
+    """A buffer transferred twice, even through a view, is a DataCloneError."""
+    data = bytearray(8)
+    with pytest.raises(webrtc.DataCloneError, match='more than once'):
+        audio_data(format='f32', channels=1, frames=2, data=data, transfer=[data, memoryview(data)])

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 from typing_extensions import override
 
-from webrtc import MediaStreamTrack, MediaStreamTrackEvent, MediaType, WebRTCObject, wrtc
+from webrtc import MediaStreamTrack, MediaStreamTrackEvent, MediaStreamTrackEventInit, MediaType, WebRTCObject, wrtc
 from webrtc.utils.events import EventTarget
 
 if TYPE_CHECKING:
@@ -70,7 +70,7 @@ class MediaStream(WebRTCObject[wrtc.MediaStream], EventTarget):
     @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
         (track,) = cast('tuple[wrtc.MediaStreamTrack]', args)
-        return MediaStreamTrackEvent(name, MediaStreamTrack._wrap(track), target=self)
+        return MediaStreamTrackEvent(name, MediaStreamTrackEventInit(MediaStreamTrack._wrap(track)))
 
     @property
     def id(self) -> str:

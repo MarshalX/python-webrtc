@@ -105,8 +105,19 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrackProcessor::OnFrame(const webrtc::VideoFrame &frame) {
+    int64_t timestampUs = frame.timestamp_us();
+    // a received frame (local ones have no RTP timestamp), in the 90 kHz clock of RTP video since the first one
+    if (frame.rtp_timestamp() != 0) {
+      const int64_t rtp = _rtpUnwrapper.Unwrap(frame.rtp_timestamp());
+      if (!_firstReceived) {
+        _firstReceived.emplace(timestampUs, rtp);
+      }
+      constexpr int64_t kRtpTicksPerMs = 90;
+      timestampUs =
+          _firstReceived->first + ((rtp - _firstReceived->second) * webrtc::kNumMicrosecsPerMillisec / kRtpTicksPerMs);
+    }
     Push(VideoItem{.buffer = frame.video_frame_buffer(),
-                   .timestampUs = frame.timestamp_us(),
+                   .timestampUs = timestampUs,
                    .rotation = static_cast<int>(frame.rotation()),
                    .rtpTimestamp = frame.rtp_timestamp()});
   }

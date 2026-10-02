@@ -38,6 +38,9 @@ class Input:
     def __init__(self, data: bytes) -> None:
         self._fdp = atheris.FuzzedDataProvider(data)
 
+    def exhausted(self) -> bool:
+        return self._fdp.remaining_bytes() == 0
+
     def flag(self) -> bool:
         return self._fdp.ConsumeBool()
 
@@ -84,6 +87,13 @@ class Input:
         data += bytes(size - len(data))
         kind = self._fdp.ConsumeIntInRange(0, 7)
         return VIEWS[kind](data) if kind < len(VIEWS) else data
+
+    def contiguous(self, size: int) -> Buffer:
+        """Like buffer, but rarely strided: native functions reject strided views before reading them."""
+        data = self.buffer(size)
+        if isinstance(data, memoryview) and not data.contiguous and self.small(15) < 15:
+            return data.tobytes()
+        return data
 
     def destination(self, size: int) -> Buffer:
         """A writable buffer of about size bytes."""

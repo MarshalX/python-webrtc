@@ -19,6 +19,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import keyword
 import re
 import textwrap
 from typing import TYPE_CHECKING
@@ -49,12 +50,20 @@ _PROTOCOLS = {
     'maplike': ('__getitem__', '__iter__', '__len__', '__contains__', 'get', 'keys', 'values', 'items'),
     'setlike': ('__iter__', '__len__', '__contains__'),
     'iterable': ('__iter__',),
+    'async_iterable': ('__aiter__', 'values'),
 }
+# toJSON returns the JSON form of its dictionary, which is a dict in Python
+_JSON = re.compile(r'\b(dict|Mapping)\b')
 
 
 def snake_case(name: str) -> str:
     """``'insertDTMF'`` -> ``'insert_dtmf'``, the way the package names acronyms."""
     return _BOUNDARY.sub('_', name).lower()
+
+
+def python_name(name: str) -> str:
+    """``'from'`` -> ``'from_'``: a keyword takes a trailing underscore, which Python names can't do without."""
+    return f'{name}_' if keyword.iskeyword(name) else name
 
 
 @functools.cache
@@ -145,10 +154,12 @@ class _Types:
 class _Arguments(_Types):
     """Matches the arguments of one overload with the parameters of a signature."""
 
-    def __init__(self, spec: Spec, label: str, parameters: list[inspect.Parameter]) -> None:
+    def __init__(self, spec: Spec, label: str, parameters: list[inspect.Parameter], *, span: int = 0) -> None:
         super().__init__(spec)
         self.label = label
         self.parameters = parameters
+        # the arguments other overloads take: optional parameters in their positions merge those overloads
+        self.span = span
         self.unused = {parameter.name: parameter for parameter in parameters}
         self.order: list[int] = []
         self.found: list[str] = []
@@ -159,13 +170,20 @@ class _Arguments(_Types):
         if self.order != sorted(self.order):
             self.found.append(f'{self.label}: arguments out of order')
         for parameter in self.unused.values():
+            if self.merged(parameter):
+                continue
             prefix = '*' if parameter.kind is _P.VAR_POSITIONAL else '**' if parameter.kind is _P.VAR_KEYWORD else ''
             self.found.append(f'{self.label}({prefix}{parameter.name}): extra argument')
         return self.found
 
+    def merged(self, parameter: inspect.Parameter) -> bool:
+        """Whether an optional parameter takes an argument of another overload, like ``MediaStream(tracks=None)``."""
+        positional = parameter.kind in {_P.POSITIONAL_ONLY, _P.POSITIONAL_OR_KEYWORD}
+        return positional and parameter.default is not _P.empty and self.parameters.index(parameter) < self.span
+
     def take(self, name: str) -> inspect.Parameter | None:
-        parameter = self.unused.pop(snake_case(name), None)
-        return parameter if parameter is not None else self.unused.pop(name, None)
+        parameter = self.unused.pop(python_name(snake_case(name)), None)
+        return parameter if parameter is not None else self.unused.pop(python_name(name), None)
 
     def argument(self, index: int, argument: Argument) -> None:
         path = f'{self.label}({argument["name"]})'
@@ -179,7 +197,9 @@ class _Arguments(_Types):
             if parameter is None:
                 self.found.append(f'{path}: missing argument')
                 return
-            self.found.append(f'{path}: named {parameter.name}')
+            # a positional-only parameter has no name callers use
+            if parameter.kind is not _P.POSITIONAL_ONLY:
+                self.found.append(f'{path}: named {parameter.name}')
 
         if argument['variadic'] != (parameter.kind is _P.VAR_POSITIONAL):
             self.found.append(f'{path}: should {"" if argument["variadic"] else "not "}be variadic')
@@ -243,16 +263,16 @@ class _Class(_Types):
 
     def resolve(self, idl_name: str, kind: str) -> str | None:
         """Checks the snake_case name and the camelCase alias of a member, returning the one to inspect."""
-        snake = snake_case(idl_name)
-        self.expected |= {idl_name, snake}
-        if snake not in self.names and idl_name not in self.names:
+        snake, camel = python_name(snake_case(idl_name)), python_name(idl_name)
+        self.expected |= {camel, snake}
+        if snake not in self.names and camel not in self.names:
             self.found.append(f'{idl_name}: missing {kind}')
             return None
         if snake not in self.names:
             self.found.append(f'{idl_name}: missing snake_case name {snake}')
-        elif idl_name not in self.names:
+        elif camel not in self.names:
             self.found.append(f'{idl_name}: missing camelCase alias')
-        return snake if snake in self.names else idl_name
+        return snake if snake in self.names else camel
 
     def annotation(self, name: str) -> object:
         for klass in self.cls.__mro__:
@@ -262,11 +282,11 @@ class _Class(_Types):
         return _P.empty
 
     def extras(self) -> list[str]:
-        infrastructure = set()
+        # the names of bases are infrastructure, or the extras of a base definition, reported once for it
+        inherited = set()
         for base in self.cls.__mro__[1:]:
-            if base.__name__ not in self.spec.definitions:
-                infrastructure |= _names(base)
-        extra = self.names - self.expected - infrastructure
+            inherited |= _names(base)
+        extra = self.names - self.expected - inherited
         # a snake_case name and its camelCase alias are one member
         return [f'{name}: extra member' for name in extra if snake_case(name) == name or snake_case(name) not in extra]
 
@@ -376,7 +396,13 @@ class _Class(_Types):
             return result.replace(parameters=list(result.parameters.values())[1:])  # self or cls
 
         self.check_overloads(idl_name, overloads, signature)
-        self.found += self.lacks(f'{idl_name}()', overloads[0]['idlType'], signature().return_annotation)
+        self.check_return(idl_name, overloads[0], signature().return_annotation)
+
+    def check_return(self, idl_name: str, operation: Operation, returned: object) -> None:
+        if idl_name != 'toJSON':
+            self.found += self.lacks(f'{idl_name}()', operation['idlType'], returned)
+        elif not _mentions(_JSON, returned):
+            self.found.append(f'{idl_name}(): should return a dict')
 
     def check_overloads(
         self, label: str, overloads: Sequence[Operation | Constructor], signature: Callable[[], inspect.Signature]
@@ -386,7 +412,10 @@ class _Class(_Types):
             parameters = list(signature().parameters.values())
         except (TypeError, ValueError):
             return
-        results = [_Arguments(self.spec, label, parameters).check(overload['arguments']) for overload in overloads]
+        span = max(len(overload['arguments']) for overload in overloads) if len(overloads) > 1 else 0
+        results = [
+            _Arguments(self.spec, label, parameters, span=span).check(overload['arguments']) for overload in overloads
+        ]
         self.found += min(results, key=len)
 
 

@@ -20,6 +20,7 @@
 #include <api/media_stream_interface.h>
 #include <api/video/video_frame.h>
 #include <api/video/video_sink_interface.h>
+#include <rtc_base/numerics/sequence_number_unwrapper.h>
 
 #include <pybind11/pybind11.h>
 
@@ -124,6 +125,9 @@ namespace python_webrtc {
     bool _ended = false;
     // a wakeup is on its way to Python
     bool _wakePending = false;
+    // the timestamps of received video, from their RTP timestamps: their render times may repeat
+    webrtc::RtpTimestampUnwrapper _rtpUnwrapper;
+    std::optional<std::pair<int64_t, int64_t>> _firstReceived;
     std::atomic<uint64_t> _totalFrames = 0;
     std::atomic<uint64_t> _discardedFrames = 0;
 

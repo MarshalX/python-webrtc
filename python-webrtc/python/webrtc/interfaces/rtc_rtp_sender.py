@@ -55,8 +55,28 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         return webrtc.RTCDTMFSender._wrap_optional(self._native_obj.dtmf)
 
     @property
-    def kind(self) -> webrtc.MediaType:
-        """:obj:`webrtc.MediaType`: The kind of media the sender sends, audio or video."""
+    def transform(self) -> webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameEncryptor | None:
+        """:obj:`webrtc.RTCRtpScriptTransform` or :obj:`webrtc.RTCRtpSFrameEncryptor`, optional: The frame transform.
+
+        It transforms the encoded frames before they're sent, :obj:`None` sends them as they're encoded.
+        A transform is used by one sender or receiver only: a transform that had one can't be set again.
+
+        Raises:
+            TypeError: If the value set isn't a transform of a sender.
+            webrtc.InvalidStateError: If the transform set had a sender or receiver.
+        """
+        native = self._native_obj.transform
+        if isinstance(native, wrtc.SFrameTransform):
+            return webrtc.RTCRtpSFrameEncryptor._wrap(native)
+        return webrtc.RTCRtpScriptTransform._of_native(native)
+
+    @transform.setter
+    def transform(self, transform: webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameEncryptor | None) -> None:
+        self._native_obj.transform = _native_transform(transform, webrtc.RTCRtpSFrameEncryptor)
+
+    @property
+    def _kind(self) -> webrtc.MediaType:
+        # the kind of the native object, which the receiver's track has too
         return self._native_obj.kind
 
     def get_parameters(self) -> webrtc.RTCRtpSendParameters:
@@ -69,28 +89,30 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
             :obj:`webrtc.RTCRtpSendParameters`: The parameters, with a new ``transaction_id``.
         """
         parameters = RTCRtpSendParameters._from_native(self._native_obj.getParameters())
-        if self.kind == MediaType.video:
+        if self._kind == MediaType.video:
             _default_scale_resolution_down_by(parameters.encodings)
         # they expire when the current task (with the code it resumed) is over, never without a loop
         _ = TaskQueue.post_to_running(self._native_obj._expireParameters, parameters.transaction_id, after_ready=True)
         return parameters
 
     async def set_parameters(
-        self, parameters: webrtc.RTCRtpSendParameters, *, key_frames: Sequence[bool] | None = None
+        self,
+        parameters: webrtc.RTCRtpSendParameters,
+        set_parameter_options: webrtc.RTCSetParameterOptions | None = None,
     ) -> None:
         """Changes how the sender sends: its encodings and degradation preference.
 
         Args:
             parameters (:obj:`webrtc.RTCRtpSendParameters`): The parameters :meth:`get_parameters` returned in the
                 current task, modified.
-            key_frames (:obj:`list` of :obj:`bool`, optional): For each encoding, whether it sends a key frame
-                right away.
+            set_parameter_options (:obj:`webrtc.RTCSetParameterOptions`, optional): How to change the encodings,
+                like sending a key frame right away.
 
         Raises:
             webrtc.InvalidStateError: If :meth:`get_parameters` wasn't called in the current task.
             webrtc.InvalidModificationError: If the ``transaction_id``, the codecs, the header extensions,
                 the RTCP parameters, the number of encodings or their ``rid`` changed, the codec of an encoding
-                isn't negotiated, or ``key_frames`` isn't one per encoding.
+                isn't negotiated, or ``encoding_options`` aren't one per encoding.
             webrtc.InvalidRangeError: If a value is out of range, like ``scale_resolution_down_by`` below 1.
         """
         if self._native_obj._transceiverStopped():
@@ -100,41 +122,42 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         if last is None:
             msg = 'get_parameters() must be called before set_parameters(), in the same task'
             raise InvalidStateError(msg)
-        _check_unchanged(parameters, RTCRtpSendParameters._from_native(last), key_frames)
-        if self.kind == MediaType.video:
+        options = set_parameter_options.encoding_options if set_parameter_options is not None else None
+        _check_unchanged(parameters, RTCRtpSendParameters._from_native(last), options)
+        if self._kind == MediaType.video:
             _check_video_ranges(parameters.encodings)
 
-        kind = self.kind
+        kind = self._kind
         # a copy (pybind returns one): changed, then set back
         encodings = last.encodings
         for native, encoding in zip(encodings, parameters.encodings):
             _ = encoding._for_kind(kind)._apply(native)
-        for native, key_frame in zip(encodings, key_frames if key_frames is not None else ()):
-            native.requestKeyFrame = bool(key_frame)
+        for native, option in zip(encodings, options if options is not None else ()):
+            native.requestKeyFrame = bool(option.key_frame)
         last.encodings = encodings
         last.degradationPreference = parameters.degradation_preference
         await call_native(self._native_obj.setParameters, last)
 
-    async def replace_track(self, track: webrtc.MediaStreamTrack | None) -> None:
+    async def replace_track(self, with_track: webrtc.MediaStreamTrack | None) -> None:
         """Replaces the track the sender sends, without negotiation.
 
         The track is replaced in the operations chain of the connection, after the operations started before
         (like setting a description), and not before the code that called it runs on.
 
         Args:
-            track (:obj:`webrtc.MediaStreamTrack`, optional): The new track, of the same kind, or :obj:`None`
+            with_track (:obj:`webrtc.MediaStreamTrack`, optional): The new track, of the same kind, or :obj:`None`
                 to stop sending.
 
         Raises:
             TypeError: If the track is of another kind.
             webrtc.InvalidStateError: If the transceiver of the sender is stopped, or the connection closed.
         """
-        if track is not None and track.kind != self.kind:
-            msg = f'a {track.kind} track can not replace the track of a {self.kind} sender'
+        if with_track is not None and with_track.kind != self._kind:
+            msg = f'a {with_track.kind} track can not replace the track of a {self._kind} sender'
             raise TypeError(msg)
 
         def replace() -> None:
-            native_track = track._native_obj if track is not None else None
+            native_track = with_track._native_obj if with_track is not None else None
             if self._native_obj._transceiverStopped() or not self._native_obj.replaceTrack(native_track):
                 msg = 'The track of a stopped sender can not be replaced'
                 raise InvalidStateError(msg)
@@ -198,15 +221,30 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
     getCapabilities = get_capabilities
 
 
+def _native_transform(
+    transform: webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameEncryptor | webrtc.RTCRtpSFrameDecryptor | None,
+    sframe: type[webrtc.RTCRtpSFrameEncryptor | webrtc.RTCRtpSFrameDecryptor],
+) -> wrtc._RtpTransform | None:
+    """The native transform of the transform attribute of a sender or receiver, whose SFrame transform is given."""
+    if transform is None:
+        return None
+    if not isinstance(transform, (webrtc.RTCRtpScriptTransform, sframe)):
+        msg = (
+            f'transform must be an RTCRtpScriptTransform, an {sframe.__name__} or None, not {type(transform).__name__}'
+        )
+        raise TypeError(msg)
+    return transform._native_obj
+
+
 def _check_unchanged(
     parameters: webrtc.RTCRtpSendParameters,
     returned: webrtc.RTCRtpSendParameters,
-    key_frames: Sequence[bool] | None,
+    encoding_options: Sequence[webrtc.RTCEncodingOptions] | None,
 ) -> None:
     """Checks what set_parameters() can't change against the parameters get_parameters() returned last.
 
     Raises:
-        webrtc.InvalidModificationError: If something changed, or ``key_frames`` isn't one per encoding.
+        webrtc.InvalidModificationError: If something changed, or ``encoding_options`` aren't one per encoding.
     """
     if parameters.transaction_id != returned.transaction_id:
         msg = "The transaction_id doesn't match the one of the last get_parameters()"
@@ -218,8 +256,8 @@ def _check_unchanged(
     if [e.rid for e in parameters.encodings] != [e.rid for e in returned.encodings]:
         msg = 'The number of encodings and their rid can not be changed'
         raise InvalidModificationError(msg)
-    if key_frames is not None and len(key_frames) != len(parameters.encodings):
-        msg = 'key_frames must have one value per encoding'
+    if encoding_options is not None and len(encoding_options) != len(parameters.encodings):
+        msg = 'encoding_options must have one value per encoding'
         raise InvalidModificationError(msg)
 
 

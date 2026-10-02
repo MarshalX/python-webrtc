@@ -84,6 +84,9 @@ _CONSTRAINABLE = (
     'echo_cancellation',
     'auto_gain_control',
     'noise_suppression',
+    'facing_mode',
+    'latency',
+    'background_blur',
 )
 
 
@@ -166,7 +169,7 @@ def _selected(
 
 # the members of constraints that are numbers: unsigned longs, and restricted doubles
 _ULONG_CONSTRAINTS = ('width', 'height', 'sample_rate', 'sample_size', 'channel_count')
-_DOUBLE_CONSTRAINTS = ('aspect_ratio', 'frame_rate')
+_DOUBLE_CONSTRAINTS = ('aspect_ratio', 'frame_rate', 'latency')
 
 
 def _check_numbers(constraint_set: MediaTrackConstraintSet) -> None:

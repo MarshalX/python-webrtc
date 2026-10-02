@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
 from webrtc import wrtc
-from webrtc.enums import TransceiverDirection, TransceiverDirectionValue
+from webrtc.enums import RTCRtpTransceiverDirection, RTCRtpTransceiverDirectionValue
 from webrtc.models.dictionary import Dictionary
 from webrtc.models.rtp_parameters import RTCRtpEncodingParameters
 from webrtc.utils.names import Alias, alias
@@ -27,7 +27,7 @@ class RTCRtpTransceiverInit(Dictionary):
     """The options of a new transceiver, for :meth:`webrtc.RTCPeerConnection.add_transceiver`.
 
     Args:
-        direction (:obj:`webrtc.TransceiverDirection`, optional): The direction of the transceiver, ``sendrecv``
+        direction (:obj:`webrtc.RTCRtpTransceiverDirection`, optional): The direction of the transceiver, ``sendrecv``
             by default.
         streams (:obj:`list` of :obj:`webrtc.MediaStream`, optional): The streams the remote peer receives the track
             of its sender in.
@@ -35,17 +35,17 @@ class RTCRtpTransceiverInit(Dictionary):
             sender, one per simulcast layer.
 
     Raises:
-        ValueError: If the direction isn't a member of :obj:`webrtc.TransceiverDirection`.
+        ValueError: If the direction isn't a member of :obj:`webrtc.RTCRtpTransceiverDirection`.
     """
 
-    direction: TransceiverDirection | TransceiverDirectionValue = TransceiverDirection.sendrecv
+    direction: RTCRtpTransceiverDirection | RTCRtpTransceiverDirectionValue = RTCRtpTransceiverDirection.sendrecv
     streams: list[webrtc.MediaStream] = field(default_factory=list)
     send_encodings: list[RTCRtpEncodingParameters] = field(default_factory=list)
 
     _dictionaries: ClassVar = {'send_encodings': RTCRtpEncodingParameters}
 
     def __post_init__(self) -> None:
-        self.direction = TransceiverDirection(self.direction)
+        self.direction = RTCRtpTransceiverDirection(self.direction)
 
     def _to_native(self, encodings: list[RTCRtpEncodingParameters]) -> wrtc.RtpTransceiverInit:
         """The native init, with the encodings to send (those of the init, adapted to the kind of the track)."""

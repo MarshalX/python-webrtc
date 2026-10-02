@@ -8,7 +8,11 @@
 #include "media.h"
 
 #include "audio_samples.h"
+#include "encoded_frame.h"
+#include "frame_transformer_bridge.h"
 #include "media_stream_track_processor.h"
+#include "rtc_rtp_script_transform.h"
+#include "sframe_transform.h"
 #include "track_generator.h"
 #include "video_frame_buffer.h"
 
@@ -19,6 +23,10 @@ namespace python_webrtc {
     AudioSamples::Init(m);
     MediaStreamTrackProcessor::Init(m);
     TrackGenerator::Init(m);
+    RtpTransform::Init(m);
+    EncodedFrame::Init(m);
+    RTCRtpScriptTransform::Init(m);
+    SFrameTransform::Init(m);
   }
 
 } // namespace python_webrtc

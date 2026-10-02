@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include <pybind11/pybind11.h>
 
@@ -22,6 +23,12 @@ namespace python_webrtc {
       throw pybind11::type_error("The buffer must be contiguous");
     }
     return info;
+  }
+
+  // the octets of a contiguous buffer, valid while info is
+  inline std::span<const uint8_t> BufferSpan(const pybind11::buffer &buffer, pybind11::buffer_info &info) {
+    info = ContiguousBuffer(buffer);
+    return {static_cast<const uint8_t *>(info.ptr), static_cast<size_t>(info.size * info.itemsize)};
   }
 
   // bytes of a buffer of octets

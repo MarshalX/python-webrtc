@@ -51,8 +51,6 @@ class RTCIceConnectionState(_StrEnum):
     failed = 'failed'
     disconnected = 'disconnected'
     closed = 'closed'
-    #: Not a state: the number of states in libwebrtc, never reported.
-    max = 'max'
 
 
 class RTCIceGatheringState(_StrEnum):
@@ -92,8 +90,8 @@ class MediaStreamSourceState(_StrEnum):
     muted = 'muted'
 
 
-class TransceiverDirection(_StrEnum):
-    """The direction of a transceiver, ``RTCRtpTransceiverDirection`` in the specification."""
+class RTCRtpTransceiverDirection(_StrEnum):
+    """The direction of a transceiver."""
 
     sendrecv = 'sendrecv'
     sendonly = 'sendonly'
@@ -102,8 +100,8 @@ class TransceiverDirection(_StrEnum):
     stopped = 'stopped'
 
 
-#: The values of :obj:`TransceiverDirection`, which parameters taking it take too
-TransceiverDirectionValue = Literal['sendrecv', 'sendonly', 'recvonly', 'inactive', 'stopped']
+#: The values of :obj:`RTCRtpTransceiverDirection`, which parameters taking it take too
+RTCRtpTransceiverDirectionValue = Literal['sendrecv', 'sendonly', 'recvonly', 'inactive', 'stopped']
 
 
 class MediaType(_StrEnum):
@@ -117,6 +115,37 @@ class MediaType(_StrEnum):
 
 #: The values of :obj:`MediaType`, which parameters taking it take too
 MediaTypeValue = Literal['audio', 'video', 'data', 'unsupported']
+
+
+class MediaDeviceKind(_StrEnum):
+    """The kind of a media device."""
+
+    audioinput = 'audioinput'
+    audiooutput = 'audiooutput'
+    videoinput = 'videoinput'
+
+
+class VideoFacingModeEnum(_StrEnum):
+    """Where a camera faces."""
+
+    user = 'user'
+    environment = 'environment'
+    left = 'left'
+    right = 'right'
+
+
+class VideoResizeModeEnum(_StrEnum):
+    """How the video of a source is resized."""
+
+    none = 'none'
+    crop_and_scale = 'crop-and-scale'
+
+
+class EchoCancellationModeEnum(_StrEnum):
+    """Which echo is cancelled: of all the audio played, or of the remote audio only."""
+
+    all = 'all'
+    remote_only = 'remote-only'
 
 
 class RTCIceComponent(_StrEnum):
@@ -146,16 +175,16 @@ class RTCIceTransportState(_StrEnum):
     closed = 'closed'
 
 
-class CricketIceGatheringState(_StrEnum):
-    """The candidate gathering state of an ICE transport, ``RTCIceGathererState`` in the specification."""
+class RTCIceGathererState(_StrEnum):
+    """The candidate gathering state of an ICE transport."""
 
     new = 'new'
     gathering = 'gathering'
     complete = 'complete'
 
 
-class DtlsTransportState(_StrEnum):
-    """The state of a DTLS transport, ``RTCDtlsTransportState`` in the specification."""
+class RTCDtlsTransportState(_StrEnum):
+    """The state of a DTLS transport."""
 
     new = 'new'
     connecting = 'connecting'
@@ -164,10 +193,9 @@ class DtlsTransportState(_StrEnum):
     failed = 'failed'
 
 
-class SctpTransportState(_StrEnum):
-    """The state of an SCTP transport, ``RTCSctpTransportState`` in the specification."""
+class RTCSctpTransportState(_StrEnum):
+    """The state of an SCTP transport."""
 
-    new = 'new'
     connecting = 'connecting'
     connected = 'connected'
     closed = 'closed'
@@ -293,6 +321,52 @@ class RTCIceServerTransportProtocol(_StrEnum):
 RTCIceServerTransportProtocolValue = Literal['udp', 'tcp', 'tls']
 
 
+class RTCStatsType(_StrEnum):
+    """The type of stats, which tells the dictionary they are."""
+
+    codec = 'codec'
+    inbound_rtp = 'inbound-rtp'
+    outbound_rtp = 'outbound-rtp'
+    remote_inbound_rtp = 'remote-inbound-rtp'
+    remote_outbound_rtp = 'remote-outbound-rtp'
+    media_source = 'media-source'
+    media_playout = 'media-playout'
+    peer_connection = 'peer-connection'
+    data_channel = 'data-channel'
+    transport = 'transport'
+    candidate_pair = 'candidate-pair'
+    local_candidate = 'local-candidate'
+    remote_candidate = 'remote-candidate'
+    certificate = 'certificate'
+
+
+class RTCQualityLimitationReason(_StrEnum):
+    """What limits the resolution or frame rate of a video sender the most."""
+
+    none = 'none'
+    cpu = 'cpu'
+    bandwidth = 'bandwidth'
+    other = 'other'
+
+
+class RTCDtlsRole(_StrEnum):
+    """The role of a DTLS transport in the handshake."""
+
+    client = 'client'
+    server = 'server'
+    unknown = 'unknown'
+
+
+class RTCStatsIceCandidatePairState(_StrEnum):
+    """The state of an ICE candidate pair in the checklist."""
+
+    frozen = 'frozen'
+    waiting = 'waiting'
+    in_progress = 'in-progress'
+    failed = 'failed'
+    succeeded = 'succeeded'
+
+
 class RTCErrorDetailType(_StrEnum):
     """The WebRTC-specific cause of an :obj:`webrtc.RTCError`."""
 
@@ -328,6 +402,19 @@ class BinaryType(_StrEnum):
 
 #: The values of :obj:`BinaryType`, which parameters taking it take too
 BinaryTypeValue = Literal['arraybuffer', 'blob']
+
+
+class EndingType(_StrEnum):
+    """How a :obj:`webrtc.Blob` writes the line endings of its string parts."""
+
+    #: As they are
+    transparent = 'transparent'
+    #: As the ones of the platform: ``\r\n`` on Windows, ``\n`` elsewhere
+    native = 'native'
+
+
+#: The values of :obj:`EndingType`, which parameters taking it take too
+EndingTypeValue = Literal['transparent', 'native']
 
 
 class VideoPixelFormat(_StrEnum):
@@ -444,6 +531,19 @@ class AlphaOption(_StrEnum):
 AlphaOptionValue = Literal['keep', 'discard']
 
 
+class PredefinedColorSpace(_StrEnum):
+    """The color space :meth:`webrtc.VideoFrame.copy_to` converts RGB pixels to."""
+
+    srgb = 'srgb'
+    srgb_linear = 'srgb-linear'
+    display_p3 = 'display-p3'
+    display_p3_linear = 'display-p3-linear'
+
+
+#: The values of :obj:`PredefinedColorSpace`, which parameters taking it take too
+PredefinedColorSpaceValue = Literal['srgb', 'srgb-linear', 'display-p3', 'display-p3-linear']
+
+
 class AudioSampleFormat(_StrEnum):
     """The type of the samples of an :obj:`webrtc.AudioData`, interleaved or in a plane per channel."""
 
@@ -459,3 +559,80 @@ class AudioSampleFormat(_StrEnum):
 
 #: The values of :obj:`AudioSampleFormat`, which parameters taking it take too
 AudioSampleFormatValue = Literal['u8', 's16', 's32', 'f32', 'u8-planar', 's16-planar', 's32-planar', 'f32-planar']
+
+
+class ReadableStreamReaderMode(_StrEnum):
+    """The type of reader :meth:`webrtc.ReadableStream.get_reader` returns."""
+
+    byob = 'byob'
+
+
+#: The values of :obj:`ReadableStreamReaderMode`, which parameters taking it take too
+ReadableStreamReaderModeValue = Literal['byob']
+
+
+class EncodedVideoChunkType(_StrEnum):
+    """Whether an encoded video frame is a key frame, which decodes on its own, or depends on earlier frames."""
+
+    key = 'key'
+    delta = 'delta'
+
+
+class RTCRtpScriptTransformType(_StrEnum):
+    """How an :obj:`webrtc.RTCRtpScriptTransform` packetizes the frames it outputs."""
+
+    #: The frames are SFrame-encrypted, packetized as SFrame
+    sframe = 'sframe'
+
+
+#: The values of :obj:`RTCRtpScriptTransformType`, which parameters taking it take too
+RTCRtpScriptTransformTypeValue = Literal['sframe']
+
+
+class SFrameCipherSuite(_StrEnum):
+    """The SFrame cipher suites of RFC 9605 and draft-barnes-sframe-iana-256: AES-CTR with HMAC tags, or AES-GCM."""
+
+    AES_128_CTR_HMAC_SHA256_80 = 'AES_128_CTR_HMAC_SHA256_80'
+    AES_128_CTR_HMAC_SHA256_64 = 'AES_128_CTR_HMAC_SHA256_64'
+    AES_128_CTR_HMAC_SHA256_32 = 'AES_128_CTR_HMAC_SHA256_32'
+    AES_128_GCM_SHA256_128 = 'AES_128_GCM_SHA256_128'
+    AES_256_GCM_SHA512_128 = 'AES_256_GCM_SHA512_128'
+    AES_256_CTR_HMAC_SHA512_80 = 'AES_256_CTR_HMAC_SHA512_80'
+    AES_256_CTR_HMAC_SHA512_64 = 'AES_256_CTR_HMAC_SHA512_64'
+    AES_256_CTR_HMAC_SHA512_32 = 'AES_256_CTR_HMAC_SHA512_32'
+
+
+#: The values of :obj:`SFrameCipherSuite`, which parameters taking it take too
+SFrameCipherSuiteValue = Literal[
+    'AES_128_CTR_HMAC_SHA256_80',
+    'AES_128_CTR_HMAC_SHA256_64',
+    'AES_128_CTR_HMAC_SHA256_32',
+    'AES_128_GCM_SHA256_128',
+    'AES_256_GCM_SHA512_128',
+    'AES_256_CTR_HMAC_SHA512_80',
+    'AES_256_CTR_HMAC_SHA512_64',
+    'AES_256_CTR_HMAC_SHA512_32',
+]
+
+
+class SFrameType(_StrEnum):
+    """Whether an :obj:`webrtc.RTCRtpSFrameEncryptor` encrypts whole frames or each RTP packet."""
+
+    per_frame = 'per-frame'
+    per_packet = 'per-packet'
+
+
+#: The values of :obj:`SFrameType`, which parameters taking it take too
+SFrameTypeValue = Literal['per-frame', 'per-packet']
+
+
+class SFrameTransformErrorEventType(_StrEnum):
+    """Why a frame didn't decrypt: it didn't authenticate, its key id is unknown, or it isn't SFrame."""
+
+    authentication = 'authentication'
+    key_id = 'keyID'
+    syntax = 'syntax'
+
+
+#: The values of :obj:`SFrameTransformErrorEventType`, which parameters taking it take too
+SFrameTransformErrorEventTypeValue = Literal['authentication', 'keyID', 'syntax']

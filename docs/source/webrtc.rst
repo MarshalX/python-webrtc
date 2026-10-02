@@ -12,7 +12,6 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
-   webrtc.functions
    webrtc.interfaces
    webrtc.models
    webrtc.utils

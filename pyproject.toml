@@ -141,7 +141,6 @@ ignore = [
 "python-webrtc/python/webrtc/interfaces/rtc_peer_connection.py" = ["PLR0904"]  # the W3C interface
 # user callbacks error the stream, as the specification says; handler errors go to the loop's exception handler
 "python-webrtc/python/webrtc/{streams.py,utils/events.py}" = ["BLE001"]
-"python-webrtc/python/webrtc/models/rtc_stats.py" = ["FURB189"]  # a real dict, for json and isinstance
 # native leak counters and queues have no public API; chaos replays a seeded random
 "tests/**" = ["S101", "D1", "PLR2004", "S404", "S603", "SLF001", "S311"]
 "examples/**" = ["T201"]
@@ -152,7 +151,7 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.flake8-builtins]
-ignorelist = ["format", "id", "type"]  # W3C member names
+ignorelist = ["format", "hash", "id", "type"]  # W3C member names
 
 [tool.ruff.lint.pydoclint]
 ignore-one-line-docstrings = true

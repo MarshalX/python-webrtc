@@ -16,24 +16,25 @@ from typing import TYPE_CHECKING, cast
 from typing_extensions import override
 
 from webrtc import (
-    CricketIceGatheringState,
     InvalidStateError,
     InvalidSyntaxError,
     RTCIceCandidate,
+    RTCIceCandidateInit,
     RTCIceCandidatePair,
+    RTCIceGathererState,
+    RTCIceGatherOptions,
     RTCIceParameters,
     RTCIceRole,
     RTCIceServer,
     RTCIceTransportState,
     RTCPeerConnectionIceEvent,
+    RTCPeerConnectionIceEventInit,
     WebRTCObject,
     wrtc,
 )
 from webrtc.utils.events import EventTarget
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     import webrtc
 
 
@@ -59,10 +60,11 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
         ``selectedcandidatepairchange`` (:obj:`webrtc.Event`): :meth:`get_selected_candidate_pair` changed.
         ``icecandidate`` (:obj:`webrtc.RTCPeerConnectionIceEvent`): A standalone transport gathered a candidate,
         or :obj:`None` once it gathered them all.
+        ``error`` (:obj:`webrtc.Event`): A standalone transport failed, which libwebrtc doesn't report.
     """
 
     _class = wrtc.RTCIceTransport
-    _events = ('statechange', 'gatheringstatechange', 'selectedcandidatepairchange', 'icecandidate')
+    _events = ('statechange', 'gatheringstatechange', 'selectedcandidatepairchange', 'icecandidate', 'error')
 
     def __init__(self) -> None:
         super().__init__()
@@ -88,7 +90,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
             (state,) = cast('tuple[RTCIceTransportState]', args)
             self._native_obj._surfaceState(state)
         elif name == 'gatheringstatechange':
-            (gathering_state,) = cast('tuple[CricketIceGatheringState]', args)
+            (gathering_state,) = cast('tuple[RTCIceGathererState]', args)
             self._native_obj._surfaceGatheringState(gathering_state)
         elif name == 'icecandidate' and len(args) > 0 and args[0] is not None:
             self._native_obj._surfaceCandidate()
@@ -99,7 +101,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
             # the end of candidates has none
             native = cast('wrtc.IceCandidateInit | None', args[0]) if len(args) > 0 else None
             candidate = self._candidate_of(native) if native is not None else None
-            return RTCPeerConnectionIceEvent(name, candidate, None, target=self)
+            return RTCPeerConnectionIceEvent(name, RTCPeerConnectionIceEventInit(candidate))
         return super()._create_event(name, *args)
 
     def _check_standalone(self, operation: str) -> None:
@@ -113,16 +115,11 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
             msg = f'Can not {operation}: the transport is stopped'
             raise InvalidStateError(msg)
 
-    def gather(
-        self,
-        gather_policy: webrtc.RTCIceTransportPolicy | webrtc.RTCIceTransportPolicyValue = 'all',
-        ice_servers: Sequence[webrtc.RTCIceServer] | None = None,
-    ) -> None:
+    def gather(self, options: webrtc.RTCIceGatherOptions | None = None) -> None:
         """Gathers the candidates of a standalone transport, sent in ``icecandidate`` events.
 
         Args:
-            gather_policy (:obj:`webrtc.RTCIceTransportPolicy`, optional): All candidates, or only relay ones.
-            ice_servers (:obj:`list` of :obj:`webrtc.RTCIceServer`, optional): STUN and TURN servers to gather with.
+            options (:obj:`webrtc.RTCIceGatherOptions`, optional): The policy and the ICE servers to gather with.
 
         Raises:
             webrtc.InvalidStateError: If it's stopped, gathering already, or belongs to a connection.
@@ -131,16 +128,16 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
             TypeError: If the policy isn't a value of :obj:`webrtc.RTCIceTransportPolicy`.
         """
         self._check_open('gather')
-        if self.gathering_state != CricketIceGatheringState.new:
+        if self.gathering_state != RTCIceGathererState.new:
             msg = 'The transport gathers its candidates already'
             raise InvalidStateError(msg)
-        self._native_obj.gather(
-            gather_policy, RTCIceServer._to_native_list(ice_servers if ice_servers is not None else ())
-        )
+        options = options if options is not None else RTCIceGatherOptions()
+        servers = options.ice_servers if options.ice_servers is not None else ()
+        self._native_obj.gather(options.gather_policy, RTCIceServer._to_native_list(servers))
 
     def start(
         self,
-        remote_parameters: webrtc.RTCIceParameters,
+        remote_parameters: webrtc.RTCIceParameters | None = None,
         role: webrtc.RTCIceRole | str = 'controlled',
     ) -> None:
         """Starts connecting a standalone transport to the remote agent, with the candidates added, or later.
@@ -148,8 +145,8 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
         Remote parameters that differ from the ones given before remove the remote candidates.
 
         Args:
-            remote_parameters (:obj:`webrtc.RTCIceParameters`): The username fragment and the password of the
-                remote agent.
+            remote_parameters (:obj:`webrtc.RTCIceParameters`, optional): The username fragment and the password of
+                the remote agent, which are required.
             role (:obj:`webrtc.RTCIceRole`, optional): Controlling or controlled (the default). When both agents take
                 the same role, one of them switches.
 
@@ -159,22 +156,27 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
             ValueError: If the role is neither controlling nor controlled.
         """
         self._check_open('start')
-        if _UFRAG.fullmatch(remote_parameters.username_fragment) is None:
-            msg = f'{remote_parameters.username_fragment!r} is not a valid ICE username fragment'
+        parameters = remote_parameters if remote_parameters is not None else RTCIceParameters()
+        ufrag, password = parameters.username_fragment, parameters.password
+        if ufrag is None or _UFRAG.fullmatch(ufrag) is None:
+            msg = f'{ufrag!r} is not a valid ICE username fragment'
             raise InvalidSyntaxError(msg)
-        if _PASSWORD.fullmatch(remote_parameters.password) is None:
+        if password is None or _PASSWORD.fullmatch(password) is None:
             msg = 'the ICE password is not valid'
             raise InvalidSyntaxError(msg)
         if role not in {RTCIceRole.controlling, RTCIceRole.controlled}:
             msg = 'role must be controlling or controlled'
             raise ValueError(msg)
-        self._native_obj.start(remote_parameters.username_fragment, remote_parameters.password, role)
+        self._native_obj.start(ufrag, password, role)
 
-    def add_remote_candidate(self, candidate: webrtc.RTCIceCandidate | webrtc.RTCIceCandidateInit) -> None:
+    def add_remote_candidate(
+        self, remote_candidate: webrtc.RTCIceCandidate | webrtc.RTCIceCandidateInit | None = None
+    ) -> None:
         """Adds a candidate of the remote agent to a standalone transport.
 
         Args:
-            candidate (:obj:`webrtc.RTCIceCandidate` or :obj:`webrtc.RTCIceCandidateInit`): The candidate.
+            remote_candidate (:obj:`webrtc.RTCIceCandidate` or :obj:`webrtc.RTCIceCandidateInit`, optional): The
+                candidate, which needs ``sdp_mid`` or ``sdp_m_line_index``.
 
         Raises:
             TypeError: If the candidate has neither ``sdp_mid`` nor ``sdp_m_line_index``.
@@ -182,6 +184,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
             webrtc.OperationError: If the candidate can't be parsed.
         """
         self._check_open('add a remote candidate')
+        candidate = remote_candidate if remote_candidate is not None else RTCIceCandidateInit()
         if not isinstance(candidate, RTCIceCandidate):
             candidate = RTCIceCandidate(*RTCIceCandidate._members_of(candidate))
         self._native_obj.addRemoteCandidate(
@@ -242,7 +245,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
             :obj:`webrtc.RTCIceParameters`, optional: The parameters, :obj:`None` without a local description.
         """
         parameters = self._native_obj.getLocalParameters()
-        return RTCIceParameters(*parameters) if parameters is not None else None
+        return RTCIceParameters(*parameters, ice_lite=False) if parameters is not None else None
 
     def get_remote_parameters(self) -> webrtc.RTCIceParameters | None:
         """Returns the ICE parameters of the transport in the remote description.
@@ -259,8 +262,8 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget):
         return self._native_obj.component
 
     @property
-    def gathering_state(self) -> webrtc.CricketIceGatheringState:
-        """:obj:`webrtc.CricketIceGatheringState`: The gathering state of the ICE agent."""
+    def gathering_state(self) -> webrtc.RTCIceGathererState:
+        """:obj:`webrtc.RTCIceGathererState`: The gathering state of the ICE agent."""
         return self._native_obj.gatheringState
 
     @property

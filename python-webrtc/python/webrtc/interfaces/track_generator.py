@@ -55,7 +55,7 @@ class _TrackSink:
         audio = data._take()
         data_bytes = audio._data
         if audio.format == AudioSampleFormat.s16 and data_bytes is not None:
-            samples = data_bytes
+            samples = bytes(data_bytes)
         else:
             # closed, copy_to() raises
             buffer = bytearray(audio.number_of_frames * audio.number_of_channels * 2)

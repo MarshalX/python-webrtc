@@ -7,7 +7,11 @@
 
 #include "interfaces.h"
 
+#include "../media/encoded_frame.h"
+#include "../media/frame_transformer_bridge.h"
 #include "../media/media_stream_track_processor.h"
+#include "../media/rtc_rtp_script_transform.h"
+#include "../media/sframe_transform.h"
 #include "../media/track_generator.h"
 #include "../media/video_frame_buffer.h"
 #include "../utils/alive_count.h"
@@ -65,6 +69,10 @@ namespace python_webrtc {
               {"MediaStreamTrackProcessor", AliveCount<MediaStreamTrackProcessor>::count.load()},
               {"TrackGenerator", AliveCount<TrackGenerator>::count.load()},
               {"VideoFrameBuffer", AliveCount<VideoFrameBuffer>::count.load()},
+              {"RTCRtpScriptTransform", AliveCount<RTCRtpScriptTransform>::count.load()},
+              {"SFrameTransform", AliveCount<SFrameTransform>::count.load()},
+              {"RTCEncodedFrame", AliveCount<EncodedFrame>::count.load()},
+              {"FrameTransformerBridge", AliveCount<FrameTransformerBridge>::count.load()},
           };
         },
         nogil());

@@ -42,13 +42,13 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
         """:obj:`bool`: Whether both the :attr:`sender` and the :attr:`receiver` stopped for good.
 
         Warning:
-            Deprecated: This feature is no longer recommended.
+            Deprecated: compare :attr:`current_direction` with :obj:`webrtc.RTCRtpTransceiverDirection.stopped`.
         """
         return self._native_obj.stopped
 
     @property
-    def direction(self) -> webrtc.TransceiverDirection:
-        """A member of :obj:`webrtc.TransceiverDirection` enum, indicating the transceiver's preferred direction.
+    def direction(self) -> webrtc.RTCRtpTransceiverDirection:
+        """A member of :obj:`webrtc.RTCRtpTransceiverDirection` enum, indicating the transceiver's preferred direction.
 
         Note:
             The transceiver's current direction is indicated by the :attr:`currentDirection` property.
@@ -56,26 +56,23 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
         return self._native_obj.direction
 
     @direction.setter
-    def direction(self, new_direction: webrtc.TransceiverDirection | webrtc.TransceiverDirectionValue) -> None:
+    def direction(
+        self, new_direction: webrtc.RTCRtpTransceiverDirection | webrtc.RTCRtpTransceiverDirectionValue
+    ) -> None:
         self._native_obj.direction = new_direction
 
     @property
-    def current_direction(self) -> webrtc.TransceiverDirection | None:
-        """:obj:`webrtc.TransceiverDirection`, optional: The negotiated direction of the transceiver."""
+    def current_direction(self) -> webrtc.RTCRtpTransceiverDirection | None:
+        """:obj:`webrtc.RTCRtpTransceiverDirection`, optional: The negotiated direction of the transceiver."""
         return self._native_obj.currentDirection
 
     def stop(self) -> None:
-        """Stops the transceiver for good, its :obj:`webrtc.RTCRtpSender` and its :obj:`webrtc.RTCRtpReceiver`.
-
-        Note:
-            To check whether the transceiver is stopped, compare :attr:`currentDirection` with
-            :obj:`webrtc.TransceiverDirection.stopped` rather than reading the deprecated :attr:`stopped`.
-        """
+        """Stops the transceiver for good, its :obj:`webrtc.RTCRtpSender` and its :obj:`webrtc.RTCRtpReceiver`."""
         self._native_obj.stop()
 
     @property
-    def kind(self) -> webrtc.MediaType:
-        """:obj:`webrtc.MediaType`: The kind of media the transceiver sends and receives, audio or video."""
+    def _kind(self) -> webrtc.MediaType:
+        # the kind of the native object, which the receiver's track has too
         return self._native_obj.kind
 
     def set_codec_preferences(self, codecs: list[webrtc.RTCRtpCodec]) -> None:
@@ -90,7 +87,7 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
             webrtc.InvalidModificationError: If a codec isn't supported, or only resiliency codecs
                 (like RTX or FEC) are given.
         """
-        kind = self.kind
+        kind = self._kind
         natives: list[wrtc.RtpCodecCapability] = []
         for source in (wrtc.RTCRtpReceiver.getCapabilities(kind), wrtc.RTCRtpSender.getCapabilities(kind)):
             natives.extend(source.codecs if source is not None else [])
@@ -109,7 +106,7 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
 
         Returns:
             :obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionCapability`: The extensions, with the direction they're
-            negotiated in, :attr:`webrtc.TransceiverDirection.stopped` for the ones that aren't.
+            negotiated in, :attr:`webrtc.RTCRtpTransceiverDirection.stopped` for the ones that aren't.
         """
         return [
             RTCRtpHeaderExtensionCapability._from_native(e) for e in self._native_obj.getHeaderExtensionsToNegotiate()
@@ -146,7 +143,7 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
 
         Returns:
             :obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionCapability`: Every extension that can be negotiated,
-            :attr:`webrtc.TransceiverDirection.stopped` for the ones that weren't.
+            :attr:`webrtc.RTCRtpTransceiverDirection.stopped` for the ones that weren't.
         """
         return [
             RTCRtpHeaderExtensionCapability._from_native(e) for e in self._native_obj.getNegotiatedHeaderExtensions()

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, NamedTuple, cast
 
 from webrtc import (
@@ -25,9 +25,10 @@ from webrtc import (
 from webrtc.models.closable import Closable
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
+from webrtc.utils.transfer import Transfer
 
 if TYPE_CHECKING:
-    from typing_extensions import Buffer
+    from typing_extensions import Buffer, TypeGuard
 
 _SAMPLE_BYTES = {'u8': 1, 's16': 2, 's32': 4, 'f32': 4}
 
@@ -58,7 +59,10 @@ class AudioDataInit(Dictionary):
         number_of_frames (:obj:`int`): The number of frames (samples per channel).
         number_of_channels (:obj:`int`): The number of channels.
         timestamp (:obj:`int`): The presentation time in microseconds.
-        data: A bytes-like buffer of the samples, which is copied.
+        data: A bytes-like buffer of the samples, which is copied unless transferred.
+        transfer (:obj:`list` of bytes-like buffers, optional): Buffers given up to the data: if the memory of
+            ``data`` is among them, the samples are kept without being copied, so the buffer must not be changed
+            afterwards. Transferred :obj:`memoryview` objects are released; Python can't detach other buffers.
     """
 
     format: AudioSampleFormat | AudioSampleFormatValue
@@ -67,6 +71,7 @@ class AudioDataInit(Dictionary):
     number_of_channels: int
     timestamp: int
     data: Buffer
+    transfer: list[Buffer] = field(default_factory=list)
 
     #: Alias for :attr:`sample_rate`
     sampleRate: ClassVar[Alias[float]] = alias('sample_rate')
@@ -114,8 +119,16 @@ def _sample_rate(value: object) -> float:
     return float(value)
 
 
-def _buffer(data: object, size: int) -> bytes:
-    """The first bytes of a bytes-like buffer."""
+def _is_buffer(data: object) -> TypeGuard[Buffer]:
+    try:
+        _ = memoryview(cast('Buffer', data))
+    except TypeError:
+        return False
+    return True
+
+
+def _buffer(data: object, size: int, *, keep: bool) -> bytes | memoryview:
+    """The first bytes of a bytes-like buffer, copied or a read-only view of them."""
     try:
         # memoryview() is the check of the buffer protocol
         view = memoryview(cast('Buffer', data)).cast('B')
@@ -125,7 +138,7 @@ def _buffer(data: object, size: int) -> bytes:
     if view.nbytes < size:
         msg = f'data must be at least {size} bytes for this format and size'
         raise TypeError(msg)
-    return bytes(view[:size])
+    return view[:size].toreadonly() if keep else bytes(view[:size])
 
 
 class _Layout(NamedTuple):
@@ -136,7 +149,7 @@ class _Layout(NamedTuple):
 
 
 class _CopyPlan(NamedTuple):
-    data: bytes
+    data: bytes | memoryview
     format: AudioSampleFormat
     plane_index: int
     frame_offset: int
@@ -169,7 +182,7 @@ class AudioData(Closable):
         )
     """
 
-    _data: bytes | None
+    _data: bytes | memoryview | None
     _format: AudioSampleFormat
     _sample_rate: float
     _frames: int
@@ -189,10 +202,13 @@ class AudioData(Closable):
         if isinstance(init.timestamp, bool) or not isinstance(init.timestamp, int):
             msg = 'The timestamp is an integer of microseconds'
             raise TypeError(msg)
-        data = _buffer(init.data, frames * channels * _sample_bytes(format))
+        transfer = Transfer(init.transfer)
+        size = frames * channels * _sample_bytes(format)
+        data = _buffer(init.data, size, keep=_is_buffer(init.data) and transfer.has(init.data))
+        transfer.detach()
         self._set(data, _Layout(format, sample_rate, frames, channels), init.timestamp)
 
-    def _set(self, data: bytes, layout: _Layout, timestamp: int) -> None:
+    def _set(self, data: bytes | memoryview, layout: _Layout, timestamp: int) -> None:
         self._data = data
         self._format, self._sample_rate, self._frames, self._channels = layout
         self._timestamp = timestamp

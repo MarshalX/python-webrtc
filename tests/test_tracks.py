@@ -132,7 +132,7 @@ async def test_remote_track_mute_and_stream_events(
     await wait_until_unmuted(remote_video)
     muted = wait_for_event(remote_video, 'mute')
 
-    transceiver.direction = webrtc.TransceiverDirection.inactive
+    transceiver.direction = webrtc.RTCRtpTransceiverDirection.inactive
     await exchange_offer(caller, callee)
 
     removed_event = await removed

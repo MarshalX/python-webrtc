@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import gc
 import threading
 from typing import TYPE_CHECKING
@@ -74,7 +75,7 @@ def create_pc(request: pytest.FixtureRequest) -> CreatePC:
 
 
 def get_stream(constraints: dict[str, bool], request: pytest.FixtureRequest) -> webrtc.MediaStream:
-    stream = webrtc.get_user_media(**constraints)
+    stream = asyncio.run(webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(**constraints)))
 
     def stop_tracks() -> None:
         for track in stream.get_tracks():

@@ -27,8 +27,6 @@ from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     import wrtc
     from webrtc.enums import RTCIceServerTransportProtocolValue
 
@@ -173,15 +171,19 @@ class RTCIceParameters(Dictionary):
     """The ICE username fragment and password of one end of an :obj:`webrtc.RTCIceTransport`.
 
     Args:
-        username_fragment (:obj:`str`): The username fragment (``a=ice-ufrag``).
-        password (:obj:`str`): The password (``a=ice-pwd``).
+        username_fragment (:obj:`str`, optional): The username fragment (``a=ice-ufrag``).
+        password (:obj:`str`, optional): The password (``a=ice-pwd``).
+        ice_lite (:obj:`bool`, optional): Whether the agent is an ICE lite one, unknown for a remote agent.
     """
 
-    username_fragment: str
-    password: str
+    username_fragment: str | None = None
+    password: str | None = None
+    ice_lite: bool | None = None
 
     #: Alias for :attr:`username_fragment`
-    usernameFragment: ClassVar[Alias[str]] = alias('username_fragment')
+    usernameFragment: ClassVar[Alias[str | None]] = alias('username_fragment')
+    #: Alias for :attr:`ice_lite`
+    iceLite: ClassVar[Alias[bool | None]] = alias('ice_lite')
 
 
 @dataclass
@@ -209,6 +211,29 @@ class RTCIceCandidateInit(Dictionary):
     sdpMLineIndex: ClassVar[Alias[int | None]] = alias('sdp_m_line_index')
     #: Alias for :attr:`username_fragment`
     usernameFragment: ClassVar[Alias[str | None]] = alias('username_fragment')
+
+
+@dataclass
+class RTCLocalIceCandidateInit(RTCIceCandidateInit):
+    """A candidate with what's only known locally, the members :obj:`webrtc.RTCIceCandidate` is created from.
+
+    Args:
+        candidate (:obj:`str`, optional): The candidate-attribute from SDP.
+        sdp_mid (:obj:`str`, optional): The media stream identification tag of the media section of the candidate.
+        sdp_m_line_index (:obj:`int`, optional): The index of the media section of the candidate.
+        username_fragment (:obj:`str`, optional): The ICE username fragment the candidate belongs to.
+        relay_protocol (:obj:`webrtc.RTCIceServerTransportProtocol`, optional): For a local relay candidate,
+            the protocol used to reach the TURN server.
+        url (:obj:`str`, optional): For a local candidate, the STUN or TURN server that gathered it.
+    """
+
+    relay_protocol: RTCIceServerTransportProtocol | RTCIceServerTransportProtocolValue | None = None
+    url: str | None = None
+
+    #: Alias for :attr:`relay_protocol`
+    relayProtocol: ClassVar[Alias[RTCIceServerTransportProtocol | RTCIceServerTransportProtocolValue | None]] = alias(
+        'relay_protocol'
+    )
 
 
 @dataclass(frozen=True)
@@ -301,21 +326,6 @@ class RTCIceCandidate:
         vars(candidate)['_parsed'] = parsed
         return candidate
 
-    @classmethod
-    def from_json(cls, value: Mapping[str, object]) -> RTCIceCandidate:
-        """Creates a candidate from its JSON form, as :meth:`to_json` returns it.
-
-        Args:
-            value (:obj:`dict`): The JSON form, read as :meth:`webrtc.RTCIceCandidateInit.from_json` does.
-
-        Returns:
-            :obj:`webrtc.RTCIceCandidate`: The candidate.
-
-        Raises:
-            TypeError: If both ``sdpMid`` and ``sdpMLineIndex`` are missing.
-        """
-        return cls(*cls._members_of(RTCIceCandidateInit.from_json(value)))
-
     @property
     def foundation(self) -> str | None:
         """:obj:`str`, optional: An identifier of candidates of the same type, base and server."""
@@ -400,5 +410,3 @@ class RTCIceCandidate:
     relatedPort: ClassVar = related_port
     #: Alias for :attr:`to_json`
     toJSON: ClassVar = to_json
-    #: Alias for :attr:`from_json`
-    fromJSON: ClassVar = from_json

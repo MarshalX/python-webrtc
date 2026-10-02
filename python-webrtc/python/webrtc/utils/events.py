@@ -77,6 +77,9 @@ class _Listeners:
         return loop
 
     def deliver(self, loop: asyncio.AbstractEventLoop, name: str, args: tuple[object, ...]) -> None:
+        if 'registrations' not in self.__dict__:
+            # the garbage collector cleared this object since the event was posted
+            return
         if loop is self.primary_loop:
             self.target._on_event(name, *args)
         registrations = [r for r in self.registrations.get(name, ()) if r.loop is loop]
@@ -85,7 +88,12 @@ class _Listeners:
         event = self.target._create_event(name, *args)
         if event is None:
             return
+        event.target = self.target
+        self._call(loop, name, event, registrations=registrations)
 
+    def _call(
+        self, loop: asyncio.AbstractEventLoop, name: str, event: webrtc.Event, *, registrations: list[_Registration]
+    ) -> None:
         for registration in registrations:
             if registration.once:
                 self.remove(name, registration.handler)
@@ -202,9 +210,10 @@ class EventTarget:
         method, never handlers.
         """
 
-    def _create_event(self, name: str, *_args: object) -> webrtc.Event | None:
+    @staticmethod
+    def _create_event(name: str, *_args: object) -> webrtc.Event | None:
         """Creates the event object from the native arguments of an event, or returns :obj:`None` to drop it."""
-        return webrtc.Event(name, self)
+        return webrtc.Event(name)
 
     @overload
     def on(self, name: str, handler: None = None) -> Callable[[_H], _H]: ...

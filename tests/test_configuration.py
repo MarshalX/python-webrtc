@@ -172,21 +172,22 @@ async def test_generate_ecdsa_certificate() -> None:
     """An ECDSA certificate expires in the future and has a SHA-256 fingerprint."""
     certificate = await webrtc.RTCPeerConnection.generate_certificate('ECDSA')
     assert certificate.expires > time.time() * 1000
-    assert not certificate.expired
+    assert not certificate._expired()
     (fingerprint,) = certificate.get_fingerprints()
     assert fingerprint.algorithm == 'sha-256'
+    assert fingerprint.value is not None
     assert len(fingerprint.value.split(':')) == 32
 
 
 @pytest.mark.asyncio
 async def test_generate_rsa_certificate() -> None:
     """An RSA certificate is generated from WebCrypto parameters."""
-    rsa = await webrtc.RTCCertificate.generate(
+    rsa = await webrtc.RTCPeerConnection.generate_certificate(
         webrtc.RsaHashedKeyGenParams(
             'RSASSA-PKCS1-v1_5', modulus_length=1024, public_exponent=b'\x01\x00\x01', hash='SHA-256'
         )
     )
-    assert not rsa.expired
+    assert not rsa._expired()
 
 
 @pytest.mark.asyncio
@@ -207,17 +208,18 @@ async def test_generate_rsa_certificate() -> None:
 async def test_generate_unsupported_certificate(algorithm: str | webrtc.Algorithm) -> None:
     """Algorithms other than ECDSA and RSASSA-PKCS1-v1_5 with SHA-256 and the exponent 65537 aren't supported."""
     with pytest.raises(webrtc.NotSupportedError):
-        await webrtc.RTCCertificate.generate(algorithm)
+        await webrtc.RTCPeerConnection.generate_certificate(algorithm)
 
 
 @pytest.mark.asyncio
 async def test_configured_certificate(create_pc: CreatePC) -> None:
     """The certificate of a configuration is the one of the connection, whose offer has its fingerprint."""
-    certificate = await webrtc.RTCCertificate.generate('ECDSA')
+    certificate = await webrtc.RTCPeerConnection.generate_certificate('ECDSA')
     (fingerprint,) = certificate.get_fingerprints()
     pc = create_pc(webrtc.RTCConfiguration(certificates=[certificate]))
     pc.add_transceiver(webrtc.MediaType.audio)
     offer = await pc.create_offer()
+    assert fingerprint.value is not None
     assert fingerprint.value.upper() in offer.sdp
     certificates = pc.get_configuration().certificates
     assert certificates is not None
@@ -227,7 +229,7 @@ async def test_configured_certificate(create_pc: CreatePC) -> None:
 @pytest.mark.asyncio
 async def test_certificates_can_not_change(create_pc: CreatePC) -> None:
     """A configuration without certificates keeps the ones of the connection, other ones aren't allowed."""
-    ecdsa, other = [await webrtc.RTCCertificate.generate('ECDSA') for _ in range(2)]
+    ecdsa, other = [await webrtc.RTCPeerConnection.generate_certificate('ECDSA') for _ in range(2)]
     pc = create_pc(webrtc.RTCConfiguration(certificates=[ecdsa]))
     pc.set_configuration(webrtc.RTCConfiguration())
     with pytest.raises(webrtc.InvalidModificationError):
@@ -237,11 +239,26 @@ async def test_certificates_can_not_change(create_pc: CreatePC) -> None:
 @pytest.mark.asyncio
 async def test_expired_certificate() -> None:
     """A connection can't be created with an expired certificate."""
-    expired = await webrtc.RTCCertificate.generate('ECDSA', expires=0)
+    expired = await webrtc.RTCPeerConnection.generate_certificate(webrtc.Algorithm('ECDSA', expires=0))
     # it expires at the millisecond it's generated, which has passed 10 ms later
     await asyncio.sleep(0.01)
     with pytest.raises(webrtc.InvalidAccessError):
         webrtc.RTCPeerConnection(webrtc.RTCConfiguration(certificates=[expired]))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('expires', [-1, 1.5, True])
+async def test_invalid_expires(expires: object) -> None:
+    """Expires is an unsigned long long, which WebIDL converts with [EnforceRange]."""
+    with pytest.raises(TypeError):
+        await webrtc.RTCPeerConnection.generate_certificate(webrtc.Algorithm('ECDSA', expires=mistyped(expires)))
+
+
+def test_algorithm_from_json() -> None:
+    """The expires member of RTCCertificateExpiration is one of the algorithm."""
+    algorithm = webrtc.EcKeyGenParams.from_json({'name': 'ECDSA', 'namedCurve': 'P-256', 'expires': 1000})
+    assert algorithm == webrtc.EcKeyGenParams('ECDSA', 'P-256', expires=1000)
+    assert isinstance(algorithm, webrtc.RTCCertificateExpiration)
 
 
 def test_ice_candidate_parsing() -> None:
@@ -262,7 +279,10 @@ def test_ice_candidate_parsing() -> None:
         'sdpMLineIndex': None,
         'usernameFragment': None,
     }
-    assert webrtc.RTCIceCandidate.from_json(candidate.to_json()).candidate == candidate.candidate
+    assert (
+        webrtc.RTCIceCandidate(**vars(webrtc.RTCIceCandidateInit.from_json(candidate.to_json()))).candidate
+        == candidate.candidate
+    )
 
 
 def test_invalid_ice_candidate() -> None:

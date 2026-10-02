@@ -18,27 +18,18 @@ import enum
 import inspect
 import sys
 import time
-from typing import TYPE_CHECKING, Callable, TypeVar, Union, cast
+from typing import TYPE_CHECKING, Callable, TypeVar, Union
 
 import pythonmonkey as pm
-from typing_extensions import TypedDict
 
 import webrtc
 import webrtc.enums
+from tests.wpt.loader import WPT_ROOT
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Coroutine
 
     from _typeshed import DataclassInstance
-
-    from webrtc.models.media_track_constraints import ConstrainDouble, ConstrainULong
-
-    class _UserMediaOptions(TypedDict, total=False, closed=True):
-        audio: bool
-        video: bool
-        width: ConstrainULong | None
-        height: ConstrainULong | None
-        frame_rate: ConstrainDouble | None
 
 
 _T = TypeVar('_T')
@@ -63,10 +54,19 @@ _PLAIN_INTERFACES = (
     webrtc.WritableStreamDefaultWriter,
     webrtc.VideoTrackGenerator,
     webrtc.VideoColorSpace,
+    webrtc.RTCRtpScriptTransformer,
+    webrtc.RTCEncodedVideoFrame,
+    webrtc.RTCEncodedAudioFrame,
 )
 
 
+# WebIDL names that aren't the camelCase of the snake_case ones
+_IDL_NAMES = {'key_id': 'keyID'}
+
+
 def _camel_case(name: str) -> str:
+    if name in _IDL_NAMES:
+        return _IDL_NAMES[name]
     first, *rest = name.split('_')
     return first + ''.join(part.title() for part in rest)
 
@@ -113,8 +113,16 @@ def _error_to_js(value: BaseException) -> object:
     return {'__error': _error(value)['error']}
 
 
+def _one_stats_to_js(stats: webrtc.RTCStats) -> object:
+    members = _dictionary_to_js(stats)
+    # address is nullable: null when the address isn't exposed
+    if isinstance(stats, webrtc.RTCIceCandidateStats):
+        members['address'] = stats.address
+    return members
+
+
 def _stats_to_js(value: webrtc.RTCStatsReport) -> object:
-    return {'__statsReport': [[stats_id, dict(stats)] for stats_id, stats in value.items()]}
+    return {'__statsReport': [[stats_id, _one_stats_to_js(stats)] for stats_id, stats in value.items()]}
 
 
 def _bytes_to_js(value: bytes) -> object:
@@ -321,13 +329,15 @@ def audio_data_copy_to(audio: webrtc.AudioData, destination: Buffer, options: ob
     return _guard(copy)
 
 
-def construct(name: str, kwargs: dict[str, object]) -> Result:
-    return _guard(lambda: getattr(webrtc, name)(**from_js(dict(kwargs))))
+def construct(name: str, kwargs: dict[str, object], args: list[object] | None = None) -> Result:
+    return _guard(
+        lambda: getattr(webrtc, name)(*from_js(list(args) if args is not None else []), **from_js(dict(kwargs)))
+    )
 
 
-def get_user_media(kwargs: dict[str, object]) -> Result:
+def get_user_media(constraints: object) -> asyncio.Future[Result]:
     # the shim converts the constraints as WebIDL does, the library validates them
-    return _guard(lambda: webrtc.get_user_media(**cast('_UserMediaOptions', from_js(dict(kwargs)))))
+    return call_async_method(webrtc.media_devices, 'get_user_media', {'args': [constraints]})
 
 
 def call_static(class_name: str, name: str, args: list[object]) -> Result:
@@ -356,6 +366,28 @@ def subscribe(obj: webrtc.EventTarget, name: str, callback: Callable[[object], o
     return _guard(add_listener)
 
 
+def wrap(value: object) -> Result:
+    """A Python object JS got as it is (like the event a JS callback is called with), as the shim reads it."""
+    return _guard(lambda: value)
+
+
+def get_buffer(obj: object, name: str) -> Result:
+    """A bytearray attribute as [identity, bytearray, detached]: JS shares its memory, one ArrayBuffer for each."""
+
+    def get() -> list[object]:
+        value = getattr(obj, name)
+        # the data of an encoded frame written to its transformer, an ArrayBuffer transferred in a browser
+        detached = bool(getattr(obj, '_detached', False))
+        return [id(value), value, detached]
+
+    return _guard(get)
+
+
+def read_text(path: str) -> Result:
+    """A file of the WPT checkout by its path from the root, like the script of a Worker."""
+    return _guard((WPT_ROOT / path.lstrip('/')).read_text)
+
+
 EXPORTS = {
     f.__name__: f
     for f in (
@@ -372,5 +404,8 @@ EXPORTS = {
         get_user_media,
         now,
         subscribe,
+        wrap,
+        get_buffer,
+        read_text,
     )
 }

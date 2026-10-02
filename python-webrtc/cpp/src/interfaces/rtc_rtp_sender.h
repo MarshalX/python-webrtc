@@ -20,6 +20,7 @@
 
 #include "../enums/enums.h"
 #include "../exceptions.h"
+#include "../media/frame_transformer_bridge.h"
 #include "media_stream_track.h"
 #include "peer_connection_factory.h"
 #include "rtc_dtls_transport.h"
@@ -29,10 +30,15 @@ namespace python_webrtc {
 
   class RTCPeerConnection;
 
-  class RTCRtpSender {
+  class RTCRtpSender : public std::enable_shared_from_this<RTCRtpSender> {
   public:
     explicit RTCRtpSender(std::shared_ptr<PeerConnectionFactory> factory,
                           webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender);
+
+    ~RTCRtpSender();
+
+    RTCRtpSender(const RTCRtpSender &) = delete;
+    RTCRtpSender &operator=(const RTCRtpSender &) = delete;
 
     static void Init(pybind11::module &m);
 
@@ -81,7 +87,15 @@ namespace python_webrtc {
 
     static std::optional<webrtc::RtpCapabilities> GetCapabilities(const std::string &kind);
 
+    std::shared_ptr<RtpTransform> GetTransform() { return _transform.Get(); }
+
+    void SetTransform(const std::shared_ptr<RtpTransform> &transform);
+
+    void ReleaseTransform() { _transform.Release(); }
+
   private:
+    FrameSource TransformSource();
+
     // what the DTMF sender finds the transceiver of the sender with
     std::function<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>()> TransceiverGetter();
 
@@ -95,6 +109,7 @@ namespace python_webrtc {
     std::shared_ptr<RTCDtlsTransport> _transport;
     std::shared_ptr<RTCDTMFSender> _dtmf;
     std::optional<webrtc::RtpParameters> _lastParameters;
+    TransformSlot _transform;
   };
 
 } // namespace python_webrtc

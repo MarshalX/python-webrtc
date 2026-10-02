@@ -1,7 +1,7 @@
-webrtc.functions.get\_user\_media
+webrtc.models.rtc\_encoded\_frame
 =================================
 
-.. automodule:: webrtc.functions.get_user_media
+.. automodule:: webrtc.models.rtc_encoded_frame
    :members:
    :undoc-members:
    :show-inheritance:
