@@ -51,6 +51,27 @@ async def test_stopped_transceiver_ends_the_track_with_its_event(pc: webrtc.RTCP
 
 
 @pytest.mark.asyncio
+async def test_ended_track_releases_its_handlers(
+    pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """An ended track fires no more events, so it keeps no handlers, once its ended event is delivered."""
+    remote = pc.add_transceiver(webrtc.MediaType.audio)
+    remote_track = remote.receiver.track
+    remote_track.on('mute', lambda _: None)
+    ended = wait_for_event(remote_track, 'ended')
+    remote.stop()
+    await ended
+    assert remote_track.listeners('mute') == []
+
+    local_track = audio_stream.get_tracks()[0]
+    local_track.on('mute', lambda _: None)
+    local_track.stop()
+    assert local_track.listeners('mute') == []
+    local_track.on('ended', lambda _: None)
+    assert local_track.listeners('ended') == []
+
+
+@pytest.mark.asyncio
 async def test_rollback_ends_the_track_of_a_removed_transceiver(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:

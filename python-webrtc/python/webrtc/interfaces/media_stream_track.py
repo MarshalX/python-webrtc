@@ -213,6 +213,8 @@ class MediaStreamTrack(
         arrives, and when it's no longer negotiated.
         ``ended`` (:obj:`webrtc.Event`): The track ended, other than with :meth:`stop`, like when the remote peer
         stopped sending it.
+
+    An ended track fires no more events, so its handlers are released then.
     """
 
     _class = wrtc.MediaStreamTrack

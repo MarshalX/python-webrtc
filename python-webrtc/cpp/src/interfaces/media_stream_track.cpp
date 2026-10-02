@@ -93,6 +93,7 @@ namespace python_webrtc {
     _stopped = true;
     _surfacedEnded.Reset();
     _factory->signalingThread()->BlockingCall([this]() { StopOnSignalingThread(); });
+    CloseListeners();
   }
 
   void MediaStreamTrack::StopOnSignalingThread() {
@@ -145,8 +146,8 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrack::OnPeerConnectionClosed() {
-    // a closed connection fires no events of its tracks
-    Mute();
+    // a closed connection fires no events of its tracks, so their handlers go
+    CloseListeners();
     _surfacedMuted.Reset();
     _surfacedEnded.Reset();
     Stop();
@@ -191,6 +192,7 @@ namespace python_webrtc {
 
   void MediaStreamTrack::SurfaceEnded() {
     _surfacedEnded.Reset();
+    CloseListeners();
   }
 
   bool MediaStreamTrack::GetEnabled() {
