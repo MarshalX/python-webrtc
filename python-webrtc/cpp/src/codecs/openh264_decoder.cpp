@@ -12,17 +12,18 @@
 #include <modules/video_coding/include/video_error_codes.h>
 #include <third_party/openh264/src/codec/api/wels/codec_api.h>
 
+#include <array>
 #include <optional>
 
 namespace python_webrtc {
 
   OpenH264Decoder::~OpenH264Decoder() {
-    Release();
+    Destroy();
   }
 
-  bool OpenH264Decoder::Configure(const Settings &settings) {
-    Release();
-    if (WelsCreateDecoder(&_decoder) != 0 || !_decoder) {
+  bool OpenH264Decoder::Configure(const Settings & /*settings*/) {
+    Destroy();
+    if (WelsCreateDecoder(&_decoder) != 0 || _decoder == nullptr) {
       _decoder = nullptr;
       return false;
     }
@@ -36,23 +37,23 @@ namespace python_webrtc {
     param.sVideoProperty.size = sizeof(param.sVideoProperty);
     param.sVideoProperty.eVideoBsType = VIDEO_BITSTREAM_AVC;
     if (_decoder->Initialize(&param) != 0) {
-      Release();
+      Destroy();
       return false;
     }
     return true;
   }
 
-  int32_t OpenH264Decoder::Decode(const webrtc::EncodedImage &image, int64_t renderTimeMs) {
-    if (!_decoder || !_callback) {
+  int32_t OpenH264Decoder::Decode(const webrtc::EncodedImage &image, int64_t /*renderTimeMs*/) {
+    if (_decoder == nullptr || _callback == nullptr) {
       return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
     }
-    if (!image.data() || image.size() == 0) {
+    if (image.data() == nullptr || image.size() == 0) {
       return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
     }
 
-    unsigned char *planes[3] = {};
+    std::array<unsigned char *, 3> planes{};
     SBufferInfo info{};
-    const auto state = _decoder->DecodeFrameNoDelay(image.data(), static_cast<int>(image.size()), planes, &info);
+    const auto state = _decoder->DecodeFrameNoDelay(image.data(), static_cast<int>(image.size()), planes.data(), &info);
     if (state != dsErrorFree) {
       return WEBRTC_VIDEO_CODEC_ERROR;
     }
@@ -61,6 +62,7 @@ namespace python_webrtc {
       return WEBRTC_VIDEO_CODEC_OK;
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-union-access): OpenH264's output has this one member
     const auto &picture = info.UsrData.sSystemBuffer;
     const auto buffer = webrtc::I420Buffer::Copy(picture.iWidth, picture.iHeight, planes[0], picture.iStride[0],
                                                  planes[1], picture.iStride[1], planes[2], picture.iStride[1]);
@@ -79,12 +81,16 @@ namespace python_webrtc {
   }
 
   int32_t OpenH264Decoder::Release() {
-    if (_decoder) {
+    Destroy();
+    return WEBRTC_VIDEO_CODEC_OK;
+  }
+
+  void OpenH264Decoder::Destroy() {
+    if (_decoder != nullptr) {
       _decoder->Uninitialize();
       WelsDestroyDecoder(_decoder);
       _decoder = nullptr;
     }
-    return WEBRTC_VIDEO_CODEC_OK;
   }
 
   webrtc::VideoDecoder::DecoderInfo OpenH264Decoder::GetDecoderInfo() const {

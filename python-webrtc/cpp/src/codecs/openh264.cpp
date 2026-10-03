@@ -36,11 +36,18 @@ namespace {
     void (*version)(OpenH264Version *) = nullptr;
   };
 
-  Library library;
-  std::atomic<bool> loaded{false};
-  // Cisco's license: the user can disable and re-enable it, which only stops offering H.264
-  std::atomic<bool> enabled{false};
-  std::mutex mutex;
+  struct State {
+    std::mutex mutex;
+    Library library;
+    std::atomic<bool> loaded{false};
+    // Cisco's license: the user can disable and re-enable it, which only stops offering H.264
+    std::atomic<bool> enabled{false};
+  };
+
+  State &state() {
+    static State instance;
+    return instance;
+  }
 
 #ifdef _WIN32
   void *Open(const std::string &path) {
@@ -51,6 +58,7 @@ namespace {
   }
 
   void *Symbol(void *handle, const char *name) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): GetProcAddress returns functions untyped
     return reinterpret_cast<void *>(GetProcAddress(static_cast<HMODULE>(handle), name));
   }
 
@@ -75,15 +83,17 @@ namespace {
   }
 
   std::string OpenError() {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): called under the loader's mutex
     const char *error = dlerror();
-    return error ? error : "unknown error";
+    return error != nullptr ? error : "unknown error";
   }
 #endif
 
   template <typename F>
   void Resolve(void *handle, const char *name, F &function) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): symbols are looked up untyped
     function = reinterpret_cast<F>(Symbol(handle, name));
-    if (!function) {
+    if (function == nullptr) {
       Close(handle);
       throw std::runtime_error(std::string("Not an OpenH264 library, no ") + name);
     }
@@ -95,18 +105,19 @@ namespace {
   }
 
   std::string Load(const std::string &path) {
-    const std::lock_guard lock(mutex);
-    if (loaded) {
-      if (library.path != path) {
-        throw std::runtime_error("OpenH264 is already loaded from " + library.path);
+    auto &current = state();
+    const std::scoped_lock lock(current.mutex);
+    if (current.loaded) {
+      if (current.library.path != path) {
+        throw std::runtime_error("OpenH264 is already loaded from " + current.library.path);
       }
     } else {
       void *handle = Open(path);
-      if (!handle) {
+      if (handle == nullptr) {
         throw std::runtime_error("Can't load " + path + ": " + OpenError());
       }
 
-      Library candidate{path};
+      Library candidate{.path = path};
       Resolve(handle, "WelsCreateSVCEncoder", candidate.createEncoder);
       Resolve(handle, "WelsDestroySVCEncoder", candidate.destroyEncoder);
       Resolve(handle, "WelsCreateDecoder", candidate.createDecoder);
@@ -123,13 +134,13 @@ namespace {
       }
 
       // never unloaded: encoders and decoders may outlive any owner we could tie it to
-      library = candidate;
-      loaded = true;
+      current.library = candidate;
+      current.loaded = true;
     }
 
-    enabled = true;
+    current.enabled = true;
     OpenH264Version version{};
-    library.version(&version);
+    current.library.version(&version);
     return VersionString(version);
   }
 
@@ -149,22 +160,22 @@ namespace {
 // the entry points the upstream encoder and our decoder call, forwarded to the loaded library
 extern "C" {
 int WelsCreateSVCEncoder(ISVCEncoder **encoder) {
-  return loaded ? library.createEncoder(encoder) : 1;
+  return state().loaded ? state().library.createEncoder(encoder) : 1;
 }
 
 void WelsDestroySVCEncoder(ISVCEncoder *encoder) {
-  if (loaded) {
-    library.destroyEncoder(encoder);
+  if (state().loaded) {
+    state().library.destroyEncoder(encoder);
   }
 }
 
 long WelsCreateDecoder(ISVCDecoder **decoder) {
-  return loaded ? library.createDecoder(decoder) : 1;
+  return state().loaded ? state().library.createDecoder(decoder) : 1;
 }
 
 void WelsDestroyDecoder(ISVCDecoder *decoder) {
-  if (loaded) {
-    library.destroyDecoder(decoder);
+  if (state().loaded) {
+    state().library.destroyDecoder(decoder);
   }
 }
 }
@@ -172,17 +183,17 @@ void WelsDestroyDecoder(ISVCDecoder *decoder) {
 namespace python_webrtc {
 
   bool OpenH264::Enabled() {
-    return enabled;
+    return state().enabled;
   }
 
   void OpenH264::Init(pybind11::module &m) {
     m.def("loadOpenH264", &Load, pybind11::arg("path"));
-    m.def("disableOpenH264", []() { enabled = false; });
+    m.def("disableOpenH264", []() { state().enabled = false; });
     m.def("openH264Enabled", &OpenH264::Enabled);
   }
 
   std::vector<webrtc::SdpVideoFormat> OpenH264EncoderAdapter::SupportedFormats() {
-    if (!enabled) {
+    if (!state().enabled) {
       return {};
     }
     // the encoder produces Constrained Baseline, which decoders of these profiles all accept
@@ -193,7 +204,7 @@ namespace python_webrtc {
 
   std::unique_ptr<webrtc::VideoEncoder> OpenH264EncoderAdapter::CreateEncoder(const webrtc::Environment &env,
                                                                               const webrtc::SdpVideoFormat &format) {
-    if (!loaded) {
+    if (!state().loaded) {
       return nullptr;
     }
     return std::make_unique<webrtc::H264EncoderImpl>(env, webrtc::H264EncoderSettings::Parse(format));
@@ -205,7 +216,7 @@ namespace python_webrtc {
   }
 
   std::vector<webrtc::SdpVideoFormat> OpenH264DecoderAdapter::SupportedFormats() {
-    if (!enabled) {
+    if (!state().enabled) {
       return {};
     }
     return Formats({webrtc::H264Profile::kProfileConstrainedBaseline, webrtc::H264Profile::kProfileBaseline,
@@ -214,9 +225,10 @@ namespace python_webrtc {
                    false);
   }
 
-  std::unique_ptr<webrtc::VideoDecoder> OpenH264DecoderAdapter::CreateDecoder(const webrtc::Environment &env,
-                                                                              const webrtc::SdpVideoFormat &format) {
-    if (!loaded) {
+  std::unique_ptr<webrtc::VideoDecoder>
+  OpenH264DecoderAdapter::CreateDecoder(const webrtc::Environment & /*env*/,
+                                        const webrtc::SdpVideoFormat & /*format*/) {
+    if (!state().loaded) {
       return nullptr;
     }
     return std::make_unique<OpenH264Decoder>();

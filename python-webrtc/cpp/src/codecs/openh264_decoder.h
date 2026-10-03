@@ -17,16 +17,24 @@ namespace python_webrtc {
 
   class OpenH264Decoder : public webrtc::VideoDecoder {
   public:
+    OpenH264Decoder() = default;
     ~OpenH264Decoder() override;
+
+    OpenH264Decoder(const OpenH264Decoder &) = delete;
+    OpenH264Decoder &operator=(const OpenH264Decoder &) = delete;
+    OpenH264Decoder(OpenH264Decoder &&) = delete;
+    OpenH264Decoder &operator=(OpenH264Decoder &&) = delete;
 
     bool Configure(const Settings &settings) override;
     int32_t Decode(const webrtc::EncodedImage &image, int64_t renderTimeMs) override;
     int32_t RegisterDecodeCompleteCallback(webrtc::DecodedImageCallback *callback) override;
     int32_t Release() override;
-    DecoderInfo GetDecoderInfo() const override;
-    const char *ImplementationName() const override;
+    [[nodiscard]] DecoderInfo GetDecoderInfo() const override;
+    [[nodiscard]] const char *ImplementationName() const override;
 
   private:
+    void Destroy();
+
     ISVCDecoder *_decoder = nullptr;
     webrtc::DecodedImageCallback *_callback = nullptr;
   };
