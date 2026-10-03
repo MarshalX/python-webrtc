@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-#  Copyright 2026 Ilya (Marshal) <https://github.com/MarshalX>.
+#  Copyright 2022-2026 Ilya (Marshal) <https://github.com/MarshalX>.
 #
 #  Dedicated to the public domain under CC0, see the LICENSE file of the examples.
 #

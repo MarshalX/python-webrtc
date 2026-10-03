@@ -1,12 +1,10 @@
 ## BSD 3-Clause License
 
-This project is inspired by [node-webrtc](https://github.com/node-webrtc/node-webrtc). License: [LICENSE](https://github.com/node-webrtc/node-webrtc/blob/develop/LICENSE.md).
-
 The following license applies to all parts of this software except as documented
 below.
 
 ```
-Copyright (c) 2022, The Python WebRTC project authors. All rights reserved.
+Copyright (c) 2022-2026 Ilya Siamionau. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
