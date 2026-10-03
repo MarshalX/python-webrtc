@@ -28,12 +28,11 @@ import json
 import math
 import subprocess
 import sys
-import tempfile
 
 import webrtc
 from tests.helpers import stats_of_type, wait_for_ice_gathering_complete
 
-ENCODER = json.loads(sys.argv[1])
+FFMPEG, ENCODER = json.loads(sys.argv[1])
 WIDTH, HEIGHT, RATE = 320, 240, 30
 SOURCE = f'testsrc2=size={WIDTH}x{HEIGHT}:rate={RATE}'
 FRAMES = 90
@@ -100,7 +99,7 @@ async def main():
     server = await asyncio.start_server(handle, '127.0.0.1', 0)
     port = server.sockets[0].getsockname()[1]
     ffmpeg = await asyncio.create_subprocess_exec(
-        'ffmpeg', '-v', 'error', '-re', '-f', 'lavfi', '-i', SOURCE, '-t', '10', *ENCODER, '-g', str(RATE),
+        FFMPEG, '-v', 'error', '-re', '-f', 'lavfi', '-i', SOURCE, '-t', '10', *ENCODER, '-g', str(RATE),
         '-bf', '0', '-pix_fmt', 'yuv420p', '-f', 'whip', f'http://127.0.0.1:{port}/whip',
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
     )
@@ -131,12 +130,11 @@ async def main():
     server.close()
 
     # the source frame of each decoded one, from its RTP timestamp; where the first one starts is searched
-    with tempfile.NamedTemporaryFile(suffix='.yuv') as file:
-        subprocess.run(
-            ['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', SOURCE, '-t', '12', '-pix_fmt', 'yuv420p', file.name],
-            check=True,
-        )
-        reference = file.read()
+    reference = subprocess.run(
+        [FFMPEG, '-v', 'error', '-f', 'lavfi', '-i', SOURCE, '-t', '12', '-pix_fmt', 'yuv420p', '-f', 'rawvideo', '-'],
+        capture_output=True,
+        check=True,
+    ).stdout
     source = lambda n: reference[n * LUMA * 3 // 2 : n * LUMA * 3 // 2 + LUMA]
     start = max(range(2 * RATE), key=lambda n: psnr(lumas[0], source(n)))
     step = 90000 // RATE
@@ -188,7 +186,9 @@ def test_decodes_h264_of_ffmpeg(encoder: list[str], profile: str) -> None:
     if encoder[1] not in ffmpeg_encoders():
         pytest.skip(f'no ffmpeg with WHIP and {encoder[1]}')
 
-    output = run_isolated(SCRIPT.replace('sys.argv[1]', repr(json.dumps(encoder))), timeout=120)
+    output = run_isolated(
+        SCRIPT.replace('sys.argv[1]', repr(json.dumps([shutil.which('ffmpeg'), encoder]))), timeout=120
+    )
     result: dict[str, object] = json.loads(output.strip().splitlines()[-1])
     if 'skip' in result:
         pytest.skip(str(result['skip']))

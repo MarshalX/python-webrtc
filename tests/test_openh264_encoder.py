@@ -31,7 +31,7 @@ import tempfile
 import webrtc
 from tests.helpers import connect
 
-FFMPEG = sys.argv[1]
+FFMPEG, FFPROBE = json.loads(sys.argv[1])
 WIDTH, HEIGHT, RATE = 320, 240, 30
 SOURCE_FRAMES = 300
 SIZE = WIDTH * HEIGHT * 3 // 2
@@ -138,7 +138,7 @@ async def main():
         with open(path, 'wb') as file:
             file.write(b''.join(data for data, *_ in stream))
         probe = json.loads(subprocess.run(
-            [FFMPEG.replace('ffmpeg', 'ffprobe'), '-v', 'error', '-show_entries', 'stream=profile,width,height',
+            [FFPROBE, '-v', 'error', '-show_entries', 'stream=profile,width,height',
              '-of', 'json', path],
             capture_output=True, text=True, check=True,
         ).stdout)['streams'][0]
@@ -177,10 +177,10 @@ asyncio.run(main())
 @functools.cache
 def result() -> dict[str, object]:
     """Runs the script once for every test of the module."""
-    ffmpeg = shutil.which('ffmpeg')
-    if ffmpeg is None or shutil.which('ffprobe') is None:
+    ffmpeg, ffprobe = shutil.which('ffmpeg'), shutil.which('ffprobe')
+    if ffmpeg is None or ffprobe is None:
         return {'skip': 'no ffmpeg and ffprobe'}
-    output = run_isolated(SCRIPT.replace('sys.argv[1]', repr(ffmpeg)), timeout=180)
+    output = run_isolated(SCRIPT.replace('sys.argv[1]', repr(json.dumps([ffmpeg, ffprobe]))), timeout=180)
     parsed: dict[str, object] = json.loads(output.strip().splitlines()[-1])
     return parsed
 

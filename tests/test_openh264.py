@@ -165,7 +165,8 @@ def test_glibc_floor(monkeypatch: pytest.MonkeyPatch, version: str | None, error
         assert name == 'CS_GNU_LIBC_VERSION'
         return version
 
-    monkeypatch.setattr(webrtc.openh264.os, 'confstr', confstr)
+    # os.confstr exists only on POSIX
+    monkeypatch.setattr(webrtc.openh264.os, 'confstr', confstr, raising=False)
     if error is None:
         webrtc.openh264._check_glibc()
     else:
