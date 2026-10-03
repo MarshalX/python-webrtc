@@ -7,6 +7,7 @@
 
 #include <pybind11/pybind11.h>
 
+#include "codecs/openh264.h"
 #include "config.h"
 #include "exceptions.h"
 #include "functions/functions.h"
@@ -58,4 +59,5 @@ PYBIND11_MODULE(wrtc, m) {
   python_webrtc::Interfaces::Init(m);
   python_webrtc::Functions::Init(m);
   python_webrtc::Media::Init(m);
+  python_webrtc::OpenH264::Init(m);
 }

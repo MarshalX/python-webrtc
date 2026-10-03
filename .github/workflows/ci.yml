@@ -35,7 +35,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: .wrtc-cache
-          key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/libwebrtc.cmake', 'cmake/libcxx/*.sha256') }}
+          key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/libwebrtc.cmake', 'cmake/libcxx/*.sha256', 'cmake/openh264.*') }}
       - run: make tidy
 
   sdist:
@@ -79,7 +79,7 @@ jobs:
         if: runner.os != 'Windows'
         with:
           path: .wrtc-cache
-          key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.ci-src/cmake/libwebrtc.cmake', '.ci-src/cmake/libcxx/*.sha256') }}
+          key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.ci-src/cmake/libwebrtc.cmake', '.ci-src/cmake/libcxx/*.sha256', '.ci-src/cmake/openh264.*') }}
       - uses: astral-sh/setup-uv@v7
       - uses: pypa/cibuildwheel@v4.2.1
         env:

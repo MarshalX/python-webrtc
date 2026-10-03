@@ -282,6 +282,7 @@ from .interfaces.sframe_transform import (
 )
 
 from .interfaces.media_devices import MediaDeviceInfo, InputDeviceInfo, MediaDevices, media_devices, mediaDevices
+from . import openh264
 
 
 __all__ = [
@@ -542,4 +543,5 @@ __all__ = [
     'WritableStreamDefaultWriter',
     'mediaDevices',
     'media_devices',
+    'openh264',
 ]
