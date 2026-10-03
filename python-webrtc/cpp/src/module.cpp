@@ -1,5 +1,5 @@
 //
-// Copyright 2022 Il`ya (Marshal) <https://github.com/MarshalX>. All rights reserved.
+// Copyright 2022-2026 Ilya (Marshal) <https://github.com/MarshalX>. All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license
 // that can be found in the LICENSE.md file in the root of the project.
@@ -39,7 +39,7 @@ PYBIND11_MODULE(wrtc, m) {
   if (!copyrightShowed) {
     auto ver = std::string(PROJECT_VER);
     const auto *dev = ver.find("dev") != std::string::npos ? " DEV" : "";
-    py::print("Python WebRTC v" + ver + dev + ", Copyright (C) 2026 Ilya (Marshal) <https://github.com/MarshalX>");
+    py::print("Python WebRTC v" + ver + dev + ", Copyright (C) 2022-2026 Ilya (Marshal) <https://github.com/MarshalX>");
     py::print("Licensed under the terms of the BSD 3-Clause License\n\n");
 
     copyrightShowed = true;
