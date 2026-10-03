@@ -3,12 +3,15 @@ set(MODULE wrtc)
 configure_file(src/config.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/config.h")
 
 file(GLOB_RECURSE MODULE_SRC CONFIGURE_DEPENDS src/*.cpp src/*.h)
+set_source_files_properties("${OPENH264_ENCODER_SRC}" src/codecs/openh264.cpp
+    PROPERTIES COMPILE_DEFINITIONS WEBRTC_USE_H264)
 
-pybind11_add_module(${MODULE} ${MODULE_SRC})
+pybind11_add_module(${MODULE} ${MODULE_SRC} "${OPENH264_ENCODER_SRC}")
 
 target_include_directories(${MODULE} PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${OPENH264_INCLUDE_DIR}"
 )
 target_link_libraries(${MODULE} PRIVATE libwebrtc)
 

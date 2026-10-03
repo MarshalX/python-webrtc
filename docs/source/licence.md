@@ -7,3 +7,15 @@ The licences of the bundled third-party code: [THIRD_PARTY_LICENSES.md](https://
 ```{include} ../../LICENSE.md
 :end-line: 35
 ```
+
+## OpenH264
+
+OpenH264 Video Codec provided by Cisco Systems, Inc.
+
+H.264 uses Cisco's OpenH264 binary, downloaded separately by {func}`webrtc.openh264.install` (see
+[H.264](guides/h264.md)). Its license, and the license of the OpenH264 headers compiled into python-webrtc:
+
+```{include} ../../THIRD_PARTY_LICENSES.md
+:start-after: "# openh264"
+:end-before: "# opus"
+```

@@ -123,6 +123,7 @@ guides/connections
 guides/data-channels
 guides/events
 guides/media
+guides/h264
 ```
 
 ```{toctree}

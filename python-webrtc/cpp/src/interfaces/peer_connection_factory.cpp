@@ -6,6 +6,7 @@
 //
 
 #include "peer_connection_factory.h"
+#include "../codecs/openh264.h"
 #include "../media/playout_audio_device.h"
 #include "../media/wakeup.h"
 #include "../utils/gil.h"
@@ -35,14 +36,16 @@
 
 namespace python_webrtc {
 
-  // Royalty-free codecs only (the prebuilts have no H.264).
-  using VideoEncoderFactory = webrtc::VideoEncoderFactoryTemplate<webrtc::LibvpxVp8EncoderTemplateAdapter,
-                                                                  webrtc::LibvpxVp9EncoderTemplateAdapter,
-                                                                  webrtc::LibaomAv1EncoderTemplateAdapter>;
+  // H.264 only once Cisco's OpenH264 binary is loaded (the prebuilts have none)
+  using VideoEncoderFactory =
+      webrtc::VideoEncoderFactoryTemplate<webrtc::LibvpxVp8EncoderTemplateAdapter,
+                                          webrtc::LibvpxVp9EncoderTemplateAdapter,
+                                          webrtc::LibaomAv1EncoderTemplateAdapter, OpenH264EncoderAdapter>;
 
   using VideoDecoderFactory =
       webrtc::VideoDecoderFactoryTemplate<webrtc::LibvpxVp8DecoderTemplateAdapter,
-                                          webrtc::LibvpxVp9DecoderTemplateAdapter, webrtc::Dav1dDecoderTemplateAdapter>;
+                                          webrtc::LibvpxVp9DecoderTemplateAdapter, webrtc::Dav1dDecoderTemplateAdapter,
+                                          OpenH264DecoderAdapter>;
 
   std::weak_ptr<PeerConnectionFactory> PeerConnectionFactory::_default{};
   std::mutex PeerConnectionFactory::_mutex{};

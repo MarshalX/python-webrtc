@@ -11,6 +11,8 @@
 #   LIBWEBRTC_CACHE_DIR  where archives are unpacked (env: WRTC_CACHE_DIR)
 
 set(LIBWEBRTC_VERSION "152.7977.0.0")
+# the upstream commit of that release (m152.7977@{#0})
+set(LIBWEBRTC_COMMIT 6f37672d358475cd17544121a12494da454d85fb)
 set(LIBWEBRTC_URL_BASE "https://github.com/crow-misia/libwebrtc-bin/releases/download/${LIBWEBRTC_VERSION}")
 
 set(LIBWEBRTC_SHA256_linux-x64   5ba9bbb3392671d96f8fb300e2a2c1566d76fa4e590e3b4f959fa144da16da5c)

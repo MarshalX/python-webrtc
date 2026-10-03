@@ -34,4 +34,11 @@ Handlers as functions or coroutines, decorators, one-shot handlers, removing the
 Reading, writing and transforming the frames of audio and video tracks.
 :::
 
+:::{grid-item-card} {octicon}`video;1em;sd-mr-1` H.264
+:link: h264
+:link-type: doc
+
+Enabling H.264 with Cisco's OpenH264 binary, and its licensing.
+:::
+
 ::::

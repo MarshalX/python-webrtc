@@ -20,7 +20,7 @@ SECTIONS = {
     'models': 'Models',
 }
 # the internals of the package, except the events every interface inherits
-TOP_LEVEL = ['enums', 'exceptions', 'streams', 'utils.events', 'base']
+TOP_LEVEL = ['enums', 'exceptions', 'streams', 'utils.events', 'base', 'openh264']
 
 # enum members have no docstrings of their own
 UNDOC_MEMBERS = {'enums'}
@@ -31,6 +31,7 @@ TITLES = {
     'enums': 'Enums',
     'exceptions': 'Exceptions',
     'streams': 'Streams',
+    'openh264': 'OpenH264',
     'utils.events': 'EventTarget',
     'interfaces.media_devices': 'MediaDevices',
     'interfaces.media_stream_track_processor': 'MediaStreamTrackProcessor',

@@ -48,6 +48,13 @@ Registering and removing event handlers.
 The readable, writable and transform streams of media processing.
 :::
 
+:::{grid-item-card} {octicon}`video;1em;sd-mr-1` OpenH264
+:link: openh264
+:link-type: doc
+
+Enabling and disabling H.264.
+:::
+
 ::::
 
 ```{toctree}
@@ -59,5 +66,6 @@ enums
 exceptions
 events
 streams
+openh264
 base
 ```
