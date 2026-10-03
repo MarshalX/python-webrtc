@@ -4,6 +4,9 @@
 #  Use of this source code is governed by a BSD-style license
 #  that can be found in the LICENSE.md file in the root of the project.
 #
+#  Ported from web-platform-tests, Copyright © web-platform-tests contributors,
+#  under the 3-Clause BSD License in the THIRD_PARTY_LICENSES.md file in the root of the project.
+#
 
 from __future__ import annotations
 
