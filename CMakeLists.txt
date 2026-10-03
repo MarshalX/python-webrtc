@@ -15,6 +15,11 @@ project(python_webrtc
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+if(APPLE)
+  # glue to libwebrtc's ObjC VideoToolbox codecs
+  enable_language(OBJCXX)
+  set(CMAKE_OBJCXX_STANDARD 20)
+endif()
 # for clang-tidy (make tidy) and editors
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(MSVC)

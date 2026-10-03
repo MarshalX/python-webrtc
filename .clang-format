@@ -1,6 +1,5 @@
 ---
 BasedOnStyle: LLVM
-Language: Cpp
 Standard: c++20
 ColumnLimit: 120
 IndentWidth: 2

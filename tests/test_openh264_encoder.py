@@ -1,5 +1,5 @@
 #
-#  Copyright 2022 Il`ya (Marshal) <https://github.com/MarshalX>. All rights reserved.
+#  Copyright 2026 Ilya (Marshal) <https://github.com/MarshalX>. All rights reserved.
 #
 #  Use of this source code is governed by a BSD-style license
 #  that can be found in the LICENSE.md file in the root of the project.
@@ -45,7 +45,13 @@ def psnr(a, b):
     return math.inf if mse == 0 else 10 * math.log10(255 * 255 / mse)
 
 
+def h264():
+    return [c for c in webrtc.RTCRtpSender.get_capabilities('video').codecs if c.mime_type == 'video/H264']
+
+
 async def main():
+    # the OS's H.264 (macOS), offered without OpenH264
+    builtin = {c.sdp_fmtp_line for c in h264()}
     try:
         await webrtc.openh264.install()
     except RuntimeError as e:
@@ -100,9 +106,7 @@ async def main():
     generator = webrtc.VideoTrackGenerator()
     sender = caller.add_track(generator.track)
     transceiver = next(t for t in caller.get_transceivers() if t.sender == sender)
-    transceiver.set_codec_preferences(
-        [c for c in webrtc.RTCRtpSender.get_capabilities('video').codecs if c.mime_type == 'video/H264']
-    )
+    transceiver.set_codec_preferences([c for c in h264() if c.sdp_fmtp_line not in builtin])
     sender.transform = webrtc.RTCRtpScriptTransform(tap)
 
     stop = asyncio.Event()

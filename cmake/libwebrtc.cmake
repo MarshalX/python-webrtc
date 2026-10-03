@@ -70,6 +70,10 @@ set(LIBWEBRTC_HEADER_DIRS
     rtc_base system_wrappers video
     third_party/abseil-cpp third_party/libyuv
 )
+if(APPLE)
+  # the ObjC SDK, for the VideoToolbox H.264 codecs
+  list(APPEND LIBWEBRTC_HEADER_DIRS sdk)
+endif()
 
 # --- target platform ---------------------------------------------------------
 
@@ -240,6 +244,20 @@ endif()
 
 if(APPLE)
   target_compile_definitions(libwebrtc INTERFACE WEBRTC_MAC)
+  # the SDK includes its headers relative to these
+  set_property(TARGET libwebrtc APPEND PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sdk/objc;${_inc}/sdk/objc/base")
+  # ObjC categories the codec glue needs, which no symbol pulls in; -ObjC would also link the SDK's Metal views
+  set(_objc_categories
+      NSString+StdString.o RTCEncodedImage+Private.o RTCVideoCodecInfo+Private.o RTCVideoEncoderSettings+Private.o)
+  set(_objc_dir "${CMAKE_BINARY_DIR}/libwebrtc-objc")
+  file(MAKE_DIRECTORY "${_objc_dir}")
+  execute_process(
+      COMMAND "${CMAKE_AR}" -x "${LIBWEBRTC_ROOT}/lib/libwebrtc.a" ${_objc_categories}
+      WORKING_DIRECTORY "${_objc_dir}"
+      COMMAND_ERROR_IS_FATAL ANY
+  )
+  list(TRANSFORM _objc_categories PREPEND "${_objc_dir}/")
+  target_link_libraries(libwebrtc INTERFACE ${_objc_categories})
   target_link_libraries(libwebrtc INTERFACE
       "-framework AppKit"
       "-framework ApplicationServices"
@@ -255,6 +273,7 @@ if(APPLE)
       "-framework Metal"
       "-framework Security"
       "-framework SystemConfiguration"
+      "-framework VideoToolbox"
   )
 elseif(_os STREQUAL "linux")
   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")

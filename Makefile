@@ -2,7 +2,7 @@
 
 # pinned to the clang-tidy of .github/scripts/tidy.sh
 CLANG_FORMAT := uvx clang-format==22.1.8
-CPP_SRC = $(shell find python-webrtc/cpp/src -name '*.cpp' -o -name '*.h')
+CPP_SRC = $(shell find python-webrtc/cpp/src -name '*.cpp' -o -name '*.h' -o -name '*.mm')
 
 # editable install; the extension is rebuilt automatically on import after C++ changes
 dev:
