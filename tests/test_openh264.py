@@ -1,5 +1,5 @@
 #
-#  Copyright 2022 Il`ya (Marshal) <https://github.com/MarshalX>. All rights reserved.
+#  Copyright 2026 Ilya (Marshal) <https://github.com/MarshalX>. All rights reserved.
 #
 #  Use of this source code is governed by a BSD-style license
 #  that can be found in the LICENSE.md file in the root of the project.
@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -27,7 +28,13 @@ chroma = (WIDTH // 2) * (HEIGHT // 2)
 RED = bytes([81] * (WIDTH * HEIGHT) + [90] * chroma + [240] * chroma)
 
 
+def h264():
+    return [c for c in webrtc.RTCRtpSender.get_capabilities('video').codecs if c.mime_type == 'video/H264']
+
+
 async def main():
+    # the OS's H.264 (macOS), offered without OpenH264
+    builtin = {c.sdp_fmtp_line for c in h264()}
     try:
         version = await webrtc.openh264.install()
     except RuntimeError as e:
@@ -38,8 +45,7 @@ async def main():
     generator = webrtc.VideoTrackGenerator()
     sender = caller.add_track(generator.track)
     transceiver = next(t for t in caller.get_transceivers() if t.sender == sender)
-    codecs = webrtc.RTCRtpSender.get_capabilities('video').codecs
-    transceiver.set_codec_preferences([c for c in codecs if c.mime_type == 'video/H264'])
+    transceiver.set_codec_preferences([c for c in h264() if c.sdp_fmtp_line not in builtin])
 
     async with writing(write_video, generator, RED, (WIDTH, HEIGHT)):
         track_event = wait_for_event(callee, 'track', 20)
@@ -80,7 +86,7 @@ asyncio.run(main())
 
 
 def test_h264_through_a_connection() -> None:
-    """Frames encoded and decoded by Cisco's OpenH264 arrive in their color and size."""
+    """Frames encoded by Cisco's OpenH264 arrive in their color and size."""
     result: dict[str, object] = json.loads(run_isolated(SCRIPT, timeout=120).strip().splitlines()[-1])
     if 'skip' in result:
         pytest.skip(str(result['skip']))
@@ -88,7 +94,8 @@ def test_h264_through_a_connection() -> None:
     assert result['version'] == webrtc.openh264.VERSION
     assert result['codec'] == 'video/H264'
     assert result['encoder'] == 'OpenH264'
-    assert result['decoder'] == 'OpenH264'
+    # the OS's decoder takes every H.264 profile on macOS
+    assert result['decoder'] == ('VideoToolbox' if sys.platform == 'darwin' else 'OpenH264')
     decoded = result['decoded']
     assert isinstance(decoded, int)
     assert decoded >= 10
@@ -109,8 +116,17 @@ import json
 import webrtc
 
 
+def h264():
+    codecs = webrtc.RTCRtpSender.get_capabilities('video').codecs
+    return {c.sdp_fmtp_line for c in codecs if c.mime_type == 'video/H264'}
+
+
+# the OS's H.264 (macOS), offered without OpenH264
+builtin = h264()
+
+
 def offered():
-    return any(c.mime_type == 'video/H264' for c in webrtc.RTCRtpSender.get_capabilities('video').codecs)
+    return bool(h264() - builtin)
 
 
 states = [(webrtc.openh264.is_enabled(), offered())]
@@ -137,7 +153,7 @@ print(json.dumps({'states': states, 'versions': versions}))
 
 
 def test_enable_disable_reenable() -> None:
-    """H.264 is offered only between install() and disable(), as Cisco's license requires users can control it."""
+    """OpenH264 is offered only between install() and disable(), as Cisco's license requires users can control it."""
     output = run_isolated(TOGGLE_SCRIPT).strip().splitlines()
     result: dict[str, object] = json.loads(output[-1])
     if 'skip' in result:

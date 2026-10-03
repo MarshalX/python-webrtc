@@ -1,11 +1,11 @@
 #
-#  Copyright 2022 Il`ya (Marshal) <https://github.com/MarshalX>. All rights reserved.
+#  Copyright 2026 Ilya (Marshal) <https://github.com/MarshalX>. All rights reserved.
 #
 #  Use of this source code is governed by a BSD-style license
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""H.264 of other encoders, sent by ffmpeg over WHIP, decoded by OpenH264."""
+"""H.264 of other encoders, sent by ffmpeg over WHIP, decoded by OpenH264 (VideoToolbox on macOS)."""
 
 from __future__ import annotations
 
@@ -182,7 +182,7 @@ CASES = [
 
 @pytest.mark.parametrize(('encoder', 'profile'), CASES)
 def test_decodes_h264_of_ffmpeg(encoder: list[str], profile: str) -> None:
-    """A stream of another encoder in a profile arrives negotiated, decoded by OpenH264, close to its source."""
+    """A stream of another encoder in a profile arrives negotiated, decoded, close to its source."""
     if encoder[1] not in ffmpeg_encoders():
         pytest.skip(f'no ffmpeg with WHIP and {encoder[1]}')
 
@@ -195,7 +195,7 @@ def test_decodes_h264_of_ffmpeg(encoder: list[str], profile: str) -> None:
 
     assert result['codec'] == 'video/H264'
     assert f'profile-level-id={profile}' in str(result['fmtp'])
-    assert result['decoder'] == 'OpenH264'
+    assert result['decoder'] == ('VideoToolbox' if sys.platform == 'darwin' else 'OpenH264')
     assert result['sizes'] == [f'{WIDTH}x{HEIGHT}']
     psnr = result['psnr']
     assert isinstance(psnr, list)

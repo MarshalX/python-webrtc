@@ -7,6 +7,7 @@
 
 #include "peer_connection_factory.h"
 #include "../codecs/openh264.h"
+#include "../codecs/videotoolbox.h"
 #include "../media/playout_audio_device.h"
 #include "../media/wakeup.h"
 #include "../utils/gil.h"
@@ -36,6 +37,17 @@
 
 namespace python_webrtc {
 
+#ifdef __APPLE__
+  // the OS's H.264 first, it wins the formats both offer
+  using VideoEncoderFactory = webrtc::VideoEncoderFactoryTemplate<
+      webrtc::LibvpxVp8EncoderTemplateAdapter, webrtc::LibvpxVp9EncoderTemplateAdapter,
+      webrtc::LibaomAv1EncoderTemplateAdapter, VideoToolboxEncoderAdapter, OpenH264EncoderAdapter>;
+
+  using VideoDecoderFactory =
+      webrtc::VideoDecoderFactoryTemplate<webrtc::LibvpxVp8DecoderTemplateAdapter,
+                                          webrtc::LibvpxVp9DecoderTemplateAdapter, webrtc::Dav1dDecoderTemplateAdapter,
+                                          VideoToolboxDecoderAdapter, OpenH264DecoderAdapter>;
+#else
   // H.264 only once Cisco's OpenH264 binary is loaded (the prebuilts have none)
   using VideoEncoderFactory =
       webrtc::VideoEncoderFactoryTemplate<webrtc::LibvpxVp8EncoderTemplateAdapter,
@@ -46,6 +58,7 @@ namespace python_webrtc {
       webrtc::VideoDecoderFactoryTemplate<webrtc::LibvpxVp8DecoderTemplateAdapter,
                                           webrtc::LibvpxVp9DecoderTemplateAdapter, webrtc::Dav1dDecoderTemplateAdapter,
                                           OpenH264DecoderAdapter>;
+#endif
 
   std::weak_ptr<PeerConnectionFactory> PeerConnectionFactory::_default{};
   std::mutex PeerConnectionFactory::_mutex{};

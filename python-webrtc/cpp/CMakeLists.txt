@@ -3,6 +3,11 @@ set(MODULE wrtc)
 configure_file(src/config.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/config.h")
 
 file(GLOB_RECURSE MODULE_SRC CONFIGURE_DEPENDS src/*.cpp src/*.h)
+if(APPLE)
+  file(GLOB_RECURSE MODULE_OBJC_SRC CONFIGURE_DEPENDS src/*.mm)
+  list(APPEND MODULE_SRC ${MODULE_OBJC_SRC})
+  set_source_files_properties(${MODULE_OBJC_SRC} PROPERTIES COMPILE_OPTIONS -fobjc-arc)
+endif()
 set_source_files_properties("${OPENH264_ENCODER_SRC}" src/codecs/openh264.cpp
     PROPERTIES COMPILE_DEFINITIONS WEBRTC_USE_H264)
 
