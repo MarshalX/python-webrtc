@@ -12,7 +12,7 @@ import json
 import pytest
 
 import webrtc
-from tests.helpers import run_isolated
+from tests.helpers import ROOT, run_isolated
 
 # loading OpenH264 can't be undone, so it happens in a process of its own
 SCRIPT = """
@@ -129,7 +129,8 @@ except RuntimeError as e:
 states.append((webrtc.openh264.is_enabled(), offered()))
 webrtc.openh264.disable()
 states.append((webrtc.openh264.is_enabled(), offered()))
-asyncio.run(webrtc.openh264.install())
+print('quiet install:', flush=True)
+asyncio.run(webrtc.openh264.install(print_notice=False))
 states.append((webrtc.openh264.is_enabled(), offered()))
 print(json.dumps({'states': states, 'versions': versions}))
 """
@@ -137,16 +138,30 @@ print(json.dumps({'states': states, 'versions': versions}))
 
 def test_enable_disable_reenable() -> None:
     """H.264 is offered only between install() and disable(), as Cisco's license requires users can control it."""
-    result: dict[str, object] = json.loads(run_isolated(TOGGLE_SCRIPT).strip().splitlines()[-1])
+    output = run_isolated(TOGGLE_SCRIPT).strip().splitlines()
+    result: dict[str, object] = json.loads(output[-1])
     if 'skip' in result:
         pytest.skip(str(result['skip']))
     assert result['states'] == [[False, False], [True, True], [False, False], [True, True]]
+    # printed by each of the two concurrent installs, not by the one with print_notice=False
+    quiet = output.index('quiet install:')
+    assert output[:quiet].count(webrtc.openh264.NOTICE) == 2
+    assert webrtc.openh264.NOTICE not in output[quiet:]
     # concurrent installs share one download and load
     assert result['versions'] == [webrtc.openh264.VERSION, webrtc.openh264.VERSION]
 
 
 def test_notice() -> None:
     assert webrtc.openh264.NOTICE == 'OpenH264 Video Codec provided by Cisco Systems, Inc.'
+
+
+def test_license_is_the_one_in_third_party_licenses() -> None:
+    """The constant and THIRD_PARTY_LICENSES.md carry the same text, and the notice in it."""
+    text = (ROOT / 'THIRD_PARTY_LICENSES.md').read_text(encoding='utf-8')
+    start = text.index('```\n' + '\n'.join(webrtc.openh264.LICENSE.splitlines()[:2])) + len('```\n')
+    section = text[start : text.index('\n```', start)]
+    assert section == webrtc.openh264.LICENSE.rstrip()
+    assert webrtc.openh264.NOTICE in webrtc.openh264.LICENSE
 
 
 @pytest.mark.parametrize(

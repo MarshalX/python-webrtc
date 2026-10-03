@@ -10,8 +10,8 @@
 OpenH264 Video Codec provided by Cisco Systems, Inc.
 
 Cisco's patent license covers the binary only on the conditions of its license (see THIRD_PARTY_LICENSES.md): the
-application lets its users enable and disable it, shows :data:`NOTICE` where they do, and reproduces the license where
-it presents licensing information.
+application lets its users enable and disable it, shows :data:`NOTICE` where they do, and reproduces :data:`LICENSE`
+where it presents licensing information.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import bz2
 import hashlib
+import importlib.resources
 import os
 import platform
 import sys
@@ -29,13 +30,16 @@ from pathlib import Path
 
 import webrtc
 
-__all__ = ['NOTICE', 'VERSION', 'disable', 'install', 'isEnabled', 'is_enabled']
+__all__ = ['LICENSE', 'NOTICE', 'VERSION', 'disable', 'install', 'isEnabled', 'is_enabled']
 
 #: The OpenH264 release the extension is built against
 VERSION = '2.6.0'
 
 #: The text Cisco's license requires where users enable or disable H.264
 NOTICE = 'OpenH264 Video Codec provided by Cisco Systems, Inc.'
+
+#: Cisco's license of the binary, which applications must reproduce where they present licensing information
+LICENSE = importlib.resources.files('webrtc').joinpath('openh264_license.txt').read_text(encoding='utf-8')
 
 _URL = 'http://ciscobinary.openh264.org/'
 
@@ -122,7 +126,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
         raise
 
 
-async def install(cache_dir: str | os.PathLike[str] | None = None) -> str:
+async def install(cache_dir: str | os.PathLike[str] | None = None, *, print_notice: bool = True) -> str:
     """Enables H.264, downloading Cisco's OpenH264 binary first if it isn't cached.
 
     OpenH264 Video Codec provided by Cisco Systems, Inc.
@@ -133,6 +137,9 @@ async def install(cache_dir: str | os.PathLike[str] | None = None) -> str:
 
     Args:
         cache_dir (:obj:`str`, optional): Where the binary is kept. Defaults to python-webrtc's cache directory.
+        print_notice (:obj:`bool`, optional): Whether to print :data:`NOTICE`. Pass :obj:`False` only when the
+            application shows :data:`NOTICE` itself where its users enable and disable H.264: Cisco's license requires
+            it there.
 
     Returns:
         :obj:`str`: The version of the loaded binary.
@@ -142,7 +149,8 @@ async def install(cache_dir: str | os.PathLike[str] | None = None) -> str:
             downloaded or loaded.
     """
     version = await asyncio.to_thread(_load, Path(cache_dir) if cache_dir is not None else None)
-    print(NOTICE)  # ruff: ignore[print]
+    if print_notice:
+        print(NOTICE)  # ruff: ignore[print]
     return version
 
 
