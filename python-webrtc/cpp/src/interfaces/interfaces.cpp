@@ -16,6 +16,7 @@
 #include "../media/video_frame_buffer.h"
 #include "../utils/alive_count.h"
 #include "../utils/gil.h"
+#include "../utils/libwebrtc_thread.h"
 #include "media_stream.h"
 #include "media_stream_track.h"
 #include "peer_connection_factory.h"
@@ -76,5 +77,6 @@ namespace python_webrtc {
           };
         },
         nogil());
+    m.def("_release_threads", []() { return ReleaseThreads().load(); });
   }
 } // namespace python_webrtc

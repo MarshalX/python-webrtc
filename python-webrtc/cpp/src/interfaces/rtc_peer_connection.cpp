@@ -12,7 +12,6 @@
 #include <limits>
 #include <set>
 #include <string_view>
-#include <thread>
 #include <utility>
 
 #include <absl/strings/match.h>
@@ -201,7 +200,7 @@ namespace python_webrtc {
 
   void RTCPeerConnection::ReleaseElsewhere(std::shared_ptr<RTCPeerConnection> &&connection) {
     if (connection) {
-      std::thread([connection = std::move(connection)]() mutable { connection = nullptr; }).detach();
+      ReleaseThread::Post([connection = std::move(connection)]() mutable { connection = nullptr; });
     }
   }
 

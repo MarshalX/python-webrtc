@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import MISSING, dataclass, fields
 from typing import TYPE_CHECKING, ClassVar
@@ -1260,11 +1261,18 @@ def _dictionary(entry: Mapping[str, object]) -> type[RTCStats]:
     return _DICTIONARIES.get(stats_type, RTCStats) if isinstance(stats_type, str) else RTCStats
 
 
+_DOWNGRADED: set[object] = set()
+
+
 def _stats(entry: Mapping[str, object]) -> RTCStats:
     try:
         return _dictionary(entry).from_json(entry)
-    except TypeError:
+    except TypeError as error:
         # libwebrtc lacks a required member of the dictionary: only the members of every stats are left
+        stats_type = entry.get('type')
+        if stats_type not in _DOWNGRADED:
+            _DOWNGRADED.add(stats_type)
+            warnings.warn(f'{stats_type!r} stats lack a required member, left as RTCStats: {error}', RuntimeWarning, 2)
         return RTCStats.from_json(entry)
 
 

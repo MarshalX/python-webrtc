@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import json
 import time
+import warnings
 
 import pytest
 
 import webrtc
 from tests.helpers import connect, stats_of_type, wait_for_event, wait_until, wait_until_unmuted
+from webrtc.models import rtc_stats
 
 
 async def send_audio(
@@ -122,6 +124,29 @@ async def test_remote_audio_is_played_out(
         return received is not None and received > 0
 
     await wait_until(decoded, 'decoded remote audio')
+
+
+@pytest.mark.asyncio
+async def test_call_stats_are_the_dictionaries_of_their_types(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """Every stats of a call with audio, video and data has its dictionary."""
+    video = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=True))
+    audio_stream.add_track(video.get_tracks()[0])
+    for track in audio_stream.get_tracks():
+        caller.add_track(track, audio_stream)
+    channel = caller.create_data_channel('stats')
+    opened = wait_for_event(channel, 'open')
+    await connect(caller, callee)
+    await opened
+
+    async def reported() -> bool:
+        return len(stats_of_type(await caller.get_stats(), 'remote-inbound-rtp')) > 0
+
+    await wait_until(reported, 'RTCP reports', timeout=20)
+    for pc in (caller, callee):
+        for stats in (await pc.get_stats()).values():
+            assert isinstance(stats, rtc_stats._dictionary(stats.to_json())), stats
 
 
 def report_of(*entries: dict[str, object]) -> webrtc.RTCStatsReport:
@@ -244,10 +269,23 @@ def test_unknown_values_are_kept() -> None:
     assert unknown.to_json() == {'timestamp': 0, 'type': 'csrc', 'id': 'X'}
 
 
-def test_stats_lacking_a_required_member() -> None:
+def test_stats_lacking_a_required_member(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stats libwebrtc reports without a required member of their dictionary have the common members only."""
-    report = report_of({'type': 'codec', 'id': 'C', 'timestamp': 0, 'payloadType': 111})
+    monkeypatch.setattr(rtc_stats, '_DOWNGRADED', set())
+    with pytest.warns(RuntimeWarning, match="'codec' stats lack a required member"):
+        report = report_of({'type': 'codec', 'id': 'C', 'timestamp': 0, 'payloadType': 111})
     assert type(report['C']) is webrtc.RTCStats
+
+
+def test_stats_lacking_a_required_member_warn_once_per_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fallback warns once per type of stats."""
+    monkeypatch.setattr(rtc_stats, '_DOWNGRADED', set())
+    entry = {'type': 'certificate', 'timestamp': 0, 'fingerprint': 'AB'}
+    with warnings.catch_warnings(record=True) as warned:
+        warnings.simplefilter('always')
+        report_of({**entry, 'id': 'A'}, {**entry, 'id': 'B'})
+        report_of({**entry, 'id': 'C'})
+    assert [warning.category for warning in warned] == [RuntimeWarning]
 
 
 def test_stats_dictionaries() -> None:

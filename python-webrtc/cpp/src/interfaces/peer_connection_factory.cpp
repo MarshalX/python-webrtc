@@ -8,6 +8,7 @@
 #include "peer_connection_factory.h"
 #include "../codecs/openh264.h"
 #include "../codecs/videotoolbox.h"
+#include "../exceptions.h"
 #include "../media/playout_audio_device.h"
 #include "../media/wakeup.h"
 #include "../utils/gil.h"
@@ -29,7 +30,7 @@
 #include <rtc_base/ssl_adapter.h>
 
 #include <stdexcept>
-#include <thread>
+#include <string>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -63,28 +64,21 @@ namespace python_webrtc {
   std::weak_ptr<PeerConnectionFactory> PeerConnectionFactory::_default{};
   std::mutex PeerConnectionFactory::_mutex{};
   std::atomic<int> PeerConnectionFactory::_alive{0};
+  bool PeerConnectionFactory::_sslInitialized{false};
+
+  namespace {
+    // NDEBUG compiles asserts out
+    std::unique_ptr<webrtc::Thread> Started(std::unique_ptr<webrtc::Thread> thread, const char *name) {
+      if (!thread || !thread->SetName(name, nullptr) || !thread->Start()) {
+        throw RTCException(webrtc::RTCErrorType::INTERNAL_ERROR, std::string("Failed to start ") + name);
+      }
+      return thread;
+    }
+  } // namespace
 
   PeerConnectionFactory::PeerConnectionFactory() : _generation(Forks().load()) {
-    _alive++;
-
-    _workerThread = webrtc::Thread::CreateWithSocketServer();
-    assert(_workerThread);
-
-    // checked by assert only, in debug builds
-    [[maybe_unused]] bool result = _workerThread->SetName("PeerConnectionFactory:workerThread", nullptr);
-    assert(result);
-
-    result = _workerThread->Start();
-    assert(result);
-
-    _signalingThread = webrtc::Thread::Create();
-    assert(_signalingThread);
-
-    result = _signalingThread->SetName("PeerConnectionFactory:signalingThread", nullptr);
-    assert(result);
-
-    result = _signalingThread->Start();
-    assert(result);
+    _workerThread = Started(webrtc::Thread::CreateWithSocketServer(), "PeerConnectionFactory:workerThread");
+    _signalingThread = Started(webrtc::Thread::Create(), "PeerConnectionFactory:signalingThread");
 
     _workerThread->BlockingCall([this]() {
       OnLibwebrtcThread() = true;
@@ -96,11 +90,16 @@ namespace python_webrtc {
         _workerThread.get(), _workerThread.get(), _signalingThread.get(), _audioDeviceModule,
         webrtc::CreateBuiltinAudioEncoderFactory(), webrtc::CreateBuiltinAudioDecoderFactory(),
         std::make_unique<VideoEncoderFactory>(), std::make_unique<VideoDecoderFactory>(), nullptr, nullptr);
-    assert(_factory);
+    if (!_factory) {
+      _workerThread->BlockingCall([this]() { _audioDeviceModule = nullptr; });
+      throw RTCException(webrtc::RTCErrorType::INTERNAL_ERROR, "Failed to create the peer connection factory");
+    }
 
     webrtc::PeerConnectionFactoryInterface::Options options;
     options.network_ignore_mask = 0;
     _factory->SetOptions(options);
+
+    _alive++;
   }
 
   PeerConnectionFactory::~PeerConnectionFactory() {
@@ -126,6 +125,11 @@ namespace python_webrtc {
   }
 
   std::shared_ptr<PeerConnectionFactory> PeerConnectionFactory::Create() {
+    const std::scoped_lock lock(_mutex);
+    return CreateLocked();
+  }
+
+  std::shared_ptr<PeerConnectionFactory> PeerConnectionFactory::CreateLocked() {
 #ifdef __APPLE__
     // libwebrtc runs its task queues on libdispatch, which crashes in the child of a fork
     if (Forks().load() > 0) {
@@ -134,6 +138,7 @@ namespace python_webrtc {
           "it): use the spawn start method of multiprocessing");
     }
 #endif
+    InitializeSSL();
     return {new PeerConnectionFactory(), &PeerConnectionFactory::Destroy};
   }
 
@@ -141,7 +146,7 @@ namespace python_webrtc {
     const std::scoped_lock lock(_mutex);
     auto factory = _default.lock();
     if (!factory) {
-      factory = Create();
+      factory = CreateLocked();
       _default = factory;
     }
     return factory;
@@ -154,20 +159,38 @@ namespace python_webrtc {
     }
     // the last owner may be released by a task on one of the factory threads, which can't stop itself
     if (factory->_workerThread->IsCurrent() || factory->_signalingThread->IsCurrent()) {
-      std::thread([factory]() { delete factory; }).detach();
+      ReleaseThread::Post([factory]() { delete factory; });
       return;
     }
 
     delete factory;
   }
 
+  void PeerConnectionFactory::InitializeSSL() {
+    if (!_sslInitialized) {
+      if (!webrtc::InitializeSSL()) {
+        throw RTCException(webrtc::RTCErrorType::INTERNAL_ERROR, "Failed to initialize SSL");
+      }
+      _sslInitialized = true;
+    }
+  }
+
   void PeerConnectionFactory::Dispose() {
-    webrtc::CleanupSSL();
+    const std::scoped_lock lock(_mutex);
+    if (_alive > 0) {
+      throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "Failed to dispose: peer connection factories are alive");
+    }
+    if (_sslInitialized) {
+      webrtc::CleanupSSL();
+      _sslInitialized = false;
+    }
   }
 
   void PeerConnectionFactory::Init(pybind11::module &m) {
-    [[maybe_unused]] const bool result = webrtc::InitializeSSL();
-    assert(result);
+    {
+      const std::scoped_lock lock(_mutex);
+      InitializeSSL();
+    }
 
 #ifndef _WIN32
     // libwebrtc threads don't survive a fork: the child forgets the factories (also runs before exec, keep it minimal)
@@ -175,14 +198,17 @@ namespace python_webrtc {
         []() {
           _mutex.lock();
           Wakeup::LockForFork();
+          ReleaseThread::LockForFork();
         },
         []() {
+          ReleaseThread::UnlockAfterFork();
           Wakeup::UnlockAfterFork();
           _mutex.unlock();
         },
         []() {
           Forks()++;
           _default.reset();
+          ReleaseThread::UnlockAfterFork();
           Wakeup::UnlockAfterFork();
           _mutex.unlock();
         });

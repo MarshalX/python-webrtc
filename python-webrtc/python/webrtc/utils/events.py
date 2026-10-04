@@ -47,6 +47,28 @@ class HandlerDecorator(Protocol[_E_contra]):
 _handler_tasks: set[asyncio.Future[object]] = set()
 
 
+def call_handler(loop: asyncio.AbstractEventLoop, handler: Callable[[_E], object], event: _E, *, message: str) -> None:
+    """Calls a handler; exceptions, async ones too, go to the loop's exception handler."""
+
+    def report(exception: BaseException) -> None:
+        loop.call_exception_handler({'message': message, 'exception': exception, 'event': event})
+
+    def done(task: asyncio.Future[object]) -> None:
+        _handler_tasks.discard(task)
+        if not task.cancelled() and (exception := task.exception()) is not None:
+            report(exception)
+
+    try:
+        result = handler(event)
+    except Exception as e:
+        report(e)
+        return
+    if inspect.isawaitable(result):
+        task = asyncio.ensure_future(result, loop=loop)
+        _handler_tasks.add(task)
+        task.add_done_callback(done)
+
+
 def _running_loop() -> asyncio.AbstractEventLoop | None:
     try:
         return asyncio.get_running_loop()
@@ -118,18 +140,7 @@ class _Listeners:
         for registration in registrations:
             if registration.once:
                 self.remove(name, registration.handler)
-            try:
-                result = registration.handler(event)
-                if inspect.isawaitable(result):
-                    task = asyncio.ensure_future(result, loop=loop)
-                    _handler_tasks.add(task)
-                    task.add_done_callback(_handler_tasks.discard)
-            except Exception as e:
-                loop.call_exception_handler({
-                    'message': f'Exception in {name!r} event handler',
-                    'exception': e,
-                    'event': event,
-                })
+            call_handler(loop, registration.handler, event, message=f'Exception in {name!r} event handler')
 
     def add(self, name: str, handler: Handler, *, once: bool) -> None:
         loop = self.ensure_primary_loop()

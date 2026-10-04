@@ -56,10 +56,15 @@ namespace python_webrtc {
 
     static void Destroy(PeerConnectionFactory *factory);
 
+    // _mutex held
+    static std::shared_ptr<PeerConnectionFactory> CreateLocked();
+    static void InitializeSSL();
+
     static std::weak_ptr<PeerConnectionFactory> _default;
     static std::mutex _mutex;
     // factories constructed and not destroyed yet, lets tests check that none leaks
     static std::atomic<int> _alive;
+    static bool _sslInitialized;
 
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> _factory;
     webrtc::scoped_refptr<webrtc::AudioDeviceModule> _audioDeviceModule;

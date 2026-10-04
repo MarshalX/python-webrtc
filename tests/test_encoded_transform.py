@@ -497,3 +497,25 @@ async def test_closing_releases_transforms() -> None:
 
     await session()
     await wait_until(lambda: released_to(baseline), 'the transforms released', TIMEOUT)
+
+
+@pytest.mark.asyncio
+async def test_async_worker_exception_goes_to_the_loop() -> None:
+    """An async worker's exception reaches the loop's exception handler."""
+    loop = asyncio.get_running_loop()
+    reported = loop.create_future()
+    loop.set_exception_handler(lambda _loop, context: reported.done() or reported.set_result(context))
+    try:
+
+        async def worker(_event: webrtc.RTCTransformEvent) -> None:
+            await asyncio.sleep(0)
+            msg = 'worker'
+            raise ValueError(msg)
+
+        transform = webrtc.RTCRtpScriptTransform(worker)
+        context = await asyncio.wait_for(reported, 5)
+        assert context['message'] == 'Exception in the worker of an RTCRtpScriptTransform'
+        assert isinstance(context['exception'], ValueError)
+        assert transform is not None
+    finally:
+        loop.set_exception_handler(None)

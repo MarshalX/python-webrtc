@@ -13,6 +13,7 @@ import asyncio
 import gc
 import inspect
 import pathlib
+import re
 import subprocess
 import sys
 import textwrap
@@ -26,7 +27,7 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import QUIET_PERIOD, connect, exchange_offer_answer, wait_for_event
+from tests.helpers import QUIET_PERIOD, connect, exchange_offer_answer, run_isolated, wait_for_event
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
@@ -728,3 +729,53 @@ async def test_a_session_releases_every_native_object() -> None:
     await asyncio.sleep(QUIET_PERIOD)
 
     assert alive_objects() == baseline
+
+
+def test_dispose_while_factories_are_alive() -> None:
+    """dispose() refuses while factories are alive; later factories still work."""
+    pc = webrtc.RTCPeerConnection()
+    with pytest.raises(webrtc.InvalidStateError):
+        wrtc.PeerConnectionFactory.dispose()
+    pc.close()
+
+    output = run_isolated(
+        """
+        import asyncio
+        import wrtc
+        import webrtc
+        from tests.helpers import connect
+
+        async def main():
+            wrtc.PeerConnectionFactory.dispose()
+            caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+            caller.create_data_channel('dispose')
+            await connect(caller, callee)
+            print(caller.connection_state)
+            caller.close()
+            callee.close()
+
+        asyncio.run(main())
+        """
+    )
+    assert 'connected' in output
+
+
+@pytest.mark.asyncio
+async def test_releases_share_one_thread(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """Releases from libwebrtc threads share one thread."""
+    candidates: list[webrtc.RTCIceCandidate] = []
+
+    @caller.on('icecandidate')
+    def on_candidate(event: webrtc.RTCPeerConnectionIceEvent) -> None:
+        if event.candidate is not None:
+            candidates.append(event.candidate)
+
+    caller.create_data_channel('release')
+    await connect(caller, callee)
+    for _ in range(20):
+        await callee.add_ice_candidate(candidates[0])
+    assert wrtc._release_threads() <= 1
+
+
+def test_repr(pc: webrtc.RTCPeerConnection) -> None:
+    assert re.fullmatch(r'<webrtc\.RTCPeerConnection object at 0x[0-9a-f]+>', repr(pc)) is not None

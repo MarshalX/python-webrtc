@@ -79,6 +79,37 @@ def test_exit_while_operations_are_pending(_attempt: int) -> None:
     assert 'exiting' in run_isolated(PENDING_AT_EXIT, timeout=30)
 
 
+AWAITED_AT_EXIT = """
+    import asyncio
+    import atexit
+
+    async def operate():
+        pc = webrtc.RTCPeerConnection()
+        pc.add_transceiver('audio')
+        for operation in (pc.get_stats, pc.create_offer):
+            try:
+                await asyncio.wait_for(operation(), 20)
+                print('settled')
+            except asyncio.TimeoutError:
+                print('hung')
+            except Exception as error:
+                print('failed', type(error).__name__)
+
+    # runs after the handlers registered by the import
+    atexit.register(lambda: asyncio.run(operate()))
+
+    import webrtc
+    print('exiting')
+"""
+
+
+def test_operations_awaited_at_exit_settle() -> None:
+    """Operations awaited by an exit handler settle rather than hang."""
+    output = run_isolated(AWAITED_AT_EXIT, timeout=60)
+    assert 'hung' not in output, output
+    assert output.count('settled') + output.count('failed InvalidStateError') == 2, output
+
+
 @pytest.mark.skipif(not hasattr(os, 'fork'), reason='no fork')
 def test_forked_child_leaves_the_objects_of_its_parent_alone() -> None:
     """The child of a fork doesn't block on its parent's threads; new objects work (raise on macOS)."""

@@ -83,11 +83,7 @@ minimum-version = "build-system.requires"
 cmake.version = ">=3.26"
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["python-webrtc/python/webrtc"]
-sdist.exclude = [
-    ".github", ".idea", "docs", "docs_html", "examples", "node-webrtc", "wpt",
-    "Dockerfile*", "docker-compose.yaml", "/py.typed",
-    "python-webrtc/python/*.py", "python-webrtc/python/*.session*", "python-webrtc/python/*.raw",
-]
+sdist.exclude = [".github", ".idea", "docs", "examples", "wpt"]
 
 [tool.cibuildwheel]
 build = "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"

@@ -13,7 +13,6 @@ There are no Workers. The worker of a transform is a Python callable run on the 
 from __future__ import annotations
 
 import asyncio
-import inspect
 import re
 import weakref
 from collections.abc import Iterable
@@ -39,7 +38,7 @@ from webrtc import (
 from webrtc.enums import EncodedVideoChunkType
 from webrtc.models.dictionary import Dictionary
 from webrtc.streams import QueuingStrategy, ReadableStream, WritableStream, _handled
-from webrtc.utils.events import UniformEventTarget, _handler_tasks
+from webrtc.utils.events import UniformEventTarget, call_handler
 
 if TYPE_CHECKING:
     from webrtc.enums import RTCRtpScriptTransformTypeValue
@@ -343,18 +342,7 @@ class RTCRtpScriptTransform(WebRTCObject[wrtc.RTCRtpScriptTransform]):
 
     def _fire(self, worker: Worker, loop: asyncio.AbstractEventLoop) -> None:
         event = RTCTransformEvent('rtctransform', self._transformer)
-        try:
-            result = worker(event)
-            if inspect.isawaitable(result):
-                task = asyncio.ensure_future(result, loop=loop)
-                _handler_tasks.add(task)
-                task.add_done_callback(_handler_tasks.discard)
-        except Exception as e:  # ruff: ignore[blind-except] # reported like the exception of a handler
-            loop.call_exception_handler({
-                'message': 'Exception in the worker of an RTCRtpScriptTransform',
-                'exception': e,
-                'event': event,
-            })
+        call_handler(loop, worker, event, message='Exception in the worker of an RTCRtpScriptTransform')
 
     @classmethod
     def _of_native(cls, native: wrtc._RtpTransform | None) -> RTCRtpScriptTransform | None:

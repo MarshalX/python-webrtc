@@ -79,6 +79,8 @@ def _resolved(value: _R) -> asyncio.Future[_R]:
 
 # pipes running, see ReadableStream.pipe_to
 _running_pipes: set[asyncio.Future[None]] = set()
+# see _then
+_running_algorithms: set[asyncio.Future[object]] = set()
 
 
 def _rejected(error: BaseException) -> asyncio.Future[_R]:
@@ -164,6 +166,9 @@ def _then(result: object, on_done: Callable[[], None], on_error: Callable[[BaseE
             on_done()
 
     task: asyncio.Future[object] = asyncio.ensure_future(result)
+    # asyncio keeps tasks weakly
+    _running_algorithms.add(task)
+    task.add_done_callback(_running_algorithms.discard)
     task.add_done_callback(done)
 
 

@@ -9,9 +9,13 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import pytest
 
-from tests.helpers import run_isolated
+import wrtc
+from tests.helpers import ROOT, run_isolated
 
 
 def test_constructors_from_many_threads() -> None:
@@ -256,3 +260,34 @@ def test_objects_of_connections_read_while_they_connect() -> None:
         timeout=60,
     )
     assert 'done' in output
+
+
+def test_callback_argument_that_cannot_be_converted() -> None:
+    """An unconvertible callback argument is reported, not fatal."""
+    output = run_isolated(
+        """
+        import sys
+        import wrtc
+
+        reported = []
+        sys.unraisablehook = lambda unraisable: reported.append(type(unraisable.exc_value).__name__)
+        wrtc._callback_unconvertible(lambda _argument: None)
+        print(reported)
+        """
+    )
+    assert "['RuntimeError']" in output
+
+
+@pytest.mark.skipif(not wrtc._sanitized, reason='checked in sanitizer builds only')
+def test_held_events_with_the_gil_abort() -> None:
+    """Held events taken with the GIL held abort."""
+    result = subprocess.run(
+        [sys.executable, '-c', 'import wrtc; wrtc._held_events_with_gil()'],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=ROOT,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert 'HeldEvents' in result.stderr, result.stderr

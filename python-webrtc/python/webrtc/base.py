@@ -72,7 +72,7 @@ class WebRTCObject(Generic[_NativeT]):
         return [cls._wrap(item) for item in items]
 
     def __repr__(self) -> str:
-        return f'<webrtc.{self.__class__.__name__} object at {hex(id(self))}'
+        return f'<webrtc.{self.__class__.__name__} object at {hex(id(self))}>'
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, WebRTCObject):

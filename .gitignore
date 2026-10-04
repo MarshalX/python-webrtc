@@ -16,6 +16,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 
 *.env
 *.log
@@ -23,19 +24,7 @@ __pycache__/
 docs/build
 
 # local reference checkouts and experiments
-/node-webrtc/
 /wpt/
-/docs_html/
-/Dockerfile*
-/docker-compose.yaml
-/py.typed
-
-# scratch files of manual testing
-python-webrtc/python/*.session
-python-webrtc/python/*.session-journal
-python-webrtc/python/*.raw
-python-webrtc/python/snippet_test.py
-python-webrtc/python/test_ub.py
 
 # fuzzing (tests/fuzz): crashes and the corpora libFuzzer grows
 /tests/fuzz/crashes/
