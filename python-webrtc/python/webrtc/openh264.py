@@ -42,6 +42,8 @@ VERSION = '2.6.0'
 NOTICE = 'OpenH264 Video Codec provided by Cisco Systems, Inc.'
 
 #: Cisco's license of the binary, which applications must reproduce where they present licensing information
+#:
+#: :meta hide-value:
 LICENSE = importlib.resources.files('webrtc').joinpath('openh264_license.txt').read_text(encoding='utf-8')
 
 _URL = 'http://ciscobinary.openh264.org/'
