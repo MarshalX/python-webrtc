@@ -138,6 +138,9 @@ class _Listeners:
         self, loop: asyncio.AbstractEventLoop, name: str, event: webrtc.Event, *, registrations: list[_Registration]
     ) -> None:
         for registration in registrations:
+            # like the DOM's removed flag: one removed by an earlier handler is skipped
+            if not any(r is registration for r in self.registrations.get(name, ())):
+                continue
             if registration.once:
                 self.remove(name, registration.handler)
             call_handler(loop, registration.handler, event, message=f'Exception in {name!r} event handler')
@@ -226,8 +229,21 @@ class EventTarget(Generic[_N_contra]):
         Events also update what the object shows (like its state, see :meth:`_on_event`). Does nothing outside of
         a loop.
         """
-        if _running_loop() is not None:
-            _ = self._created_listeners().ensure_primary_loop()
+        _ = self._attach_running_loop()
+
+    def _attach_running_loop(self) -> bool:
+        """Like :meth:`_attach`. Events posted while there was no open loop were dropped, so was a native wakeup.
+
+        Returns:
+            :obj:`bool`: Whether the running loop took over from none or a closed one, so the caller acks a wakeup.
+        """
+        loop = _running_loop()
+        if loop is None:
+            return False
+        listeners = self._native_obj._listeners
+        previous = None if listeners is None else listeners.primary_loop
+        _ = self._created_listeners().ensure_primary_loop()
+        return previous is not loop and (previous is None or previous.is_closed())
 
     def _check_event(self, name: str) -> None:
         if name not in self._events:

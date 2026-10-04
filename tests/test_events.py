@@ -327,3 +327,24 @@ async def test_async_handler_exception_goes_to_the_loop(pc: webrtc.RTCPeerConnec
         assert isinstance(context['event'], webrtc.Event)
     finally:
         loop.set_exception_handler(None)
+
+
+@pytest.mark.asyncio
+async def test_handler_removed_during_dispatch_is_skipped(pc: webrtc.RTCPeerConnection) -> None:
+    """A handler removed mid-dispatch is skipped."""
+    calls: list[str] = []
+
+    def first(_event: webrtc.Event) -> None:
+        calls.append('first')
+        pc.off('negotiationneeded', second)
+
+    def second(_event: webrtc.Event) -> None:
+        calls.append('second')
+
+    pc.on('negotiationneeded', first)
+    pc.on('negotiationneeded', second)
+    negotiation = wait_for_event(pc, 'negotiationneeded')
+    _ = pc.add_transceiver(webrtc.MediaType.audio)
+    _ = await negotiation
+    await asyncio.sleep(QUIET_PERIOD)
+    assert calls == ['first']

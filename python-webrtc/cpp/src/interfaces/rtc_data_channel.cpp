@@ -125,6 +125,9 @@ namespace python_webrtc {
         Emit("error", RTCCallbackException(std::move(error)));
       }
       Emit("close", state);
+      if (auto closed = _closedCallback.Get()) {
+        closed();
+      }
       break;
     }
     default:
@@ -157,6 +160,10 @@ namespace python_webrtc {
 
   void RTCDataChannel::SetMaxMessageSizeGetter(std::function<std::optional<double>()> getter) {
     _maxMessageSizeGetter.Set(std::move(getter));
+  }
+
+  void RTCDataChannel::SetClosedCallback(std::function<void()> callback) {
+    _closedCallback.Set(std::move(callback));
   }
 
   std::string RTCDataChannel::GetLabel() {

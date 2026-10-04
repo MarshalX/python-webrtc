@@ -305,6 +305,8 @@ namespace python_webrtc {
 
     void Adopt(const std::shared_ptr<RTCDataChannel> &channel);
 
+    void ForgetChannel(webrtc::DataChannelInterface *channel);
+
     void Adopt(const std::shared_ptr<RTCSctpTransport> &sctp);
 
     void Adopt(const std::shared_ptr<RTCDtlsTransport> &dtls);
@@ -442,7 +444,7 @@ namespace python_webrtc {
     Wrappers<RTCRtpReceiver, webrtc::RtpReceiverInterface> _receivers;
     std::shared_ptr<RTCSctpTransport> _sctp;
     std::vector<std::shared_ptr<RTCDtlsTransport>> _dtlsTransports;
-    // channels are kept while the connection is open, so their handlers are
+    // kept until closed, so their handlers are
     Wrappers<RTCDataChannel, webrtc::DataChannelInterface> _channels;
   };
 

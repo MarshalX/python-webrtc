@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -78,6 +79,11 @@ namespace python_webrtc {
     const bool _isScreencast;
     const std::optional<bool> _needsDenoising;
     webrtc::VideoBroadcaster _broadcaster;
+    // sinks of disabled or ended tracks: a black frame a second
+    webrtc::VideoBroadcaster _blackBroadcaster;
+    std::mutex _sinksMutex;
+    std::map<webrtc::VideoSinkInterface<webrtc::VideoFrame> *, bool> _sinks;
+    std::atomic<int64_t> _lastBlackMs{0};
     std::atomic<int> _width{0};
     std::atomic<int> _height{0};
     std::atomic<bool> _ended{false};

@@ -609,7 +609,7 @@ class ReadableStream(Generic[_T]):
 
         Returns:
             :obj:`asyncio.Future`: Done once the source is canceled. Fails with :obj:`TypeError` if the stream is
-            locked, or with the error of an errored stream.
+            locked, or with the error of an errored stream or of the source's ``cancel``.
         """
         if self.locked:
             return _rejected(TypeError('The stream is locked'))
@@ -755,7 +755,11 @@ class ReadableStream(Generic[_T]):
         if self._state == _ReadableState.errored:
             return _rejected(self._error_stored())
         self._close()
-        return _future_of(self._controller._cancel(reason))
+        try:
+            canceled = self._controller._cancel(reason)
+        except Exception as e:
+            return _rejected(e)
+        return _future_of(canceled)
 
     #: Alias for :meth:`get_reader`
     getReader = get_reader
@@ -915,9 +919,13 @@ async def _iterate(reader: ReadableStreamDefaultReader[_T], *, prevent_cancel: b
     finally:
         # runs once the generator is finalized, so an early stop cancels then
         if reader._stream is not None:
-            if not done and not prevent_cancel:
-                await reader.cancel()
-            reader.release_lock()
+            if done or prevent_cancel:
+                reader.release_lock()
+            else:
+                # released before the cancel settles, as the spec does
+                canceled = reader.cancel()
+                reader.release_lock()
+                await canceled
 
 
 class _Tee(Generic[_T]):
@@ -1090,12 +1098,12 @@ class WritableStreamDefaultController(Generic[_W_contra]):
 
     def _advance(self) -> None:
         stream = self._stream
-        if not self._started or self._in_flight or len(self._queue) == 0:
+        if not self._started or self._in_flight:
             return
         if stream._state == _WritableState.erroring:
             stream._finish_erroring()
             return
-        if stream._state != _WritableState.writable:
+        if stream._state != _WritableState.writable or len(self._queue) == 0:
             return
         chunk, future, _ = self._queue[0]
         self._in_flight = True
@@ -1207,7 +1215,7 @@ class WritableStream(Generic[_W_contra]):
 
         Returns:
             :obj:`asyncio.Future`: Done once the sink is aborted, or right away for a closed or errored stream. It
-            fails with :obj:`TypeError` if the stream is locked.
+            fails with :obj:`TypeError` if the stream is locked, or with the sink's ``abort`` error.
         """
         if self.locked:
             return _rejected(TypeError('The stream is locked'))
@@ -1229,7 +1237,11 @@ class WritableStream(Generic[_W_contra]):
         self._state = _WritableState.errored
         self._stored_error = error
         self._reject_writer(error)
-        return _future_of(_call(self._controller._sink, 'abort', reason))
+        try:
+            aborted = _call(self._controller._sink, 'abort', reason)
+        except Exception as e:
+            return _rejected(e)
+        return _future_of(aborted)
 
     def _start_erroring(self, error: BaseException) -> None:
         self._state = _WritableState.erroring
@@ -1246,7 +1258,6 @@ class WritableStream(Generic[_W_contra]):
         error = _error_of(self._stored_error)
         self._controller._reject_queue(error)
         self._reject_writer(error)
-        _ = _call(self._controller._sink, 'abort', self._stored_error)
 
     def _deal_with_rejection(self, error: BaseException) -> None:
         if self._state == _WritableState.writable:
@@ -1462,7 +1473,7 @@ class TransformStreamDefaultController(Generic[_T, _O]):
         """
         error = _error_of(reason)
         self._stream._readable._controller.error(error)
-        self._stream._writable._controller.error(error)
+        self._stream._error_writable(error)
 
     def terminate(self) -> None:
         """Ends the stream. Readers get the end of the stream and writers get a :obj:`TypeError`.
@@ -1472,7 +1483,7 @@ class TransformStreamDefaultController(Generic[_T, _O]):
         controller = self._stream._readable._controller
         if controller._can_close_or_enqueue():
             controller.close()
-        self._stream._writable._controller.error(TypeError('The stream is terminated'))
+        self._stream._error_writable(TypeError('The stream is terminated'))
 
     #: Alias for :attr:`desired_size`
     desiredSize = desired_size
@@ -1515,7 +1526,7 @@ class TransformStream(Generic[_T, _O]):
         self._writable: WritableStream[_T] = WritableStream(
             _TransformSink(self), QueuingStrategy(writable.high_water_mark, writable.size)
         )
-        _ = _call(transformer, 'start', self._controller)
+        self._start(_call(transformer, 'start', self._controller))
 
     @property
     def readable(self) -> ReadableStream[_O]:
@@ -1532,6 +1543,30 @@ class TransformStream(Generic[_T, _O]):
         See :mdn:`TransformStream/writable`.
         """
         return self._writable
+
+    def _start(self, result: object) -> None:
+        """Holds both sides until an async start settles."""
+        if not inspect.isawaitable(result):
+            return
+        readable, writable = self._readable._controller, self._writable._controller
+        readable._started = writable._started = False
+
+        def started() -> None:
+            readable._started = writable._started = True
+            readable._call_pull_if_needed()
+            writable._advance()
+
+        def failed(error: BaseException) -> None:
+            readable._started = writable._started = True
+            readable.error(error)
+            self._writable._deal_with_rejection(error)
+
+        _then(result, started, failed)
+
+    def _error_writable(self, error: BaseException) -> None:
+        """Errors the writable side and unblocks a write waiting for room."""
+        self._writable._controller.error(error)
+        _settle(self._pull_waiter, None)
 
 
 class _TransformSink(Generic[_T, _O]):
@@ -1550,16 +1585,27 @@ class _TransformSink(Generic[_T, _O]):
             waiter: asyncio.Future[None] = _pending()
             stream._pull_waiter = waiter
             await waiter
+        writable = stream._writable
+        if writable._state == _WritableState.erroring:
+            raise _error_of(writable._stored_error)
         transform = _member(stream._transformer, 'transform')
-        if transform is None:
-            # chunks pass unchanged without a transform
-            stream._controller.enqueue(cast('_O', chunk))
-        else:
-            await _await(transform(chunk, stream._controller))
+        try:
+            if transform is None:
+                # chunks pass unchanged without a transform
+                stream._controller.enqueue(cast('_O', chunk))
+            else:
+                await _await(transform(chunk, stream._controller))
+        except Exception as e:
+            stream._controller.error(e)
+            raise
 
     async def close(self) -> None:
         stream = self._stream
-        _ = await _await(_call(stream._transformer, 'flush', stream._controller))
+        try:
+            _ = await _await(_call(stream._transformer, 'flush', stream._controller))
+        except Exception as e:
+            stream._readable._controller.error(e)
+            raise
         if stream._readable._controller._can_close_or_enqueue():
             stream._readable._controller.close()
 
@@ -1575,4 +1621,4 @@ class _TransformSource(Generic[_T, _O]):
         _settle(self._stream._pull_waiter, None)
 
     def cancel(self, reason: object) -> None:
-        self._stream._writable._controller.error(_error_of(reason))
+        self._stream._error_writable(_error_of(reason))

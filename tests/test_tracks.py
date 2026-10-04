@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 
 import pytest
 
@@ -95,6 +96,31 @@ def test_remove_track_of_another_connection(caller: webrtc.RTCPeerConnection, ca
 
 
 @pytest.mark.asyncio
+async def test_remove_track_of_a_negotiated_stopped_transceiver(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """Removing a stopped sender does nothing."""
+    transceiver = caller.add_transceiver(webrtc.MediaType.audio)
+    await exchange_offer_answer(caller, callee)
+    transceiver.stop()
+    await exchange_offer_answer(caller, callee)
+    assert transceiver.current_direction == webrtc.RTCRtpTransceiverDirection.stopped
+    caller.remove_track(transceiver.sender)
+
+
+@pytest.mark.asyncio
+async def test_remove_track_of_a_rolled_back_transceiver(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """Removing a rolled back sender does nothing."""
+    caller.add_transceiver(webrtc.MediaType.audio)
+    await exchange_offer(caller, callee)
+    [transceiver] = callee.get_transceivers()
+    await callee.set_remote_description(webrtc.RTCSessionDescriptionInit('rollback'))
+    callee.remove_track(transceiver.sender)
+
+
+@pytest.mark.asyncio
 async def test_track_event_when_remote_streams_change(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:
@@ -161,3 +187,23 @@ async def test_remote_track_mute_and_stream_events(
     assert removed_event.track == remote_video
     await muted
     assert remote_video.muted
+
+
+def test_remote_track_keeps_its_id_after_close(pc: webrtc.RTCPeerConnection) -> None:
+    """A kept remote track keeps its id."""
+    track = pc.add_transceiver(webrtc.MediaType.audio).receiver.track
+    before = track.id
+    pc.close()
+    gc.collect()
+    _ = pc.get_transceivers()
+    assert (track.id, track.label) == (before, 'remote audio')
+
+
+@pytest.mark.parametrize(('kind', 'hint'), [(webrtc.MediaType.audio, 'speech'), (webrtc.MediaType.video, 'detail')])
+def test_clone_copies_enabled_and_content_hint(pc: webrtc.RTCPeerConnection, kind: webrtc.MediaType, hint: str) -> None:
+    """Clones keep enabled and content hint."""
+    track = pc.add_transceiver(kind).receiver.track
+    track.enabled = False
+    track.content_hint = hint
+    clones = [track.clone(), webrtc.MediaStream([track]).clone().get_tracks()[0]]
+    assert [(clone.enabled, clone.content_hint) for clone in clones] == [(False, hint)] * 2

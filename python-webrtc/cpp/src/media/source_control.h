@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -27,6 +28,8 @@ namespace python_webrtc {
     // the synthetic camera, cleared when it's destroyed
     RTCVideoTrackSource *camera = nullptr;
     bool microphone = false;
+    // tracks not ended
+    std::set<const webrtc::MediaStreamTrackInterface *> live;
 
     static void Register(const webrtc::MediaStreamTrackInterface *track, const std::string &trackId,
                          const std::shared_ptr<SourceControl> &control) {
@@ -36,6 +39,18 @@ namespace python_webrtc {
         it = it->second.expired() ? registry.erase(it) : std::next(it);
       }
       registry[{track, trackId}] = control;
+      const std::scoped_lock controlLock(control->mutex);
+      control->live.insert(track);
+    }
+
+    void Ended(const webrtc::MediaStreamTrackInterface *track) {
+      const std::scoped_lock lock(mutex);
+      live.erase(track);
+    }
+
+    bool AnyLive() {
+      const std::scoped_lock lock(mutex);
+      return !live.empty();
     }
 
     static std::shared_ptr<SourceControl> Find(const webrtc::MediaStreamTrackInterface *track,

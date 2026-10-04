@@ -48,6 +48,8 @@ namespace python_webrtc {
     // DtmfSenderObserverInterface, on the signaling thread
     void OnToneChange(const std::string &tone, const std::string &toneBuffer) override;
 
+    // "determine if DTMF can be sent"
+    void CheckCanSend();
     void InsertDtmf(const std::string &tones, int duration, int interToneGap);
 
     // the tones not played yet, as Python sees them: set by insertDTMF(), shortened along with tonechange events

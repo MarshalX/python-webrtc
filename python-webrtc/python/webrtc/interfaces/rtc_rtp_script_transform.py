@@ -93,6 +93,9 @@ class _FrameSource:
         self._controller = controller
 
     def pull(self, _controller: ReadableStreamDefaultController[EncodedFrame]) -> None:
+        # a wakeup sent with no open loop was dropped
+        if self._transformer._attach_running_loop():
+            self._transformer._native_obj._ackWakeup()
         self._transformer._deliver()
 
 
@@ -164,7 +167,12 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
 
     def _end(self) -> None:
         self._ended = True
-        error = InvalidStateError('The transform was removed from its sender or receiver')
+        message = 'The transform was removed from its sender or receiver'
+        error = InvalidStateError(message)
+        requests, self._key_frame_requests = self._key_frame_requests, []
+        for request in requests:
+            if not request.future.done() and not request.future.get_loop().is_closed():
+                request.future.set_exception(InvalidStateError(message))
         _ = _handled(self._readable._cancel(error))
         _ = _handled(self._writable._abort(error))
 
@@ -230,7 +238,7 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
                 first key frame.
 
         Raises:
-            webrtc.InvalidStateError: If the transform isn't of a video sender.
+            webrtc.InvalidStateError: If the transform isn't of a video sender, or is removed.
             webrtc.NotAllowedError: If the rid isn't alphanumeric or is longer than 255 characters.
             webrtc.NotFoundError: If the sender has no layer of that rid.
         """

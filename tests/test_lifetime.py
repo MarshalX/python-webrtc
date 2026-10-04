@@ -792,3 +792,27 @@ async def test_releases_share_one_thread(caller: webrtc.RTCPeerConnection, calle
 
 def test_repr(pc: webrtc.RTCPeerConnection) -> None:
     assert re.fullmatch(r'<webrtc\.RTCPeerConnection object at 0x[0-9a-f]+>', repr(pc)) is not None
+
+
+@pytest.mark.asyncio
+async def test_closed_channel_is_collected_while_connection_is_open() -> None:
+    """A closed, dropped channel is collected."""
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    try:
+        channel = caller.create_data_channel('collected')
+        channel.on('message', lambda _event: None)
+        opened = wait_for_event(channel, 'open')
+        await connect(caller, callee)
+        await opened
+        closed = wait_for_event(channel, 'close')
+        channel.close()
+        await closed
+        ref = weakref.ref(channel)
+        del channel, opened, closed
+        collect()
+        await asyncio.sleep(QUIET_PERIOD)
+        collect()
+        assert ref() is None
+    finally:
+        caller.close()
+        callee.close()

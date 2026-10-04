@@ -43,6 +43,7 @@ from webrtc.models.rtp_parameters import RTCRtpCodec
 from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
 from webrtc.utils.native_calls import call_native
 from webrtc.utils.operations import OperationsChain, later
+from webrtc.utils.strings import usv_string
 from webrtc.utils.task_queue import TaskQueue
 
 if TYPE_CHECKING:
@@ -576,6 +577,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         if kind not in {MediaType.audio, MediaType.video}:
             msg = f'{kind!r} is not a kind of track'
             raise TypeError(msg)
+        self._check_state('add a transceiver')
         native_init = None
         if init is not None:
             _check_send_encodings(init.send_encodings, kind)
@@ -621,14 +623,14 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     def remove_track(self, sender: webrtc.RTCRtpSender) -> None:
         """Stops sending the track of a sender, from the next negotiation. The sender stays in :meth:`get_senders`.
 
-        Does nothing if the sender has no track. See :mdn:`RTCPeerConnection/removeTrack`.
+        Does nothing if the sender has no track, or is stopped or rolled back. See :mdn:`RTCPeerConnection/removeTrack`.
 
         Args:
             sender (:obj:`webrtc.RTCRtpSender`): A sender of this connection.
 
         Raises:
             webrtc.InvalidStateError: If the connection is closed.
-            webrtc.InvalidAccessError: If the sender belongs to another connection.
+            webrtc.InvalidAccessError: If the sender wasn't created by this connection.
         """
         self._native_obj.removeTrack(sender._native_obj)
 
@@ -687,7 +689,9 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             webrtc.InvalidStateError: If the connection is closed.
             webrtc.OperationError: If the ``id`` is in use, or no id is left.
         """
+        self._check_state('create a data channel')
         init = data_channel_dict if data_channel_dict is not None else RTCDataChannelInit()
+        label = usv_string(label)
         check_utf8_length('label', label)
         init._check()
         native = self._native_obj.createDataChannel(
@@ -695,7 +699,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             init.ordered,
             init.max_packet_life_time,
             init.max_retransmits,
-            init.protocol,
+            usv_string(init.protocol),
             init.negotiated,
             init.id if init.negotiated else None,
             init.priority,

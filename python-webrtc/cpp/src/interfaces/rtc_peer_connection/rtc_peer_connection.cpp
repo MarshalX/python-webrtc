@@ -259,6 +259,25 @@ namespace python_webrtc {
       auto sctp = self ? self->GetSctp() : std::nullopt;
       return sctp ? (*sctp)->GetMaxMessageSize() : std::nullopt;
     });
+    channel->SetClosedCallback([weak = weak_from_this(), key = channel->channel().get()]() {
+      if (auto self = weak.lock()) {
+        self->ForgetChannel(key);
+      }
+    });
+  }
+
+  void RTCPeerConnection::ForgetChannel(webrtc::DataChannelInterface *channel) {
+    std::shared_ptr<RTCDataChannel> forgotten;
+    {
+      const std::scoped_lock lock(_wrappersMutex);
+      auto it = _channels.find(channel);
+      if (it == _channels.end()) {
+        return;
+      }
+      forgotten = std::move(it->second);
+      _channels.erase(it);
+    }
+    // released out of the lock
   }
 
   void RTCPeerConnection::Adopt(const std::shared_ptr<RTCSctpTransport> &sctp) {
@@ -314,10 +333,20 @@ namespace python_webrtc {
       throw RTCException(closedError("removeTrack"));
     }
 
-    auto senders = pc->GetSenders();
-    if (std::ranges::find(senders, sender.sender()) == senders.end()) {
+    if (sender.GetConnection().get() != this) {
       throw RTCException(webrtc::RTCErrorType::INVALID_PARAMETER,
                          "The sender was not created by this RTCPeerConnection");
+    }
+    // stopped or rolled back: a no-op
+    auto transceivers = pc->GetTransceivers();
+    auto transceiver = std::ranges::find_if(
+        transceivers, [&](const auto &candidate) { return candidate->sender() == sender.sender(); });
+    if (transceiver != transceivers.end() && ((*transceiver)->stopping() || (*transceiver)->stopped())) {
+      return;
+    }
+    auto senders = pc->GetSenders();
+    if (std::ranges::find(senders, sender.sender()) == senders.end()) {
+      return;
     }
 
     auto error = pc->RemoveTrackOrError(sender.sender());

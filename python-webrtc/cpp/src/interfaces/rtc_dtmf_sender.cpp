@@ -42,6 +42,7 @@ namespace python_webrtc {
     Listeners::BindClass<RTCDTMFSender>(m, "RTCDTMFSender")
         .def_property_readonly("toneBuffer", nogil_fn(&RTCDTMFSender::GetToneBuffer))
         .def_property_readonly("canInsertDTMF", nogil_fn(&RTCDTMFSender::GetCanInsertDtmf))
+        .def("_checkCanSend", &RTCDTMFSender::CheckCanSend, nogil())
         .def("insertDTMF", &RTCDTMFSender::InsertDtmf, nogil(), pybind11::arg("tones"), pybind11::arg("duration"),
              pybind11::arg("interToneGap"))
         .def("_surfaceBuffer", &RTCDTMFSender::SurfaceBuffer, nogil(), pybind11::arg("buffer"),
@@ -68,7 +69,7 @@ namespace python_webrtc {
     Emit("tonechange", tone, toneBuffer, insertion);
   }
 
-  void RTCDTMFSender::InsertDtmf(const std::string &tones, int duration, int interToneGap) {
+  void RTCDTMFSender::CheckCanSend() {
     auto lookup = _transceiver.Get();
     auto transceiver = lookup ? lookup() : nullptr;
     if (!transceiver || transceiver->stopping() || transceiver->stopped()) {
@@ -79,6 +80,13 @@ namespace python_webrtc {
                       *direction == webrtc::RtpTransceiverDirection::kInactive)) {
       throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "The transceiver of the sender doesn't send");
     }
+    if (!_dtmf->CanInsertDtmf()) {
+      throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "The DTMF sender can't send tones yet");
+    }
+  }
+
+  void RTCDTMFSender::InsertDtmf(const std::string &tones, int duration, int interToneGap) {
+    CheckCanSend();
     if (tones.empty() && _dtmf->tones().empty()) {
       // nothing to play, nor to cancel
       return;

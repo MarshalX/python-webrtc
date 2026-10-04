@@ -69,13 +69,7 @@ class _TrackSource:
         self._controller = controller
 
     def pull(self, _controller: ReadableStreamDefaultController[VideoFrame | AudioData]) -> None:
-        native = self._processor._native_obj
-        created_outside_loop = native._listeners is None
-        # the native events go to the loop reading
-        self._processor._attach()
-        if created_outside_loop:
-            # the wakeup sent before was dropped
-            native._ackWakeup()
+        self._processor._attach_reader()
         self.deliver()
 
     def cancel(self, _reason: object) -> None:
@@ -143,9 +137,12 @@ class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], Ev
         self._readable: ReadableStream[VideoFrame | AudioData] = ReadableStream(
             self._source, QueuingStrategy(high_water_mark=0)
         )
-        self._attach()
-        if self._native_obj._listeners is not None:
-            # media comes as soon as the sink is attached: a wakeup sent before the listeners were set was dropped
+        # media can come before the listeners are set
+        self._attach_reader()
+
+    def _attach_reader(self) -> None:
+        # a wakeup sent with no open loop was dropped
+        if self._attach_running_loop():
             self._native_obj._ackWakeup()
 
     @override

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, TypeVar, Union
 import webrtc  # the streams come after the models in the package
 from webrtc.enums import EndingType, EndingTypeValue
 from webrtc.models.dictionary import Dictionary
+from webrtc.utils.strings import usv_string
 
 if TYPE_CHECKING:
     import builtins
@@ -125,8 +126,7 @@ class Blob:
             if isinstance(part, Blob):
                 chunks.append(part._bytes)
             elif isinstance(part, str):
-                # lone surrogates become U+FFFD
-                text = part.encode('utf-8', 'surrogatepass').decode('utf-8', 'replace')
+                text = usv_string(part)
                 chunks.append((_native_endings(text) if native else text).encode())
             else:
                 chunks.append(bytes(memoryview(part)))

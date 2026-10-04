@@ -261,3 +261,26 @@ def test_constraints_from_json() -> None:
             webrtc.MediaTrackConstraintSet(aspect_ratio=1.5),
         ],
     )
+
+
+@pytest.mark.asyncio
+async def test_exact_list_of_resize_modes() -> None:
+    """An exact list of resize modes matches."""
+    stream = await webrtc.media_devices.get_user_media(
+        webrtc.MediaStreamConstraints(
+            video=C(resize_mode=webrtc.ConstrainDOMStringParameters(exact=['none', 'crop-and-scale']))
+        )
+    )
+    track = stream.get_video_tracks()[0]
+    assert track.get_settings().resize_mode == 'none'
+    track.stop()
+
+
+@pytest.mark.asyncio
+async def test_clone_keeps_constraints(video_stream: webrtc.MediaStream) -> None:
+    """A clone keeps the constraints."""
+    video = video_stream.get_tracks()[0]
+    await video.apply_constraints(C(width=320))
+    clone = video.clone()
+    assert clone.get_constraints() == video.get_constraints()
+    clone.stop()

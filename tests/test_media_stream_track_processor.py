@@ -352,3 +352,41 @@ async def test_frames_wait_in_the_native_queue_only(video_stream: webrtc.MediaSt
         as_video_frame(result.value).close()
     await wait_until(lambda: processor.discarded_frames > 0, 'frames to be dropped')
     assert len(processor.readable._controller._queue) == 0
+
+
+def test_processor_reads_in_a_second_loop(video_stream: webrtc.MediaStream) -> None:
+    """Reads keep working in a later loop."""
+    track = video_stream.get_tracks()[0]
+
+    async def create() -> webrtc.MediaStreamTrackProcessor:  # ruff: ignore[unused-async]
+        return webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
+
+    async def read_frames(processor: webrtc.MediaStreamTrackProcessor, count: int) -> None:
+        reader = processor.readable.get_reader()
+        for _ in range(count):
+            as_video_frame((await read(reader)).value).close()
+        reader.release_lock()
+
+    loop = asyncio.new_event_loop()
+    try:
+        processor = loop.run_until_complete(create())
+        loop.run_until_complete(read_frames(processor, 3))
+        time.sleep(0.3)
+    finally:
+        loop.close()
+    asyncio.run(read_frames(processor, 5))
+
+
+@pytest.mark.asyncio
+async def test_clone_of_a_stopped_generator_track_gets_frames() -> None:
+    """A live clone keeps receiving frames."""
+    generator = webrtc.VideoTrackGenerator()
+    clone = generator.track.clone()
+    reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(clone)).readable.get_reader()
+    generator.track.stop()
+    assert clone.ready_state == webrtc.MediaStreamTrackState.live
+    writer = generator.writable.get_writer()
+    for timestamp in range(3):
+        await writer.write(video_frame(timestamp))
+    as_video_frame((await asyncio.wait_for(reader.read(), 5)).value).close()
+    clone.stop()

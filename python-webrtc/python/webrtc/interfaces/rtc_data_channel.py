@@ -23,6 +23,7 @@ from webrtc.models.dictionary import Dictionary
 from webrtc.models.events import Event, MessageEvent, RTCErrorEvent, RTCErrorEventInit
 from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
 from webrtc.utils.names import Alias, alias
+from webrtc.utils.strings import usv_string
 
 if TYPE_CHECKING:
     import webrtc
@@ -42,7 +43,7 @@ def check_utf8_length(name: str, value: str) -> None:
     Raises:
         TypeError: If it's longer.
     """
-    if len(value.encode()) > MAX_UNSIGNED_SHORT:
+    if len(usv_string(value).encode()) > MAX_UNSIGNED_SHORT:
         msg = f'{name} is longer than {MAX_UNSIGNED_SHORT} bytes'
         raise TypeError(msg)
 
@@ -371,7 +372,7 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannel
             webrtc.OperationError: If the send queue is full.
         """
         if isinstance(data, str):
-            self._native_obj.send(data.encode(), binary=False)
+            self._native_obj.send(usv_string(data).encode(), binary=False)
         elif isinstance(data, (bytes, bytearray, memoryview, Blob)):
             self._native_obj.send(bytes(data), binary=True)
         else:

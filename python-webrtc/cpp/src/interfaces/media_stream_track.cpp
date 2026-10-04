@@ -102,8 +102,15 @@ namespace python_webrtc {
       _track->UnregisterObserver(this);
       _observing = false;
     }
-    _enabled = _track->enabled();
+    if (!_ended) {
+      _enabled = _track->enabled();
+    }
     _ended = true;
+    // sinks get black or silence, clones keep the media
+    _track->set_enabled(false);
+    if (_source) {
+      _source->Ended(_track.get());
+    }
     NotifyEnded();
   }
 
@@ -155,10 +162,14 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrack::MarkRemote() {
-    _muted = true;
     {
       // a remote track has its own id, rather than the one in the description, which every receiver of it shares
       const std::scoped_lock lock(_idMutex);
+      if (_id) {
+        // marked once, as [[ReceiverTrack]] is set once
+        return;
+      }
+      _muted = true;
       _id = webrtc::CreateRandomUuid();
       _label = _track->kind() == webrtc::MediaStreamTrackInterface::kAudioKind ? "remote audio" : "remote video";
     }
@@ -387,6 +398,9 @@ namespace python_webrtc {
     }
     auto clonedMediaStreamTrack = holder().GetOrCreate(_factory, clonedTrack);
     clonedMediaStreamTrack->SetLabel(GetLabel());
+    // as browsers do, though the spec starts a clone enabled
+    clonedMediaStreamTrack->SetEnabled(GetEnabled());
+    clonedMediaStreamTrack->SetContentHint(GetContentHint());
     if (_ended) {
       clonedMediaStreamTrack->Stop();
     }
