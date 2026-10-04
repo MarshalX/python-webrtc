@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""VideoFrame of WebCodecs (https://developer.mozilla.org/en-US/docs/Web/API/VideoFrame) and its dictionaries."""
+"""The WebCodecs :obj:`VideoFrame`, its rectangles, color space and the dictionaries that create and copy it."""
 
 from __future__ import annotations
 
@@ -52,13 +52,17 @@ _RGB_FORMATS = (VideoPixelFormat.RGBA, VideoPixelFormat.RGBX, VideoPixelFormat.B
 
 @dataclass(frozen=True)
 class DOMRectReadOnly:
-    """A rectangle, like the visible part of a frame.
+    """An immutable rectangle, like the coded or visible part of a frame.
+
+    The width and height may be negative. The edges are then measured from :attr:`x` and :attr:`y` backwards.
+
+    See :mdn:`DOMRectReadOnly`.
 
     Args:
-        x (:obj:`float`, optional): The left edge.
-        y (:obj:`float`, optional): The top edge.
-        width (:obj:`float`, optional): The width.
-        height (:obj:`float`, optional): The height.
+        x (:obj:`float`, optional): The horizontal origin, 0 by default.
+        y (:obj:`float`, optional): The vertical origin, 0 by default.
+        width (:obj:`float`, optional): The width, 0 by default.
+        height (:obj:`float`, optional): The height, 0 by default.
     """
 
     x: float = 0
@@ -68,37 +72,61 @@ class DOMRectReadOnly:
 
     @property
     def top(self) -> float:
-        """:obj:`float`: The top edge."""
+        """:obj:`float`: The smaller of :attr:`y` and :attr:`y` plus :attr:`height`.
+
+        See :mdn:`DOMRectReadOnly/top`.
+        """
         return min(self.y, self.y + self.height)
 
     @property
     def right(self) -> float:
-        """:obj:`float`: The right edge."""
+        """:obj:`float`: The larger of :attr:`x` and :attr:`x` plus :attr:`width`.
+
+        See :mdn:`DOMRectReadOnly/right`.
+        """
         return max(self.x, self.x + self.width)
 
     @property
     def bottom(self) -> float:
-        """:obj:`float`: The bottom edge."""
+        """:obj:`float`: The larger of :attr:`y` and :attr:`y` plus :attr:`height`.
+
+        See :mdn:`DOMRectReadOnly/bottom`.
+        """
         return max(self.y, self.y + self.height)
 
     @property
     def left(self) -> float:
-        """:obj:`float`: The left edge."""
+        """:obj:`float`: The smaller of :attr:`x` and :attr:`x` plus :attr:`width`.
+
+        See :mdn:`DOMRectReadOnly/left`.
+        """
         return min(self.x, self.x + self.width)
 
     @classmethod
     def from_rect(cls, other: DOMRectInit | DOMRectReadOnly | None = None) -> DOMRectReadOnly:
-        """Returns a rectangle of the members of another one.
+        """Creates a rectangle with the origin and size of another one.
+
+        See :mdn:`DOMRectReadOnly/fromRect_static`.
 
         Args:
-            other (:obj:`DOMRectInit`, optional): The rectangle, empty by default.
+            other (:obj:`DOMRectInit` or :obj:`DOMRectReadOnly`, optional): The rectangle to copy. When left
+                out, the result is an empty rectangle at the origin.
+
+        Returns:
+            :obj:`DOMRectReadOnly`: The new rectangle.
         """
         if other is None:
             return cls()
         return cls(other.x, other.y, other.width, other.height)
 
     def to_json(self) -> dict[str, float]:
-        """Returns the attributes as a dictionary, like ``toJSON()``."""
+        """Serializes the rectangle, including its edges.
+
+        See :mdn:`DOMRectReadOnly/toJSON`.
+
+        Returns:
+            :obj:`dict`: The ``x``, ``y``, ``width``, ``height``, ``top``, ``right``, ``bottom`` and ``left`` values.
+        """
         return {
             'x': self.x,
             'y': self.y,
@@ -118,13 +146,17 @@ class DOMRectReadOnly:
 
 @dataclass
 class DOMRectInit(Dictionary):
-    """A rectangle to give, like the visible part of a new frame. A :obj:`DOMRectReadOnly` is taken as well.
+    """A rectangle passed as an option, like the visible part of a new frame.
+
+    Wherever one is accepted, a :obj:`DOMRectReadOnly` is accepted too.
+
+    See :mdn:`DOMRectReadOnly/fromRect_static`.
 
     Args:
-        x (:obj:`float`, optional): The left edge.
-        y (:obj:`float`, optional): The top edge.
-        width (:obj:`float`, optional): The width.
-        height (:obj:`float`, optional): The height.
+        x (:obj:`float`, optional): The horizontal origin, 0 by default.
+        y (:obj:`float`, optional): The vertical origin, 0 by default.
+        width (:obj:`float`, optional): The width, 0 by default.
+        height (:obj:`float`, optional): The height, 0 by default.
     """
 
     x: float = 0
@@ -135,11 +167,13 @@ class DOMRectInit(Dictionary):
 
 @dataclass
 class PlaneLayout(Dictionary):
-    """Where a plane is in a buffer.
+    """The position of one plane of pixels in a buffer.
+
+    See :mdn:`VideoFrame/copyTo`.
 
     Args:
-        offset (:obj:`int`): The first byte of the plane.
-        stride (:obj:`int`): The number of bytes from a row to the next.
+        offset (:obj:`int`): The index of the plane's first byte in the buffer.
+        stride (:obj:`int`): The number of bytes from the start of one row to the start of the next, padding included.
     """
 
     offset: int
@@ -148,13 +182,19 @@ class PlaneLayout(Dictionary):
 
 @dataclass
 class VideoColorSpace:
-    """The color space of a frame. Members are :obj:`None` when unknown.
+    """The color space of a frame, read from :attr:`VideoFrame.color_space`. A member is :obj:`None` when unknown.
+
+    Frames received from a track carry no color space of their own and report BT.601 (``smpte170m``) with a
+    limited range. That's the default of the software decoders.
+
+    See :mdn:`VideoColorSpace`.
 
     Args:
         primaries (:obj:`webrtc.VideoColorPrimaries`, optional): The color primaries.
         transfer (:obj:`webrtc.VideoTransferCharacteristics`, optional): The transfer characteristics.
-        matrix (:obj:`webrtc.VideoMatrixCoefficients`, optional): The matrix coefficients.
-        full_range (:obj:`bool`, optional): Whether the samples use the full range of their bits.
+        matrix (:obj:`webrtc.VideoMatrixCoefficients`, optional): The matrix that converts between RGB and YUV.
+        full_range (:obj:`bool`, optional): Whether samples span the full range of their bits. If not, they
+            use the limited (studio) range.
     """
 
     primaries: VideoColorPrimaries | VideoColorPrimariesValue | None = None
@@ -163,7 +203,13 @@ class VideoColorSpace:
     full_range: bool | None = None
 
     def to_json(self) -> dict[str, str | bool | None]:
-        """Returns the members as a dictionary with the camelCase names, like ``toJSON()``."""
+        """Serializes the color space.
+
+        See :mdn:`VideoColorSpace/toJSON`.
+
+        Returns:
+            :obj:`dict`: The ``primaries``, ``transfer``, ``matrix`` and ``fullRange`` values.
+        """
         return {
             'primaries': self.primaries,
             'transfer': self.transfer,
@@ -179,13 +225,16 @@ class VideoColorSpace:
 
 @dataclass
 class VideoColorSpaceInit(Dictionary):
-    """A color space to give a new frame. A :obj:`VideoColorSpace` is taken as well.
+    """A color space passed to a new frame. A :obj:`VideoColorSpace` is accepted too.
+
+    See :mdn:`VideoColorSpace/VideoColorSpace`.
 
     Args:
         primaries (:obj:`webrtc.VideoColorPrimaries`, optional): The color primaries.
         transfer (:obj:`webrtc.VideoTransferCharacteristics`, optional): The transfer characteristics.
-        matrix (:obj:`webrtc.VideoMatrixCoefficients`, optional): The matrix coefficients.
-        full_range (:obj:`bool`, optional): Whether the samples use the full range of their bits.
+        matrix (:obj:`webrtc.VideoMatrixCoefficients`, optional): The matrix that converts between RGB and YUV.
+        full_range (:obj:`bool`, optional): Whether samples span the full range of their bits. If not, they
+            use the limited (studio) range.
     """
 
     primaries: VideoColorPrimaries | VideoColorPrimariesValue | None = None
@@ -214,10 +263,13 @@ _REC601 = VideoColorSpace(
 
 @dataclass
 class VideoFrameMetadata(Dictionary):
-    """What else is known of a frame.
+    """Extra facts about a frame, returned by :meth:`VideoFrame.metadata`.
+
+    See :mdn:`VideoFrame/metadata`.
 
     Args:
-        rtp_timestamp (:obj:`int`, optional): The RTP timestamp of a frame received from a remote peer.
+        rtp_timestamp (:obj:`int`, optional): The RTP timestamp of a frame received from a remote peer, or
+            :obj:`None` for local frames.
     """
 
     rtp_timestamp: int | None = None
@@ -228,25 +280,35 @@ class VideoFrameMetadata(Dictionary):
 
 @dataclass
 class VideoFrameBufferInit(Dictionary):
-    """How to create a :obj:`VideoFrame` from a buffer of pixels.
+    """Options to create a :obj:`VideoFrame` from a buffer of pixels.
+
+    Only the pixels of the visible rectangle are kept. They become the whole frame, so its coded size is the size
+    of ``visible_rect``.
+
+    See :mdn:`VideoFrame/VideoFrame`.
 
     Args:
-        format (:obj:`webrtc.VideoPixelFormat`): The layout of the pixels.
-        coded_width (:obj:`int`): The width in pixels.
-        coded_height (:obj:`int`): The height in pixels.
+        format (:obj:`webrtc.VideoPixelFormat`): The pixel format of the buffer.
+        coded_width (:obj:`int`): The width of the pixels in the buffer, which must be positive.
+        coded_height (:obj:`int`): The height of the pixels in the buffer, which must be positive.
         timestamp (:obj:`int`): The presentation time in microseconds.
         duration (:obj:`int`, optional): The duration in microseconds.
-        layout (:obj:`list` of :obj:`PlaneLayout`, optional): Where the planes are in the buffer, packed one after
-            another by default.
-        visible_rect (:obj:`DOMRectInit`, optional): The part of the frame to show, all of it by default.
-        rotation (:obj:`float`, optional): How the frame is rotated clockwise to be shown, rounded to a multiple of 90.
-        flip (:obj:`bool`, optional): Whether the frame is mirrored horizontally to be shown, before the rotation.
-        display_width (:obj:`int`, optional): The width to show the frame at, with ``display_height``.
-        display_height (:obj:`int`, optional): The height to show the frame at, with ``display_width``.
-        color_space (:obj:`VideoColorSpaceInit`, optional): The color space.
-        metadata (:obj:`VideoFrameMetadata`, optional): What else is known of the frame, copied.
-        transfer (:obj:`list` of bytes-like buffers, optional): Buffers given up to the frame. The pixels are copied
-            all the same; transferred :obj:`memoryview` objects are released, and Python can't detach other buffers.
+        layout (:obj:`list` of :obj:`PlaneLayout`, optional): The offset and stride of each plane in the buffer.
+            By default, the planes are tightly packed one after another.
+        visible_rect (:obj:`DOMRectInit`, optional): The part of the pixels to keep. Its coordinates are integers
+            aligned to the chroma subsampling. All the pixels are kept by default.
+        rotation (:obj:`float`, optional): The clockwise rotation to apply when showing the frame, rounded to the
+            nearest multiple of 90.
+        flip (:obj:`bool`, optional): Whether to mirror the frame horizontally when showing it, before rotating.
+        display_width (:obj:`int`, optional): The width to show the frame at, given together with
+            ``display_height``. By default, the display size is the visible size after rotation.
+        display_height (:obj:`int`, optional): The height to show the frame at, given together with
+            ``display_width``.
+        color_space (:obj:`VideoColorSpaceInit`, optional): The color space. By default, it's sRGB for RGB formats
+            and BT.709 with a limited range for the others.
+        metadata (:obj:`VideoFrameMetadata`, optional): Extra facts about the frame, deep-copied.
+        transfer (:obj:`list` of bytes-like buffers, optional): Buffers to give up to the frame. The pixels are
+            copied regardless. Transferred :obj:`memoryview` objects are released, but other buffers stay usable.
     """
 
     _dictionaries: ClassVar = {
@@ -287,18 +349,27 @@ class VideoFrameBufferInit(Dictionary):
 
 @dataclass
 class VideoFrameInit(Dictionary):
-    """How to create a :obj:`VideoFrame` from another one. Members left out are the ones of that frame.
+    """Options to create a :obj:`VideoFrame` from another one. Anything left out is taken from the source frame.
+
+    The new frame shares the pixels of the source and always keeps its color space.
+
+    See :mdn:`VideoFrame/VideoFrame`.
 
     Args:
         timestamp (:obj:`int`, optional): The presentation time in microseconds.
         duration (:obj:`int`, optional): The duration in microseconds.
-        alpha (:obj:`webrtc.AlphaOption`, optional): Whether the alpha channel is kept.
-        visible_rect (:obj:`DOMRectInit`, optional): The part of the frame to show.
-        rotation (:obj:`float`, optional): A rotation added to the one of the frame.
-        flip (:obj:`bool`, optional): Whether to mirror the frame, in addition to the frame's own flip.
-        display_width (:obj:`int`, optional): The width to show the frame at, with ``display_height``.
-        display_height (:obj:`int`, optional): The height to show the frame at, with ``display_width``.
-        metadata (:obj:`VideoFrameMetadata`, optional): What else is known of the frame, copied.
+        alpha (:obj:`webrtc.AlphaOption`, optional): Whether to keep the alpha channel. With ``discard``, the frame
+            switches to the matching format without alpha.
+        visible_rect (:obj:`DOMRectInit`, optional): The part of the source's coded pixels to show. Its coordinates
+            are integers aligned to the chroma subsampling. Unless the display size is given, it's scaled to match.
+        rotation (:obj:`float`, optional): A clockwise rotation added to the source's, rounded to the nearest
+            multiple of 90.
+        flip (:obj:`bool`, optional): Whether to mirror the frame horizontally. It toggles the source's flip.
+        display_width (:obj:`int`, optional): The width to show the frame at, given together with
+            ``display_height``.
+        display_height (:obj:`int`, optional): The height to show the frame at, given together with
+            ``display_width``.
+        metadata (:obj:`VideoFrameMetadata`, optional): Extra facts that replace the source's, deep-copied.
     """
 
     _dictionaries: ClassVar = {'visible_rect': DOMRectInit, 'metadata': VideoFrameMetadata}
@@ -323,15 +394,19 @@ class VideoFrameInit(Dictionary):
 
 @dataclass
 class VideoFrameCopyToOptions(Dictionary):
-    """How :meth:`VideoFrame.copy_to` copies a frame.
+    """Options for :meth:`VideoFrame.copy_to` and :meth:`VideoFrame.allocation_size`.
+
+    See :mdn:`VideoFrame/copyTo`.
 
     Args:
-        rect (:obj:`DOMRectInit`, optional): The part to copy, the visible one by default.
-        layout (:obj:`list` of :obj:`PlaneLayout`, optional): Where to put the planes, one after another by default.
-        format (:obj:`webrtc.VideoPixelFormat`, optional): The format to convert to: the frame's own one, or one of
-            ``RGBA``, ``RGBX``, ``BGRA`` and ``BGRX``.
-        color_space (:obj:`webrtc.PredefinedColorSpace`, optional): The color space to convert to an RGB format in,
-            ``srgb`` by default and the only one supported.
+        rect (:obj:`DOMRectInit`, optional): The part of the coded pixels to copy. Its coordinates are integers
+            aligned to the chroma subsampling. By default, the visible rectangle is copied.
+        layout (:obj:`list` of :obj:`PlaneLayout`, optional): Where to write each plane in the destination.
+            By default, the planes are tightly packed one after another.
+        format (:obj:`webrtc.VideoPixelFormat`, optional): The format to write. It's either the frame's own
+            format, or one of ``RGBA``, ``RGBX``, ``BGRA`` and ``BGRX`` to convert to RGB.
+        color_space (:obj:`webrtc.PredefinedColorSpace`, optional): The color space of an RGB conversion. Only
+            ``srgb`` is supported, and it's the default.
     """
 
     _dictionaries: ClassVar = {'rect': DOMRectInit, 'layout': PlaneLayout}
@@ -618,18 +693,22 @@ class _FrameInfo(NamedTuple):
 
 
 class VideoFrame(Closable):
-    """A frame of video: its pixels and metadata (https://developer.mozilla.org/en-US/docs/Web/API/VideoFrame).
+    """One frame of video. It holds the pixels along with how and when to show them.
 
-    A frame holds its pixels until :meth:`close`, which frames read from a track should be once used: a frame
-    garbage collected without being closed is released with a :obj:`ResourceWarning`.
+    A frame holds its pixels until :meth:`close` is called or a ``with`` block around it ends. Close every frame
+    once done with it, including frames read from a track. A frame that is garbage collected while open emits a
+    :obj:`ResourceWarning`.
+
+    See :mdn:`VideoFrame`.
 
     Args:
-        source: A bytes-like buffer of pixels, or a :obj:`VideoFrame` to create another frame of the same pixels.
-        init (:obj:`VideoFrameBufferInit` or :obj:`VideoFrameInit`, optional): How to create the frame, for a buffer
-            (required) or a frame.
+        source: A bytes-like buffer of pixels, which is copied into the frame. It can also be another
+            :obj:`VideoFrame`, whose pixels are shared without copying.
+        init (:obj:`VideoFrameBufferInit` or :obj:`VideoFrameInit`, optional): The options. A
+            buffer requires a :obj:`VideoFrameBufferInit`, and a frame takes an optional :obj:`VideoFrameInit`.
 
     Raises:
-        TypeError: If the init isn't valid, or the buffer is too small for it.
+        TypeError: If the source or the options are invalid, or the buffer is too small for them.
         webrtc.InvalidStateError: If the source frame is closed.
 
     Example::
@@ -788,68 +867,111 @@ class VideoFrame(Closable):
 
     @property
     def format(self) -> VideoPixelFormat | None:
-        """:obj:`webrtc.VideoPixelFormat`, optional: The layout of the pixels, :obj:`None` once closed."""
+        """:obj:`webrtc.VideoPixelFormat`, optional: The pixel format, or :obj:`None` once closed.
+
+        See :mdn:`VideoFrame/format`.
+        """
         return self._format if self._resource is not None else None
 
     @property
     def coded_width(self) -> int:
-        """:obj:`int`: The width of the pixels, 0 once closed."""
+        """:obj:`int`: The width of the stored pixels, or 0 once closed.
+
+        See :mdn:`VideoFrame/codedWidth`.
+        """
         return self._resource.width if self._resource is not None else 0
 
     @property
     def coded_height(self) -> int:
-        """:obj:`int`: The height of the pixels, 0 once closed."""
+        """:obj:`int`: The height of the stored pixels, or 0 once closed.
+
+        See :mdn:`VideoFrame/codedHeight`.
+        """
         return self._resource.height if self._resource is not None else 0
 
     @property
     def coded_rect(self) -> DOMRectReadOnly | None:
-        """:obj:`DOMRectReadOnly`, optional: The rect of all the pixels, :obj:`None` once closed."""
+        """:obj:`DOMRectReadOnly`, optional: A rectangle covering all the stored pixels, or :obj:`None` once closed.
+
+        See :mdn:`VideoFrame/codedRect`.
+        """
         if self._resource is None:
             return None
         return DOMRectReadOnly(0, 0, self._resource.width, self._resource.height)
 
     @property
     def visible_rect(self) -> DOMRectReadOnly | None:
-        """:obj:`DOMRectReadOnly`, optional: The part of the pixels to show, :obj:`None` once closed."""
+        """:obj:`DOMRectReadOnly`, optional: The part of the stored pixels to show, or :obj:`None` once closed.
+
+        See :mdn:`VideoFrame/visibleRect`.
+        """
         return self._visible_rect if self._resource is not None else None
 
     @property
     def rotation(self) -> int:
-        """:obj:`int`: How the frame is rotated clockwise to be shown: 0, 90, 180 or 270."""
+        """:obj:`int`: The clockwise rotation to apply when showing the frame, which is 0, 90, 180 or 270.
+
+        Frames from a track carry the rotation that the sender signalled. The pixels themselves are not rotated.
+
+        See :mdn:`VideoFrame/rotation`.
+        """
         return self._rotation
 
     @property
     def flip(self) -> bool:
-        """:obj:`bool`: Whether the frame is mirrored horizontally to be shown, before the rotation."""
+        """:obj:`bool`: Whether to mirror the frame horizontally when showing it, before :attr:`rotation`.
+
+        See :mdn:`VideoFrame/flip`.
+        """
         return self._flip
 
     @property
     def display_width(self) -> int:
-        """:obj:`int`: The width to show the frame at, 0 once closed."""
+        """:obj:`int`: The width to show the frame at after rotation, or 0 once closed.
+
+        See :mdn:`VideoFrame/displayWidth`.
+        """
         return self._display[0] if self._resource is not None else 0
 
     @property
     def display_height(self) -> int:
-        """:obj:`int`: The height to show the frame at, 0 once closed."""
+        """:obj:`int`: The height to show the frame at after rotation, or 0 once closed.
+
+        See :mdn:`VideoFrame/displayHeight`.
+        """
         return self._display[1] if self._resource is not None else 0
 
     @property
     def timestamp(self) -> int:
-        """:obj:`int`: The presentation time in microseconds."""
+        """:obj:`int`: The presentation time in microseconds, kept after closing.
+
+        See :mdn:`VideoFrame/timestamp`.
+        """
         return self._timestamp
 
     @property
     def duration(self) -> int | None:
-        """:obj:`int`, optional: The duration in microseconds."""
+        """:obj:`int`, optional: The duration in microseconds, or :obj:`None` if unknown, as for frames from a track.
+
+        See :mdn:`VideoFrame/duration`.
+        """
         return self._duration
 
     @property
     def color_space(self) -> VideoColorSpace:
-        """:obj:`VideoColorSpace`: The color space."""
+        """:obj:`VideoColorSpace`: The color space of the pixels, kept after closing.
+
+        See :mdn:`VideoFrame/colorSpace`.
+        """
         return self._color_space
 
     def metadata(self) -> VideoFrameMetadata:
-        """Returns what else is known of the frame, like the RTP timestamp of a received frame.
+        """Returns a copy of the frame's extra facts, like the RTP timestamp of a frame received from a peer.
+
+        See :mdn:`VideoFrame/metadata`.
+
+        Returns:
+            :obj:`VideoFrameMetadata`: A deep copy, so changing it leaves the frame untouched.
 
         Raises:
             webrtc.InvalidStateError: If the frame is closed.
@@ -884,28 +1006,42 @@ class VideoFrame(Closable):
         return _CopyPlan(resource, format, rect, size, planes)
 
     def allocation_size(self, options: VideoFrameCopyToOptions | None = None) -> int:
-        """Returns how many bytes :meth:`copy_to` needs.
+        """Computes the minimum destination size for :meth:`copy_to` with the same options.
 
-        Raises :obj:`webrtc.InvalidStateError` if the frame is closed, :obj:`TypeError` if the options aren't valid
-        and :obj:`webrtc.NotSupportedError` if the frame can't be converted to the format.
+        See :mdn:`VideoFrame/allocationSize`.
 
         Args:
-            options (:obj:`VideoFrameCopyToOptions`, optional): How the frame is copied.
+            options (:obj:`VideoFrameCopyToOptions`, optional): What to copy and how.
+
+        Returns:
+            :obj:`int`: The number of bytes.
+
+        Raises:
+            webrtc.InvalidStateError: If the frame is closed.
+            TypeError: If the options are invalid, like a rectangle outside the frame or overlapping planes.
+            webrtc.NotSupportedError: If the format or color space can't be converted to.
         """
         return self._plan_copy(options).size
 
     def copy_to(
         self, destination: bytearray | memoryview, options: VideoFrameCopyToOptions | None = None
     ) -> asyncio.Future[list[PlaneLayout]]:
-        """Copies the pixels into a buffer.
+        """Copies the pixels into a buffer, converting them to RGB if asked.
+
+        The copy happens before this returns, so the future is already done. Call it from a running event loop.
+        Errors are set on the future and not raised. RGB conversion uses the frame's matrix and range.
+
+        See :mdn:`VideoFrame/copyTo`.
 
         Args:
-            destination (:obj:`bytearray` or writable :obj:`memoryview`): The buffer.
-            options (:obj:`VideoFrameCopyToOptions`, optional): How the frame is copied.
+            destination (:obj:`bytearray` or writable :obj:`memoryview`): The buffer to write to, at least
+                :meth:`allocation_size` bytes long.
+            options (:obj:`VideoFrameCopyToOptions`, optional): What to copy and how.
 
         Returns:
-            :obj:`asyncio.Future`: The :obj:`PlaneLayout` of each plane in the buffer, once copied.
-            It fails with the errors of :meth:`allocation_size`, or :obj:`TypeError` if the buffer is too small.
+            :obj:`asyncio.Future`: Resolves to a :obj:`list` of :obj:`PlaneLayout` that says where each plane was
+            written. It fails with the errors of :meth:`allocation_size`, or :obj:`TypeError` if the buffer is too
+            small.
         """
         future = asyncio.get_running_loop().create_future()
         try:
@@ -941,7 +1077,12 @@ class VideoFrame(Closable):
         return [PlaneLayout(plane.offset, plane.stride) for plane in plan.planes]
 
     def clone(self) -> VideoFrame:
-        """Returns another frame of the same pixels, which is closed separately.
+        """Creates another frame that shares these pixels without copying them. Each frame must be closed separately.
+
+        See :mdn:`VideoFrame/clone`.
+
+        Returns:
+            :obj:`VideoFrame`: The new frame.
 
         Raises:
             webrtc.InvalidStateError: If the frame is closed.
@@ -954,7 +1095,13 @@ class VideoFrame(Closable):
         return frame
 
     def close(self) -> None:
-        """Releases the pixels. Closing a closed frame does nothing."""
+        """Releases this frame's hold on the pixels. Closing a closed frame does nothing.
+
+        After that, the size and rectangle attributes read as empty, and most methods raise
+        :obj:`webrtc.InvalidStateError`.
+
+        See :mdn:`VideoFrame/close`.
+        """
         self._resource = None
 
     def __repr__(self) -> str:

@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""The base class of the wrappers of native objects."""
+"""The base class of objects that wrap a native WebRTC object."""
 
 from __future__ import annotations
 
@@ -22,10 +22,16 @@ _NativeT = TypeVar('_NativeT')
 
 
 class WebRTCObject(Generic[_NativeT]):
-    """The wrapper of a native object. Wrappers are equal when they wrap the same native object.
+    """The base class of the objects that wrap a native object.
+
+    Two wrappers are equal, and hash the same, when they wrap the same native object, so a sender returned twice
+    compares equal to itself.
 
     Args:
-        native_obj (optional): The native object, a new one of the native class if omitted.
+        native_obj (optional): The native object to wrap. If omitted, a new one of the native class is created.
+
+    Raises:
+        TypeError: If ``native_obj`` is omitted and the class has no native class.
     """
 
     #: The native class, created with no arguments when no native object is given
@@ -49,7 +55,7 @@ class WebRTCObject(Generic[_NativeT]):
 
     @classmethod
     def _wrap(cls, item: _NativeT) -> Self:
-        """The wrapper of a native object, created without the constructor, which takes the public arguments."""
+        """The wrapper of a native object. It skips the constructor, which takes the public arguments."""
         obj = cls.__new__(cls)
         obj._init_native(item)
         if isinstance(obj, EventTarget):

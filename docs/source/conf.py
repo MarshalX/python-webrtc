@@ -46,6 +46,7 @@ language = 'en'
 
 extensions = [
     'sphinx.ext.autodoc',
+    'sphinx.ext.extlinks',
     'sphinx.ext.intersphinx',
     'sphinx.ext.napoleon',
     'sphinxext.opengraph',
@@ -87,6 +88,11 @@ pygments_style_dark = 'monokai'
 myst_heading_anchors = 4
 myst_enable_extensions = ['colon_fence', 'alert', 'strikethrough', 'deflist', 'html_image', 'gfm_autolink']
 
+# -- Extlinks ---------------------------------------------------
+extlinks = {'mdn': ('https://developer.mozilla.org/en-US/docs/Web/API/%s', 'MDN: %s')}
+# PyPI renders its tab anchors, like #history, with JavaScript
+linkcheck_anchors_ignore_for_url = [r'https://pypi\.org/.*']
+
 # -- Intersphinx ---------------------------------------------------
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None),
@@ -103,6 +109,7 @@ autodoc_member_order = 'bysource'
 autodoc_typehints = 'description'
 autodoc_typehints_description_target = 'documented_params'
 napoleon_use_rtype = False
+napoleon_custom_sections = [('Events', 'params_style')]
 
 # -- Options for HTML output -------------------------------------------------
 

@@ -5,11 +5,11 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""SFrame (RFC 9605) of WebRTC Encoded Transform: end-to-end encryption of the encoded frames.
+"""SFrame transforms of WebRTC Encoded Transform, which encrypt encoded frames end to end with SFrame (RFC 9605).
 
-Keys are the raw bytes of the base keys of RFC 9605 (Python has no ``CryptoKey``), each with its key id. Frames are
-encrypted whole ("per-frame"), so codecs whose RTP packetization parses the payload (H.264, AV1) don't go through:
-VP8, VP9 and Opus do.
+A key is given as the raw bytes of the RFC 9605 base key together with a key id, in place of a ``CryptoKey``. Whole
+frames are encrypted ("per-frame"). Codecs whose RTP packetization parses the payload, such as H.264 and AV1, can't
+be used. VP8, VP9 and Opus work.
 """
 
 from __future__ import annotations
@@ -38,9 +38,9 @@ from webrtc.utils.events import UniformEventTarget
 if TYPE_CHECKING:
     from webrtc.streams import TransformStreamDefaultController
 
-#: What the SFrame streams take: a frame, or any buffer
+#: A chunk the SFrame streams take, which is an encoded frame or any buffer
 SFrameInput = Union[RTCEncodedVideoFrame, RTCEncodedAudioFrame, Buffer]
-#: What the SFrame streams output: the frame, or the bytes of a buffer
+#: A chunk the SFrame streams output, which is the encoded frame written or :obj:`bytes` for a buffer
 SFrameChunk = Union[RTCEncodedVideoFrame, RTCEncodedAudioFrame, bytes]
 
 _C = TypeVar('_C', bound=SFrameChunk, default=Union[RTCEncodedVideoFrame, RTCEncodedAudioFrame])
@@ -110,13 +110,13 @@ class _SFrameEncryptorManager:
         def _native_obj(self) -> wrtc.SFrameTransform: ...
 
     async def set_encryption_key(self, key: Buffer, key_id: int) -> None:
-        """Encrypts with a key from now on, in place of the previous one.
+        """Sets the key that encrypts the next frames and replaces the current one.
 
-        The counter of the encryptor goes on, so a key set again is never used with a counter twice.
+        The frame counter isn't reset, so setting a key again never reuses a counter with it.
 
         Args:
-            key (:obj:`bytes`): The base key of RFC 9605, any buffer.
-            key_id (:obj:`int`): The key id frames are sent with, from 0 to 2**64 - 1.
+            key (:obj:`bytes`): The RFC 9605 base key, as any buffer.
+            key_id (:obj:`int`): The key id sent with the frames, from 0 to 2**64 - 1.
 
         Raises:
             TypeError: If the key isn't a buffer, or the key id isn't an :obj:`int`.
@@ -139,10 +139,10 @@ class _SFrameDecryptorManager:
         def _native_obj(self) -> wrtc.SFrameTransform: ...
 
     async def add_decryption_key(self, key: Buffer, key_id: int) -> None:
-        """Decrypts the frames of a key id with a key, in place of the previous key of that id.
+        """Adds the key that decrypts the frames of a key id. It replaces any key that has the same id.
 
         Args:
-            key (:obj:`bytes`): The base key of RFC 9605, any buffer.
+            key (:obj:`bytes`): The RFC 9605 base key, as any buffer.
             key_id (:obj:`int`): The key id, from 0 to 2**64 - 1.
 
         Raises:
@@ -156,7 +156,7 @@ class _SFrameDecryptorManager:
             raise InvalidModificationError(msg)
 
     async def remove_decryption_key(self, key_id: int) -> None:
-        """Stops decrypting the frames of a key id: they're ``keyID`` errors from now on.
+        """Removes the key of a key id. From now on, frames with that id fail with a ``keyID`` error.
 
         Args:
             key_id (:obj:`int`): The key id, from 0 to 2**64 - 1.
@@ -178,16 +178,17 @@ class _SFrameDecryptorManager:
 
 
 class RTCRtpSFrameEncryptor(_SFrameEncryptorManager, WebRTCObject[wrtc.SFrameTransform]):
-    """Encrypts the frames of a sender with SFrame, set as its ``transform``.
+    """Encrypts the frames of a sender with SFrame, once set as its ``transform``.
 
-    Frames are encrypted on the threads of libwebrtc. Until a key is set, frames are dropped rather than sent in clear.
+    Frames are encrypted natively, off the event loop. Until a key is set, frames are dropped so none go out in
+    clear.
 
     Args:
-        options (:obj:`webrtc.RTCRtpSFrameEncryptorOptions`): The cipher suite.
+        options (:obj:`webrtc.RTCRtpSFrameEncryptorOptions`): The cipher suite and SFrame type.
 
     Raises:
-        TypeError: If the options aren't :obj:`webrtc.RTCRtpSFrameEncryptorOptions`.
-        webrtc.NotSupportedError: For the ``'per-packet'`` type, as libwebrtc has no SFrame packetization.
+        TypeError: If the options aren't :obj:`webrtc.SFrameTransformOptions`.
+        webrtc.NotSupportedError: For the ``'per-packet'`` type, because SFrame RTP packetization isn't available.
 
     Example::
 
@@ -199,7 +200,7 @@ class RTCRtpSFrameEncryptor(_SFrameEncryptorManager, WebRTCObject[wrtc.SFrameTra
     def __init__(self, options: RTCRtpSFrameEncryptorOptions) -> None:
         native = _native(options, encrypting=True)
         if SFrameType(getattr(options, 'type', SFrameType.per_frame)) == SFrameType.per_packet:
-            msg = 'per-packet SFrame needs the SFrame packetization of RTP, which libwebrtc lacks'
+            msg = 'per-packet SFrame needs the SFrame packetization of RTP, which is not supported'
             raise NotSupportedError(msg)
         super().__init__(native)
 
@@ -209,9 +210,9 @@ class RTCRtpSFrameDecryptor(
     WebRTCObject[wrtc.SFrameTransform],
     UniformEventTarget[Literal['error'], SFrameTransformErrorEvent],
 ):
-    """Decrypts the SFrame frames of a receiver, set as its ``transform``.
+    """Decrypts the SFrame frames of a receiver, once set as its ``transform``.
 
-    Frames are decrypted on the threads of libwebrtc. Frames that don't decrypt are dropped, each reported by an
+    Frames are decrypted natively, off the event loop. A frame that fails to decrypt is dropped and reported by an
     ``error`` event.
 
     Args:
@@ -221,7 +222,7 @@ class RTCRtpSFrameDecryptor(
         TypeError: If the options aren't :obj:`webrtc.SFrameTransformOptions`.
 
     Events:
-        ``error`` (:obj:`webrtc.SFrameTransformErrorEvent`): a frame didn't decrypt.
+        error (:obj:`webrtc.SFrameTransformErrorEvent`): A frame didn't decrypt.
     """
 
     def __init__(self, options: SFrameTransformOptions) -> None:
@@ -260,10 +261,11 @@ class _SFrameStreamTransformer(Generic[_C]):
 
 
 class _SFrameStream(WebRTCObject[wrtc.SFrameTransform], Generic[_C]):
-    """A GenericTransformStream of SFrame: frames or buffers written to :attr:`writable` are read transformed.
+    """A GenericTransformStream of SFrame. Frames or buffers written to :attr:`writable` are read back transformed.
 
-    Typed by its chunks: encoded frames by default, like the streams of a transformer it's piped between; ``bytes``
-    (``SFrameEncryptorStream[bytes]``) for buffers, or :obj:`SFrameChunk` for both.
+    The type parameter is its chunk type. It's encoded frames by default, to match the streams of the transformer
+    it's piped between. Use ``bytes`` for buffers, as in ``SFrameEncryptorStream[bytes]``, or :obj:`SFrameChunk`
+    for both.
     """
 
     def __init__(self, native: wrtc.SFrameTransform, *, encrypting: bool) -> None:
@@ -274,12 +276,15 @@ class _SFrameStream(WebRTCObject[wrtc.SFrameTransform], Generic[_C]):
 
     @property
     def readable(self) -> ReadableStream[_C]:
-        """:obj:`webrtc.ReadableStream`: The transformed chunks: the frames written, or :obj:`bytes`."""
+        """:obj:`webrtc.ReadableStream`: The output chunks.
+
+        Each frame written comes out with its data replaced, and each buffer comes out as :obj:`bytes`.
+        """
         return cast('ReadableStream[_C]', self._transform.readable)
 
     @property
     def writable(self) -> WritableStream[_C | Buffer]:
-        """:obj:`webrtc.WritableStream`: The chunks to transform, encoded frames or buffers.
+        """:obj:`webrtc.WritableStream`: The input chunks.
 
         Takes :obj:`webrtc.RTCEncodedVideoFrame`, :obj:`webrtc.RTCEncodedAudioFrame` or any buffer. Anything else
         errors the stream with :obj:`TypeError`.
@@ -288,10 +293,12 @@ class _SFrameStream(WebRTCObject[wrtc.SFrameTransform], Generic[_C]):
 
 
 class SFrameEncryptorStream(_SFrameEncryptorManager, _SFrameStream[_C]):
-    """Encrypts the frames or buffers written to it with SFrame, like a :obj:`webrtc.TransformStream`.
+    """A transform stream that encrypts the frames or buffers written to it with SFrame.
 
-    A frame is read back with its data encrypted, a buffer as the :obj:`bytes` of the SFrame ciphertext. Until a key
-    is set, chunks are dropped.
+    It has :attr:`readable` and :attr:`writable` like a :obj:`webrtc.TransformStream`, so it can be piped through in
+    the worker of an :obj:`webrtc.RTCRtpScriptTransform`. A frame comes out with its data encrypted, and a buffer
+    comes out as the :obj:`bytes` of the ciphertext. Until a key is set, chunks are dropped. The type parameter is
+    the output type. It's encoded frames by default, and ``SFrameEncryptorStream[bytes]`` handles buffers.
 
     Args:
         options (:obj:`webrtc.SFrameTransformOptions`): The cipher suite.
@@ -315,10 +322,12 @@ class SFrameEncryptorStream(_SFrameEncryptorManager, _SFrameStream[_C]):
 class SFrameDecryptorStream(
     _SFrameDecryptorManager, _SFrameStream[_C], UniformEventTarget[Literal['error'], SFrameTransformErrorEvent]
 ):
-    """Decrypts the SFrame frames or buffers written to it, like a :obj:`webrtc.TransformStream`.
+    """A transform stream that decrypts the SFrame frames or buffers written to it.
 
-    A frame is read back with its data decrypted, a buffer as the :obj:`bytes` of the plaintext. Chunks that don't
-    decrypt are dropped, each reported by an ``error`` event.
+    It has :attr:`readable` and :attr:`writable` like a :obj:`webrtc.TransformStream`. A frame comes out with its
+    data decrypted, and a buffer comes out as the :obj:`bytes` of the plaintext. A chunk that fails to decrypt is
+    dropped and reported by an ``error`` event. The type parameter is the output type. It's encoded frames by
+    default, and ``SFrameDecryptorStream[bytes]`` handles buffers.
 
     Args:
         options (:obj:`webrtc.SFrameTransformOptions`): The cipher suite.
@@ -327,7 +336,7 @@ class SFrameDecryptorStream(
         TypeError: If the options aren't :obj:`webrtc.SFrameTransformOptions`.
 
     Events:
-        ``error`` (:obj:`webrtc.SFrameTransformErrorEvent`): a chunk didn't decrypt.
+        error (:obj:`webrtc.SFrameTransformErrorEvent`): A chunk didn't decrypt.
     """
 
     def __init__(self, options: SFrameTransformOptions) -> None:

@@ -43,10 +43,10 @@ async def call_native(
     *args: _P.args,
     **kwargs: _P.kwargs,
 ) -> _T | None:
-    """Calls a native method taking success and failure callbacks, called from a libwebrtc thread, and awaits them.
+    """Calls a native method taking success and failure callbacks, called from a native thread, and awaits them.
 
     The result goes through the task queue of the loop, so the code awaiting it runs after the handlers of the events
-    libwebrtc emitted before completing the call.
+    the native WebRTC engine emitted before completing the call.
 
     Args:
         method (:obj:`callable`): The native method, called as ``method(on_success, on_failure, *args)``.

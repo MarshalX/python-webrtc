@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""RTCDtlsTransport of WebRTC."""
+"""The DTLS transport that RTP and SCTP packets go over."""
 
 from __future__ import annotations
 
@@ -23,14 +23,16 @@ _R = TypeVar('_R')
 
 
 class RTCDtlsTransport(WebRTCObject[wrtc.RTCDtlsTransport], EventTarget[_DtlsTransportEvent]):
-    """The Datagram Transport Layer Security (DTLS) transport of a :obj:`webrtc.RTCPeerConnection`.
+    """The DTLS transport that secures the packets of a :obj:`webrtc.RTCPeerConnection`.
 
-    The RTP and RTCP packets of its :obj:`webrtc.RTCRtpSender` and :obj:`webrtc.RTCRtpReceiver` objects are sent and
-    received over it.
+    The RTP and RTCP packets of its senders and receivers, and the SCTP packets of its data channels, go over it.
 
-    Events (see :meth:`on`):
-        ``statechange`` (:obj:`webrtc.Event`): :attr:`state` changed.
-        ``error`` (:obj:`webrtc.RTCErrorEvent`): The transport failed with an :obj:`webrtc.RTCError`.
+    See :mdn:`RTCDtlsTransport`.
+
+    Events:
+        statechange (:obj:`webrtc.Event`): :attr:`state` changed.
+        error (:obj:`webrtc.RTCErrorEvent`): The transport failed. The event carries the
+            :obj:`webrtc.RTCError` that explains why.
     """
 
     _class = wrtc.RTCDtlsTransport
@@ -48,7 +50,7 @@ class RTCDtlsTransport(WebRTCObject[wrtc.RTCDtlsTransport], EventTarget[_DtlsTra
     def on(self, name: Literal['error'], handler: Callable[[RTCErrorEvent], _R]) -> Callable[[RTCErrorEvent], _R]: ...
 
     def on(self, name: _DtlsTransportEvent, handler: AnyHandler | None = None) -> object:
-        """See :meth:`webrtc.UniformEventTarget.on`."""
+        """Adds a handler of an event, called each time. See :meth:`webrtc.UniformEventTarget.on`."""
         return self._add(name, handler, once=False)
 
     @overload
@@ -64,7 +66,7 @@ class RTCDtlsTransport(WebRTCObject[wrtc.RTCDtlsTransport], EventTarget[_DtlsTra
     def once(self, name: Literal['error'], handler: Callable[[RTCErrorEvent], _R]) -> Callable[[RTCErrorEvent], _R]: ...
 
     def once(self, name: _DtlsTransportEvent, handler: AnyHandler | None = None) -> object:
-        """See :meth:`webrtc.UniformEventTarget.once`."""
+        """Adds a handler of an event, called once. See :meth:`webrtc.UniformEventTarget.once`."""
         return self._add(name, handler, once=True)
 
     @override
@@ -83,19 +85,28 @@ class RTCDtlsTransport(WebRTCObject[wrtc.RTCDtlsTransport], EventTarget[_DtlsTra
 
     @property
     def ice_transport(self) -> webrtc.RTCIceTransport:
-        """:obj:`webrtc.RTCIceTransport`: Returns a reference to the underlying :obj:`webrtc.RTCIceTransport` object."""
+        """:obj:`webrtc.RTCIceTransport`: The ICE transport the DTLS packets go over.
+
+        See :mdn:`RTCDtlsTransport/iceTransport`.
+        """
         return webrtc.RTCIceTransport._wrap(self._native_obj.iceTransport)
 
     @property
     def state(self) -> webrtc.RTCDtlsTransportState:
-        """:obj:`webrtc.RTCDtlsTransportState`: The state of the DTLS transport."""
+        """:obj:`webrtc.RTCDtlsTransportState`: How far the DTLS handshake got, or whether it failed or closed.
+
+        See :mdn:`RTCDtlsTransport/state`.
+        """
         return self._native_obj.state
 
     def get_remote_certificates(self) -> list[bytes]:
-        """Returns the certificates of the remote peer, once the DTLS handshake is done.
+        """Returns the certificates the remote peer presented in the DTLS handshake, once it is done.
+
+        See :mdn:`RTCDtlsTransport/getRemoteCertificates`.
 
         Returns:
-            :obj:`list` of :obj:`bytes`: The certificates in the DER format, the peer's first.
+            :obj:`list` of :obj:`bytes`: The DER-encoded certificates, with the peer's own first. The list
+            is empty before the handshake.
         """
         return list(self._native_obj.getRemoteCertificates())
 

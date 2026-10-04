@@ -5,9 +5,9 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""RTCRtpScriptTransform of WebRTC Encoded Transform: the encoded frames of a sender or receiver, in Python.
+"""Script transforms of WebRTC Encoded Transform, which process the encoded frames of a sender or receiver in Python.
 
-Python has no Workers: the worker of a transform is a function called on the event loop the transform was created on.
+There are no Workers. The worker of a transform is a Python callable run on the event loop that created the transform.
 """
 
 from __future__ import annotations
@@ -44,8 +44,9 @@ if TYPE_CHECKING:
     from webrtc.enums import RTCRtpScriptTransformTypeValue
     from webrtc.streams import ReadableStreamDefaultController, WritableStreamDefaultController
 
-#: The function a transform calls with its ``rtctransform`` event
+#: The callable a transform runs with its ``rtctransform`` event, either a plain or a coroutine function
 Worker = Callable[[RTCTransformEvent], object]
+#: An encoded video or audio frame
 EncodedFrame = Union[RTCEncodedVideoFrame, RTCEncodedAudioFrame]
 
 # a rid of RFC 8851: alphanumeric, at most 255 characters
@@ -60,12 +61,12 @@ _KEY_FRAME_INVALID_STATE, _KEY_FRAME_NOT_FOUND = 1, 2
 
 @dataclass
 class WorkerAndParameters(Dictionary):
-    """The worker of an :obj:`RTCRtpScriptTransform` and how the transform packetizes frames.
+    """The worker of an :obj:`RTCRtpScriptTransform` and the kind of frames it outputs.
 
     Args:
-        worker (:obj:`callable`): The function called with the ``rtctransform`` event, a coroutine function too.
-        type (:obj:`webrtc.RTCRtpScriptTransformType`, optional): ``'sframe'`` if the worker outputs SFrame-encrypted
-            frames.
+        worker (:obj:`callable`): Called with the ``rtctransform`` event. A coroutine function runs as a task.
+        type (:obj:`webrtc.RTCRtpScriptTransformType`, optional): ``'sframe'`` if the worker outputs
+            SFrame-encrypted frames. It's accepted but has no effect, and frames are packetized as usual.
 
     Raises:
         TypeError: If the worker isn't callable.
@@ -111,14 +112,17 @@ class _FrameSink:
 
 
 class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], KeyFrameRequestEvent]):
-    """The encoded frames of the sender or receiver of an :obj:`RTCRtpScriptTransform`, as streams.
+    """A pair of streams with the encoded frames of the sender or receiver of an :obj:`RTCRtpScriptTransform`.
 
-    The worker of the transform gets it with the ``rtctransform`` event. Frames are read from :attr:`readable` and
-    written to :attr:`writable` to be sent (or decoded), changed or not; frames that aren't written are dropped.
-    Frames are queued until they're read, up to 120, then the oldest one is dropped.
+    The worker gets it as the ``transformer`` of the ``rtctransform`` event. Frames read from :attr:`readable` and
+    written to :attr:`writable` go on to the packetizer or the decoder, whether they were changed or not. Frames
+    that aren't written are dropped. Up to 120 unread frames are queued, and after that the oldest is dropped. Both
+    streams end once the transform is removed from its sender or receiver.
+
+    See :mdn:`RTCRtpScriptTransformer`.
 
     Events:
-        ``keyframerequest`` (:obj:`webrtc.KeyFrameRequestEvent`): the remote peer asked for a key frame.
+        keyframerequest (:obj:`webrtc.KeyFrameRequestEvent`): The remote peer asked for a key frame.
     """
 
     def __init__(self, transform: RTCRtpScriptTransform, options: object) -> None:
@@ -199,32 +203,43 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
 
     @property
     def readable(self) -> ReadableStream[EncodedFrame]:
-        """:obj:`webrtc.ReadableStream`: The frames of the sender or receiver, encoded video or audio frames."""
+        """:obj:`webrtc.ReadableStream`: The incoming encoded frames, video or audio.
+
+        See :mdn:`RTCRtpScriptTransformer/readable`.
+        """
         return self._readable
 
     @property
     def writable(self) -> WritableStream[EncodedFrame]:
-        """:obj:`webrtc.WritableStream`: Takes the frames read back, to be sent or decoded.
+        """:obj:`webrtc.WritableStream`: Takes the frames that were read, so they can be sent or decoded.
 
-        Frames of another transformer, copies and frames written out of order (or twice) are dropped. Anything else
-        than a frame errors the stream with :obj:`TypeError`.
+        It drops frames of another transformer, constructed copies, and frames written out of order or twice.
+        Writing anything other than an encoded frame errors the stream with :obj:`TypeError`.
+
+        See :mdn:`RTCRtpScriptTransformer/writable`.
         """
         return self._writable
 
     @property
     def options(self) -> object:
-        """The options of the transform, as given to it."""
+        """The ``options`` given to the transform. This is the same object, so no copy is made.
+
+        See :mdn:`RTCRtpScriptTransformer/options`.
+        """
         return self._options
 
     async def generate_key_frame(self, rid: str | None = None) -> None:
-        """Asks the encoder of the sender for a key frame, done once one of the layer is read from :attr:`readable`.
+        """Asks the encoder of the sender for a key frame and returns once one is read from :attr:`readable`.
+
+        See :mdn:`RTCRtpScriptTransformer/generateKeyFrame`.
 
         Args:
-            rid (:obj:`str`, optional): The simulcast layer, any if omitted.
+            rid (:obj:`str`, optional): The simulcast layer. :obj:`None` asks every layer and returns with the
+                first key frame.
 
         Raises:
             webrtc.InvalidStateError: If the transform isn't of a video sender.
-            webrtc.NotAllowedError: If the rid isn't alphanumeric, or longer than 255 characters.
+            webrtc.NotAllowedError: If the rid isn't alphanumeric or is longer than 255 characters.
             webrtc.NotFoundError: If the sender has no layer of that rid.
         """
         kind = self._native_obj.sourceKind
@@ -246,7 +261,9 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
         await future
 
     async def send_key_frame_request(self) -> None:
-        """Asks the remote sender for a key frame (a picture loss indication).
+        """Asks the remote sender for a key frame by sending a picture loss indication.
+
+        See :mdn:`RTCRtpScriptTransformer/sendKeyFrameRequest`.
 
         Raises:
             webrtc.InvalidStateError: If the transform isn't of a video receiver.
@@ -262,20 +279,22 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
 
 
 class RTCRtpScriptTransform(WebRTCObject[wrtc.RTCRtpScriptTransform]):
-    """Transforms the encoded frames of a sender or receiver in Python, set as its ``transform``.
+    """Processes the encoded frames of a sender or receiver in Python, once set as its ``transform``.
 
-    The worker is called on the event loop the transform is created on, with an :obj:`webrtc.RTCTransformEvent`
-    whose ``transformer`` reads and writes the frames. A coroutine function runs as a task of that loop.
-    A transform is used by one sender or receiver only.
+    Soon after construction, the worker is called on the current event loop with an :obj:`webrtc.RTCTransformEvent`
+    whose ``transformer`` reads and writes the frames. A coroutine function runs as a task of that loop, and an
+    exception it raises goes to the exception handler of the loop. A transform serves only one sender or receiver.
+
+    See :mdn:`RTCRtpScriptTransform`.
 
     Args:
         worker_or_worker_and_parameters (:obj:`callable` or :obj:`WorkerAndParameters`): The worker.
-        options (optional): Any value, the ``options`` of the transformer.
-        transfer (:obj:`list`, optional): Objects given up to the transformer. Python can't detach them, they're
-            only checked to be listed once.
+        options (optional): Any value, available as :attr:`RTCRtpScriptTransformer.options`.
+        transfer (:obj:`list`, optional): Objects to transfer. Nothing is detached, and the objects are only
+            checked to be listed once.
 
     Raises:
-        TypeError: If the worker isn't callable, or ``transfer`` isn't a sequence.
+        TypeError: If the worker isn't callable or ``transfer`` isn't a sequence.
         webrtc.DataCloneError: If an object is in ``transfer`` more than once.
         RuntimeError: If called outside of a running event loop.
 
@@ -283,9 +302,10 @@ class RTCRtpScriptTransform(WebRTCObject[wrtc.RTCRtpScriptTransform]):
 
         async def worker(event):
             transformer = event.transformer
+            writer = transformer.writable.get_writer()
             async for frame in transformer.readable:
                 frame.data = encrypt(frame.data)
-                await transformer.writable.get_writer().write(frame)
+                await writer.write(frame)
 
 
         sender.transform = webrtc.RTCRtpScriptTransform(worker)

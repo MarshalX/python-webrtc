@@ -18,20 +18,23 @@ from webrtc.utils.names import Alias, alias
 
 @dataclass
 class RTCOfferAnswerOptions(Dictionary):
-    """The options of creating an offer or an answer, which :obj:`RTCOfferOptions` adds to."""
+    """The base of :obj:`webrtc.RTCOfferOptions` and :obj:`webrtc.RTCAnswerOptions`. It has no members of its own."""
 
 
 @dataclass
 class RTCOfferOptions(RTCOfferAnswerOptions):
     """The options of :meth:`webrtc.RTCPeerConnection.create_offer`.
 
+    See :mdn:`RTCPeerConnection/createOffer`.
+
     Args:
-        ice_restart (:obj:`bool`, optional): Whether to restart ICE, gathering new credentials and candidates.
+        ice_restart (:obj:`bool`, optional): Whether the offer restarts ICE, with new credentials and candidates.
             :meth:`webrtc.RTCPeerConnection.restart_ice` is the preferred way.
-        offer_to_receive_audio (:obj:`bool`, optional): Legacy: :obj:`True` adds a receiving audio transceiver
-            if there's none, :obj:`False` stops receiving audio on the existing ones.
+        offer_to_receive_audio (:obj:`bool`, optional): A legacy option, applied to the transceivers before the
+            offer is created. :obj:`True` adds a ``recvonly`` audio transceiver unless one already receives audio,
+            and :obj:`False` stops receiving on the audio transceivers. :obj:`None` (the default) changes nothing.
             :meth:`webrtc.RTCPeerConnection.add_transceiver` is the preferred way.
-        offer_to_receive_video (:obj:`bool`, optional): The same for video.
+        offer_to_receive_video (:obj:`bool`, optional): The same as ``offer_to_receive_audio``, for video.
     """
 
     ice_restart: bool = False
@@ -48,4 +51,7 @@ class RTCOfferOptions(RTCOfferAnswerOptions):
 
 @dataclass
 class RTCAnswerOptions(RTCOfferAnswerOptions):
-    """The options of :meth:`webrtc.RTCPeerConnection.create_answer`."""
+    """The options of :meth:`webrtc.RTCPeerConnection.create_answer`, which has no members yet.
+
+    See :mdn:`RTCPeerConnection/createAnswer`.
+    """

@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""The type and the SDP of a description."""
+"""Session descriptions as plain data, to set on a connection or to exchange with the remote peer."""
 
 from __future__ import annotations
 
@@ -18,13 +18,15 @@ from webrtc.models.dictionary import Dictionary
 
 @dataclass
 class RTCSessionDescriptionInit(Dictionary):
-    """The type and the SDP of a description.
+    """The type and the SDP of a session description, as plain data.
 
-    As :meth:`webrtc.RTCPeerConnection.create_offer` and :meth:`webrtc.RTCPeerConnection.create_answer` return them.
+    :meth:`webrtc.RTCPeerConnection.create_offer` and :meth:`webrtc.RTCPeerConnection.create_answer` return it, and
+    the methods that set a description take it. :meth:`from_json` creates it from a message of the remote peer.
+    See :mdn:`RTCSessionDescription/RTCSessionDescription`.
 
     Args:
         type (:obj:`webrtc.RTCSdpType`): The type of the description, or its value (like ``'offer'``).
-        sdp (:obj:`str`, optional): The SDP of the description.
+        sdp (:obj:`str`, optional): The SDP of the description, empty by default.
 
     Raises:
         ValueError: If the type isn't a member of :obj:`webrtc.RTCSdpType`.
@@ -49,13 +51,15 @@ class RTCSessionDescriptionInit(Dictionary):
 
 @dataclass
 class RTCLocalSessionDescriptionInit(Dictionary):
-    """A local description, whose type may be left out (:meth:`webrtc.RTCPeerConnection.set_local_description`).
+    """A description for :meth:`webrtc.RTCPeerConnection.set_local_description`, whose type may be left out.
 
-    Without a type, nor an SDP, the offer or the answer the signaling state calls for is created and set.
+    Without an SDP, the connection creates and sets the description itself. It uses the given type, or else the
+    offer or answer that its signaling state calls for. See :mdn:`RTCPeerConnection/setLocalDescription`.
 
     Args:
         type (:obj:`webrtc.RTCSdpType`, optional): The type of the description, or its value (like ``'offer'``).
-        sdp (:obj:`str`, optional): The SDP of the description.
+            Required when an SDP is given.
+        sdp (:obj:`str`, optional): The SDP of the description, empty by default.
 
     Raises:
         ValueError: If the type isn't a member of :obj:`webrtc.RTCSdpType`.

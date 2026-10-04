@@ -98,13 +98,13 @@ too. Enums compare equal to the strings of the specification, and dictionaries a
 
 ## Supported platforms
 
-Pre-built wheels for CPython 3.9 – 3.14 on:
+Pre-built wheels for CPython 3.9 to 3.14 on:
 
 | Linux                                       | macOS                        | Windows |
 |---------------------------------------------|------------------------------|---------|
 | x86_64 and aarch64 (glibc 2.27+, manylinux) | 13+, Intel and Apple Silicon | x64     |
 
-Elsewhere, pip builds it from sources: see [Installation](quickstart.md#installation).
+Elsewhere, pip builds it from sources. See [Installation](quickstart.md#installation).
 
 ```{toctree}
 :hidden:

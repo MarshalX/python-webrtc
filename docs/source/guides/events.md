@@ -16,7 +16,8 @@ def on_track(event):
 
 @pc.on('icecandidate')
 async def on_candidate(event):
-    await signaling.send(event.candidate)
+    if event.candidate is not None:
+        await signaling.send(event.candidate.to_json())
 
 
 channel.on('message', lambda event: print(event.data))
@@ -26,7 +27,8 @@ The names are the ones of the specification, without the `on` prefix. A name the
 {obj}`ValueError`, which lists the names it does.
 
 Handlers run on the event loop they were registered from, so they have to be registered from a running loop. The
-events of libwebrtc threads are only scheduled there: a slow handler delays the next events, not the media.
+native threads only schedule events on that loop. A slow handler delays the events after it, and the media keeps
+flowing.
 
 ## One-shot handlers
 
@@ -48,10 +50,9 @@ pc.off()  # every handler of every event
 ```
 
 {meth}`~webrtc.utils.events.EventTarget.listeners` returns the handlers of an event, and
-{meth}`~webrtc.utils.events.EventTarget.event_names` the events that have some. A handler is registered once:
-registering it again does nothing.
+{meth}`~webrtc.utils.events.EventTarget.event_names` the events that have some. Registering the same handler twice has no effect.
 
 ## Errors
 
-An exception in a handler doesn't stop the other handlers: it goes to the exception handler of the loop, which logs
+An exception in a handler doesn't stop the other handlers. It goes to the exception handler of the loop, which logs
 it by default. Use {meth}`asyncio.loop.set_exception_handler` to handle them yourself.

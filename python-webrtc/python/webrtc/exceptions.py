@@ -5,7 +5,13 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Exceptions raised by WebRTC operations, named after the ``DOMException`` of the specification."""
+"""Exceptions raised by WebRTC operations.
+
+Errors of the specifications are subclasses of :obj:`RTCException`, named after the ``DOMException`` names, so an
+``InvalidStateError`` is caught with ``except webrtc.InvalidStateError``. The ``SyntaxError`` and ``RangeError`` of the
+specifications are :obj:`InvalidSyntaxError` and :obj:`InvalidRangeError`, which don't shadow the Python builtins and
+are :obj:`ValueError` subclasses too.
+"""
 
 from __future__ import annotations
 
@@ -19,62 +25,78 @@ from webrtc.utils.names import Alias, alias
 if TYPE_CHECKING:
     from webrtc.enums import RTCErrorDetailTypeValue
 
+#: The root of every exception of the native module, :obj:`PythonWebRTCException` and :obj:`SdpParseException`
 PythonWebRTCExceptionBase = wrtc.PythonWebRTCExceptionBase
+#: The native exception that :obj:`RTCException` subclasses, and so every WebRTC error of this library does too
 PythonWebRTCException = wrtc.PythonWebRTCException
+#: The native exception for an SDP that doesn't parse. Descriptions that don't parse raise :obj:`RTCError` instead,
+#: with the ``sdp-syntax-error`` detail
 SdpParseException = wrtc.SdpParseException
 
 
 class RTCException(PythonWebRTCException):
-    """Base class of the errors reported by libwebrtc, the ``DOMException`` of the specification."""
+    """The base class of the WebRTC errors. It stands for the ``DOMException`` of the specifications.
+
+    Errors of the native WebRTC engine are raised as the subclass that matches their type. Catch this class to handle
+    any of them.
+
+    See :mdn:`DOMException`.
+    """
 
     @property
     def message(self) -> str:
-        """:obj:`str`: A description of the error."""
+        """:obj:`str`: The description of the error. It's the first argument, or an empty string without one.
+
+        See :mdn:`DOMException/message`.
+        """
         return str(self.args[0]) if len(self.args) > 0 else ''
 
 
 class InvalidStateError(RTCException):
-    """The object is in a state that doesn't allow the operation, like a closed connection."""
+    """The object's state doesn't allow the operation, like calling a method of a closed connection."""
 
 
 class InvalidAccessError(RTCException):
-    """A parameter or an operation isn't supported by the object, like an invalid description."""
+    """The object doesn't support the parameter or the operation, like a description it can't apply."""
 
 
 class InvalidModificationError(RTCException):
-    """An attempt to modify something that can't be modified, like a read-only parameter."""
+    """The change isn't allowed, like a change to a read-only member of the parameters of a sender."""
 
 
 class OperationError(RTCException):
-    """The operation failed for an operation-specific reason."""
+    """The operation failed for a reason specific to it.
+
+    Errors of the native WebRTC engine without a closer match are raised as this class.
+    """
 
 
 class NotSupportedError(RTCException):
-    """The operation or a value isn't supported by the implementation."""
+    """This library or the native WebRTC engine doesn't support the operation or the value."""
 
 
 class NetworkError(RTCException):
-    """An error of an underlying network protocol."""
+    """A network protocol below the operation failed."""
 
 
 class NotFoundError(RTCException):
-    """An object isn't found, like a simulcast layer of an unknown ``rid``."""
+    """The object asked for doesn't exist, like a simulcast layer of an unknown ``rid``."""
 
 
 class NotAllowedError(RTCException):
-    """The operation isn't allowed, like with a malformed ``rid``."""
+    """The operation isn't allowed with these arguments, like a malformed ``rid``."""
 
 
 class DataCloneError(RTCException):
-    """An object can't be transferred, like a buffer listed twice in ``transfer``."""
+    """An object can't be cloned or transferred, like a buffer listed twice in ``transfer``."""
 
 
 class InvalidSyntaxError(RTCException, ValueError):
-    """A string couldn't be parsed, like an ICE server URL. ``SyntaxError`` in the specification."""
+    """A string doesn't parse, like an ICE server URL. It stands for the ``SyntaxError`` of the specifications."""
 
 
 class InvalidRangeError(RTCException, ValueError):
-    """A value is out of the allowed range. ``RangeError`` in the specification."""
+    """A value is out of its allowed range. It stands for the ``RangeError`` of the specifications."""
 
 
 class InvalidCharacterError(RTCException, ValueError):
@@ -82,11 +104,17 @@ class InvalidCharacterError(RTCException, ValueError):
 
 
 class OverconstrainedError(RTCException):
-    """A required constraint of a track can't be satisfied.
+    """No source can satisfy a required constraint of a track.
+
+    See :mdn:`OverconstrainedError`.
 
     Args:
-        constraint (:obj:`str`): The constraint, like ``'width'``.
-        message (:obj:`str`, optional): A description of the error.
+        constraint (:obj:`str`): The name of the constraint, like ``'width'``.
+        message (:obj:`str`, optional): The description of the error. Defaults to one naming the constraint.
+
+    Attributes:
+        constraint (:obj:`str`): The name of the constraint that can't be satisfied.
+            See :mdn:`OverconstrainedError/constraint`.
     """
 
     def __init__(self, constraint: str, message: str = '') -> None:
@@ -96,12 +124,14 @@ class OverconstrainedError(RTCException):
 
 @dataclass
 class RTCErrorInit(Dictionary):
-    """The WebRTC-specific information of an :obj:`RTCError`.
+    """The WebRTC-specific members of an :obj:`RTCError`.
+
+    See :mdn:`RTCError/RTCError`.
 
     Args:
-        error_detail (:obj:`webrtc.RTCErrorDetailType`): The WebRTC-specific error code.
-        sdp_line_number (:obj:`int`, optional): The line of the SDP where a syntax error occurred.
-        sctp_cause_code (:obj:`int`, optional): The SCTP cause code of a failed SCTP negotiation.
+        error_detail (:obj:`webrtc.RTCErrorDetailType`): The cause of the error, as a member or its string value.
+        sdp_line_number (:obj:`int`, optional): The line of the SDP that doesn't parse.
+        sctp_cause_code (:obj:`int`, optional): The SCTP cause code of a failed data channel or association.
         received_alert (:obj:`int`, optional): The DTLS alert received from the remote peer.
         sent_alert (:obj:`int`, optional): The DTLS alert sent to the remote peer.
         http_request_status_code (:obj:`int`, optional): The HTTP status code of a failed request.
@@ -135,11 +165,27 @@ class RTCErrorInit(Dictionary):
 
 
 class RTCError(OperationError):
-    """An error carrying WebRTC-specific information, the members of its :obj:`RTCErrorInit`.
+    """An :obj:`OperationError` with WebRTC-specific members, copied from its :obj:`RTCErrorInit`.
+
+    It's raised for errors of the native WebRTC engine that carry a detail, like a description that doesn't parse.
+    The ``error`` events of data channels and transports carry it too.
+
+    See :mdn:`RTCError`.
 
     Args:
-        init (:obj:`RTCErrorInit`): The WebRTC-specific information.
-        message (:obj:`str`, optional): A description of the error.
+        init (:obj:`RTCErrorInit`): The WebRTC-specific members.
+        message (:obj:`str`, optional): The description of the error.
+
+    Attributes:
+        error_detail (:obj:`webrtc.RTCErrorDetailType`): The cause of the error. See :mdn:`RTCError/errorDetail`.
+        sdp_line_number (:obj:`int`, optional): The line of the SDP that doesn't parse.
+            See :mdn:`RTCError/sdpLineNumber`.
+        sctp_cause_code (:obj:`int`, optional): The SCTP cause code of a failed data channel or association.
+            See :mdn:`RTCError/sctpCauseCode`.
+        received_alert (:obj:`int`, optional): The DTLS alert received from the remote peer.
+            See :mdn:`RTCError/receivedAlert`.
+        sent_alert (:obj:`int`, optional): The DTLS alert sent to the remote peer. See :mdn:`RTCError/sentAlert`.
+        http_request_status_code (:obj:`int`, optional): The HTTP status code of a failed request.
     """
 
     def __init__(self, init: RTCErrorInit, message: str = '') -> None:
@@ -200,7 +246,7 @@ def _from_native(
 
 
 def _event_error(native: wrtc.RTCCallbackException) -> RTCError:
-    """The error of an ``error`` event: libwebrtc fails channels and transports with errors that carry a detail."""
+    """The error of an ``error`` event. Channels and transports fail with errors that carry a detail."""
     error = native.toPython()
     if not isinstance(error, RTCError):
         msg = f'an error event carries an RTCError, not {type(error).__name__}'

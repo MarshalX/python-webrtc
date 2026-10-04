@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""RTCRtpReceiver of WebRTC."""
+"""The receiver that receives and decodes remote media."""
 
 from __future__ import annotations
 
@@ -32,7 +32,12 @@ _MAX_JITTER_BUFFER_TARGET = 4000
 
 
 class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
-    """Receives and decodes the media of a :obj:`webrtc.MediaStreamTrack` of an :obj:`webrtc.RTCPeerConnection`."""
+    """Receives and decodes remote media into a :obj:`webrtc.MediaStreamTrack`.
+
+    Each :obj:`webrtc.RTCRtpTransceiver` of an :obj:`webrtc.RTCPeerConnection` has one.
+
+    See :mdn:`RTCRtpReceiver`.
+    """
 
     _class = wrtc.RTCRtpReceiver
 
@@ -43,20 +48,29 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
 
     @property
     def track(self) -> webrtc.MediaStreamTrack:
-        """:obj:`webrtc.MediaStreamTrack`: The track of the received media."""
+        """:obj:`webrtc.MediaStreamTrack`: The track the received media plays on. It exists from the start.
+
+        See :mdn:`RTCRtpReceiver/track`.
+        """
         return webrtc.MediaStreamTrack._wrap(self._native_obj.track)
 
     @property
     def transport(self) -> webrtc.RTCDtlsTransport | None:
-        """:obj:`webrtc.RTCDtlsTransport`, optional: The transport of the packets, :obj:`None` until there's one."""
+        """:obj:`webrtc.RTCDtlsTransport`, optional: The transport the packets come over.
+
+        It's :obj:`None` until there's one.
+        See :mdn:`RTCRtpReceiver/transport`.
+        """
         return webrtc.RTCDtlsTransport._wrap_optional(self._native_obj.transport)
 
     @property
     def transform(self) -> webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameDecryptor | None:
         """:obj:`webrtc.RTCRtpScriptTransform` or :obj:`webrtc.RTCRtpSFrameDecryptor`, optional: The frame transform.
 
-        It transforms the encoded frames before they're decoded, :obj:`None` decodes them as they're received.
-        A transform is used by one sender or receiver only: a transform that had one can't be set again.
+        It changes the encoded frames before they're decoded. With :obj:`None`, frames are decoded as received.
+        A transform serves one sender or receiver for its lifetime, so once attached it can't be set elsewhere.
+
+        See :mdn:`RTCRtpReceiver/transform`.
 
         Raises:
             TypeError: If the value set isn't a transform of a receiver.
@@ -73,9 +87,14 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
 
     @property
     def jitter_buffer_target(self) -> float | None:
-        """:obj:`float`, optional: How many milliseconds of media the receiver should buffer (0 to 4000).
+        """:obj:`float`, optional: The target delay of the jitter buffer in milliseconds, from 0 to 4000.
 
-        It trades latency for smoothness. :obj:`None` for the default.
+        A higher value adds latency for smoother playback. :obj:`None` leaves it to the receiver.
+
+        See :mdn:`RTCRtpReceiver/jitterBufferTarget`.
+
+        Raises:
+            webrtc.InvalidRangeError: If the value set is outside 0 to 4000.
         """
         return self._native_obj.jitterBufferTarget
 
@@ -89,6 +108,8 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
     def get_parameters(self) -> webrtc.RTCRtpReceiveParameters:
         """Returns the parameters the receiver receives with.
 
+        See :mdn:`RTCRtpReceiver/getParameters`.
+
         Returns:
             :obj:`webrtc.RTCRtpReceiveParameters`: The parameters.
         """
@@ -98,16 +119,20 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
     def get_capabilities(kind: webrtc.MediaType | webrtc.MediaTypeValue) -> webrtc.RTCRtpCapabilities | None:
         """Returns the codecs and header extensions receivers of a kind support.
 
+        See :mdn:`RTCRtpReceiver/getCapabilities_static`.
+
         Args:
             kind (:obj:`webrtc.MediaType`): Audio or video.
 
         Returns:
-            :obj:`webrtc.RTCRtpCapabilities`, optional: The capabilities, :obj:`None` for another kind.
+            :obj:`webrtc.RTCRtpCapabilities`, optional: The capabilities, or :obj:`None` for another kind.
         """
         return RTCRtpCapabilities._supported(wrtc.RTCRtpReceiver, kind)
 
     async def get_stats(self) -> webrtc.RTCStatsReport:
-        """Collects the stats of the receiver, and of the objects its stats refer to.
+        """Collects the stats of the receiver and of the objects they refer to.
+
+        See :mdn:`RTCRtpReceiver/getStats`.
 
         Returns:
             :obj:`webrtc.RTCStatsReport`: The stats.
@@ -120,6 +145,8 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
     def get_synchronization_sources(self) -> list[webrtc.RTCRtpSynchronizationSource]:
         """Returns the synchronization sources (SSRCs) of the media received in the last 10 seconds.
 
+        See :mdn:`RTCRtpReceiver/getSynchronizationSources`.
+
         Returns:
             :obj:`list` of :obj:`webrtc.RTCRtpSynchronizationSource`: The sources, the most recent first.
         """
@@ -128,7 +155,9 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
     def get_contributing_sources(self) -> list[webrtc.RTCRtpContributingSource]:
         """Returns the contributing sources (CSRCs) of the media received in the last 10 seconds.
 
-        Like the participants a conference server mixes.
+        These are the original streams a mixer, like a conference server, combined into the received one.
+
+        See :mdn:`RTCRtpReceiver/getContributingSources`.
 
         Returns:
             :obj:`list` of :obj:`webrtc.RTCRtpContributingSource`: The sources, the most recent first.

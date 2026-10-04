@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""AudioData of WebCodecs (https://developer.mozilla.org/en-US/docs/Web/API/AudioData) and its dictionaries."""
+"""The WebCodecs :obj:`AudioData` and the dictionaries that create and copy it."""
 
 from __future__ import annotations
 
@@ -51,18 +51,21 @@ def _is_planar(format: AudioSampleFormat) -> bool:
 
 @dataclass
 class AudioDataInit(Dictionary):
-    """How to create an :obj:`AudioData`.
+    """Options to create an :obj:`AudioData`.
+
+    See :mdn:`AudioData/AudioData`.
 
     Args:
-        format (:obj:`webrtc.AudioSampleFormat`): The type and layout of the samples.
-        sample_rate (:obj:`float`): The number of frames per second.
-        number_of_frames (:obj:`int`): The number of frames (samples per channel).
-        number_of_channels (:obj:`int`): The number of channels.
+        format (:obj:`webrtc.AudioSampleFormat`): The sample type and whether channels are interleaved or planar.
+        sample_rate (:obj:`float`): The number of frames per second. It must be positive and finite.
+        number_of_frames (:obj:`int`): The number of frames (samples per channel), which must be positive.
+        number_of_channels (:obj:`int`): The number of channels, which must be positive.
         timestamp (:obj:`int`): The presentation time in microseconds.
-        data: A bytes-like buffer of the samples, which is copied unless transferred.
-        transfer (:obj:`list` of bytes-like buffers, optional): Buffers given up to the data: if the memory of
-            ``data`` is among them, the samples are kept without being copied, so the buffer must not be changed
-            afterwards. Transferred :obj:`memoryview` objects are released; Python can't detach other buffers.
+        data: A bytes-like buffer that holds at least the samples described above. Extra bytes are ignored. The
+            buffer is copied unless it is transferred.
+        transfer (:obj:`list` of bytes-like buffers, optional): Buffers to give up. When ``data`` is among them its
+            memory is kept without copying, so it must not be modified afterwards. Transferred :obj:`memoryview`
+            objects are released, but other buffers stay usable.
     """
 
     format: AudioSampleFormat | AudioSampleFormatValue
@@ -83,13 +86,17 @@ class AudioDataInit(Dictionary):
 
 @dataclass
 class AudioDataCopyToOptions(Dictionary):
-    """What :meth:`AudioData.copy_to` copies.
+    """Options for :meth:`AudioData.copy_to` and :meth:`AudioData.allocation_size`.
+
+    See :mdn:`AudioData/copyTo`.
 
     Args:
-        plane_index (:obj:`int`): The channel to copy for a planar format, 0 for an interleaved one.
-        frame_offset (:obj:`int`, optional): The first frame to copy.
-        frame_count (:obj:`int`, optional): How many frames to copy, up to the last one by default.
-        format (:obj:`webrtc.AudioSampleFormat`, optional): The format to convert to, the data's own one by default.
+        plane_index (:obj:`int`): The channel to copy when the destination format is planar. It must be 0 for an
+            interleaved format, which copies all channels.
+        frame_offset (:obj:`int`, optional): The index of the first frame to copy, 0 by default.
+        frame_count (:obj:`int`, optional): How many frames to copy. By default, all frames from ``frame_offset`` on.
+        format (:obj:`webrtc.AudioSampleFormat`, optional): The format to convert the samples to. By default, the
+            data's own format.
     """
 
     plane_index: int
@@ -158,15 +165,19 @@ class _CopyPlan(NamedTuple):
 
 
 class AudioData(Closable):
-    """Audio samples and their metadata (https://developer.mozilla.org/en-US/docs/Web/API/AudioData).
+    """A block of audio samples with their format and presentation time.
 
-    Samples read from a track hold memory until :meth:`close`, like a :obj:`webrtc.VideoFrame`.
+    The samples are held until :meth:`close` is called or a ``with`` block around the data ends. Data read from a
+    track is interleaved ``u8``, ``s16`` or ``s32``. It emits a :obj:`ResourceWarning` if it is garbage collected
+    while open.
+
+    See :mdn:`AudioData`.
 
     Args:
         init (:obj:`AudioDataInit`): The samples and their format.
 
     Raises:
-        TypeError: If the init isn't valid, or the data is too small for it.
+        TypeError: If the options are invalid, or the data is too small for them.
 
     Example::
 
@@ -238,34 +249,52 @@ class AudioData(Closable):
 
     @property
     def format(self) -> AudioSampleFormat | None:
-        """:obj:`webrtc.AudioSampleFormat`, optional: The type and layout of the samples, :obj:`None` once closed."""
+        """:obj:`webrtc.AudioSampleFormat`, optional: The sample type and layout, or :obj:`None` once closed.
+
+        See :mdn:`AudioData/format`.
+        """
         return self._format if self._data is not None else None
 
     @property
     def sample_rate(self) -> float:
-        """:obj:`float`: The number of frames per second, 0 once closed."""
+        """:obj:`float`: The number of frames per second, or 0 once closed.
+
+        See :mdn:`AudioData/sampleRate`.
+        """
         return self._sample_rate if self._data is not None else 0
 
     @property
     def number_of_frames(self) -> int:
-        """:obj:`int`: The number of frames, 0 once closed."""
+        """:obj:`int`: The number of frames (samples per channel), or 0 once closed.
+
+        See :mdn:`AudioData/numberOfFrames`.
+        """
         return self._frames if self._data is not None else 0
 
     @property
     def number_of_channels(self) -> int:
-        """:obj:`int`: The number of channels, 0 once closed."""
+        """:obj:`int`: The number of channels, or 0 once closed.
+
+        See :mdn:`AudioData/numberOfChannels`.
+        """
         return self._channels if self._data is not None else 0
 
     @property
     def duration(self) -> int:
-        """:obj:`int`: The duration in microseconds, 0 once closed."""
+        """:obj:`int`: The duration in microseconds, rounded down, or 0 once closed.
+
+        See :mdn:`AudioData/duration`.
+        """
         if self._data is None:
             return 0
         return int(self._frames / self._sample_rate * 1_000_000)
 
     @property
     def timestamp(self) -> int:
-        """:obj:`int`: The presentation time in microseconds."""
+        """:obj:`int`: The presentation time in microseconds, kept after closing.
+
+        See :mdn:`AudioData/timestamp`.
+        """
         return self._timestamp
 
     def _plan_copy(self, options: AudioDataCopyToOptions) -> _CopyPlan:
@@ -299,27 +328,39 @@ class AudioData(Closable):
         )
 
     def allocation_size(self, options: AudioDataCopyToOptions) -> int:
-        """Returns how many bytes :meth:`copy_to` needs.
+        """Computes the minimum destination size for :meth:`copy_to` with the same options.
 
-        Raises :obj:`webrtc.InvalidStateError` if the data is closed, :obj:`TypeError` if the options aren't valid
-        and :obj:`webrtc.InvalidRangeError` if the plane or the frames don't exist.
+        See :mdn:`AudioData/allocationSize`.
 
         Args:
-            options (:obj:`AudioDataCopyToOptions`): What is copied.
+            options (:obj:`AudioDataCopyToOptions`): What to copy.
+
+        Returns:
+            :obj:`int`: The number of bytes.
+
+        Raises:
+            webrtc.InvalidStateError: If the data is closed.
+            TypeError: If an option has the wrong type or a negative value.
+            webrtc.InvalidRangeError: If the plane or the frames are out of range.
         """
         return self._plan_copy(options).size
 
     def copy_to(self, destination: bytearray | memoryview, options: AudioDataCopyToOptions) -> None:
         """Copies samples into a buffer, converting them to another format if asked.
 
-        Raises the errors of :meth:`allocation_size` too.
+        Float samples converted to an integer format are clamped to the range from -1 to 1 first.
+
+        See :mdn:`AudioData/copyTo`.
 
         Args:
-            destination (:obj:`bytearray` or writable :obj:`memoryview`): The buffer.
-            options (:obj:`AudioDataCopyToOptions`): What is copied.
+            destination (:obj:`bytearray` or writable :obj:`memoryview`): The buffer to write to, at least
+                :meth:`allocation_size` bytes long.
+            options (:obj:`AudioDataCopyToOptions`): What to copy.
 
         Raises:
-            webrtc.InvalidRangeError: If the plane or the frames don't exist, or the buffer is too small.
+            webrtc.InvalidStateError: If the data is closed.
+            TypeError: If an option has the wrong type or a negative value.
+            webrtc.InvalidRangeError: If the plane or the frames are out of range, or the buffer is too small.
             webrtc.NotSupportedError: If the samples can't be converted to the format.
         """
         plan = self._plan_copy(options)
@@ -342,7 +383,12 @@ class AudioData(Closable):
             raise NotSupportedError(str(e)) from None
 
     def clone(self) -> AudioData:
-        """Returns another data of the same samples, which is closed separately.
+        """Creates another data that shares these samples without copying them. Each must be closed separately.
+
+        See :mdn:`AudioData/clone`.
+
+        Returns:
+            :obj:`AudioData`: The new data.
 
         Raises:
             webrtc.InvalidStateError: If the data is closed.
@@ -355,7 +401,13 @@ class AudioData(Closable):
         return audio
 
     def close(self) -> None:
-        """Releases the samples. Closing a closed data does nothing."""
+        """Releases this data's hold on the samples. Closing a closed data does nothing.
+
+        After that, the format and size attributes read as empty, and the methods raise
+        :obj:`webrtc.InvalidStateError`.
+
+        See :mdn:`AudioData/close`.
+        """
         self._data = None
 
     def __repr__(self) -> str:

@@ -93,13 +93,18 @@ def _codec_members(native: wrtc.RtpCodec) -> _CodecMembers:
 
 @dataclass
 class RTCRtpCodec(Dictionary):
-    """A codec.
+    """A codec a sender or a receiver supports, or the one an encoding sends with.
+
+    Codecs given to the library match a supported one by MIME type (ignoring case), clock rate, channels and fmtp
+    parameters (in any order).
+
+    See :mdn:`RTCRtpSender/getCapabilities_static`.
 
     Args:
         mime_type (:obj:`str`): The type and subtype of the codec, like ``'audio/opus'``.
-        clock_rate (:obj:`int`): The clock rate in Hz.
-        channels (:obj:`int`, optional): The number of audio channels.
-        sdp_fmtp_line (:obj:`str`, optional): The parameters of the codec, as in the ``a=fmtp`` line of SDP,
+        clock_rate (:obj:`int`): The RTP clock rate in Hz.
+        channels (:obj:`int`, optional): The number of audio channels. It's :obj:`None` for video.
+        sdp_fmtp_line (:obj:`str`, optional): The codec parameters, as in the ``a=fmtp`` line of SDP,
             like ``'minptime=10;useinbandfec=1'``.
     """
 
@@ -145,14 +150,16 @@ class RTCRtpCodec(Dictionary):
 
 @dataclass
 class RTCRtpCodecParameters(Dictionary):
-    """A codec negotiated for a sender or a receiver.
+    """A codec negotiated for a sender or a receiver, with its payload type.
+
+    See :mdn:`RTCRtpSender/getParameters`.
 
     Args:
-        payload_type (:obj:`int`): The RTP payload type of the codec.
+        payload_type (:obj:`int`): The RTP payload type the codec is negotiated with.
         mime_type (:obj:`str`): The type and subtype of the codec, like ``'audio/opus'``.
-        clock_rate (:obj:`int`): The clock rate in Hz.
-        channels (:obj:`int`, optional): The number of audio channels.
-        sdp_fmtp_line (:obj:`str`, optional): The parameters of the codec, as in the ``a=fmtp`` line of SDP.
+        clock_rate (:obj:`int`): The RTP clock rate in Hz.
+        channels (:obj:`int`, optional): The number of audio channels. It's :obj:`None` for video.
+        sdp_fmtp_line (:obj:`str`, optional): The codec parameters, as in the ``a=fmtp`` line of SDP.
     """
 
     payload_type: int
@@ -179,9 +186,11 @@ class RTCRtpCodecParameters(Dictionary):
 class RTCRtpHeaderExtensionParameters(Dictionary):
     """An RTP header extension negotiated for a sender or a receiver.
 
+    See :mdn:`RTCRtpSender/getParameters`.
+
     Args:
-        uri (:obj:`str`): The URI of the extension.
-        id (:obj:`int`): The id used in RTP packets.
+        uri (:obj:`str`): The URI that names the extension.
+        id (:obj:`int`): The id that marks the extension in RTP packets.
         encrypted (:obj:`bool`, optional): Whether the extension is encrypted.
     """
 
@@ -196,10 +205,12 @@ class RTCRtpHeaderExtensionParameters(Dictionary):
 
 @dataclass
 class RTCRtcpParameters(Dictionary):
-    """RTCP parameters of a sender or a receiver.
+    """The RTCP parameters of a sender or a receiver.
+
+    See :mdn:`RTCRtpSender/getParameters`.
 
     Args:
-        cname (:obj:`str`, optional): The canonical name used in RTCP, only known for senders.
+        cname (:obj:`str`, optional): The canonical name sent in RTCP. It's :obj:`None` for receivers.
         reduced_size (:obj:`bool`, optional): Whether reduced-size RTCP is negotiated.
     """
 
@@ -212,10 +223,12 @@ class RTCRtcpParameters(Dictionary):
 
 @dataclass
 class RTCRtpCodingParameters(Dictionary):
-    """The members of an encoding that identify it.
+    """The member of an encoding that identifies it.
+
+    See :mdn:`RTCRtpSender/getParameters`.
 
     Args:
-        rid (:obj:`str`, optional): The RTP stream id of a simulcast layer. Can't be changed once set.
+        rid (:obj:`str`, optional): The RTP stream id of a simulcast layer. It can't be changed once set.
     """
 
     rid: str | None = None
@@ -223,19 +236,25 @@ class RTCRtpCodingParameters(Dictionary):
 
 @dataclass
 class RTCRtpEncodingParameters(RTCRtpCodingParameters):
-    """An encoding of a sender, one per simulcast layer.
+    """An encoding of a sender. A sender has one per simulcast layer, or a single one.
+
+    For audio senders, ``max_framerate`` and ``scale_resolution_down_by`` are ignored.
+
+    See :mdn:`RTCRtpSender/setParameters`.
 
     Args:
-        rid (:obj:`str`, optional): The RTP stream id of a simulcast layer. Can't be changed once set.
+        rid (:obj:`str`, optional): The RTP stream id of a simulcast layer. It can't be changed once set.
         active (:obj:`bool`, optional): Whether the encoding is sent.
-        max_bitrate (:obj:`int`, optional): The highest bitrate in bits per second.
-        max_framerate (:obj:`float`, optional): The highest frame rate of video.
-        scale_resolution_down_by (:obj:`float`, optional): How much video is scaled down (at least 1).
-        priority (:obj:`webrtc.RTCPriorityType`, optional): The share of the bitrate the encoding gets.
+        max_bitrate (:obj:`int`, optional): The bitrate cap in bits per second.
+        max_framerate (:obj:`float`, optional): The frame rate cap of video.
+        scale_resolution_down_by (:obj:`float`, optional): The factor video is scaled down by, at least 1.
+        priority (:obj:`webrtc.RTCPriorityType`, optional): The relative share of the bitrate the encoding gets.
+            It's read back as the level closest to what the encoder uses.
         network_priority (:obj:`webrtc.RTCPriorityType`, optional): The DSCP marking of its packets.
         scalability_mode (:obj:`str`, optional): The SVC mode of video, like ``'L1T3'``.
         adaptive_ptime (:obj:`bool`, optional): Whether audio may use longer packets when bandwidth is low.
-        codec (:obj:`webrtc.RTCRtpCodec`, optional): The codec to send with, instead of the negotiated first one.
+        codec (:obj:`webrtc.RTCRtpCodec`, optional): The codec to send with. The first negotiated one is used
+            by default.
     """
 
     active: bool = True
@@ -320,7 +339,9 @@ class RTCRtpEncodingParameters(RTCRtpCodingParameters):
 
 @dataclass
 class RTCRtpParameters(Dictionary):
-    """The parameters of a sender or a receiver.
+    """The parameters a sender and a receiver share.
+
+    See :mdn:`RTCRtpSender/getParameters`.
 
     Args:
         header_extensions (:obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionParameters`): The header extensions.
@@ -344,7 +365,9 @@ class RTCRtpParameters(Dictionary):
 
 @dataclass
 class RTCRtpReceiveParameters(RTCRtpParameters):
-    """The parameters a receiver receives with.
+    """The parameters a receiver receives with, from :meth:`webrtc.RTCRtpReceiver.get_parameters`.
+
+    See :mdn:`RTCRtpReceiver/getParameters`.
 
     Args:
         header_extensions (:obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionParameters`): The header extensions.
@@ -368,13 +391,16 @@ class RTCRtpSendParameters(RTCRtpParameters):
     Only :attr:`encodings` (all but their ``rid``) and :attr:`degradation_preference` can be changed with
     :meth:`webrtc.RTCRtpSender.set_parameters`.
 
+    See :mdn:`RTCRtpSender/getParameters`.
+
     Args:
         header_extensions (:obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionParameters`): The header extensions.
         rtcp (:obj:`webrtc.RTCRtcpParameters`): The RTCP parameters.
         codecs (:obj:`list` of :obj:`webrtc.RTCRtpCodecParameters`): The negotiated codecs.
-        transaction_id (:obj:`str`): Identifies the call of ``get_parameters`` the parameters come from.
+        transaction_id (:obj:`str`): Identifies the ``get_parameters`` call the parameters come from.
         encodings (:obj:`list` of :obj:`webrtc.RTCRtpEncodingParameters`): The encodings.
-        degradation_preference (:obj:`webrtc.RTCDegradationPreference`, optional): What video degrades first.
+        degradation_preference (:obj:`webrtc.RTCDegradationPreference`, optional): Whether video drops frame
+            rate or resolution first when bandwidth or CPU is short.
     """
 
     transaction_id: str
@@ -409,10 +435,14 @@ class RTCRtpSendParameters(RTCRtpParameters):
 class RTCRtpHeaderExtensionCapability(Dictionary):
     """An RTP header extension that can be negotiated.
 
+    In :obj:`webrtc.RTCRtpCapabilities` only the URI is meaningful, since the direction is set per transceiver.
+
+    See :mdn:`RTCRtpSender/getCapabilities_static`.
+
     Args:
-        uri (:obj:`str`): The URI of the extension.
-        direction (:obj:`webrtc.RTCRtpTransceiverDirection`, optional): In which directions it's negotiated,
-            :attr:`webrtc.RTCRtpTransceiverDirection.stopped` for not at all.
+        uri (:obj:`str`): The URI that names the extension.
+        direction (:obj:`webrtc.RTCRtpTransceiverDirection`, optional): The directions it's negotiated in.
+            It's :attr:`webrtc.RTCRtpTransceiverDirection.stopped` for none.
     """
 
     uri: str
@@ -426,6 +456,8 @@ class RTCRtpHeaderExtensionCapability(Dictionary):
 @dataclass
 class RTCRtpCapabilities(Dictionary):
     """The codecs and header extensions a sender or a receiver supports.
+
+    See :mdn:`RTCRtpSender/getCapabilities_static`.
 
     Args:
         codecs (:obj:`list` of :obj:`webrtc.RTCRtpCodec`): The codecs.
@@ -463,7 +495,7 @@ class RTCRtpCapabilities(Dictionary):
 
 @dataclass
 class RTCEncodingOptions(Dictionary):
-    """How :meth:`webrtc.RTCRtpSender.set_parameters` changes an encoding (WebRTC Extensions).
+    """How :meth:`webrtc.RTCRtpSender.set_parameters` changes one encoding, from WebRTC Extensions.
 
     Args:
         key_frame (:obj:`bool`, optional): Whether the encoding sends a key frame right away.
@@ -477,11 +509,10 @@ class RTCEncodingOptions(Dictionary):
 
 @dataclass
 class RTCSetParameterOptions(Dictionary):
-    """The options of :meth:`webrtc.RTCRtpSender.set_parameters`.
+    """The options of :meth:`webrtc.RTCRtpSender.set_parameters`, from WebRTC Extensions.
 
     Args:
-        encoding_options (:obj:`list` of :obj:`webrtc.RTCEncodingOptions`, optional): One per encoding
-            (WebRTC Extensions).
+        encoding_options (:obj:`list` of :obj:`webrtc.RTCEncodingOptions`, optional): One per encoding, in order.
     """
 
     encoding_options: list[RTCEncodingOptions] = field(default_factory=list)

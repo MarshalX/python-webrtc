@@ -7,7 +7,7 @@
 
 """Settings, capabilities and constraints of tracks.
 
-See https://developer.mozilla.org/en-US/docs/Web/API/Media_Capture_and_Streams_API/Constraints.
+See :mdn:`Media_Capture_and_Streams_API/Constraints`.
 """
 
 from __future__ import annotations
@@ -21,11 +21,11 @@ from webrtc.utils.names import Alias, alias
 
 @dataclass
 class ULongRange(Dictionary):
-    """A range of integers.
+    """A range of integers a source supports, in :obj:`MediaTrackCapabilities`.
 
     Args:
-        min (:obj:`int`, optional): The lowest value.
-        max (:obj:`int`, optional): The highest value.
+        min (:obj:`int`, optional): The lowest value, inclusive.
+        max (:obj:`int`, optional): The highest value, inclusive.
     """
 
     min: int | None = None
@@ -34,11 +34,11 @@ class ULongRange(Dictionary):
 
 @dataclass
 class DoubleRange(Dictionary):
-    """A range of numbers.
+    """A range of numbers a source supports, in :obj:`MediaTrackCapabilities`.
 
     Args:
-        min (:obj:`float`, optional): The lowest value.
-        max (:obj:`float`, optional): The highest value.
+        min (:obj:`float`, optional): The lowest value, inclusive.
+        max (:obj:`float`, optional): The highest value, inclusive.
     """
 
     min: float | None = None
@@ -47,13 +47,15 @@ class DoubleRange(Dictionary):
 
 @dataclass
 class ConstrainULongRange(ULongRange):
-    """A constraint on an integer.
+    """A constraint on an integer, with required bounds or a required value, and a preferred value.
+
+    The required members fail the constraints when the source's range doesn't allow them.
 
     Args:
-        min (:obj:`int`, optional): The lowest value, required.
-        max (:obj:`int`, optional): The highest value, required.
-        exact (:obj:`int`, optional): The value, required.
-        ideal (:obj:`int`, optional): The value to get as near as possible.
+        min (:obj:`int`, optional): The lowest value allowed, as a requirement.
+        max (:obj:`int`, optional): The highest value allowed, as a requirement.
+        exact (:obj:`int`, optional): The only value allowed, as a requirement.
+        ideal (:obj:`int`, optional): The value to get as near as possible to. It never fails the constraints.
     """
 
     exact: int | None = None
@@ -62,13 +64,15 @@ class ConstrainULongRange(ULongRange):
 
 @dataclass
 class ConstrainDoubleRange(DoubleRange):
-    """A constraint on a number.
+    """A constraint on a number, with required bounds or a required value, and a preferred value.
+
+    The required members fail the constraints when the source's range doesn't allow them.
 
     Args:
-        min (:obj:`float`, optional): The lowest value, required.
-        max (:obj:`float`, optional): The highest value, required.
-        exact (:obj:`float`, optional): The value, required.
-        ideal (:obj:`float`, optional): The value to get as near as possible.
+        min (:obj:`float`, optional): The lowest value allowed, as a requirement.
+        max (:obj:`float`, optional): The highest value allowed, as a requirement.
+        exact (:obj:`float`, optional): The only value allowed, as a requirement.
+        ideal (:obj:`float`, optional): The value to get as near as possible to. It never fails the constraints.
     """
 
     exact: float | None = None
@@ -77,11 +81,11 @@ class ConstrainDoubleRange(DoubleRange):
 
 @dataclass
 class ConstrainBooleanParameters(Dictionary):
-    """A constraint on a boolean.
+    """A constraint on a boolean, with a required value or a preferred one.
 
     Args:
-        exact (:obj:`bool`, optional): The value, required.
-        ideal (:obj:`bool`, optional): The value to get if possible.
+        exact (:obj:`bool`, optional): The only value allowed, as a requirement.
+        ideal (:obj:`bool`, optional): The value to get if possible. It never fails the constraints.
     """
 
     exact: bool | None = None
@@ -90,11 +94,12 @@ class ConstrainBooleanParameters(Dictionary):
 
 @dataclass
 class ConstrainDOMStringParameters(Dictionary):
-    """A constraint on a string.
+    """A constraint on a string, with required values or preferred ones.
 
     Args:
-        exact (:obj:`str` or :obj:`list` of :obj:`str`, optional): The value, or the values allowed, required.
-        ideal (:obj:`str` or :obj:`list` of :obj:`str`, optional): The value, or the values, to get if possible.
+        exact (:obj:`str` or :obj:`list` of :obj:`str`, optional): The value or values allowed, as a requirement.
+        ideal (:obj:`str` or :obj:`list` of :obj:`str`, optional): The value or values to get if possible. They
+            never fail the constraints.
     """
 
     exact: str | list[str] | None = None
@@ -103,35 +108,55 @@ class ConstrainDOMStringParameters(Dictionary):
 
 @dataclass
 class ConstrainBooleanOrDOMStringParameters(Dictionary):
-    """A constraint on a boolean or a string.
+    """A constraint on a boolean or a string, with a required value or a preferred one.
 
     Args:
-        exact (:obj:`bool` or :obj:`str`, optional): The value, required.
-        ideal (:obj:`bool` or :obj:`str`, optional): The value to get if possible.
+        exact (:obj:`bool` or :obj:`str`, optional): The only value allowed, as a requirement.
+        ideal (:obj:`bool` or :obj:`str`, optional): The value to get if possible. It never fails the constraints.
     """
 
     exact: bool | str | None = None
     ideal: bool | str | None = None
 
 
-#: An integer (an ideal one), or a constraint on it
+#: A constraint on an integer, where a bare value is an ideal one
 ConstrainULong = Union[int, ConstrainULongRange]
-#: A number (an ideal one), or a constraint on it
+#: A constraint on a number, where a bare value is an ideal one
 ConstrainDouble = Union[float, ConstrainDoubleRange]
-#: A boolean (an ideal one), or a constraint on it
+#: A constraint on a boolean, where a bare value is an ideal one
 ConstrainBoolean = Union[bool, ConstrainBooleanParameters]
-#: A string or strings (ideal ones), or a constraint on them
+#: A constraint on a string, where a bare string or a list of them is ideal
 ConstrainDOMString = Union[str, list[str], ConstrainDOMStringParameters]
-#: A boolean or a string (an ideal one), or a constraint on it
+#: A constraint on a boolean or a string, where a bare value is an ideal one
 ConstrainBooleanOrDOMString = Union[bool, str, ConstrainBooleanOrDOMStringParameters]
 
 
 @dataclass
 class MediaTrackSupportedConstraints(Dictionary):
-    """The constraints the library recognizes, all of them (:meth:`webrtc.MediaDevices.get_supported_constraints`).
+    """The constraints the library recognizes, as :meth:`webrtc.MediaDevices.get_supported_constraints` returns.
+
+    Every member is :obj:`True`. A recognized constraint that the source has no capability or setting for (like
+    :attr:`facing_mode` on the synthetic camera) is ignored when ideal and fails when required.
+
+    See :mdn:`MediaDevices/getSupportedConstraints`.
 
     Args:
-        width (:obj:`bool`, optional): :obj:`True`, like every other member.
+        width (:obj:`bool`, optional): Whether ``width`` is recognized.
+        height (:obj:`bool`, optional): Whether ``height`` is recognized.
+        aspect_ratio (:obj:`bool`, optional): Whether ``aspect_ratio`` is recognized.
+        frame_rate (:obj:`bool`, optional): Whether ``frame_rate`` is recognized.
+        facing_mode (:obj:`bool`, optional): Whether ``facing_mode`` is recognized.
+        resize_mode (:obj:`bool`, optional): Whether ``resize_mode`` is recognized.
+        sample_rate (:obj:`bool`, optional): Whether ``sample_rate`` is recognized.
+        sample_size (:obj:`bool`, optional): Whether ``sample_size`` is recognized.
+        echo_cancellation (:obj:`bool`, optional): Whether ``echo_cancellation`` is recognized.
+        auto_gain_control (:obj:`bool`, optional): Whether ``auto_gain_control`` is recognized.
+        noise_suppression (:obj:`bool`, optional): Whether ``noise_suppression`` is recognized.
+        latency (:obj:`bool`, optional): Whether ``latency`` is recognized.
+        channel_count (:obj:`bool`, optional): Whether ``channel_count`` is recognized.
+        device_id (:obj:`bool`, optional): Whether ``device_id`` is recognized.
+        group_id (:obj:`bool`, optional): Whether ``group_id`` is recognized.
+        background_blur (:obj:`bool`, optional): Whether ``background_blur`` is recognized.
     """
 
     width: bool = True
@@ -181,23 +206,27 @@ class MediaTrackSupportedConstraints(Dictionary):
 
 @dataclass
 class MediaTrackSettings(Dictionary):
-    """What a track carries, as far as it's known (:meth:`webrtc.MediaStreamTrack.get_settings`).
+    """What a track carries now, as :meth:`webrtc.MediaStreamTrack.get_settings` returns.
 
-    Members are :obj:`None` when they don't apply to the track.
+    Members are :obj:`None` when they don't apply to the track or aren't known yet. The library never fills
+    :attr:`facing_mode`, :attr:`latency` or :attr:`background_blur`.
+
+    See :mdn:`MediaTrackSettings`.
 
     Args:
         width (:obj:`int`, optional): The width of the video.
         height (:obj:`int`, optional): The height of the video.
         aspect_ratio (:obj:`float`, optional): The width divided by the height.
         frame_rate (:obj:`float`, optional): The frames per second, measured over the last frames.
-        resize_mode (:obj:`str`, optional): How the source is resized, ``'none'`` for the synthetic camera.
-        device_id (:obj:`str`, optional): The device of the track, for :meth:`webrtc.MediaDevices.get_user_media`.
-        group_id (:obj:`str`, optional): The group of the device.
+        resize_mode (:obj:`str`, optional): How the source is resized. It's ``'none'`` for the synthetic camera.
+        device_id (:obj:`str`, optional): The device of a track of :meth:`webrtc.MediaDevices.get_user_media`.
+        group_id (:obj:`str`, optional): The group ID of the device.
         sample_rate (:obj:`int`, optional): The samples per second of the audio.
         sample_size (:obj:`int`, optional): The bits per sample of the audio.
         channel_count (:obj:`int`, optional): The channels of the audio.
-        echo_cancellation (:obj:`bool`, optional): Whether echo is cancelled.
-        auto_gain_control (:obj:`bool`, optional): Whether the gain is controlled.
+        echo_cancellation (:obj:`bool` or :obj:`str`, optional): Whether echo is cancelled. It's :obj:`False` for the
+            synthetic microphone.
+        auto_gain_control (:obj:`bool`, optional): Whether the gain is controlled automatically.
         noise_suppression (:obj:`bool`, optional): Whether noise is suppressed.
         facing_mode (:obj:`str`, optional): Where the camera faces, like ``'user'``.
         latency (:obj:`float`, optional): The latency of the audio in seconds.
@@ -251,23 +280,27 @@ class MediaTrackSettings(Dictionary):
 
 @dataclass
 class MediaTrackCapabilities(Dictionary):
-    """What the source of a track can do (:meth:`webrtc.MediaStreamTrack.get_capabilities`).
+    """What the source of a track can do, as :meth:`webrtc.MediaStreamTrack.get_capabilities` returns.
 
-    The synthetic camera and microphone of :meth:`webrtc.MediaDevices.get_user_media` have capabilities, other tracks
-    don't control their source.
+    Only the synthetic camera and microphone of :meth:`webrtc.MediaDevices.get_user_media` have capabilities. The
+    camera supports 1 to 4096 pixels each way at 1 to 120 frames per second. The microphone is 48 kHz 16-bit mono
+    with no processing. For other tracks every member is :obj:`None`, because the library doesn't control their
+    source.
+
+    See :mdn:`MediaStreamTrack/getCapabilities`.
 
     Args:
         width (:obj:`ULongRange`, optional): The widths of the video.
         height (:obj:`ULongRange`, optional): The heights of the video.
         aspect_ratio (:obj:`DoubleRange`, optional): The aspect ratios of the video.
         frame_rate (:obj:`DoubleRange`, optional): The frame rates of the video.
-        resize_mode (:obj:`list` of :obj:`str`, optional): The ways the source is resized.
+        resize_mode (:obj:`list` of :obj:`str`, optional): The ways the source can be resized.
         device_id (:obj:`str`, optional): The device of the track.
-        group_id (:obj:`str`, optional): The group of the device.
+        group_id (:obj:`str`, optional): The group ID of the device.
         sample_rate (:obj:`ULongRange`, optional): The sample rates of the audio.
         sample_size (:obj:`ULongRange`, optional): The bits per sample of the audio.
         channel_count (:obj:`ULongRange`, optional): The channels of the audio.
-        echo_cancellation (:obj:`list` of :obj:`bool`, optional): Whether echo can be cancelled.
+        echo_cancellation (:obj:`list` of :obj:`bool` or :obj:`str`, optional): Whether echo can be cancelled.
         auto_gain_control (:obj:`list` of :obj:`bool`, optional): Whether the gain can be controlled.
         noise_suppression (:obj:`list` of :obj:`bool`, optional): Whether noise can be suppressed.
         facing_mode (:obj:`list` of :obj:`str`, optional): Where the camera can face.
@@ -322,10 +355,11 @@ class MediaTrackCapabilities(Dictionary):
 
 @dataclass
 class MediaTrackConstraintSet(Dictionary):
-    """A set of constraints on a track, see :obj:`MediaTrackConstraints`.
+    """A set of constraints on a track. It's the base of :obj:`MediaTrackConstraints` and of its advanced sets.
 
-    Each member is a value (an ideal one) or a constraint with ``exact``, ``ideal``, ``min`` and ``max``: the required
-    ones make the constraints fail if the source can't satisfy them.
+    Each member is either a bare value, which is ideal, or a constraint object with ``exact``, ``ideal``, ``min``
+    and ``max``. The required parts fail the constraints if the source can't satisfy them, but the ideal ones never
+    do.
 
     Args:
         width (:obj:`int` or :obj:`ConstrainULongRange`, optional): The width of the video.
@@ -334,14 +368,14 @@ class MediaTrackConstraintSet(Dictionary):
         frame_rate (:obj:`float` or :obj:`ConstrainDoubleRange`, optional): The frame rate of the video.
         resize_mode (:obj:`str` or :obj:`ConstrainDOMStringParameters`, optional): How the source is resized.
         device_id (:obj:`str` or :obj:`ConstrainDOMStringParameters`, optional): The device.
-        group_id (:obj:`str` or :obj:`ConstrainDOMStringParameters`, optional): The group of the device.
+        group_id (:obj:`str` or :obj:`ConstrainDOMStringParameters`, optional): The group ID of the device.
         sample_rate (:obj:`int` or :obj:`ConstrainULongRange`, optional): The sample rate of the audio.
         sample_size (:obj:`int` or :obj:`ConstrainULongRange`, optional): The bits per sample of the audio.
         channel_count (:obj:`int` or :obj:`ConstrainULongRange`, optional): The channels of the audio.
         echo_cancellation (:obj:`bool` or :obj:`ConstrainBooleanOrDOMStringParameters`, optional): Whether echo is
             cancelled.
         auto_gain_control (:obj:`bool` or :obj:`ConstrainBooleanParameters`, optional): Whether the gain is
-            controlled.
+            controlled automatically.
         noise_suppression (:obj:`bool` or :obj:`ConstrainBooleanParameters`, optional): Whether noise is suppressed.
         facing_mode (:obj:`str` or :obj:`ConstrainDOMStringParameters`, optional): Where the camera faces.
         latency (:obj:`float` or :obj:`ConstrainDoubleRange`, optional): The latency of the audio in seconds.
@@ -415,13 +449,17 @@ class MediaTrackConstraintSet(Dictionary):
 
 @dataclass
 class MediaTrackConstraints(MediaTrackConstraintSet):
-    """What a track is asked to be (:meth:`webrtc.MediaStreamTrack.apply_constraints`).
+    """The constraints of a track, as given to :meth:`webrtc.MediaStreamTrack.apply_constraints`.
 
-    The members are the ones of :obj:`MediaTrackConstraintSet`, and:
+    They're also given per track to :meth:`webrtc.MediaDevices.get_user_media`. The members are the ones of
+    :obj:`MediaTrackConstraintSet`, plus :attr:`advanced`.
+
+    See :mdn:`MediaTrackConstraints`.
 
     Args:
-        advanced (:obj:`list` of :obj:`MediaTrackConstraintSet`, optional): Sets of constraints tried in order, each
-            applied if it can be satisfied.
+        advanced (:obj:`list` of :obj:`MediaTrackConstraintSet`, optional): More sets to try in order after the basic
+            one. A set is applied only if all of it can be satisfied. A set that can't be satisfied is skipped and
+            doesn't fail the constraints.
     """
 
     _dictionaries: ClassVar = {**MediaTrackConstraintSet._dictionaries, 'advanced': MediaTrackConstraintSet}
@@ -431,7 +469,9 @@ class MediaTrackConstraints(MediaTrackConstraintSet):
 
 @dataclass
 class MediaStreamConstraints(Dictionary):
-    """The tracks :meth:`webrtc.MediaDevices.get_user_media` returns.
+    """Which tracks :meth:`webrtc.MediaDevices.get_user_media` returns, and their constraints.
+
+    At least one of the two must be requested. See :mdn:`MediaDevices/getUserMedia`.
 
     Args:
         video (:obj:`bool` or :obj:`MediaTrackConstraints`, optional): Whether to get a video track, and its

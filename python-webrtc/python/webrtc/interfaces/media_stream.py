@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""MediaStream of Media Capture and Streams."""
+"""MediaStream of Media Capture and Streams, which groups tracks."""
 
 from __future__ import annotations
 
@@ -25,14 +25,15 @@ if TYPE_CHECKING:
 class MediaStream(
     WebRTCObject[wrtc.MediaStream], UniformEventTarget[Literal['addtrack', 'removetrack'], MediaStreamTrackEvent]
 ):
-    """The MediaStream interface represents a stream of media content.
+    """A group of audio and video tracks, played or sent together.
 
-    A stream consists of several tracks, such as video or audio tracks. Each track is specified as an instance of
-    :obj:`webrtc.MediaStreamTrack`.
+    The stream holds its tracks, which stay alive as long as the stream does.
 
-    Events (see :meth:`on`):
-        ``addtrack`` and ``removetrack`` (:obj:`webrtc.MediaStreamTrackEvent`): The remote peer added a track to
-        a remote stream, or removed one. Changes made with :meth:`add_track` and :meth:`remove_track` fire none.
+    See :mdn:`MediaStream`.
+
+    Events:
+        addtrack and removetrack (:obj:`webrtc.MediaStreamTrackEvent`): The remote peer added a track to
+            a remote stream, or removed one. Changes made with :meth:`add_track` and :meth:`remove_track` fire none.
 
     Args:
         tracks (:obj:`list` of :obj:`webrtc.MediaStreamTrack`, optional): The tracks of the new stream,
@@ -40,7 +41,7 @@ class MediaStream(
     """
 
     _class = wrtc.MediaStream
-    #: The native tracks, kept here: the native stream keeps them weakly
+    #: The native tracks, kept alive here because the native stream holds them weakly
     _tracks: list[wrtc.MediaStreamTrack]
 
     def __init__(self, tracks: list[webrtc.MediaStreamTrack] | webrtc.MediaStream | None = None) -> None:
@@ -75,16 +76,24 @@ class MediaStream(
 
     @property
     def id(self) -> str:
-        """:obj:`str`: The universally unique identifier (UUID) of the stream, 36 characters."""
+        """:obj:`str`: The ID of the stream. A local stream gets a random UUID and a remote one keeps its peer's ID.
+
+        See :mdn:`MediaStream/id`.
+        """
         return self._native_obj.id
 
     @property
     def active(self) -> bool:
-        """:obj:`bool`: Whether the :obj:`webrtc.MediaStream` is active: whether a track of it isn't ended."""
+        """:obj:`bool`: Whether a track of the stream hasn't ended yet.
+
+        See :mdn:`MediaStream/active`.
+        """
         return self._native_obj.active
 
     def get_audio_tracks(self) -> list[webrtc.MediaStreamTrack]:
         """Returns the audio tracks of the stream, in no defined order.
+
+        See :mdn:`MediaStream/getAudioTracks`.
 
         Returns:
             :obj:`list` of :obj:`webrtc.MediaStreamTrack`: The tracks.
@@ -94,6 +103,8 @@ class MediaStream(
     def get_video_tracks(self) -> list[webrtc.MediaStreamTrack]:
         """Returns the video tracks of the stream, in no defined order.
 
+        See :mdn:`MediaStream/getVideoTracks`.
+
         Returns:
             :obj:`list` of :obj:`webrtc.MediaStreamTrack`: The tracks.
         """
@@ -102,13 +113,17 @@ class MediaStream(
     def get_tracks(self) -> list[webrtc.MediaStreamTrack]:
         """Returns all the tracks of the stream, in no defined order.
 
+        See :mdn:`MediaStream/getTracks`.
+
         Returns:
             :obj:`list` of :obj:`webrtc.MediaStreamTrack`: The tracks.
         """
         return MediaStreamTrack._wrap_many(self._kept_tracks())
 
     def get_track_by_id(self, track_id: str) -> webrtc.MediaStreamTrack | None:
-        """Returns the track of an ID, the first one if several tracks have it.
+        """Returns the track with an ID, the first one if several tracks have it.
+
+        See :mdn:`MediaStream/getTrackById`.
 
         Args:
             track_id (:obj:`str`): The ID.
@@ -121,7 +136,9 @@ class MediaStream(
         return MediaStreamTrack._wrap_optional(track)
 
     def add_track(self, track: webrtc.MediaStreamTrack) -> None:
-        """Adds a track to the stream, unless it's there already.
+        """Adds a track to the stream, unless it's there already. Fires no ``addtrack`` event.
+
+        See :mdn:`MediaStream/addTrack`.
 
         Args:
             track (:obj:`webrtc.MediaStreamTrack`): The track.
@@ -130,7 +147,9 @@ class MediaStream(
         self._keep_tracks()
 
     def remove_track(self, track: webrtc.MediaStreamTrack) -> None:
-        """Removes a track from the stream, if it's there.
+        """Removes a track from the stream, if it's there. Fires no ``removetrack`` event.
+
+        See :mdn:`MediaStream/removeTrack`.
 
         Args:
             track (:obj:`webrtc.MediaStreamTrack`): The track.
@@ -139,22 +158,26 @@ class MediaStream(
         self._keep_tracks()
 
     def clone(self) -> webrtc.MediaStream:
-        """Returns a clone of the stream, with a new :attr:`id`.
+        """Returns a copy of the stream with a new :attr:`id`, holding clones of its tracks.
+
+        Each cloned track has a new ID and shares the source of the original one.
+
+        See :mdn:`MediaStream/clone`.
 
         Returns:
             :obj:`webrtc.MediaStream`: The clone.
         """
         return self._wrap(self._native_obj.clone())
 
-    #: Alias for :attr:`get_audio_tracks`
+    #: Alias for :meth:`get_audio_tracks`
     getAudioTracks = get_audio_tracks
-    #: Alias for :attr:`get_video_tracks`
+    #: Alias for :meth:`get_video_tracks`
     getVideoTracks = get_video_tracks
-    #: Alias for :attr:`get_tracks`
+    #: Alias for :meth:`get_tracks`
     getTracks = get_tracks
-    #: Alias for :attr:`get_track_by_id`
+    #: Alias for :meth:`get_track_by_id`
     getTrackById = get_track_by_id
-    #: Alias for :attr:`add_track`
+    #: Alias for :meth:`add_track`
     addTrack = add_track
-    #: Alias for :attr:`remove_track`
+    #: Alias for :meth:`remove_track`
     removeTrack = remove_track

@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""MediaDevices of Media Capture and Streams: the synthetic camera and microphone of the library."""
+"""MediaDevices of Media Capture and Streams, which provides the synthetic microphone and camera of the library."""
 
 from __future__ import annotations
 
@@ -45,13 +45,15 @@ if TYPE_CHECKING:
 
 
 class MediaDeviceInfo:
-    """A media device, as :meth:`MediaDevices.enumerate_devices` lists it.
+    """A media device, as listed by :meth:`MediaDevices.enumerate_devices`.
+
+    See :mdn:`MediaDeviceInfo`.
 
     Args:
-        device_id (:obj:`str`): The id of the device.
+        device_id (:obj:`str`): The ID of the device.
         kind (:obj:`webrtc.MediaDeviceKind`): Whether it's a microphone, a speaker or a camera.
-        label (:obj:`str`): The name of the device.
-        group_id (:obj:`str`): The id of the physical device it belongs to.
+        label (:obj:`str`): The human-readable name of the device.
+        group_id (:obj:`str`): The ID shared by the devices of one physical device.
     """
 
     def __init__(self, *, device_id: str, kind: webrtc.MediaDeviceKind, label: str, group_id: str) -> None:
@@ -62,26 +64,40 @@ class MediaDeviceInfo:
 
     @property
     def device_id(self) -> str:
-        """:obj:`str`: The id of the device."""
+        """:obj:`str`: The ID of the device. It's ``'synthetic-microphone'`` or ``'synthetic-camera'``.
+
+        See :mdn:`MediaDeviceInfo/deviceId`.
+        """
         return self._device_id
 
     @property
     def kind(self) -> webrtc.MediaDeviceKind:
-        """:obj:`webrtc.MediaDeviceKind`: Whether it's a microphone, a speaker or a camera."""
+        """:obj:`webrtc.MediaDeviceKind`: Whether it's a microphone, a speaker or a camera.
+
+        See :mdn:`MediaDeviceInfo/kind`.
+        """
         return self._kind
 
     @property
     def label(self) -> str:
-        """:obj:`str`: The name of the device."""
+        """:obj:`str`: The human-readable name of the device. It's always given, since no permission is needed.
+
+        See :mdn:`MediaDeviceInfo/label`.
+        """
         return self._label
 
     @property
     def group_id(self) -> str:
-        """:obj:`str`: The id of the physical device it belongs to."""
+        """:obj:`str`: The ID shared by the devices of one physical device. Both devices use ``'synthetic'``.
+
+        See :mdn:`MediaDeviceInfo/groupId`.
+        """
         return self._group_id
 
     def to_json(self) -> dict[str, str]:
         """Returns the device as a JSON-serializable dictionary.
+
+        See :mdn:`MediaDeviceInfo/toJSON`.
 
         Returns:
             :obj:`dict`: ``deviceId``, ``kind``, ``label`` and ``groupId``.
@@ -100,13 +116,15 @@ class MediaDeviceInfo:
 
 
 class InputDeviceInfo(MediaDeviceInfo):
-    """An input device: the synthetic camera or microphone.
+    """An input device, which is the synthetic microphone or the synthetic camera.
+
+    See :mdn:`InputDeviceInfo`.
 
     Args:
-        device_id (:obj:`str`): The id of the device.
+        device_id (:obj:`str`): The ID of the device.
         kind (:obj:`webrtc.MediaDeviceKind`): Whether it's a microphone or a camera.
-        label (:obj:`str`): The name of the device.
-        group_id (:obj:`str`): The id of the physical device it belongs to.
+        label (:obj:`str`): The human-readable name of the device.
+        group_id (:obj:`str`): The ID shared by the devices of one physical device.
         capabilities (:obj:`webrtc.MediaTrackCapabilities`): What the device can do.
     """
 
@@ -123,7 +141,9 @@ class InputDeviceInfo(MediaDeviceInfo):
         self._capabilities = capabilities
 
     def get_capabilities(self) -> webrtc.MediaTrackCapabilities:
-        """Returns what the device can do, as the tracks of it have.
+        """Returns what the device can do. This matches :meth:`webrtc.MediaStreamTrack.get_capabilities` of its tracks.
+
+        See :mdn:`InputDeviceInfo/getCapabilities`.
 
         Returns:
             :obj:`webrtc.MediaTrackCapabilities`: A copy of the capabilities.
@@ -181,13 +201,16 @@ def _capture_mode(
 
 
 class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent]):
-    """The media devices of the library: a synthetic microphone and camera, as :data:`webrtc.media_devices`.
+    """The media devices of the library, which are a synthetic microphone and camera. Use :data:`webrtc.media_devices`.
 
-    The microphone plays quiet noise, the camera draws a moving pattern (use :obj:`webrtc.VideoTrackGenerator` and
-    :obj:`webrtc.MediaStreamTrackGenerator` for real media).
+    No hardware is opened. The microphone plays quiet noise and the camera draws a moving pattern. To send real
+    media, write it to a :obj:`webrtc.VideoTrackGenerator` or :obj:`webrtc.MediaStreamTrackGenerator`.
 
-    Events (see :meth:`on`):
-        ``devicechange`` (:obj:`webrtc.DeviceChangeEvent`): The devices changed, which they never do.
+    See :mdn:`MediaDevices`.
+
+    Events:
+        devicechange (:obj:`webrtc.DeviceChangeEvent`): The devices changed. It never fires, because the
+            devices are fixed.
     """
 
     def __init__(self) -> None:
@@ -206,25 +229,33 @@ class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent
         return {d.kind: d.get_capabilities() for d in self._devices if isinstance(d, InputDeviceInfo)}
 
     async def enumerate_devices(self) -> list[webrtc.MediaDeviceInfo]:
-        """Lists the devices: the synthetic microphone and camera.
+        """Lists the synthetic microphone and camera. Labels are included and no permission prompt is shown.
+
+        See :mdn:`MediaDevices/enumerateDevices`.
 
         Returns:
-            :obj:`list` of :obj:`webrtc.MediaDeviceInfo`: The devices, :obj:`webrtc.InputDeviceInfo` ones.
+            :obj:`list` of :obj:`webrtc.MediaDeviceInfo`: The devices, all of them :obj:`webrtc.InputDeviceInfo`.
         """
         return list(self._devices)
 
     def get_supported_constraints(self) -> webrtc.MediaTrackSupportedConstraints:
-        """Returns the constraints the library recognizes: all of them.
+        """Returns the constraints the library recognizes, which are all of them.
+
+        See :mdn:`MediaDevices/getSupportedConstraints`.
 
         Returns:
-            :obj:`webrtc.MediaTrackSupportedConstraints`: The constraints.
+            :obj:`webrtc.MediaTrackSupportedConstraints`: The constraints, with every member set to :obj:`True`.
         """
         return MediaTrackSupportedConstraints(**dict.fromkeys(self._supported, True))
 
     async def get_user_media(self, constraints: webrtc.MediaStreamConstraints | None = None) -> webrtc.MediaStream:
-        """Returns a stream of the synthetic microphone and/or camera, as requested.
+        """Returns a stream with a track of the synthetic microphone, the synthetic camera, or both.
 
-        The constraints given are the ones of the tracks (see :meth:`webrtc.MediaStreamTrack.get_constraints`).
+        The camera starts at 640x480 and 30 frames per second, adjusted to fit the given constraints. The microphone
+        has a fixed format. The constraints become the constraints of the tracks, as
+        :meth:`webrtc.MediaStreamTrack.get_constraints` shows.
+
+        See :mdn:`MediaDevices/getUserMedia`.
 
         Args:
             constraints (:obj:`webrtc.MediaStreamConstraints`, optional): Whether to get an audio and a video track,
@@ -234,11 +265,11 @@ class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent
             :obj:`webrtc.MediaStream`: The stream.
 
         Raises:
-            TypeError: If neither audio nor video is requested, or a value isn't a finite number (negative for
-                the size).
-            webrtc.OverconstrainedError: If a required value (``exact``, ``min``, ``max``) is beyond what the
-                device can do, like more than 4096 pixels wide or 120 frames per second for the camera. Other
-                values are brought within that.
+            TypeError: If neither audio nor video is requested, or a value isn't a finite number. A size also
+                can't be negative.
+            webrtc.OverconstrainedError: If an ``exact``, ``min`` or ``max`` value is beyond what the device can
+                do, like a camera more than 4096 pixels wide or faster than 120 frames per second. Other values
+                are clamped to the capabilities.
         """
         constraints = constraints if constraints is not None else MediaStreamConstraints()
         audio = _track_constraints(constraints, 'audio')
@@ -266,7 +297,7 @@ class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent
     getUserMedia = get_user_media
 
 
-#: The media devices of the library, ``navigator.mediaDevices`` in a browser
+#: The media devices of the library, ``navigator.mediaDevices`` in a browser. See :mdn:`Navigator/mediaDevices`.
 media_devices = MediaDevices()
 #: Alias for :data:`media_devices`
 mediaDevices = media_devices

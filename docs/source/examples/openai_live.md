@@ -1,6 +1,6 @@
 # Voice chat with OpenAI GPT-Live
 
-Talks to the model through your microphone and speakers, with live transcripts in the terminal. No server: just an
+Talks to the model through your microphone and speakers, with live transcripts in the terminal. It needs no server, only an
 API key.
 
 ```bash

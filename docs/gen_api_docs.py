@@ -22,9 +22,6 @@ SECTIONS = {
 # the internals of the package, except the events every interface inherits
 TOP_LEVEL = ['enums', 'exceptions', 'streams', 'utils.events', 'base', 'openh264']
 
-# enum members have no docstrings of their own
-UNDOC_MEMBERS = {'enums'}
-
 # modules of several public classes, or whose class name isn't the best title
 TITLES = {
     'base': 'WebRTCObject',
@@ -80,8 +77,7 @@ def write_page(path: Path, module: str) -> None:
     """Writes the page of a module."""
     title = title_of(module)
     path.parent.mkdir(parents=True, exist_ok=True)
-    options = '   :undoc-members:\n' if module in UNDOC_MEMBERS else ''
-    path.write_text(f'{title}\n{"=" * len(title)}\n\n.. automodule:: webrtc.{module}\n{options}', encoding='UTF-8')
+    path.write_text(f'{title}\n{"=" * len(title)}\n\n.. automodule:: webrtc.{module}\n', encoding='UTF-8')
 
 
 def write_index(path: Path, title: str, docnames: list[str]) -> None:

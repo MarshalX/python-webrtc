@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""RTCDTMFSender of WebRTC."""
+"""DTMF tones sent over an audio sender."""
 
 from __future__ import annotations
 
@@ -26,11 +26,13 @@ _TONES = re.compile(r'[0-9A-Da-d#*,]*')
 class RTCDTMFSender(
     WebRTCObject[wrtc.RTCDTMFSender], UniformEventTarget[Literal['tonechange'], RTCDTMFToneChangeEvent]
 ):
-    """Sends DTMF tones on an audio sender (:attr:`webrtc.RTCRtpSender.dtmf`).
+    """Sends DTMF (telephone keypad) tones over an audio sender, from :attr:`webrtc.RTCRtpSender.dtmf`.
 
-    Events (see :meth:`on`):
-        ``tonechange`` (:obj:`webrtc.RTCDTMFToneChangeEvent`): A tone started playing, or all tones were played
-        (with an empty ``tone``).
+    See :mdn:`RTCDTMFSender`.
+
+    Events:
+        tonechange (:obj:`webrtc.RTCDTMFToneChangeEvent`): A tone started playing, or the last one ended
+            (with an empty ``tone``).
     """
 
     _class = wrtc.RTCDTMFSender
@@ -47,13 +49,17 @@ class RTCDTMFSender(
         return RTCDTMFToneChangeEvent(name, RTCDTMFToneChangeEventInit(tone))
 
     def insert_dtmf(self, tones: str, duration: int = 100, inter_tone_gap: int = 70) -> None:
-        """Plays tones, replacing the ones not played yet.
+        """Queues tones to play, replacing the ones not played yet.
+
+        Durations and gaps out of range are clamped to the nearest limit.
+
+        See :mdn:`RTCDTMFSender/insertDTMF`.
 
         Args:
-            tones (:obj:`str`): The tones: ``0`` to ``9``, ``A`` to ``D``, ``#`` and ``*``, and ``,`` for a pause
-                of 2 seconds. An empty string cancels the tones not played yet.
-            duration (:obj:`int`, optional): The duration of a tone in milliseconds, from 40 to 6000.
-            inter_tone_gap (:obj:`int`, optional): The pause between tones in milliseconds, at least 30.
+            tones (:obj:`str`): The tones: ``0`` to ``9``, ``A`` to ``D`` (any case), ``#``, ``*``, and ``,`` for a
+                2-second pause. An empty string cancels the tones not played yet.
+            duration (:obj:`int`, optional): The length of each tone in milliseconds, clamped to 40 to 6000.
+            inter_tone_gap (:obj:`int`, optional): The pause after each tone in milliseconds, clamped to 30 to 6000.
 
         Raises:
             webrtc.InvalidCharacterError: If ``tones`` has another character.
@@ -68,12 +74,19 @@ class RTCDTMFSender(
 
     @property
     def tone_buffer(self) -> str:
-        """:obj:`str`: The tones not played yet."""
+        """:obj:`str`: The tones not played yet, in upper case.
+
+        See :mdn:`RTCDTMFSender/toneBuffer`.
+        """
         return self._native_obj.toneBuffer
 
     @property
     def can_insert_dtmf(self) -> bool:
-        """:obj:`bool`: Whether tones can be sent, once the sender is negotiated to send."""
+        """:obj:`bool`: Whether tones can be sent.
+
+        That needs the sender to be negotiated to send with a telephone-event codec.
+        See :mdn:`RTCDTMFSender/canInsertDTMF`.
+        """
         return self._native_obj.canInsertDTMF
 
     #: Alias for :attr:`insert_dtmf`

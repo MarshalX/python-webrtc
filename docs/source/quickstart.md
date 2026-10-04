@@ -8,8 +8,8 @@ pip install wrtc
 
 The package is `wrtc` on PyPI, and `webrtc` in Python. Wheels are pre-built for the
 [supported platforms](index.md#supported-platforms). Elsewhere pip builds it from sources, which needs CMake 3.26+
-and a C++20 compiler (Clang on Linux, Apple Clang on macOS, MSVC on Windows). The prebuilt libwebrtc is downloaded
-once and cached, so nothing else has to be installed.
+and a C++20 compiler (Clang on Linux, Apple Clang on macOS, MSVC on Windows). The prebuilt native WebRTC library is
+downloaded once and cached, so nothing else has to be installed.
 
 To build from sources on a supported platform too:
 
@@ -79,9 +79,9 @@ What happens:
 2. Each side applies its own description with `set_local_description` and the other side's with
    `set_remote_description`.
 3. ICE candidates arrive in the `icecandidate` event as they are gathered. Each one is passed to the other side.
-4. Once connected, the channel opens on both ends: the callee gets it in the `datachannel` event.
+4. Once connected, the channel opens on both ends, and the callee gets it in the `datachannel` event.
 
-Everything is asynchronous and runs on the event loop: handlers are called there, and can be coroutines.
+Everything is asynchronous and runs on the event loop. Handlers are called there, and can be coroutines.
 
 ## Next steps
 

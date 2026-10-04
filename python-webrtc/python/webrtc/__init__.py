@@ -5,7 +5,10 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Python bindings to WebRTC, with the API of the browsers."""
+"""WebRTC for Python that follows the browser API and runs on the native WebRTC engine.
+
+Every public class, enum and exception is importable from this package, like ``webrtc.RTCPeerConnection``.
+"""
 
 from __future__ import annotations
 

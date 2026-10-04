@@ -5,7 +5,11 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Events of WebRTC objects. libwebrtc threads only schedule them: handlers run on their event loop."""
+"""Event handling of WebRTC objects.
+
+The native WebRTC engine emits events on its own threads, which only schedule them. Handlers run on the asyncio event
+loop they were registered from.
+"""
 
 from __future__ import annotations
 
@@ -19,11 +23,12 @@ from typing_extensions import Literal, Never, get_args, get_origin
 import webrtc
 from webrtc.utils.task_queue import TaskQueue
 
+#: A handler, which is a function or a coroutine function called with the :obj:`webrtc.Event` of an event
 Handler = Callable[['webrtc.Event'], object]
-# any one-argument callable: a handler takes the event subclass of its event, like RTCTrackEvent
+#: Any handler, which takes the event class of its event, like :obj:`webrtc.RTCTrackEvent`
 AnyHandler = Callable[[Never], object]
 
-#: Event names, a ``Literal``; ``EventTarget[Never]`` is any target
+#: Event names as a ``Literal``. ``EventTarget[Never]`` is any target
 _N_contra = TypeVar('_N_contra', bound=str, contravariant=True)
 _E = TypeVar('_E', bound='webrtc.Event')
 _E_contra = TypeVar('_E_contra', bound='webrtc.Event', contravariant=True)
@@ -31,10 +36,10 @@ _R = TypeVar('_R')
 
 
 class HandlerDecorator(Protocol[_E_contra]):
-    """Registers the decorated handler."""
+    """The decorator returned by ``on()`` and ``once()`` without a handler, which registers the decorated one."""
 
     def __call__(self, handler: Callable[[_E_contra], _R], /) -> Callable[[_E_contra], _R]:
-        """Registers the handler."""
+        """Registers the handler and returns it unchanged."""
         ...
 
 
@@ -157,10 +162,14 @@ class _NativeEventTarget(Protocol):
 
 
 class EventTarget(Generic[_N_contra]):
-    """Mixin of :obj:`webrtc.WebRTCObject` subclasses that emit events.
+    """The base class of objects that emit events.
 
-    Handlers are called with one event object, on the event loop they were registered from.
-    They can be plain functions or coroutine functions.
+    Handlers are registered with ``on()`` or ``once()`` by event name, from a running asyncio event loop, and are
+    called on that loop with one event object. They can be functions or coroutine functions, and a coroutine is run as a
+    task. An exception in a handler goes to the exception handler of the loop, and doesn't stop the other handlers. A
+    handler registered twice for an event is called once.
+
+    See :mdn:`EventTarget`.
 
     Example::
 
@@ -239,8 +248,8 @@ class EventTarget(Generic[_N_contra]):
     def _on_event(self, name: str, *args: object) -> None:
         """Called for every event on the loop of the first handler, before the handlers of the event.
 
-        Names starting with ``_`` (like ``'_sent'``) are internal events of the native object: they only reach this
-        method, never handlers.
+        Names starting with ``_`` (like ``'_sent'``) are internal events of the native object. They only reach this
+        method and never reach handlers.
         """
 
     @staticmethod
@@ -249,7 +258,9 @@ class EventTarget(Generic[_N_contra]):
         return webrtc.Event(name)
 
     def off(self, name: _N_contra | None = None, handler: AnyHandler | None = None) -> None:
-        """Removes handlers.
+        """Removes one handler or all of them, for one event or for all events.
+
+        See :mdn:`EventTarget/removeEventListener`.
 
         Args:
             name (:obj:`str`, optional): The name of the event. If omitted, every event.
@@ -265,7 +276,9 @@ class EventTarget(Generic[_N_contra]):
             listeners.remove(name, handler)
 
     def remove_listener(self, name: _N_contra, handler: AnyHandler) -> None:
-        """Removes a handler of an event.
+        """Removes a handler of an event. Removing one that isn't registered does nothing.
+
+        See :mdn:`EventTarget/removeEventListener`.
 
         Args:
             name (:obj:`str`): The name of the event.
@@ -288,10 +301,13 @@ class EventTarget(Generic[_N_contra]):
         self.off(name)
 
     def listeners(self, name: _N_contra) -> list[AnyHandler]:
-        """Returns the handlers of an event.
+        """Returns the handlers of an event, in the order they were registered.
 
         Args:
             name (:obj:`str`): The name of the event.
+
+        Returns:
+            :obj:`list` of :obj:`callable`: The handlers.
 
         Raises:
             ValueError: If the object has no such event.
@@ -303,7 +319,11 @@ class EventTarget(Generic[_N_contra]):
         return [r.handler for r in listeners.registrations.get(name, ())]
 
     def event_names(self) -> set[str]:
-        """Returns the names of the events that have handlers."""
+        """Returns the names of the events that have handlers.
+
+        Returns:
+            :obj:`set` of :obj:`str`: The names.
+        """
         listeners = self._listeners()
         if listeners is None:
             return set()
@@ -331,7 +351,7 @@ def _is_target_base(base: object) -> bool:
 
 
 class UniformEventTarget(EventTarget[_N_contra], Generic[_N_contra, _E]):
-    """An :obj:`EventTarget` whose events share one event class."""
+    """An :obj:`EventTarget` whose events all have the same event class, which typed handlers take."""
 
     @overload
     def on(self, name: _N_contra, handler: None = None) -> HandlerDecorator[_E]: ...
@@ -341,6 +361,8 @@ class UniformEventTarget(EventTarget[_N_contra], Generic[_N_contra, _E]):
 
     def on(self, name: _N_contra, handler: Callable[[_E], _R] | None = None) -> object:
         """Registers a handler of an event. Can be used as a decorator.
+
+        See :mdn:`EventTarget/addEventListener`.
 
         Args:
             name (:obj:`str`): The name of the event, like ``'icecandidate'``.
@@ -363,11 +385,14 @@ class UniformEventTarget(EventTarget[_N_contra], Generic[_N_contra, _E]):
     def once(self, name: _N_contra, handler: Callable[[_E], _R]) -> Callable[[_E], _R]: ...
 
     def once(self, name: _N_contra, handler: Callable[[_E], _R] | None = None) -> object:
-        """Registers a handler that is removed after it's called for the first time. Can be used as a decorator.
+        """Registers a handler that is removed before its first call. Can be used as a decorator.
+
+        See :mdn:`EventTarget/addEventListener`.
 
         Args:
             name (:obj:`str`): The name of the event.
             handler (:obj:`callable`, optional): A function or a coroutine function called with the event object.
+                If omitted, a decorator is returned.
 
         Returns:
             :obj:`callable`: The handler, or a decorator registering it.

@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""The encoded frames an :obj:`webrtc.RTCRtpScriptTransformer` reads and writes, and their metadata."""
+"""Encoded video and audio frames an :obj:`webrtc.RTCRtpScriptTransformer` reads and writes, with their metadata."""
 
 from __future__ import annotations
 
@@ -29,20 +29,20 @@ if TYPE_CHECKING:
 
 @dataclass
 class RTCEncodedFrameMetadata(Dictionary):
-    """The metadata of an encoded frame. Members a frame doesn't have are :obj:`None`.
+    """The metadata shared by encoded video and audio frames. A member the frame lacks is :obj:`None`.
 
     Args:
-        synchronization_source (:obj:`int`, optional): The SSRC of the RTP stream of the frame.
+        synchronization_source (:obj:`int`, optional): The SSRC of the RTP stream the frame belongs to.
         payload_type (:obj:`int`, optional): The RTP payload type of the frame.
         contributing_sources (:obj:`list` of :obj:`int`, optional): The CSRCs of the frame.
         rtp_timestamp (:obj:`int`, optional): The RTP timestamp of the frame.
-        receive_time (:obj:`float`, optional): When the first packet of a received frame arrived, in milliseconds
-            since the Unix epoch.
-        capture_time (:obj:`float`, optional): When the frame was captured, in milliseconds since the Unix epoch
-            (of the remote clock, for a received frame).
-        sender_capture_time_offset (:obj:`float`, optional): The offset of the clock of the capturer from the clock
-            of the sender, in milliseconds, for a received frame.
-        mime_type (:obj:`str`, optional): The codec of the frame, like ``'video/VP8'``.
+        receive_time (:obj:`float`, optional): For a received frame, when its first packet arrived, in
+            milliseconds since the Unix epoch.
+        capture_time (:obj:`float`, optional): When the frame was captured, in milliseconds since the Unix epoch.
+            A received frame uses the clock of the remote peer.
+        sender_capture_time_offset (:obj:`float`, optional): For a received frame, the offset between the clock of
+            the capturing system and that of the sender, in milliseconds.
+        mime_type (:obj:`str`, optional): The codec of the frame, such as ``'video/VP8'``.
     """
 
     synchronization_source: int | None = None
@@ -74,11 +74,15 @@ class RTCEncodedFrameMetadata(Dictionary):
 
 @dataclass
 class RTCEncodedVideoFrameMetadata(RTCEncodedFrameMetadata):
-    """The metadata of an :obj:`RTCEncodedVideoFrame`. See :obj:`RTCEncodedFrameMetadata` for the common members.
+    """The metadata of an :obj:`RTCEncodedVideoFrame`. It adds to the members of :obj:`RTCEncodedFrameMetadata`.
+
+    See :mdn:`RTCEncodedVideoFrame/getMetadata`.
 
     Args:
-        frame_id (:obj:`int`, optional): The identifier of the frame, which dependencies refer to.
-        dependencies (:obj:`list` of :obj:`int`, optional): The identifiers of the frames this one depends on.
+        frame_id (:obj:`int`, optional): The identifier of the frame, which :attr:`dependencies` of later frames
+            refer to.
+        dependencies (:obj:`list` of :obj:`int`, optional): The :attr:`frame_id` values of the frames this one
+            depends on.
         width (:obj:`int`, optional): The width of the frame, in pixels.
         height (:obj:`int`, optional): The height of the frame, in pixels.
         spatial_index (:obj:`int`, optional): The spatial layer of the frame.
@@ -104,7 +108,9 @@ class RTCEncodedVideoFrameMetadata(RTCEncodedFrameMetadata):
 
 @dataclass
 class RTCEncodedAudioFrameMetadata(RTCEncodedFrameMetadata):
-    """The metadata of an :obj:`RTCEncodedAudioFrame`. See :obj:`RTCEncodedFrameMetadata` for the common members.
+    """The metadata of an :obj:`RTCEncodedAudioFrame`. It adds to the members of :obj:`RTCEncodedFrameMetadata`.
+
+    See :mdn:`RTCEncodedAudioFrame/getMetadata`.
 
     Args:
         sequence_number (:obj:`int`, optional): The RTP sequence number of a received frame.
@@ -122,11 +128,13 @@ class RTCEncodedAudioFrameMetadata(RTCEncodedFrameMetadata):
 
 @dataclass
 class RTCEncodedVideoFrameOptions(Dictionary):
-    """The options of the copy constructor of :obj:`RTCEncodedVideoFrame`.
+    """The options for copying an :obj:`RTCEncodedVideoFrame`.
+
+    See :mdn:`RTCEncodedVideoFrame/RTCEncodedVideoFrame`.
 
     Args:
-        metadata (:obj:`RTCEncodedVideoFrameMetadata`, optional): Members replacing those of the original frame,
-            the ones that aren't :obj:`None`.
+        metadata (:obj:`RTCEncodedVideoFrameMetadata`, optional): Metadata for the copy. Each member that isn't
+            :obj:`None` replaces that of the original frame.
     """
 
     metadata: RTCEncodedVideoFrameMetadata | None = None
@@ -136,11 +144,13 @@ class RTCEncodedVideoFrameOptions(Dictionary):
 
 @dataclass
 class RTCEncodedAudioFrameOptions(Dictionary):
-    """The options of the copy constructor of :obj:`RTCEncodedAudioFrame`.
+    """The options for copying an :obj:`RTCEncodedAudioFrame`.
+
+    See :mdn:`RTCEncodedAudioFrame/RTCEncodedAudioFrame`.
 
     Args:
-        metadata (:obj:`RTCEncodedAudioFrameMetadata`, optional): Members replacing those of the original frame,
-            the ones that aren't :obj:`None`.
+        metadata (:obj:`RTCEncodedAudioFrameMetadata`, optional): Metadata for the copy. Each member that isn't
+            :obj:`None` replaces that of the original frame.
     """
 
     metadata: RTCEncodedAudioFrameMetadata | None = None
@@ -210,7 +220,10 @@ class _RTCEncodedFrame(Generic[_MetadataT]):
     def data(self) -> bytearray:
         """:obj:`bytearray`: The encoded payload, which can be changed in place or replaced.
 
-        A :obj:`bytearray` set is used as it is, other buffers are copied. Empty once the frame is written.
+        An assigned :obj:`bytearray` is kept as is, and any other buffer is copied. It's empty once the frame was
+        written.
+
+        See :mdn:`RTCEncodedVideoFrame/data` and :mdn:`RTCEncodedAudioFrame/data`.
 
         Raises:
             TypeError: If the value set isn't a contiguous buffer.
@@ -242,13 +255,16 @@ class _RTCEncodedFrame(Generic[_MetadataT]):
 
 
 class RTCEncodedVideoFrame(_RTCEncodedFrame[RTCEncodedVideoFrameMetadata]):
-    """An encoded video frame an :obj:`webrtc.RTCRtpScriptTransformer` reads, and writes back changed or not.
+    """An encoded video frame, read from an :obj:`webrtc.RTCRtpScriptTransformer` and written back to it.
+
+    The constructor copies a frame with its payload and metadata. A copy belongs to no sender or receiver, so writing it
+    to a transformer drops it.
+
+    See :mdn:`RTCEncodedVideoFrame`.
 
     Args:
-        original_frame (:obj:`RTCEncodedVideoFrame`): The frame to copy, its payload and metadata.
-        options (:obj:`RTCEncodedVideoFrameOptions`, optional): Metadata replacing that of the original.
-
-    A copy is a frame of no sender or receiver: writing it to a transformer drops it.
+        original_frame (:obj:`RTCEncodedVideoFrame`): The frame to copy.
+        options (:obj:`RTCEncodedVideoFrameOptions`, optional): Metadata overriding that of the original.
 
     Raises:
         TypeError: If ``original_frame`` isn't an :obj:`RTCEncodedVideoFrame`.
@@ -274,14 +290,19 @@ class RTCEncodedVideoFrame(_RTCEncodedFrame[RTCEncodedVideoFrameMetadata]):
 
     @property
     def type(self) -> EncodedVideoChunkType:
-        """:obj:`webrtc.EncodedVideoChunkType`: Whether it's a key frame or a delta frame."""
+        """:obj:`webrtc.EncodedVideoChunkType`: Whether it's a key frame or a delta frame.
+
+        See :mdn:`RTCEncodedVideoFrame/type`.
+        """
         return self._type
 
     def get_metadata(self) -> RTCEncodedVideoFrameMetadata:
         """Returns the metadata of the frame.
 
+        See :mdn:`RTCEncodedVideoFrame/getMetadata`.
+
         Returns:
-            :obj:`RTCEncodedVideoFrameMetadata`: A copy, which changing doesn't change the frame.
+            :obj:`RTCEncodedVideoFrameMetadata`: A copy, so changing it doesn't change the frame.
         """
         return self._copied_metadata()
 
@@ -290,13 +311,16 @@ class RTCEncodedVideoFrame(_RTCEncodedFrame[RTCEncodedVideoFrameMetadata]):
 
 
 class RTCEncodedAudioFrame(_RTCEncodedFrame[RTCEncodedAudioFrameMetadata]):
-    """An encoded audio frame an :obj:`webrtc.RTCRtpScriptTransformer` reads, and writes back changed or not.
+    """An encoded audio frame, read from an :obj:`webrtc.RTCRtpScriptTransformer` and written back to it.
+
+    The constructor copies a frame with its payload and metadata. A copy belongs to no sender or receiver, so writing it
+    to a transformer drops it.
+
+    See :mdn:`RTCEncodedAudioFrame`.
 
     Args:
-        original_frame (:obj:`RTCEncodedAudioFrame`): The frame to copy, its payload and metadata.
-        options (:obj:`RTCEncodedAudioFrameOptions`, optional): Metadata replacing that of the original.
-
-    A copy is a frame of no sender or receiver: writing it to a transformer drops it.
+        original_frame (:obj:`RTCEncodedAudioFrame`): The frame to copy.
+        options (:obj:`RTCEncodedAudioFrameOptions`, optional): Metadata overriding that of the original.
 
     Raises:
         TypeError: If ``original_frame`` isn't an :obj:`RTCEncodedAudioFrame`.
@@ -313,8 +337,10 @@ class RTCEncodedAudioFrame(_RTCEncodedFrame[RTCEncodedAudioFrameMetadata]):
     def get_metadata(self) -> RTCEncodedAudioFrameMetadata:
         """Returns the metadata of the frame.
 
+        See :mdn:`RTCEncodedAudioFrame/getMetadata`.
+
         Returns:
-            :obj:`RTCEncodedAudioFrameMetadata`: A copy, which changing doesn't change the frame.
+            :obj:`RTCEncodedAudioFrameMetadata`: A copy, so changing it doesn't change the frame.
         """
         return self._copied_metadata()
 

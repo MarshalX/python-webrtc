@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""The configuration of a connection."""
+"""The configuration of a connection and the STUN and TURN servers it gathers candidates with."""
 
 from __future__ import annotations
 
@@ -88,6 +88,9 @@ def _check_url(url: str) -> str:
 class RTCOAuthCredential(Dictionary):
     """An OAuth credential of a TURN server (RFC 7635).
 
+    It's accepted for completeness only. A TURN server with an OAuth credential raises
+    :obj:`webrtc.NotSupportedError` when the configuration is applied.
+
     Args:
         mac_key (:obj:`str`): The base64-encoded MAC key.
         access_token (:obj:`str`): The base64-encoded access token.
@@ -104,16 +107,20 @@ class RTCOAuthCredential(Dictionary):
 
 @dataclass
 class RTCIceServer(Dictionary):
-    """A STUN or TURN server used to gather ICE candidates.
+    """A STUN or TURN server to gather ICE candidates with.
+
+    It isn't checked on creation, only when the configuration is applied. The URLs must be valid ``stun``,
+    ``stuns``, ``turn`` or ``turns`` URLs (RFC 7064, RFC 7065), and a TURN server needs a username of at most
+    509 characters and a non-empty password. See :mdn:`RTCPeerConnection/RTCPeerConnection`.
 
     Args:
-        urls (:obj:`str` or :obj:`list` of :obj:`str`): The URLs of the server, like ``'stun:stun.example.org'``
-            or ``'turn:turn.example.org:3478?transport=tcp'``.
+        urls (:obj:`str` or :obj:`list` of :obj:`str`): One URL or several, like ``'stun:stun.example.org'``
+            or ``'turn:turn.example.org:3478?transport=tcp'``. At least one is required.
         username (:obj:`str`, optional): The username of a TURN server.
         credential (:obj:`str` or :obj:`webrtc.RTCOAuthCredential`, optional): The password of a TURN server,
             or its OAuth credential.
-        credential_type (:obj:`str`, optional): ``'password'`` (the default) or ``'oauth'``, which libwebrtc
-            doesn't support.
+        credential_type (:obj:`str`, optional): ``'password'`` (the default) or ``'oauth'``, which isn't
+            supported and raises :obj:`webrtc.NotSupportedError` for a TURN server.
     """
 
     urls: str | list[str]
@@ -144,7 +151,7 @@ class RTCIceServer(Dictionary):
                 if not isinstance(self.credential, RTCOAuthCredential):
                     msg = 'an OAuth TURN server needs an RTCOAuthCredential'
                     raise InvalidAccessError(msg)
-                msg = 'libwebrtc does not support OAuth credentials of TURN servers'
+                msg = 'OAuth credentials of TURN servers are not supported'
                 raise NotSupportedError(msg)
             if self.username is None or self.credential is None or self.credential == '':
                 msg = 'a TURN server needs a username and a credential'
@@ -174,8 +181,9 @@ class RTCIceGatherOptions(Dictionary):
     """How a standalone :obj:`webrtc.RTCIceTransport` gathers candidates, for :meth:`webrtc.RTCIceTransport.gather`.
 
     Args:
-        gather_policy (:obj:`webrtc.RTCIceTransportPolicy`, optional): All candidates, or only relay ones.
-        ice_servers (:obj:`list` of :obj:`webrtc.RTCIceServer`, optional): STUN and TURN servers to gather with.
+        gather_policy (:obj:`webrtc.RTCIceTransportPolicy`, optional): Whether to gather every type of candidate
+            (``all``, the default) or only relay ones.
+        ice_servers (:obj:`list` of :obj:`webrtc.RTCIceServer`, optional): The STUN and TURN servers to gather with.
     """
 
     gather_policy: RTCIceTransportPolicy | RTCIceTransportPolicyValue = RTCIceTransportPolicy.all
@@ -193,26 +201,32 @@ class RTCIceGatherOptions(Dictionary):
 class RTCConfiguration(Dictionary):
     """The configuration of a :obj:`webrtc.RTCPeerConnection`.
 
+    A connection takes it on creation and in :meth:`webrtc.RTCPeerConnection.set_configuration`, and checks the
+    members there. This class doesn't check them. Enum members accept their values too.
+    See :mdn:`RTCPeerConnection/RTCPeerConnection`.
+
     Args:
-        ice_servers (:obj:`list` of :obj:`webrtc.RTCIceServer`, optional): STUN and TURN servers to gather
-            ICE candidates with.
-        ice_transport_policy (:obj:`webrtc.RTCIceTransportPolicy`, optional): Which candidates may be used,
-            all of them (the default) or only relay ones.
-        bundle_policy (:obj:`webrtc.RTCBundlePolicy`, optional): How media is bundled when the remote peer
-            doesn't support bundling. Can't be changed with :meth:`webrtc.RTCPeerConnection.set_configuration`.
-        rtcp_mux_policy (:obj:`webrtc.RTCRtcpMuxPolicy`, optional): RTCP multiplexing, which is required.
-        ice_candidate_pool_size (:obj:`int`, optional): The number of candidates (0 to 255) to gather before
-            they are needed. Can't be changed once the local description is set.
+        ice_servers (:obj:`list` of :obj:`webrtc.RTCIceServer`, optional): The STUN and TURN servers to gather
+            ICE candidates with. There are none by default.
+        ice_transport_policy (:obj:`webrtc.RTCIceTransportPolicy`, optional): Whether every type of candidate may
+            be used (``all``, the default) or only relay ones.
+        bundle_policy (:obj:`webrtc.RTCBundlePolicy`, optional): How media is grouped into transports when the
+            remote peer doesn't support bundling. It's ``balanced`` by default and can't be changed.
+        rtcp_mux_policy (:obj:`webrtc.RTCRtcpMuxPolicy`, optional): RTCP multiplexing, which is always required.
+        ice_candidate_pool_size (:obj:`int`, optional): How many candidates (0 to 255) to gather ahead of
+            setting the local description. It's 0 by default and can't be changed once the local description
+            is set.
         port_range (:obj:`tuple` of two :obj:`int`, optional): The lowest and the highest local UDP and TCP port
-            to use, for firewalls that only allow a range. Not in the WebRTC specification.
+            to use, for firewalls that only allow a range. This option is specific to this library.
         certificates (:obj:`list` of :obj:`webrtc.RTCCertificate`, optional): The certificates to authenticate
-            with, generated if omitted. Can't be changed with :meth:`webrtc.RTCPeerConnection.set_configuration`,
-            where omitting them keeps them.
-        always_negotiate_data_channels (:obj:`bool`, optional): Whether offers always have a media section for
-            data channels, first among the new ones, even before a data channel is created. Can't be changed.
-        rtp_header_encryption_policy (:obj:`webrtc.RTCRtpHeaderEncryptionPolicy`, optional): Whether RTP header
-            extensions are encrypted with cryptex (RFC 9335) when the remote peer supports it (``negotiate``), or
-            a remote description without it fails (``require``). Can't be changed.
+            with. They're generated if omitted. They can't be changed, and leaving them out of
+            :meth:`webrtc.RTCPeerConnection.set_configuration` keeps the current ones.
+        always_negotiate_data_channels (:obj:`bool`, optional): Whether every offer has a media section for data
+            channels even before a channel is created. The section comes first among the new sections. It can't
+            be changed.
+        rtp_header_encryption_policy (:obj:`webrtc.RTCRtpHeaderEncryptionPolicy`, optional): ``negotiate`` (the
+            default) encrypts RTP header extensions with cryptex (RFC 9335) when the remote peer supports it,
+            and ``require`` fails a remote description without it. It can't be changed.
     """
 
     ice_servers: list[RTCIceServer] = field(default_factory=list)

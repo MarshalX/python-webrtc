@@ -26,15 +26,19 @@ _SILENT_LEVEL = 127
 
 @dataclass(frozen=True)
 class RTCRtpContributingSource(Dictionary):
-    """A source of the media an :obj:`webrtc.RTCRtpReceiver` received in the last 10 seconds.
+    """A contributing source (CSRC) of the media an :obj:`webrtc.RTCRtpReceiver` received in the last 10 seconds.
+
+    Also the base of :obj:`webrtc.RTCRtpSynchronizationSource`.
+
+    See :mdn:`RTCRtpReceiver/getContributingSources`.
 
     Args:
-        timestamp (:obj:`float`): When the last packet from the source was received, in milliseconds since
-            the Unix epoch, as the timestamps of :obj:`webrtc.RTCStats`.
-        source (:obj:`int`): The CSRC or SSRC of the source.
-        rtp_timestamp (:obj:`int`): The RTP timestamp of the last packet from the source.
-        audio_level (:obj:`float`, optional): The audio level of the last packet, from 0 (silence) to 1
-            (0 dBov), if the remote peer sent it.
+        timestamp (:obj:`float`): When the latest packet from the source arrived, in milliseconds since
+            the Unix epoch, on the same clock as :obj:`webrtc.RTCStats` timestamps.
+        source (:obj:`int`): The CSRC or SSRC identifier of the source.
+        rtp_timestamp (:obj:`int`): The RTP timestamp of the latest packet from the source.
+        audio_level (:obj:`float`, optional): The audio level of the latest packet, linear from 0 (silence) to 1
+            (0 dBov). It's converted from the level header extension, and is :obj:`None` if the packet had none.
     """
 
     timestamp: float
@@ -60,5 +64,7 @@ class RTCRtpContributingSource(Dictionary):
 class RTCRtpSynchronizationSource(RTCRtpContributingSource):
     """A synchronization source (SSRC) of the media an :obj:`webrtc.RTCRtpReceiver` received in the last 10 s.
 
-    See :obj:`webrtc.RTCRtpContributingSource` for its members.
+    It has the members of :obj:`webrtc.RTCRtpContributingSource`.
+
+    See :mdn:`RTCRtpReceiver/getSynchronizationSources`.
     """
