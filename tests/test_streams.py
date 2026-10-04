@@ -21,7 +21,7 @@ import webrtc
 from tests.helpers import wait_until
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterable
+    from collections.abc import AsyncGenerator, AsyncIterator, Iterable
 
 
 class Chunks:
@@ -515,7 +515,7 @@ async def test_iterator_return_releases_on_cancel_error() -> None:
     iterator = stream.values()
     assert await iterator.__anext__() == 1
     with pytest.raises(ValueError, match='cancel failed'):
-        await iterator.aclose()
+        await cast('AsyncGenerator[int, None]', iterator).aclose()
     assert not stream.locked
 
 

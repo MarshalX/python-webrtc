@@ -169,7 +169,8 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
         self._ended = True
         message = 'The transform was removed from its sender or receiver'
         error = InvalidStateError(message)
-        requests, self._key_frame_requests = self._key_frame_requests, []
+        requests = self._key_frame_requests
+        self._key_frame_requests = []
         for request in requests:
             if not request.future.done() and not request.future.get_loop().is_closed():
                 request.future.set_exception(InvalidStateError(message))

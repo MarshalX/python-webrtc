@@ -165,8 +165,8 @@ def _matches(exact: object, capability: object) -> bool:
     """Whether an exact value (or one of a list of them) is the capability, or one of a list of them."""
     if exact is None:
         return True
-    exacts = exact if isinstance(exact, list) else [exact]
-    capabilities = capability if isinstance(capability, list) else [capability]
+    exacts = cast('list[object]', exact) if isinstance(exact, list) else [exact]
+    capabilities = cast('list[object]', capability) if isinstance(capability, list) else [capability]
     return any(value in capabilities for value in exacts)
 
 

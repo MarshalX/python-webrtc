@@ -12,6 +12,7 @@ from __future__ import annotations
 import array
 import asyncio
 import math
+from typing import cast
 
 import pytest
 
@@ -157,13 +158,13 @@ async def test_stopped_camera_track_stops_sending(
     remote = await connect_track(caller, callee, track, timeout=TIMEOUT)
     reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(remote)).readable.get_reader()
     for _ in range(5):
-        (await asyncio.wait_for(reader.read(), TIMEOUT)).value.close()
+        cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), TIMEOUT)).value).close()
     track.stop()
     await asyncio.sleep(1)
     drained = 0
     while drained < 100:
         try:
-            (await asyncio.wait_for(reader.read(), 0.5)).value.close()
+            cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), 0.5)).value).close()
         except TimeoutError:
             break
         drained += 1
