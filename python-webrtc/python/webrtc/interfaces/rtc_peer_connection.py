@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""RTCPeerConnection of WebRTC."""
+"""The connection between the local peer and a remote one."""
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ if TYPE_CHECKING:
 
     from webrtc.models.rtc_certificate import AlgorithmIdentifier
 
-#: A description, as the methods that set one take it
+#: A description in the form the methods that set one accept
 _Description = Union[RTCSessionDescription, RTCSessionDescriptionInit]
 
 # the signaling states a local description of a type can be set in
@@ -93,29 +93,34 @@ _R = TypeVar('_R')
 
 
 class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerConnectionEvent]):
-    """A WebRTC connection between the local computer and a remote peer.
+    """A connection to a remote peer, which negotiates and carries media tracks and data channels.
 
-    It connects to the remote peer, maintains and monitors the connection, and closes it once it's no longer needed.
+    The application exchanges descriptions (:meth:`create_offer`, :meth:`create_answer`) and ICE candidates
+    with the remote peer over its own signaling channel. Operations that change the negotiation run one after
+    another, in the order they're called. See :mdn:`RTCPeerConnection`.
 
-    Events (see :meth:`on`):
-        ``negotiationneeded`` (:obj:`webrtc.Event`): Negotiation (an offer/answer exchange) is needed.
-        ``icecandidate`` (:obj:`webrtc.RTCPeerConnectionIceEvent`): A local ICE candidate was gathered, to be sent
-        to the remote peer. Its ``candidate`` is :obj:`None` once gathering is complete.
-        ``icecandidateerror`` (:obj:`webrtc.RTCPeerConnectionIceErrorEvent`): A STUN or TURN server failed.
-        ``signalingstatechange``, ``iceconnectionstatechange``, ``icegatheringstatechange``,
-        ``connectionstatechange`` (:obj:`webrtc.Event`): :attr:`signaling_state`, :attr:`ice_connection_state`,
-        :attr:`ice_gathering_state` or :attr:`connection_state` changed.
-        ``track`` (:obj:`webrtc.RTCTrackEvent`): A remote track was negotiated.
-        ``datachannel`` (:obj:`webrtc.RTCDataChannelEvent`): The remote peer created a data channel.
+    Events:
+        negotiationneeded (:obj:`webrtc.Event`): Negotiation (an offer/answer exchange) is needed.
+        icecandidate (:obj:`webrtc.RTCPeerConnectionIceEvent`): A local ICE candidate was gathered and should be
+            sent to the remote peer. Its ``candidate`` is :obj:`None` once gathering is complete.
+        icecandidateerror (:obj:`webrtc.RTCPeerConnectionIceErrorEvent`): A STUN or TURN server failed.
+        signalingstatechange (:obj:`webrtc.Event`): :attr:`signaling_state` changed.
+        iceconnectionstatechange (:obj:`webrtc.Event`): :attr:`ice_connection_state` changed.
+        icegatheringstatechange (:obj:`webrtc.Event`): :attr:`ice_gathering_state` changed.
+        connectionstatechange (:obj:`webrtc.Event`): :attr:`connection_state` changed.
+        track (:obj:`webrtc.RTCTrackEvent`): A remote track was negotiated.
+        datachannel (:obj:`webrtc.RTCDataChannelEvent`): The remote peer created a data channel.
 
-    A closed connection emits no events.
+    A closed connection emits no events, including the ones queued before :meth:`close`.
 
     Args:
         configuration (:obj:`webrtc.RTCConfiguration`, optional): The configuration of the connection.
+            The defaults of :obj:`webrtc.RTCConfiguration` are used if it's omitted.
 
     Raises:
         webrtc.InvalidSyntaxError: If an ICE server URL is invalid.
-        webrtc.InvalidAccessError: If a TURN server has no credentials.
+        webrtc.InvalidAccessError: If a TURN server has no credentials, or a certificate has expired.
+        webrtc.NotSupportedError: If a TURN server has an OAuth credential.
         ValueError: If a member of the configuration is out of range.
         TypeError: If a member of the configuration has a wrong type, or a value its enum doesn't have.
     """
@@ -184,7 +189,20 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     ) -> Callable[[RTCDataChannelEvent], _R]: ...
 
     def on(self, name: _PeerConnectionEvent, handler: AnyHandler | None = None) -> object:
-        """See :meth:`webrtc.UniformEventTarget.on`."""
+        """Registers a handler of an event of the connection, listed above. Can be used as a decorator.
+
+        Args:
+            name (:obj:`str`): The name of the event, like ``'icecandidate'``.
+            handler (:obj:`callable`, optional): A function or a coroutine function called with the event object.
+                If omitted, a decorator is returned.
+
+        Returns:
+            :obj:`callable`: The handler, or a decorator registering it.
+
+        Raises:
+            ValueError: If the connection has no such event.
+            RuntimeError: If called outside of a running event loop.
+        """
         return self._add(name, handler, once=False)
 
     @overload
@@ -228,7 +246,20 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     ) -> Callable[[RTCDataChannelEvent], _R]: ...
 
     def once(self, name: _PeerConnectionEvent, handler: AnyHandler | None = None) -> object:
-        """See :meth:`webrtc.UniformEventTarget.once`."""
+        """Registers a handler that is removed after its first call. Can be used as a decorator.
+
+        Args:
+            name (:obj:`str`): The name of the event, like ``'track'``.
+            handler (:obj:`callable`, optional): A function or a coroutine function called with the event object.
+                If omitted, a decorator is returned.
+
+        Returns:
+            :obj:`callable`: The handler, or a decorator registering it.
+
+        Raises:
+            ValueError: If the connection has no such event.
+            RuntimeError: If called outside of a running event loop.
+        """
         return self._add(name, handler, once=True)
 
     def __init__(self, configuration: webrtc.RTCConfiguration | None = None) -> None:
@@ -298,9 +329,9 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             _ = TaskQueue.post_to_running(channel._release)
 
     def _complete_gathering(self, transports: list[wrtc.RTCIceTransport], state: webrtc.RTCIceGatheringState) -> None:
-        """The ICE transports and the connection complete gathering, and the candidates end, in a single task.
+        """Completes gathering on the ICE transports and the connection, and ends the candidates, in one task.
 
-        So every handler sees all of them complete.
+        This way every handler sees all of them complete.
         """
         ice_transports = webrtc.RTCIceTransport._wrap_many(transports)
         for ice_transport in ice_transports:
@@ -374,7 +405,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     def _apply_legacy_offer_option(self, kind: webrtc.MediaType, *, receive: bool | None) -> None:
         """Applies ``offer_to_receive_audio`` or ``offer_to_receive_video`` of :meth:`create_offer`.
 
-        As the specification defines them, in terms of transceivers.
+        It follows the specification, which defines them in terms of transceivers.
         """
         if receive is None:
             return
@@ -398,12 +429,11 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             sender._expireParameters()
 
     async def create_offer(self, options: webrtc.RTCOfferOptions | None = None) -> webrtc.RTCSessionDescriptionInit:
-        """Initiates the creation of an SDP offer for the purpose of starting a new WebRTC connection to a remote peer.
+        """Creates an offer that starts a negotiation or renegotiates one.
 
-        The SDP offer includes information about any MediaStreamTrack objects already attached to the WebRTC session,
-        codec, and options supported by the machine, as well as any candidates already gathered by the ICE agent, for
-        the purpose of being sent over the signaling channel to a potential peer to request a connection or to update
-        the configuration of an existing connection.
+        The offer describes the transceivers and data channels of the connection, with the codecs it supports and
+        the ICE candidates gathered so far. It isn't applied until it's passed to :meth:`set_local_description`.
+        See :mdn:`RTCPeerConnection/createOffer`.
 
         Args:
             options (:obj:`webrtc.RTCOfferOptions`, optional): How to create the offer.
@@ -412,7 +442,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             :obj:`webrtc.RTCSessionDescriptionInit`: The offer, to set with :meth:`set_local_description`.
 
         Raises:
-            webrtc.InvalidStateError: If the signaling state is neither stable nor have-local-offer.
+            webrtc.InvalidStateError: If the signaling state isn't ``stable`` or ``have-local-offer``,
+                or the connection is closed.
         """
         async with self._operation():
             self._check_state('create an offer', RTCSignalingState.stable, RTCSignalingState.have_local_offer)
@@ -423,10 +454,10 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             return _init_of(await call_native(self._native_obj.createOffer, options.ice_restart))
 
     async def create_answer(self, options: webrtc.RTCAnswerOptions | None = None) -> webrtc.RTCSessionDescriptionInit:
-        """Creates an SDP answer to an offer received from the remote peer.
+        """Creates an answer to the offer set as the remote description.
 
-        The answer contains information about any media already attached to the session, codecs and options supported
-        by the machine, and any ICE candidates already gathered.
+        It isn't applied until it's passed to :meth:`set_local_description`.
+        See :mdn:`RTCPeerConnection/createAnswer`.
 
         Args:
             options (:obj:`webrtc.RTCAnswerOptions`, optional): How to create the answer.
@@ -452,9 +483,9 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     async def set_local_description(
         self, description: _Description | RTCLocalSessionDescriptionInit | None = None
     ) -> None:
-        """Changes the local description associated with the connection.
+        """Applies a local session description, which starts ICE gathering.
 
-        This description specifies the properties of the local end of the connection, including the media format.
+        See :mdn:`RTCPeerConnection/setLocalDescription`.
 
         Args:
             description (:obj:`webrtc.RTCSessionDescription`, optional): The description, as returned by
@@ -468,6 +499,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             webrtc.InvalidModificationError: If the SDP isn't the one :meth:`create_offer`
                 or :meth:`create_answer` returned last.
             webrtc.RTCError: If the SDP can't be parsed (``sdp_syntax_error``).
+            TypeError: If the description has an SDP but no type, or is neither of the accepted types.
         """
         init = _description_init(description, allow_implicit=True)
         async with self._operation():
@@ -480,11 +512,10 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     async def set_remote_description(
         self, description: webrtc.RTCSessionDescriptionInit | webrtc.RTCSessionDescription
     ) -> None:
-        """Sets the specified session description as the remote peer's current offer or answer.
+        """Applies an offer, an answer or a rollback received from the remote peer.
 
-        The description specifies the properties of the remote end of the connection, including the media format.
-
-        An offer set while there's a local offer rolls the local one back first.
+        An offer set while there's a local offer rolls the local one back first. Remote tracks the description
+        adds are announced with ``track`` events. See :mdn:`RTCPeerConnection/setRemoteDescription`.
 
         Args:
             description (:obj:`webrtc.RTCSessionDescriptionInit`): The description received from the remote peer,
@@ -495,6 +526,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             webrtc.InvalidStateError: If the type doesn't match the signaling state, or the connection is closed.
             webrtc.RTCError: If the SDP can't be parsed (``sdp_syntax_error``).
             webrtc.InvalidAccessError: If the description can't be applied.
+            TypeError: If the description is neither of the accepted types.
         """
         init = _description_init(description, allow_implicit=False)
         async with self._operation():
@@ -504,16 +536,21 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             self._completed_description()
 
     def add_track(self, track: webrtc.MediaStreamTrack, *streams: webrtc.MediaStream) -> webrtc.RTCRtpSender:
-        """Adds a new :obj:`webrtc.MediaStreamTrack` to the set of tracks which will be transmitted to the other peer.
+        """Starts sending a track to the remote peer, from the next negotiation.
+
+        If there's an unused transceiver of the same kind, it's reused. Otherwise a new one is added.
+        See :mdn:`RTCPeerConnection/addTrack`.
 
         Args:
-            track (:obj:`webrtc.MediaStreamTrack`): A :obj:`webrtc.MediaStreamTrack` object representing the media track
-                to add to the peer connection.
+            track (:obj:`webrtc.MediaStreamTrack`): The track to send.
             *streams (:obj:`webrtc.MediaStream`): The local streams the remote peer receives the track in.
 
         Returns:
-            :obj:`webrtc.RTCRtpSender`: The :obj:`webrtc.RTCRtpSender` object which will be used to
-            transmit the media data.
+            :obj:`webrtc.RTCRtpSender`: The sender of the track.
+
+        Raises:
+            webrtc.InvalidStateError: If the connection is closed.
+            webrtc.InvalidAccessError: If a sender of the connection already has the track.
         """
         native_streams = [stream._native_obj for stream in streams] if len(streams) > 0 else None
         sender = self._native_obj.addTrack(track._native_obj, native_streams)
@@ -525,18 +562,14 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         track_or_kind: webrtc.MediaStreamTrack | webrtc.MediaType | webrtc.MediaTypeValue,
         init: webrtc.RTCRtpTransceiverInit | None = None,
     ) -> webrtc.RTCRtpTransceiver:
-        """Creates a new :obj:`webrtc.RTCRtpTransceiver` and adds it to the transceivers of the connection.
+        """Adds a new transceiver, negotiated with the next offer.
 
-        Each transceiver represents a bidirectional stream, with both an :obj:`webrtc.RTCRtpSender` and
-        an :obj:`webrtc.RTCRtpReceiver` associated with it.
+        See :mdn:`RTCPeerConnection/addTransceiver`.
 
         Args:
-            track_or_kind (:obj:`webrtc.MediaStreamTrack` or :obj:`webrtc.MediaType`): A
-                :obj:`webrtc.MediaStreamTrack` to associate with the transceiver, or :attr:`webrtc.MediaType.audio`
-                or :attr:`webrtc.MediaType.video` (or its value), which is used as the kind of the receiver's track,
-                and by extension of the :obj:`webrtc.RTCRtpReceiver` itself.
-            init (:obj:`webrtc.RTCRtpTransceiverInit`, optional): The options of the new transceiver. It isn't
-                changed.
+            track_or_kind (:obj:`webrtc.MediaStreamTrack` or :obj:`webrtc.MediaType`): The track the sender of the
+                transceiver sends, or the kind of media (``'audio'`` or ``'video'``) for a transceiver without one.
+            init (:obj:`webrtc.RTCRtpTransceiverInit`, optional): The options of the new transceiver.
 
         Returns:
             :obj:`webrtc.RTCRtpTransceiver`: The new transceiver.
@@ -546,6 +579,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             ValueError: If a ``rid`` of the send encodings is invalid, or missing or repeated with several
                 encodings.
             webrtc.OperationError: If the codec of a send encoding can't be sent.
+            webrtc.InvalidStateError: If the connection is closed.
         """
         kind = track_or_kind.kind if isinstance(track_or_kind, webrtc.MediaStreamTrack) else track_or_kind
         if kind not in {MediaType.audio, MediaType.video}:
@@ -564,51 +598,39 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         return webrtc.RTCRtpTransceiver._wrap(transceiver)
 
     def get_transceivers(self) -> list[webrtc.RTCRtpTransceiver]:
-        """Returns the transceivers the connection sends and receives media with.
+        """Returns the transceivers of the connection, in the order they were added.
+
+        See :mdn:`RTCPeerConnection/getTransceivers`.
 
         Returns:
-            :obj:`list` of :obj:`webrtc.RTCRtpTransceiver`: An array of the :obj:`webrtc.RTCRtpTransceiver` objects
-            representing the transceivers handling sending and receiving all media
-            on the :obj:`webrtc.RTCPeerConnection`. The list is in the order in which the transceivers were
-            added to the connection.
+            :obj:`list` of :obj:`webrtc.RTCRtpTransceiver`: The transceivers.
         """
         return webrtc.RTCRtpTransceiver._wrap_many(self._native_obj.getTransceivers())
 
     def get_senders(self) -> list[webrtc.RTCRtpSender]:
-        """Returns the senders of the connection, each of which sends the media of one track.
+        """Returns the senders of the transceivers of the connection, one per transceiver.
 
-        A sender examines and controls the encoding and transmission of the media of its track.
-
-        Note:
-            The order of the returned :obj:`webrtc.RTCRtpSender` objects is not defined by the specification,
-            and may change from one call to :meth:`get_senders` to the next.
+        See :mdn:`RTCPeerConnection/getSenders`.
 
         Returns:
-            :obj:`list` of :obj:`webrtc.RTCRtpSender`: An array of :obj:`webrtc.RTCRtpSender` objects, one for each
-            track on the connection. The array is empty if there are no RTP senders on the connection.
+            :obj:`list` of :obj:`webrtc.RTCRtpSender`: The senders, including the ones without a track.
         """
         return webrtc.RTCRtpSender._wrap_many(self._native_obj.getSenders())
 
     def get_receivers(self) -> list[webrtc.RTCRtpReceiver]:
-        """Returns an array of :obj:`webrtc.RTCRtpReceiver` objects, each of which represents one RTP receiver.
+        """Returns the receivers of the transceivers of the connection, one per transceiver.
 
-        Each RTP receiver manages the reception and decoding of data for a :obj:`webrtc.MediaStreamTrack` on an
-        :obj:`webrtc.RTCPeerConnection`.
-
-        Note:
-            The order of the returned :obj:`webrtc.RTCRtpReceiver` objects is not defined by the specification,
-            and may change from one call to :meth:`get_receivers` to the next.
+        See :mdn:`RTCPeerConnection/getReceivers`.
 
         Returns:
-            :obj:`list` of :obj:`webrtc.RTCRtpReceiver`: An array of :obj:`webrtc.RTCRtpReceiver` objects, one for each
-            track on the connection. The array is empty if there are no RTP receivers on the connection.
+            :obj:`list` of :obj:`webrtc.RTCRtpReceiver`: The receivers.
         """
         return webrtc.RTCRtpReceiver._wrap_many(self._native_obj.getReceivers())
 
     def remove_track(self, sender: webrtc.RTCRtpSender) -> None:
-        """Stops sending the track of a sender, which stays in :meth:`get_senders`.
+        """Stops sending the track of a sender, from the next negotiation. The sender stays in :meth:`get_senders`.
 
-        Does nothing if the sender has no track.
+        Does nothing if the sender has no track. See :mdn:`RTCPeerConnection/removeTrack`.
 
         Args:
             sender (:obj:`webrtc.RTCRtpSender`): A sender of this connection.
@@ -623,6 +645,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         self, candidate: webrtc.RTCIceCandidateInit | webrtc.RTCIceCandidate | None = None
     ) -> None:
         """Adds a candidate received from the remote peer to the remote description.
+
+        See :mdn:`RTCPeerConnection/addIceCandidate`.
 
         Args:
             candidate (:obj:`webrtc.RTCIceCandidateInit` or :obj:`webrtc.RTCIceCandidate`, optional): The
@@ -653,9 +677,11 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     def create_data_channel(
         self, label: str, data_channel_dict: webrtc.RTCDataChannelInit | None = None
     ) -> webrtc.RTCDataChannel:
-        """Creates a channel to send messages to the remote peer, negotiated with the next offer.
+        """Creates a channel to exchange messages with the remote peer.
 
-        Unless ``negotiated`` is set in the options.
+        The first channel needs a negotiation, which adds the SCTP transport. A ``negotiated`` channel isn't
+        announced to the remote peer, so both peers create it with the same ``id``.
+        See :mdn:`RTCPeerConnection/createDataChannel`.
 
         Args:
             label (:obj:`str`): The name of the channel, up to 65535 bytes in UTF-8.
@@ -692,9 +718,11 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     async def get_stats(self, selector: webrtc.MediaStreamTrack | None = None) -> webrtc.RTCStatsReport:
         """Collects the stats of the connection, or of the sender or the receiver of a track.
 
+        See :mdn:`RTCPeerConnection/getStats`.
+
         Args:
             selector (:obj:`webrtc.MediaStreamTrack`, optional): A track of exactly one sender or receiver
-                of the connection, to only get the stats of it.
+                of the connection. Only the stats of that sender or receiver are collected.
 
         Returns:
             :obj:`webrtc.RTCStatsReport`: The stats.
@@ -716,12 +744,14 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     async def generate_certificate(keygen_algorithm: AlgorithmIdentifier) -> webrtc.RTCCertificate:
         """Generates a key and a self-signed certificate on a worker thread, for :attr:`RTCConfiguration.certificates`.
 
+        See :mdn:`RTCPeerConnection/generateCertificate_static`.
+
         Args:
             keygen_algorithm (:obj:`str` or :obj:`webrtc.Algorithm`): A WebCrypto algorithm: ``'ECDSA'``
                 (with the P-256 curve), an :obj:`webrtc.EcKeyGenParams`, or an :obj:`webrtc.RsaHashedKeyGenParams`
                 like ``RsaHashedKeyGenParams('RSASSA-PKCS1-v1_5', modulus_length=2048,
-                public_exponent=bytes([1, 0, 1]), hash='SHA-256')``. Its ``expires`` is in how many milliseconds
-                the certificate expires, at most a year (30 days by default).
+                public_exponent=bytes([1, 0, 1]), hash='SHA-256')``. Its ``expires`` sets for how many milliseconds
+                the certificate is valid, up to a year (30 days by default).
 
         Returns:
             :obj:`webrtc.RTCCertificate`: The certificate.
@@ -735,16 +765,19 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     def get_configuration(self) -> webrtc.RTCConfiguration:
         """Returns the configuration of the connection, as it was last set.
 
+        The certificates are the ones in use, generated or given. See :mdn:`RTCPeerConnection/getConfiguration`.
+
         Returns:
-            :obj:`webrtc.RTCConfiguration`: A copy of the configuration.
+            :obj:`webrtc.RTCConfiguration`: A copy of the configuration. Changing it doesn't affect the
+            connection.
         """
         return RTCConfiguration._from_native(self._native_obj.getConfiguration())
 
     def set_configuration(self, configuration: webrtc.RTCConfiguration | None = None) -> None:
-        """Changes the configuration of the connection. Members that aren't set get their default values.
+        """Replaces the configuration of the connection. Members that aren't set get their default values.
 
-        Changed ICE servers or ICE transport policy are used for the candidates gathered next,
-        like after :meth:`restart_ice`.
+        Changed ICE servers or ICE transport policy apply to the candidates gathered next, like after
+        :meth:`restart_ice`. See :mdn:`RTCPeerConnection/setConfiguration`.
 
         Args:
             configuration (:obj:`webrtc.RTCConfiguration`, optional): The new configuration.
@@ -755,7 +788,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
                 :attr:`webrtc.RTCConfiguration.bundle_policy` or
                 :attr:`webrtc.RTCConfiguration.always_negotiate_data_channels`.
             webrtc.InvalidSyntaxError: If an ICE server URL is invalid.
-            webrtc.InvalidAccessError: If a TURN server has no credentials.
+            webrtc.InvalidAccessError: If a TURN server has no credentials, or a certificate has expired.
+            webrtc.NotSupportedError: If a TURN server has an OAuth credential.
             ValueError: If a member of the configuration is out of range.
             TypeError: If a member of the configuration has a wrong type, or a value its enum doesn't have.
         """
@@ -764,84 +798,118 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         self._native_obj.setConfiguration(configuration._to_native())
 
     def restart_ice(self) -> None:
-        """Allows to easily request that ICE candidate gathering be redone on both ends of the connection.
+        """Requests an ICE restart, with new credentials and candidates, from the next negotiation on either side.
 
-        This simplifies the process by allowing the same method to be used by either the caller or the receiver to
-        trigger an ICE restart.
+        It leads to a ``negotiationneeded`` event. It does nothing before the first local description, since that one
+        already has new credentials, or once the connection is closed. See :mdn:`RTCPeerConnection/restartIce`.
         """
         self._native_obj.restartIce()
 
     def close(self) -> None:
-        """Closes the connection."""
+        """Closes the connection for good, stopping its transceivers and data channels.
+
+        Remote tracks end, the states become ``closed`` without events, and no event is emitted afterwards.
+        Does nothing if it's already closed. See :mdn:`RTCPeerConnection/close`.
+        """
         self._native_obj.close()
 
     @property
     def sctp(self) -> webrtc.RTCSctpTransport | None:
-        """:obj:`webrtc.RTCSctpTransport`, optional: The SCTP transport of the data, :obj:`None` until negotiated."""
+        """:obj:`webrtc.RTCSctpTransport`, optional: The transport of the data channels.
+
+        It's :obj:`None` until the data channels are negotiated.
+        See :mdn:`RTCPeerConnection/sctp`.
+        """
         return webrtc.RTCSctpTransport._wrap_optional(self._native_obj.sctp)
 
     @property
     def local_description(self) -> webrtc.RTCSessionDescription | None:
-        """:obj:`webrtc.RTCSessionDescription`, optional: The local end of the connection, :obj:`None` until set.
+        """:obj:`webrtc.RTCSessionDescription`, optional: The pending local description, or else the current one.
 
-        It includes the ICE candidates gathered so far.
+        :obj:`None` until one is set. It includes the ICE candidates gathered so far.
+        See :mdn:`RTCPeerConnection/localDescription`.
         """
         return RTCSessionDescription._wrap_optional(self._native_obj.localDescription)
 
     @property
     def remote_description(self) -> webrtc.RTCSessionDescription | None:
-        """:obj:`webrtc.RTCSessionDescription`, optional: The remote end of the connection.
+        """:obj:`webrtc.RTCSessionDescription`, optional: The pending remote description, or else the current one.
 
-        :obj:`None` if the remote description hasn't been set yet.
+        :obj:`None` until one is set. It includes the candidates added with :meth:`add_ice_candidate`.
+        See :mdn:`RTCPeerConnection/remoteDescription`.
         """
         return RTCSessionDescription._wrap_optional(self._native_obj.remoteDescription)
 
     @property
     def current_local_description(self) -> webrtc.RTCSessionDescription | None:
-        """:obj:`webrtc.RTCSessionDescription`, optional: The local description negotiated last, in stable state."""
+        """:obj:`webrtc.RTCSessionDescription`, optional: The local description of the last completed negotiation.
+
+        See :mdn:`RTCPeerConnection/currentLocalDescription`.
+        """
         return RTCSessionDescription._wrap_optional(self._native_obj.currentLocalDescription)
 
     @property
     def current_remote_description(self) -> webrtc.RTCSessionDescription | None:
-        """:obj:`webrtc.RTCSessionDescription`, optional: The remote description negotiated last, in stable state."""
+        """:obj:`webrtc.RTCSessionDescription`, optional: The remote description of the last completed negotiation.
+
+        See :mdn:`RTCPeerConnection/currentRemoteDescription`.
+        """
         return RTCSessionDescription._wrap_optional(self._native_obj.currentRemoteDescription)
 
     @property
     def pending_local_description(self) -> webrtc.RTCSessionDescription | None:
-        """:obj:`webrtc.RTCSessionDescription`, optional: The local description being negotiated, if any."""
+        """:obj:`webrtc.RTCSessionDescription`, optional: The local description of a negotiation in progress.
+
+        See :mdn:`RTCPeerConnection/pendingLocalDescription`.
+        """
         return RTCSessionDescription._wrap_optional(self._native_obj.pendingLocalDescription)
 
     @property
     def pending_remote_description(self) -> webrtc.RTCSessionDescription | None:
-        """:obj:`webrtc.RTCSessionDescription`, optional: The remote description being negotiated, if any."""
+        """:obj:`webrtc.RTCSessionDescription`, optional: The remote description of a negotiation in progress.
+
+        See :mdn:`RTCPeerConnection/pendingRemoteDescription`.
+        """
         return RTCSessionDescription._wrap_optional(self._native_obj.pendingRemoteDescription)
 
     @property
     def can_trickle_ice_candidates(self) -> bool | None:
         """:obj:`bool`, optional: Whether the remote peer takes candidates one by one (trickle ICE).
 
-        :obj:`None` until there's a remote description.
+        :obj:`None` until there's a remote description. See :mdn:`RTCPeerConnection/canTrickleIceCandidates`.
         """
         return self._native_obj.canTrickleIceCandidates
 
     @property
     def connection_state(self) -> webrtc.RTCPeerConnectionState:
-        """:obj:`webrtc.RTCPeerConnectionState`: The current state of the connection."""
+        """:obj:`webrtc.RTCPeerConnectionState`: The overall state of the ICE and DTLS transports of the connection.
+
+        See :mdn:`RTCPeerConnection/connectionState`.
+        """
         return self._native_obj.connectionState
 
     @property
     def signaling_state(self) -> webrtc.RTCSignalingState:
-        """:obj:`webrtc.RTCSignalingState`: The state of the signaling process."""
+        """:obj:`webrtc.RTCSignalingState`: Where the connection is in the offer/answer exchange.
+
+        See :mdn:`RTCPeerConnection/signalingState`.
+        """
         return self._native_obj.signalingState
 
     @property
     def ice_connection_state(self) -> webrtc.RTCIceConnectionState:
-        """:obj:`webrtc.RTCIceConnectionState`: The state of the ICE agent."""
+        """:obj:`webrtc.RTCIceConnectionState`: The overall state of the ICE transports of the connection.
+
+        See :mdn:`RTCPeerConnection/iceConnectionState`.
+        """
         return self._native_obj.iceConnectionState
 
     @property
     def ice_gathering_state(self) -> webrtc.RTCIceGatheringState:
-        """:obj:`webrtc.RTCIceGatheringState`: The ICE candidate gathering state."""
+        """:obj:`webrtc.RTCIceGatheringState`: The overall candidate gathering state of the ICE transports.
+
+        See :mdn:`RTCPeerConnection/iceGatheringState`.
+        """
         return self._native_obj.iceGatheringState
 
     #: Alias for :attr:`local_description`

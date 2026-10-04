@@ -5,10 +5,11 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""The part of WHATWG Streams (https://streams.spec.whatwg.org) that media processing uses.
+"""The subset of WHATWG Streams that media processing uses, with readable, writable and transform streams of objects.
 
-Readable, writable and transform streams of objects. Methods return futures like the promises of the specification,
-so a read or a write is requested when it's called, not when it's awaited. They need a running asyncio event loop.
+Where the specification returns a promise, these methods return an :obj:`asyncio.Future`. The operation starts when
+the method is called, before the future is awaited. Byte streams and BYOB readers aren't implemented. Streams are
+created and used from a running asyncio event loop.
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ _T = TypeVar('_T', default=object)
 #: The type of the chunks a transform stream outputs
 _O = TypeVar('_O', default=object)
 _R = TypeVar('_R')
-#: The type of the chunks a writable stream takes: one taking any object takes chunks of any type
+#: The type of the chunks a writable stream takes. A stream that takes any object accepts chunks of any type
 _W_contra = TypeVar('_W_contra', contravariant=True, default=object)
 
 
@@ -202,12 +203,12 @@ class _GenericTransformStream(Protocol[_W_contra, _O]):
 
 @dataclass
 class QueuingStrategy(Dictionary, Generic[_T]):
-    """How a stream counts its queue, for the constructors of streams.
+    """How a stream measures its queue, given to the constructor of a stream.
 
     Args:
-        high_water_mark (:obj:`float`, optional): The total size of the chunks queued until the stream applies
-            backpressure, which depends on the stream by default.
-        size (optional): The size of a chunk, 1 for each by default.
+        high_water_mark (:obj:`float`, optional): The total size of queued chunks at which the stream signals
+            backpressure. :obj:`None` takes the default of the stream.
+        size (:obj:`callable`, optional): Returns the size of a chunk. Each chunk counts as 1 if :obj:`None`.
     """
 
     high_water_mark: float | None = None
@@ -249,8 +250,11 @@ def _chunk_size(strategy: _Strategy[_T], chunk: _T) -> float:
 class ReadableStreamGetReaderOptions(Dictionary):
     """The options of :meth:`ReadableStream.get_reader`.
 
+    See :mdn:`ReadableStream/getReader`.
+
     Args:
-        mode (:obj:`webrtc.ReadableStreamReaderMode`, optional): The type of reader, a default one if :obj:`None`.
+        mode (:obj:`webrtc.ReadableStreamReaderMode`, optional): The kind of reader. :obj:`None` gives a default
+            reader. ``'byob'`` is refused because there are no byte streams.
 
     Raises:
         ValueError: If the mode isn't a member of :obj:`webrtc.ReadableStreamReaderMode`.
@@ -268,7 +272,7 @@ class ReadableStreamIteratorOptions(Dictionary):
     """The options of :meth:`ReadableStream.values`.
 
     Args:
-        prevent_cancel (:obj:`bool`, optional): Whether the stream is left open when the iteration stops early.
+        prevent_cancel (:obj:`bool`, optional): Keep the stream open when the iteration stops before the end.
     """
 
     prevent_cancel: bool = False
@@ -279,11 +283,13 @@ class ReadableStreamIteratorOptions(Dictionary):
 
 @dataclass
 class ReadableWritablePair(Dictionary, Generic[_T, _O]):
-    """A writable stream and the readable one its chunks come out of, for :meth:`ReadableStream.pipe_through`.
+    """A writable stream and the readable stream its output comes out of, for :meth:`ReadableStream.pipe_through`.
+
+    See :mdn:`ReadableStream/pipeThrough`.
 
     Args:
-        readable (:obj:`ReadableStream`): The stream to read.
-        writable (:obj:`WritableStream`): The stream to write.
+        readable (:obj:`ReadableStream`): The output side.
+        writable (:obj:`WritableStream`): The input side.
     """
 
     readable: ReadableStream[_O]
@@ -294,10 +300,14 @@ class ReadableWritablePair(Dictionary, Generic[_T, _O]):
 class StreamPipeOptions(Dictionary):
     """The options of :meth:`ReadableStream.pipe_to` and :meth:`ReadableStream.pipe_through`.
 
+    There's no ``signal``. To stop a pipe, cancel the future that :meth:`ReadableStream.pipe_to` returns.
+
+    See :mdn:`ReadableStream/pipeTo`.
+
     Args:
-        prevent_close (:obj:`bool`, optional): Whether the destination is left open when the source closes.
-        prevent_abort (:obj:`bool`, optional): Whether the destination is left as it is when the source errors.
-        prevent_cancel (:obj:`bool`, optional): Whether the source is left as it is when the destination errors.
+        prevent_close (:obj:`bool`, optional): Don't close the destination when the source closes.
+        prevent_abort (:obj:`bool`, optional): Don't abort the destination when the source errors.
+        prevent_cancel (:obj:`bool`, optional): Don't cancel the source when the destination errors.
     """
 
     prevent_close: bool = False
@@ -316,9 +326,11 @@ class StreamPipeOptions(Dictionary):
 class ReadableStreamReadResult(Dictionary, Generic[_T]):
     """The result of :meth:`ReadableStreamDefaultReader.read`.
 
+    See :mdn:`ReadableStreamDefaultReader/read`.
+
     Args:
-        value (optional): The chunk, :obj:`None` once done.
-        done (:obj:`bool`, optional): Whether the stream is closed and has no more chunks.
+        value (optional): The chunk read. It's :obj:`None` when :attr:`done` is set.
+        done (:obj:`bool`, optional): :obj:`True` once the stream is closed and every chunk was read.
     """
 
     value: _T | None = None
@@ -326,7 +338,10 @@ class ReadableStreamReadResult(Dictionary, Generic[_T]):
 
 
 class ReadableStreamDefaultController(Generic[_T]):
-    """Lets an underlying source enqueue chunks, close or error its stream."""
+    """Given to an underlying source to enqueue chunks into its stream, close it or error it.
+
+    See :mdn:`ReadableStreamDefaultController`.
+    """
 
     def __init__(self, stream: ReadableStream[_T], source: object, strategy: _Strategy[_T]) -> None:
         self._stream = stream
@@ -342,7 +357,12 @@ class ReadableStreamDefaultController(Generic[_T]):
 
     @property
     def desired_size(self) -> float | None:
-        """:obj:`float`, optional: The size of the chunks the queue takes until it's full, :obj:`None` if errored."""
+        """:obj:`float`, optional: The room left in the queue before backpressure.
+
+        It's negative when the queue is over-full, 0 once the stream is closed and :obj:`None` once it errored.
+
+        See :mdn:`ReadableStreamDefaultController/desiredSize`.
+        """
         state = self._stream._state
         if state == 'errored':
             return None
@@ -351,12 +371,17 @@ class ReadableStreamDefaultController(Generic[_T]):
         return self._strategy.high_water_mark - self._queue_total_size
 
     def enqueue(self, chunk: _T | None = None) -> None:
-        """Enqueues a chunk, which fulfills a pending read if there's one.
+        """Adds a chunk to the stream. If a read is pending, the chunk goes straight to it.
+
+        See :mdn:`ReadableStreamDefaultController/enqueue`.
+
+        Args:
+            chunk: The chunk.
 
         Raises:
-            TypeError: If the stream is closed or closing.
-            webrtc.InvalidRangeError: If the size of the chunk isn't a finite non-negative number, which errors the
-                stream, as anything the size function raises does.
+            TypeError: If the stream is closed or a close was requested.
+            webrtc.InvalidRangeError: If the size of the chunk isn't a finite non-negative number. This error and
+                any exception from the ``size`` function also error the stream.
         """
         if not self._can_close_or_enqueue():
             msg = 'The stream is closed or closing'
@@ -364,10 +389,12 @@ class ReadableStreamDefaultController(Generic[_T]):
         self._enqueue(cast('_T', chunk))
 
     def close(self) -> None:
-        """Closes the stream once its queue is read.
+        """Closes the stream once the chunks already queued are read.
+
+        See :mdn:`ReadableStreamDefaultController/close`.
 
         Raises:
-            TypeError: If the stream is closed or closing.
+            TypeError: If the stream is closed or a close was requested.
         """
         if not self._can_close_or_enqueue():
             msg = 'The stream is closed or closing'
@@ -375,7 +402,15 @@ class ReadableStreamDefaultController(Generic[_T]):
         self._close()
 
     def error(self, e: object = None) -> None:
-        """Errors the stream: pending and later reads fail with the error."""
+        """Errors the stream and drops its queue. Pending and later reads fail with the error.
+
+        Does nothing if the stream isn't readable.
+
+        See :mdn:`ReadableStreamDefaultController/error`.
+
+        Args:
+            e (optional): The error. A value that isn't an exception is raised as a :obj:`TypeError`.
+        """
         if self._stream._state != 'readable':
             return
         self._reset_queue()
@@ -464,12 +499,15 @@ class ReadableStreamDefaultController(Generic[_T]):
 
 
 class ReadableStream(Generic[_T]):
-    """A stream of chunks to read (https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream).
+    """A source of chunks to read, iterable with ``async for``.
+
+    See :mdn:`ReadableStream`.
 
     Args:
-        underlying_source (optional): An object with optional ``start(controller)``, ``pull(controller)`` and
-            ``cancel(reason)`` methods (or a :obj:`dict` of them), which may be coroutine functions.
-        strategy (:obj:`QueuingStrategy`, optional): How the queue is counted, a chunk each up to 1 by default.
+        underlying_source (optional): An object or a :obj:`dict` with optional ``start(controller)``,
+            ``pull(controller)`` and ``cancel(reason)`` callables. Each can be a plain or a coroutine function, and
+            they get a :obj:`ReadableStreamDefaultController`.
+        strategy (:obj:`QueuingStrategy`, optional): How the queue is measured. The default high water mark is 1.
 
     Raises:
         webrtc.InvalidRangeError: If the high water mark of the strategy is negative or NaN.
@@ -485,15 +523,18 @@ class ReadableStream(Generic[_T]):
 
     @staticmethod
     def from_(async_iterable: AsyncIterable[_R] | Iterable[_R]) -> ReadableStream[_R]:
-        """Returns a stream of the items of an iterable, asynchronous or not (``ReadableStream.from`` in browsers).
+        """Creates a stream that reads the items of an iterable, asynchronous or not.
 
-        Canceling the stream closes the iterator, like a generator, if it can be closed.
+        Named ``from`` in the specification. Items are fetched one at a time, as they're read. Canceling the stream
+        closes the iterator if it's a generator.
+
+        See :mdn:`ReadableStream/from_static`.
 
         Args:
-            async_iterable: The iterable.
+            async_iterable: The iterable or asynchronous iterable.
 
         Returns:
-            :obj:`ReadableStream`: The stream.
+            :obj:`ReadableStream`: The stream of its items.
 
         Raises:
             TypeError: If the object isn't iterable.
@@ -510,17 +551,26 @@ class ReadableStream(Generic[_T]):
 
     @property
     def locked(self) -> bool:
-        """:obj:`bool`: Whether a reader holds the stream."""
+        """:obj:`bool`: Whether a reader holds the lock of the stream.
+
+        See :mdn:`ReadableStream/locked`.
+        """
         return self._reader is not None
 
     def get_reader(self, options: ReadableStreamGetReaderOptions | None = None) -> ReadableStreamDefaultReader[_T]:
-        """Returns a reader, which holds the stream until it's released.
+        """Creates a reader, which locks the stream until :meth:`ReadableStreamDefaultReader.release_lock`.
+
+        See :mdn:`ReadableStream/getReader`.
 
         Args:
-            options (:obj:`ReadableStreamGetReaderOptions`, optional): The type of reader, a default one if not set.
+            options (:obj:`ReadableStreamGetReaderOptions`, optional): The kind of reader. Only default readers
+                exist.
+
+        Returns:
+            :obj:`ReadableStreamDefaultReader`: The reader.
 
         Raises:
-            TypeError: If the stream is locked, or the mode is ``byob``, which only byte streams support.
+            TypeError: If the stream is locked or the mode is ``'byob'``.
         """
         if options is not None and options.mode == ReadableStreamReaderMode.byob:
             msg = 'Only byte streams have BYOB readers'
@@ -528,10 +578,16 @@ class ReadableStream(Generic[_T]):
         return ReadableStreamDefaultReader(self)
 
     def cancel(self, reason: object = None) -> asyncio.Future[None]:
-        """Cancels the stream: its source stops and its chunks are dropped.
+        """Cancels the stream. Queued chunks are dropped and the ``cancel`` of the source is called.
+
+        See :mdn:`ReadableStream/cancel`.
+
+        Args:
+            reason (optional): Passed to the ``cancel`` of the source.
 
         Returns:
-            :obj:`asyncio.Future`: Done once the source is canceled.
+            :obj:`asyncio.Future`: Done once the source is canceled. Fails with :obj:`TypeError` if the stream is
+            locked, or with the error of an errored stream.
         """
         if self.locked:
             return _rejected(TypeError('The stream is locked'))
@@ -540,16 +596,21 @@ class ReadableStream(Generic[_T]):
     def pipe_to(
         self, destination: WritableStream[_T], options: StreamPipeOptions | None = None
     ) -> asyncio.Future[None]:
-        """Writes every chunk of the stream to a writable stream, waiting for it when it's full.
+        """Reads every chunk and writes it to a writable stream, respecting its backpressure.
 
-        Canceling the returned future stops the pipe like an abort signal in browsers.
+        Both streams are locked while the pipe runs. There's no abort signal, so cancel the returned future to stop
+        the pipe. The destination is then aborted unless :attr:`StreamPipeOptions.prevent_abort` is set.
+
+        See :mdn:`ReadableStream/pipeTo`.
 
         Args:
             destination (:obj:`WritableStream`): The stream to write to.
-            options (:obj:`StreamPipeOptions`, optional): What the pipe leaves as it is when it stops.
+            options (:obj:`StreamPipeOptions`, optional): What the pipe leaves untouched when it stops.
 
         Returns:
-            :obj:`asyncio.Future`: Done once every chunk is written, or failed with the error that stopped it.
+            :obj:`asyncio.Future`: Done once every chunk is written and the destination is closed, unless closing
+            is prevented. It fails with the error that stopped the pipe, or with :obj:`TypeError` if either stream
+            is locked.
         """
         if self.locked or destination.locked:
             return _rejected(TypeError('A stream is locked'))
@@ -584,12 +645,14 @@ class ReadableStream(Generic[_T]):
         transform: ReadableWritablePair[_T, _O] | _GenericTransformStream[_T, _O],
         options: StreamPipeOptions | None = None,
     ) -> ReadableStream[_O]:
-        """Pipes the stream into the writable side of a transform (like :obj:`TransformStream`).
+        """Sends the chunks of the stream through a transform and returns the readable side of the transform.
+
+        See :mdn:`ReadableStream/pipeThrough`.
 
         Args:
-            transform (:obj:`ReadableWritablePair`): The streams, or an object with ``writable`` and ``readable``
-                ones, like :obj:`TransformStream`.
-            options (:obj:`StreamPipeOptions`, optional): The options of :meth:`pipe_to`.
+            transform (:obj:`ReadableWritablePair`): The pair, or any object with ``writable`` and ``readable``
+                streams, like :obj:`TransformStream`.
+            options (:obj:`StreamPipeOptions`, optional): The options of the pipe, as for :meth:`pipe_to`.
 
         Returns:
             :obj:`ReadableStream`: The readable side of the transform.
@@ -604,9 +667,12 @@ class ReadableStream(Generic[_T]):
         return transform.readable
 
     def tee(self) -> list[ReadableStream[_T]]:
-        """Splits the stream into two branches, each reading every chunk, which locks the stream.
+        """Splits the stream into two branches that each read every chunk, and locks the stream.
 
-        The stream is canceled once both branches are, and the branches error when it does.
+        Chunks aren't copied, so both branches get the same objects. The stream is canceled once both branches are,
+        and both branches error if it errors.
+
+        See :mdn:`ReadableStream/tee`.
 
         Returns:
             :obj:`list` of :obj:`ReadableStream`: The two branches.
@@ -617,16 +683,19 @@ class ReadableStream(Generic[_T]):
         return _Tee(self).branches
 
     def values(self, options: ReadableStreamIteratorOptions | None = None) -> AsyncIterator[_T]:
-        """Iterates over the chunks, like ``async for``.
+        """Returns an asynchronous iterator over the chunks, which locks the stream. ``async for`` uses it too.
 
-        Stopping early cancels the stream once the iterator is finalized, right away with
-        :func:`contextlib.aclosing`.
+        Stopping early cancels the stream when the iterator is finalized. Wrap it in :func:`contextlib.aclosing`
+        to cancel right away.
 
         Args:
             options (:obj:`ReadableStreamIteratorOptions`, optional): Whether stopping early leaves the stream open.
 
         Returns:
-            An asynchronous iterator of the chunks.
+            :obj:`collections.abc.AsyncIterator`: The chunks.
+
+        Raises:
+            TypeError: If the stream is locked.
         """
         prevent_cancel = options is not None and options.prevent_cancel
         return _iterate(self.get_reader(), prevent_cancel=prevent_cancel)
@@ -675,10 +744,12 @@ class ReadableStream(Generic[_T]):
 
 
 class ReadableStreamDefaultReader(Generic[_T]):
-    """Reads the chunks of a stream, which it locks until :meth:`release_lock`.
+    """Reads the chunks of a stream, locking it until :meth:`release_lock`.
+
+    See :mdn:`ReadableStreamDefaultReader`.
 
     Args:
-        stream (:obj:`ReadableStream`): The stream.
+        stream (:obj:`ReadableStream`): The stream to lock.
 
     Raises:
         TypeError: If the stream is locked.
@@ -699,15 +770,20 @@ class ReadableStreamDefaultReader(Generic[_T]):
 
     @property
     def closed(self) -> asyncio.Future[None]:
-        """:obj:`asyncio.Future`: Done once the stream is closed, failed if it errors or the lock is released."""
+        """:obj:`asyncio.Future`: Done once the stream closes. It fails if the stream errors or the lock is released.
+
+        See :mdn:`ReadableStreamDefaultReader/closed`.
+        """
         return self._closed
 
     def read(self) -> asyncio.Future[ReadableStreamReadResult[_T]]:
         """Reads the next chunk.
 
+        See :mdn:`ReadableStreamDefaultReader/read`.
+
         Returns:
-            :obj:`asyncio.Future`: Its :obj:`ReadableStreamReadResult`, done once a chunk is there or the stream is
-            closed, failed if the stream errors.
+            :obj:`asyncio.Future`: A :obj:`ReadableStreamReadResult`, set once a chunk is available or the stream
+            closes. It fails with the error of the stream, or with :obj:`TypeError` once the reader is released.
         """
         stream = self._stream
         if stream is None:
@@ -721,13 +797,28 @@ class ReadableStreamDefaultReader(Generic[_T]):
         return request
 
     def cancel(self, reason: object = None) -> asyncio.Future[None]:
-        """Cancels the stream (see :meth:`ReadableStream.cancel`)."""
+        """Cancels the stream, as :meth:`ReadableStream.cancel` does, while keeping the lock.
+
+        See :mdn:`ReadableStreamDefaultReader/cancel`.
+
+        Args:
+            reason (optional): Passed to the ``cancel`` of the source.
+
+        Returns:
+            :obj:`asyncio.Future`: Done once the source is canceled. Fails with :obj:`TypeError` once the reader is
+            released.
+        """
         if self._stream is None:
             return _rejected(TypeError('The reader is released'))
         return self._stream._cancel(reason)
 
     def release_lock(self) -> None:
-        """Releases the stream: pending reads fail with :obj:`TypeError`."""
+        """Unlocks the stream. Pending reads and :attr:`closed` fail with :obj:`TypeError`.
+
+        It does nothing if the reader is already released.
+
+        See :mdn:`ReadableStreamDefaultReader/releaseLock`.
+        """
         stream = self._stream
         if stream is None:
             return
@@ -917,7 +1008,10 @@ _CLOSE = object()
 
 
 class WritableStreamDefaultController(Generic[_W_contra]):
-    """Lets an underlying sink error its stream."""
+    """Given to an underlying sink to error its stream.
+
+    See :mdn:`WritableStreamDefaultController`.
+    """
 
     def __init__(self, stream: WritableStream[_W_contra], sink: object, strategy: _Strategy[_W_contra]) -> None:
         self._stream = stream
@@ -929,7 +1023,15 @@ class WritableStreamDefaultController(Generic[_W_contra]):
         self._in_flight = False
 
     def error(self, e: object = None) -> None:
-        """Errors the stream: pending and later writes fail with the error."""
+        """Errors the stream, so queued and later writes fail with the error.
+
+        It does nothing unless the stream is writable.
+
+        See :mdn:`WritableStreamDefaultController/error`.
+
+        Args:
+            e (optional): The error. A value that isn't an exception is raised as a :obj:`TypeError`.
+        """
         if self._stream._state == 'writable':
             self._stream._start_erroring(_error_of(e))
 
@@ -1013,12 +1115,15 @@ class WritableStreamDefaultController(Generic[_W_contra]):
 
 
 class WritableStream(Generic[_W_contra]):
-    """A stream to write chunks to (https://developer.mozilla.org/en-US/docs/Web/API/WritableStream).
+    """A destination to write chunks to, one at a time, in order.
+
+    See :mdn:`WritableStream`.
 
     Args:
-        underlying_sink (optional): An object with optional ``start(controller)``, ``write(chunk, controller)``,
-            ``close()`` and ``abort(reason)`` methods (or a :obj:`dict` of them), which may be coroutine functions.
-        strategy (:obj:`QueuingStrategy`, optional): How the queue is counted, a chunk each up to 1 by default.
+        underlying_sink (optional): An object or a :obj:`dict` with optional ``start(controller)``,
+            ``write(chunk, controller)``, ``close()`` and ``abort(reason)`` callables. Each can be a plain or a
+            coroutine function, and they get a :obj:`WritableStreamDefaultController`.
+        strategy (:obj:`QueuingStrategy`, optional): How the queue is measured. The default high water mark is 1.
 
     Raises:
         webrtc.InvalidRangeError: If the high water mark of the strategy is negative or NaN.
@@ -1035,31 +1140,52 @@ class WritableStream(Generic[_W_contra]):
 
     @property
     def locked(self) -> bool:
-        """:obj:`bool`: Whether a writer holds the stream."""
+        """:obj:`bool`: Whether a writer holds the lock of the stream.
+
+        See :mdn:`WritableStream/locked`.
+        """
         return self._writer is not None
 
     def get_writer(self) -> WritableStreamDefaultWriter[_W_contra]:
-        """Returns a writer, which holds the stream until it's released.
+        """Creates a writer, which locks the stream until :meth:`WritableStreamDefaultWriter.release_lock`.
 
-        Raises :obj:`TypeError` if the stream is locked.
+        See :mdn:`WritableStream/getWriter`.
+
+        Returns:
+            :obj:`WritableStreamDefaultWriter`: The writer.
+
+        Raises:
+            TypeError: If the stream is locked.
         """
         return WritableStreamDefaultWriter(self)
 
     def close(self) -> asyncio.Future[None]:
-        """Closes the stream once the chunks written before are.
+        """Closes the stream after the chunks already written, then calls the ``close`` of the sink.
+
+        See :mdn:`WritableStream/close`.
 
         Returns:
-            :obj:`asyncio.Future`: Done once the sink is closed.
+            :obj:`asyncio.Future`: Done once the sink is closed. It fails with :obj:`TypeError` if the stream is
+            locked, closed or closing, or with the error that stops the stream.
         """
         if self.locked:
             return _rejected(TypeError('The stream is locked'))
         return self._close()
 
     def abort(self, reason: object = None) -> asyncio.Future[None]:
-        """Aborts the stream: queued chunks are dropped and the sink is aborted.
+        """Aborts the stream. Queued writes fail, the stream errors and the ``abort`` of the sink is called.
+
+        It doesn't wait for a write in progress. Pending writes fail with ``reason`` if it's an exception, and
+        otherwise with an :obj:`asyncio.CancelledError` that holds it.
+
+        See :mdn:`WritableStream/abort`.
+
+        Args:
+            reason (optional): Passed to the ``abort`` of the sink.
 
         Returns:
-            :obj:`asyncio.Future`: Done once the sink is aborted.
+            :obj:`asyncio.Future`: Done once the sink is aborted, or right away for a closed or errored stream. It
+            fails with :obj:`TypeError` if the stream is locked.
         """
         if self.locked:
             return _rejected(TypeError('The stream is locked'))
@@ -1129,10 +1255,12 @@ class WritableStream(Generic[_W_contra]):
 
 
 class WritableStreamDefaultWriter(Generic[_W_contra]):
-    """Writes chunks to a stream, which it locks until :meth:`release_lock`.
+    """Writes chunks to a stream, locking it until :meth:`release_lock`.
+
+    See :mdn:`WritableStreamDefaultWriter`.
 
     Args:
-        stream (:obj:`WritableStream`): The stream.
+        stream (:obj:`WritableStream`): The stream to lock.
 
     Raises:
         TypeError: If the stream is locked.
@@ -1158,17 +1286,29 @@ class WritableStreamDefaultWriter(Generic[_W_contra]):
 
     @property
     def closed(self) -> asyncio.Future[None]:
-        """:obj:`asyncio.Future`: Done once the stream is closed, failed if it errors or the lock is released."""
+        """:obj:`asyncio.Future`: Done once the stream closes. It fails if the stream errors or the lock is released.
+
+        See :mdn:`WritableStreamDefaultWriter/closed`.
+        """
         return self._closed
 
     @property
     def ready(self) -> asyncio.Future[None]:
-        """:obj:`asyncio.Future`: Done when the stream can take a chunk without queuing it beyond its limit."""
+        """:obj:`asyncio.Future`: Done while the queue is below its high water mark.
+
+        Under backpressure it's replaced by a pending future. It fails if the stream errors or the lock is released.
+
+        See :mdn:`WritableStreamDefaultWriter/ready`.
+        """
         return self._ready
 
     @property
     def desired_size(self) -> float | None:
-        """:obj:`float`, optional: How many chunks can be written until the queue is full.
+        """:obj:`float`, optional: The room left in the queue before backpressure.
+
+        It's 0 once the stream is closed and :obj:`None` once it's errored or erroring.
+
+        See :mdn:`WritableStreamDefaultWriter/desiredSize`.
 
         Raises:
             TypeError: If the writer is released.
@@ -1184,11 +1324,16 @@ class WritableStreamDefaultWriter(Generic[_W_contra]):
         return stream._controller._desired_size()
 
     def write(self, chunk: _W_contra | None = None) -> asyncio.Future[None]:
-        """Writes a chunk.
+        """Queues a chunk for the ``write`` of the sink.
+
+        See :mdn:`WritableStreamDefaultWriter/write`.
+
+        Args:
+            chunk: The chunk.
 
         Returns:
-            :obj:`asyncio.Future`: Done once the sink took it, failed if it didn't, or if the size of the chunk
-            errored the stream.
+            :obj:`asyncio.Future`: Done once the sink wrote the chunk. It fails with the error of the sink or the
+            stream, or with :obj:`TypeError` if the stream is closing or the writer is released.
         """
         stream = self._stream
         if stream is None:
@@ -1202,19 +1347,41 @@ class WritableStreamDefaultWriter(Generic[_W_contra]):
         return future
 
     def close(self) -> asyncio.Future[None]:
-        """Closes the stream (see :meth:`WritableStream.close`)."""
+        """Closes the stream, as :meth:`WritableStream.close` does, while keeping the lock.
+
+        See :mdn:`WritableStreamDefaultWriter/close`.
+
+        Returns:
+            :obj:`asyncio.Future`: Done once the sink is closed. It fails with :obj:`TypeError` once the writer is
+            released.
+        """
         if self._stream is None:
             return _rejected(TypeError('The writer is released'))
         return self._stream._close()
 
     def abort(self, reason: object = None) -> asyncio.Future[None]:
-        """Aborts the stream (see :meth:`WritableStream.abort`)."""
+        """Aborts the stream, as :meth:`WritableStream.abort` does, while keeping the lock.
+
+        See :mdn:`WritableStreamDefaultWriter/abort`.
+
+        Args:
+            reason (optional): Passed to the ``abort`` of the sink.
+
+        Returns:
+            :obj:`asyncio.Future`: Done once the sink is aborted. It fails with :obj:`TypeError` once the writer is
+            released.
+        """
         if self._stream is None:
             return _rejected(TypeError('The writer is released'))
         return self._stream._abort(reason)
 
     def release_lock(self) -> None:
-        """Releases the stream."""
+        """Unlocks the stream. :attr:`ready` and :attr:`closed` fail with :obj:`TypeError`.
+
+        Writes already queued go on. It does nothing if the writer is already released.
+
+        See :mdn:`WritableStreamDefaultWriter/releaseLock`.
+        """
         stream = self._stream
         if stream is None:
             return
@@ -1231,28 +1398,55 @@ class WritableStreamDefaultWriter(Generic[_W_contra]):
 
 
 class TransformStreamDefaultController(Generic[_T, _O]):
-    """Lets a transformer enqueue chunks to the readable side, error or terminate its stream."""
+    """Given to a transformer to enqueue output chunks, error the stream or terminate it.
+
+    See :mdn:`TransformStreamDefaultController`.
+    """
 
     def __init__(self, stream: TransformStream[_T, _O]) -> None:
         self._stream = stream
 
     @property
     def desired_size(self) -> float | None:
-        """:obj:`float`, optional: The desired size of the readable side."""
+        """:obj:`float`, optional: The room left in the queue of the readable side.
+
+        It matches :attr:`ReadableStreamDefaultController.desired_size` of that side.
+
+        See :mdn:`TransformStreamDefaultController/desiredSize`.
+        """
         return self._stream._readable._controller.desired_size
 
     def enqueue(self, chunk: _O | None = None) -> None:
-        """Enqueues a chunk to the readable side."""
+        """Adds an output chunk to the readable side.
+
+        See :mdn:`TransformStreamDefaultController/enqueue`.
+
+        Args:
+            chunk: The chunk.
+
+        Raises:
+            TypeError: If the readable side is closed or closing.
+            webrtc.InvalidRangeError: If the size of the chunk isn't a finite non-negative number.
+        """
         self._stream._readable._controller.enqueue(chunk)
 
     def error(self, reason: object = None) -> None:
-        """Errors both sides."""
+        """Errors both sides of the stream.
+
+        See :mdn:`TransformStreamDefaultController/error`.
+
+        Args:
+            reason (optional): The error. A value that isn't an exception is raised as a :obj:`TypeError`.
+        """
         error = _error_of(reason)
         self._stream._readable._controller.error(error)
         self._stream._writable._controller.error(error)
 
     def terminate(self) -> None:
-        """Closes the readable side and errors the writable one."""
+        """Ends the stream. Readers get the end of the stream and writers get a :obj:`TypeError`.
+
+        See :mdn:`TransformStreamDefaultController/terminate`.
+        """
         controller = self._stream._readable._controller
         if not controller._close_requested and self._stream._readable._state == 'readable':
             controller.close()
@@ -1263,18 +1457,19 @@ class TransformStreamDefaultController(Generic[_T, _O]):
 
 
 class TransformStream(Generic[_T, _O]):
-    """A pair of streams where what's written is transformed and read.
+    """A writable side and a readable side. Chunks written to one are transformed and read from the other.
 
-    See https://developer.mozilla.org/en-US/docs/Web/API/TransformStream.
+    See :mdn:`TransformStream`.
 
     Args:
-        transformer (optional): An object with optional ``start(controller)``, ``transform(chunk, controller)`` and
-            ``flush(controller)`` methods (or a :obj:`dict` of them), which may be coroutine functions. Chunks pass
-            unchanged without ``transform``.
-        writable_strategy (:obj:`QueuingStrategy`, optional): How the queue of the writable side is counted, a chunk
-            each up to 1 by default.
-        readable_strategy (:obj:`QueuingStrategy`, optional): How the queue of the readable side is counted, a chunk
-            each up to 0 by default.
+        transformer (optional): An object or a :obj:`dict` with optional ``start(controller)``,
+            ``transform(chunk, controller)`` and ``flush(controller)`` callables. Each can be a plain or a coroutine
+            function, and they get a :obj:`TransformStreamDefaultController`. Without ``transform``, chunks pass
+            through unchanged.
+        writable_strategy (:obj:`QueuingStrategy`, optional): How the queue of the writable side is measured. The
+            default high water mark is 1.
+        readable_strategy (:obj:`QueuingStrategy`, optional): How the queue of the readable side is measured. The
+            default high water mark is 0.
 
     Raises:
         webrtc.InvalidRangeError: If the high water mark of a strategy is negative or NaN.
@@ -1302,12 +1497,18 @@ class TransformStream(Generic[_T, _O]):
 
     @property
     def readable(self) -> ReadableStream[_O]:
-        """:obj:`ReadableStream`: The transformed chunks."""
+        """:obj:`ReadableStream`: The side to read the output chunks from.
+
+        See :mdn:`TransformStream/readable`.
+        """
         return self._readable
 
     @property
     def writable(self) -> WritableStream[_T]:
-        """:obj:`WritableStream`: The chunks to transform."""
+        """:obj:`WritableStream`: The side to write the input chunks to.
+
+        See :mdn:`TransformStream/writable`.
+        """
         return self._writable
 
 

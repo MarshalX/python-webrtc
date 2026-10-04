@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""The base of the WebIDL dictionaries, which methods take as typed models only."""
+"""The base class of the WebIDL dictionaries. Methods take them as typed dataclasses in place of plain dicts."""
 
 from __future__ import annotations
 
@@ -23,7 +23,11 @@ if TYPE_CHECKING:
 
 
 class Dictionary:
-    """A dataclass of a WebIDL dictionary, which can be created from its JSON form with :meth:`from_json`."""
+    """The base class of the dataclasses of WebIDL dictionaries.
+
+    Methods take these dataclasses in place of plain dicts. :meth:`from_json` and :meth:`to_json` convert them to and
+    from the JSON form that is exchanged with the remote peer.
+    """
 
     # members holding dictionaries, or lists of them, whose JSON forms from_json converts too
     _dictionaries: ClassVar[Mapping[str, type[Dictionary]]] = {}
@@ -33,9 +37,9 @@ class Dictionary:
 
     @classmethod
     def from_json(cls, value: Mapping[str, object]) -> Self:
-        """Creates the dictionary from its JSON form, like a message from the remote peer.
+        """Creates the dictionary from its JSON form, like one received from the remote peer.
 
-        Keys are the camelCase names of the specification or the snake_case ones, unknown keys are ignored, and
+        Keys can be the camelCase names of the specification or the snake_case ones. Unknown keys are ignored, and
         nested dictionaries are converted too.
 
         Args:
@@ -57,9 +61,9 @@ class Dictionary:
         return cls(**kwargs)
 
     def to_json(self) -> dict[str, object]:
-        """The JSON form of the dictionary, like a message to the remote peer.
+        """Returns the JSON form of the dictionary, like one to send to the remote peer.
 
-        Keys are the camelCase names of the specification, members that are :obj:`None` are left out, enums are
+        Keys are the camelCase names of the specification. Members that are :obj:`None` are left out, enums become
         their values, and nested dictionaries are converted too.
 
         Returns:

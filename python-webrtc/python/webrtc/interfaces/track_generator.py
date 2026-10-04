@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Tracks of media the application writes: VideoTrackGenerator, and MediaStreamTrackGenerator of Chrome."""
+"""Tracks of media the application writes, with VideoTrackGenerator and the non-standard MediaStreamTrackGenerator."""
 
 from __future__ import annotations
 
@@ -79,11 +79,12 @@ class _TrackSink:
 
 
 class VideoTrackGenerator:
-    """A video track of the frames written to a stream.
+    """A video track of the frames the application writes to a stream.
 
-    See https://developer.mozilla.org/en-US/docs/Web/API/VideoTrackGenerator.
+    Each :obj:`webrtc.VideoFrame` written is sent on :attr:`track` and closed. Writing anything else or a closed
+    frame errors :attr:`writable`. Closing or aborting :attr:`writable` ends the track.
 
-    Each frame written is sent on :attr:`track` and closed. Closing or aborting :attr:`writable` ends the track.
+    See :mdn:`VideoTrackGenerator`.
 
     Example::
 
@@ -102,17 +103,28 @@ class VideoTrackGenerator:
 
     @property
     def track(self) -> MediaStreamTrack:
-        """:obj:`webrtc.MediaStreamTrack`: The track of the frames."""
+        """:obj:`webrtc.MediaStreamTrack`: The video track carrying the frames written.
+
+        See :mdn:`VideoTrackGenerator/track`.
+        """
         return self._track
 
     @property
     def writable(self) -> WritableStream:
-        """:obj:`webrtc.WritableStream`: Where to write :obj:`webrtc.VideoFrame` objects."""
+        """:obj:`webrtc.WritableStream`: The stream to write :obj:`webrtc.VideoFrame` objects to.
+
+        See :mdn:`VideoTrackGenerator/writable`.
+        """
         return self._writable
 
     @property
     def muted(self) -> bool:
-        """:obj:`bool`: Whether frames written are dropped, the track being muted meanwhile."""
+        """:obj:`bool`: Whether written frames are dropped. :attr:`track` stays muted while it's :obj:`True`.
+
+        It starts as :obj:`False`.
+
+        See :mdn:`VideoTrackGenerator/muted`.
+        """
         return self._native.muted
 
     @muted.setter
@@ -122,26 +134,31 @@ class VideoTrackGenerator:
 
 @dataclass
 class MediaStreamTrackGeneratorInit(Dictionary):
-    """How to create a :obj:`MediaStreamTrackGenerator`.
+    """The options of a :obj:`MediaStreamTrackGenerator`.
 
     Args:
-        kind (:obj:`webrtc.MediaType`): ``audio`` or ``video``.
+        kind (:obj:`webrtc.MediaType`): The kind of the track, ``'audio'`` or ``'video'``.
     """
 
     kind: MediaType | MediaTypeValue
 
 
 class MediaStreamTrackGenerator(MediaStreamTrack):
-    """A track of the media written to a stream, :obj:`webrtc.VideoFrame` or :obj:`webrtc.AudioData` objects.
+    """A track of the :obj:`webrtc.VideoFrame` or :obj:`webrtc.AudioData` objects the application writes to a stream.
 
-    It's Chrome's API (https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrackGenerator), the only one for
-    audio: for video, :obj:`VideoTrackGenerator` is the standard one.
+    It's non-standard, but it's the only way to generate audio. For video, :obj:`VideoTrackGenerator` is the standard
+    choice. Unlike :obj:`VideoTrackGenerator`, this generator is the track itself.
 
-    Audio is sent in 10 ms frames: samples short of one wait for the next ones written.
+    Each object written is sent and closed. Audio is converted to 16-bit samples and sent in 10 ms frames. Samples
+    that don't fill a frame wait for the next write. Writing the wrong kind of object or a closed one errors
+    :attr:`writable`. So does a sample rate the library can't send, with :obj:`webrtc.NotSupportedError`. Closing or
+    aborting :attr:`writable` ends the track.
+
+    See :mdn:`MediaStreamTrackGenerator`.
 
     Args:
         kind (:obj:`webrtc.MediaType`, :obj:`str` or :obj:`MediaStreamTrackGeneratorInit`): ``'audio'`` or ``'video'``,
-            or the init with it.
+            or an init that holds it.
 
     Raises:
         TypeError: If the kind isn't audio or video.
@@ -160,5 +177,8 @@ class MediaStreamTrackGenerator(MediaStreamTrack):
 
     @property
     def writable(self) -> WritableStream:
-        """:obj:`webrtc.WritableStream`: Where to write the media."""
+        """:obj:`webrtc.WritableStream`: The stream to write :obj:`webrtc.VideoFrame` or :obj:`webrtc.AudioData` to.
+
+        See :mdn:`MediaStreamTrackGenerator/writable`.
+        """
         return self._writable

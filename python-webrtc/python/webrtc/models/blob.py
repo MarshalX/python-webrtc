@@ -5,9 +5,9 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Blob (https://developer.mozilla.org/en-US/docs/Web/API/Blob): immutable bytes with a MIME type.
+"""Immutable bytes with a MIME type.
 
-Like the binary messages of a data channel with a ``binaryType`` of ``'blob'``.
+A data channel delivers binary messages as blobs when its binary type is ``'blob'``.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
     from webrtc.streams import ReadableStream, ReadableStreamDefaultController
 
+#: A part of a new :obj:`Blob`. It can be a :obj:`str`, a bytes-like object or another :obj:`Blob`.
 BlobPart = Union[str, bytes, bytearray, memoryview, 'Blob']
 _T = TypeVar('_T')
 
@@ -62,11 +63,15 @@ def _decode(data: builtins.bytes) -> str:
 
 @dataclass
 class BlobPropertyBag(Dictionary):
-    """How to create a :obj:`Blob`.
+    """The options of a new :obj:`Blob`.
+
+    See :mdn:`Blob/Blob`.
 
     Args:
-        type (:obj:`str`, optional): The MIME type, lowercased; empty if it has characters outside of U+0020-U+007E.
-        endings (:obj:`webrtc.EndingType`, optional): How the line endings of the string parts are written.
+        type (:obj:`str`, optional): The MIME type. The blob lowercases it, or leaves it empty if it has characters
+            outside of U+0020 to U+007E.
+        endings (:obj:`webrtc.EndingType`, optional): How the line endings of the :obj:`str` parts are written.
+            The default is ``'transparent'``, which keeps them as they are.
     """
 
     type: str = ''
@@ -99,8 +104,15 @@ class _Source:
 class Blob:
     """Immutable bytes with a MIME type.
 
+    The bytes are held in memory. ``bytes(blob)`` and ``len(blob)`` give the bytes and their number, and blobs with
+    the same bytes and type are equal. The reading methods return futures that are already done, so they must be
+    called while an event loop runs.
+
+    See :mdn:`Blob`.
+
     Args:
-        blob_parts (iterable, optional): Strings (encoded as UTF-8), bytes-like objects and blobs, concatenated.
+        blob_parts (iterable of :obj:`BlobPart`, optional): The parts, concatenated. A :obj:`str` is encoded as UTF-8,
+            with lone surrogates replaced by U+FFFD.
         options (:obj:`BlobPropertyBag`, optional): The MIME type, and how the line endings of strings are written.
     """
 
@@ -123,21 +135,33 @@ class Blob:
 
     @property
     def size(self) -> int:
-        """:obj:`int`: The number of bytes."""
+        """:obj:`int`: The number of bytes.
+
+        See :mdn:`Blob/size`.
+        """
         return len(self._bytes)
 
     @property
     def type(self) -> str:
-        """:obj:`str`: The MIME type, empty if unknown."""
+        """:obj:`str`: The MIME type in lowercase, empty if unknown.
+
+        See :mdn:`Blob/type`.
+        """
         return self._type
 
     def slice(self, start: int = 0, end: int | None = None, content_type: str = '') -> Blob:
-        """Returns a blob of a range of the bytes.
+        """Returns a new blob with a range of the bytes. Indices out of range are clamped.
+
+        See :mdn:`Blob/slice`.
 
         Args:
-            start (:obj:`int`, optional): The first byte, counted from the end if negative.
-            end (:obj:`int`, optional): The byte after the last one, counted from the end if negative.
-            content_type (:obj:`str`, optional): The MIME type of the new blob.
+            start (:obj:`int`, optional): The index of the first byte, counted from the end if negative.
+            end (:obj:`int`, optional): The index after the last byte, counted from the end if negative. The end of
+                the blob by default.
+            content_type (:obj:`str`, optional): The MIME type of the new blob, empty by default.
+
+        Returns:
+            :obj:`Blob`: The new blob.
         """
         size = len(self._bytes)
         start = max(size + start, 0) if start < 0 else min(start, size)
@@ -145,23 +169,53 @@ class Blob:
         return Blob([self._bytes[start : max(start, end)]], BlobPropertyBag(type=content_type))
 
     def array_buffer(self) -> asyncio.Future[bytes]:
-        """Returns a future of the bytes, as :obj:`bytes`."""
+        """Reads the bytes. They come as :obj:`bytes`, where the specification gives an array buffer.
+
+        See :mdn:`Blob/arrayBuffer`.
+
+        Returns:
+            :obj:`asyncio.Future` of :obj:`bytes`: The bytes, already done.
+        """
         return _done(self._bytes)
 
     def bytes(self) -> asyncio.Future[bytes]:
-        """Returns a future of the bytes, as :obj:`bytes`."""
+        """Reads the bytes. They come as :obj:`bytes`, where the specification gives a byte array.
+
+        See :mdn:`Blob/bytes`.
+
+        Returns:
+            :obj:`asyncio.Future` of :obj:`bytes`: The bytes, already done.
+        """
         return _done(self._bytes)
 
     def text(self) -> asyncio.Future[str]:
-        """Returns a future of the bytes decoded as UTF-8."""
+        """Reads the bytes decoded as UTF-8. A leading BOM is dropped, and invalid bytes become U+FFFD.
+
+        See :mdn:`Blob/text`.
+
+        Returns:
+            :obj:`asyncio.Future` of :obj:`str`: The text, already done.
+        """
         return _done(_decode(self._bytes))
 
     def stream(self) -> ReadableStream[builtins.bytes]:
-        """Returns a :obj:`webrtc.ReadableStream` of the bytes, in :obj:`bytes` chunks."""
+        """Returns a stream of the bytes, in :obj:`bytes` chunks of up to 64 KiB.
+
+        See :mdn:`Blob/stream`.
+
+        Returns:
+            :obj:`webrtc.ReadableStream` of :obj:`bytes`: The stream.
+        """
         return webrtc.ReadableStream(_Source(self._bytes, text=False))
 
     def text_stream(self) -> ReadableStream[str]:
-        """Returns a :obj:`webrtc.ReadableStream` of the bytes decoded as UTF-8, in :obj:`str` chunks."""
+        """Returns a stream of :obj:`str` chunks, decoded from the bytes the same way :meth:`text` does.
+
+        See :mdn:`Blob/textStream`.
+
+        Returns:
+            :obj:`webrtc.ReadableStream` of :obj:`str`: The stream.
+        """
         return webrtc.ReadableStream(_Source(self._bytes, text=True))
 
     # the bytes() method hides the builtin in the class

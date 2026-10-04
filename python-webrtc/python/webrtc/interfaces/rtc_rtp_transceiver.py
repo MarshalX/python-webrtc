@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""RTCRtpTransceiver of WebRTC."""
+"""The pair of a sender and a receiver that share a media section of the SDP."""
 
 from __future__ import annotations
 
@@ -14,44 +14,57 @@ from webrtc import InvalidModificationError, RTCRtpCodec, RTCRtpHeaderExtensionC
 
 
 class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
-    """A permanent pair of an :obj:`webrtc.RTCRtpSender` and an :obj:`webrtc.RTCRtpReceiver`, with shared state."""
+    """A sender and a receiver that share one media section of the SDP, with its direction and codecs.
+
+    Created by :meth:`webrtc.RTCPeerConnection.add_transceiver`, :meth:`webrtc.RTCPeerConnection.add_track` and
+    remote offers, and listed by :meth:`webrtc.RTCPeerConnection.get_transceivers`. See :mdn:`RTCRtpTransceiver`.
+    """
 
     _class = wrtc.RTCRtpTransceiver
 
     @property
     def mid(self) -> str | None:
-        """A :obj:`str` which uniquely identifies the pairing of source and destination of the transceiver's stream.
+        """:obj:`str`, optional: The media ID (``a=mid``) of the media section of the transceiver.
 
-        Its value is taken from the media ID of the SDP m-line. This value is :obj:`None` if negotiation has not
-        completed.
+        :obj:`None` until a description with the section is set. See :mdn:`RTCRtpTransceiver/mid`.
         """
         return self._native_obj.mid
 
     @property
     def receiver(self) -> webrtc.RTCRtpReceiver:
-        """:obj:`webrtc.RTCRtpReceiver`: Receives and decodes the incoming media of the :attr:`mid`."""
+        """:obj:`webrtc.RTCRtpReceiver`: Receives and decodes the media of the transceiver. It's always the same object.
+
+        See :mdn:`RTCRtpTransceiver/receiver`.
+        """
         return webrtc.RTCRtpReceiver._wrap(self._native_obj.receiver)
 
     @property
     def sender(self) -> webrtc.RTCRtpSender:
-        """:obj:`webrtc.RTCRtpSender`: Encodes and sends the media of the :attr:`mid`."""
+        """:obj:`webrtc.RTCRtpSender`: Encodes and sends the media of the transceiver. It's always the same object.
+
+        See :mdn:`RTCRtpTransceiver/sender`.
+        """
         return webrtc.RTCRtpSender._wrap(self._native_obj.sender)
 
     @property
     def stopped(self) -> bool:
-        """:obj:`bool`: Whether both the :attr:`sender` and the :attr:`receiver` stopped for good.
+        """:obj:`bool`: Whether the transceiver was stopped, by :meth:`stop` or by a negotiation.
+
+        See :mdn:`RTCRtpTransceiver/stopped`.
 
         Warning:
-            Deprecated: compare :attr:`current_direction` with :obj:`webrtc.RTCRtpTransceiverDirection.stopped`.
+            Deprecated. Compare :attr:`current_direction` with :obj:`webrtc.RTCRtpTransceiverDirection.stopped`.
         """
         return self._native_obj.stopped
 
     @property
     def direction(self) -> webrtc.RTCRtpTransceiverDirection:
-        """A member of :obj:`webrtc.RTCRtpTransceiverDirection` enum, indicating the transceiver's preferred direction.
+        """:obj:`webrtc.RTCRtpTransceiverDirection`: The preferred direction, which the next negotiation offers.
 
-        Note:
-            The transceiver's current direction is indicated by the :attr:`currentDirection` property.
+        It can be set with a member or its value. A change leads to a ``negotiationneeded`` event, and the negotiated
+        direction is :attr:`current_direction`. Setting it on a stopped transceiver raises
+        :obj:`webrtc.InvalidStateError`. Setting it to ``stopped`` raises :obj:`webrtc.InvalidAccessError`, so use
+        :meth:`stop` for that. See :mdn:`RTCRtpTransceiver/direction`.
         """
         return self._native_obj.direction
 
@@ -63,11 +76,20 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
 
     @property
     def current_direction(self) -> webrtc.RTCRtpTransceiverDirection | None:
-        """:obj:`webrtc.RTCRtpTransceiverDirection`, optional: The negotiated direction of the transceiver."""
+        """:obj:`webrtc.RTCRtpTransceiverDirection`, optional: The direction of the last negotiation.
+
+        :obj:`None` until the transceiver is negotiated. See :mdn:`RTCRtpTransceiver/currentDirection`.
+        """
         return self._native_obj.currentDirection
 
     def stop(self) -> None:
-        """Stops the transceiver for good, its :obj:`webrtc.RTCRtpSender` and its :obj:`webrtc.RTCRtpReceiver`."""
+        """Stops the transceiver for good. Its sender stops sending and the track of its receiver ends.
+
+        The next negotiation removes its media section. See :mdn:`RTCRtpTransceiver/stop`.
+
+        Raises:
+            webrtc.InvalidStateError: If the connection is closed.
+        """
         self._native_obj.stop()
 
     @property
@@ -77,6 +99,9 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
 
     def set_codec_preferences(self, codecs: list[webrtc.RTCRtpCodec]) -> None:
         """Sets the codecs to negotiate, in order of preference, from the next negotiation.
+
+        Codecs are matched to the supported ones by MIME type, clock rate, channels and SDP format parameters.
+        See :mdn:`RTCRtpTransceiver/setCodecPreferences`.
 
         Args:
             codecs (:obj:`list` of :obj:`webrtc.RTCRtpCodec`): Codecs from the capabilities of
@@ -105,8 +130,8 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
         """Returns the header extensions offered or accepted in the next negotiation.
 
         Returns:
-            :obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionCapability`: The extensions, with the direction they're
-            negotiated in, :attr:`webrtc.RTCRtpTransceiverDirection.stopped` for the ones that aren't.
+            :obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionCapability`: The extensions and the direction each one
+            is negotiated in. The ones that aren't negotiated have :attr:`webrtc.RTCRtpTransceiverDirection.stopped`.
         """
         return [
             RTCRtpHeaderExtensionCapability._from_native(e) for e in self._native_obj.getHeaderExtensionsToNegotiate()
@@ -142,8 +167,8 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
         """Returns the header extensions negotiated last, and their directions.
 
         Returns:
-            :obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionCapability`: Every extension that can be negotiated,
-            :attr:`webrtc.RTCRtpTransceiverDirection.stopped` for the ones that weren't.
+            :obj:`list` of :obj:`webrtc.RTCRtpHeaderExtensionCapability`: Every extension that can be negotiated.
+            The ones that weren't negotiated have :attr:`webrtc.RTCRtpTransceiverDirection.stopped`.
         """
         return [
             RTCRtpHeaderExtensionCapability._from_native(e) for e in self._native_obj.getNegotiatedHeaderExtensions()

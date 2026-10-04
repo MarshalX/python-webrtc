@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""RTCIceTransport of WebRTC, standalone too, as in WebRTC Extensions."""
+"""The ICE transport of a connection, which can also be used on its own."""
 
 from __future__ import annotations
 
@@ -55,18 +55,22 @@ _R = TypeVar('_R')
 
 
 class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransportEvent]):
-    """The ICE transport a :obj:`webrtc.RTCDtlsTransport` of a connection runs over, or a standalone transport.
+    """The ICE transport a :obj:`webrtc.RTCDtlsTransport` of a connection runs over, or a standalone one.
 
-    A standalone one (``RTCIceTransport()``) connects after :meth:`gather`, :meth:`start` and
-    :meth:`add_remote_candidate`.
+    A standalone transport (``RTCIceTransport()``, from WebRTC Extensions) is driven by hand. Call :meth:`gather`,
+    :meth:`start` and :meth:`add_remote_candidate`, then :meth:`stop` when done. Those methods raise for a
+    transport of a connection. Its events go to the event loop it was created on.
 
-    Events (see :meth:`on`):
-        ``statechange`` (:obj:`webrtc.Event`): :attr:`state` changed.
-        ``gatheringstatechange`` (:obj:`webrtc.Event`): :attr:`gathering_state` changed.
-        ``selectedcandidatepairchange`` (:obj:`webrtc.Event`): :meth:`get_selected_candidate_pair` changed.
-        ``icecandidate`` (:obj:`webrtc.RTCPeerConnectionIceEvent`): A standalone transport gathered a candidate,
-        or :obj:`None` once it gathered them all.
-        ``error`` (:obj:`webrtc.Event`): A standalone transport failed, which libwebrtc doesn't report.
+    See :mdn:`RTCIceTransport`.
+
+    Events:
+        statechange (:obj:`webrtc.Event`): :attr:`state` changed.
+        gatheringstatechange (:obj:`webrtc.Event`): :attr:`gathering_state` changed.
+        selectedcandidatepairchange (:obj:`webrtc.Event`): :meth:`get_selected_candidate_pair` changed.
+        icecandidate (:obj:`webrtc.RTCPeerConnectionIceEvent`): A standalone transport gathered a candidate,
+            or :obj:`None` once it gathered them all.
+        error (:obj:`webrtc.Event`): A standalone transport failed. It never fires, because the native ICE
+            agent doesn't report it.
     """
 
     _class = wrtc.RTCIceTransport
@@ -88,7 +92,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
     ) -> Callable[[RTCPeerConnectionIceEvent], _R]: ...
 
     def on(self, name: _IceTransportEvent, handler: AnyHandler | None = None) -> object:
-        """See :meth:`webrtc.UniformEventTarget.on`."""
+        """Adds a handler of an event, called each time. See :meth:`webrtc.UniformEventTarget.on`."""
         return self._add(name, handler, once=False)
 
     @overload
@@ -108,7 +112,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
     ) -> Callable[[RTCPeerConnectionIceEvent], _R]: ...
 
     def once(self, name: _IceTransportEvent, handler: AnyHandler | None = None) -> object:
-        """See :meth:`webrtc.UniformEventTarget.once`."""
+        """Adds a handler of an event, called once. See :meth:`webrtc.UniformEventTarget.once`."""
         return self._add(name, handler, once=True)
 
     def __init__(self) -> None:
@@ -161,7 +165,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
             raise InvalidStateError(msg)
 
     def gather(self, options: webrtc.RTCIceGatherOptions | None = None) -> None:
-        """Gathers the candidates of a standalone transport, sent in ``icecandidate`` events.
+        """Starts gathering the local candidates of a standalone transport, each sent in an ``icecandidate`` event.
 
         Args:
             options (:obj:`webrtc.RTCIceGatherOptions`, optional): The policy and the ICE servers to gather with.
@@ -170,6 +174,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
             webrtc.InvalidStateError: If it's stopped, gathering already, or belongs to a connection.
             webrtc.InvalidSyntaxError: If an ICE server URL is invalid.
             webrtc.InvalidAccessError: If a TURN server has no credentials.
+            webrtc.NotSupportedError: If a TURN server has an OAuth credential.
             TypeError: If the policy isn't a value of :obj:`webrtc.RTCIceTransportPolicy`.
         """
         self._check_open('gather')
@@ -185,15 +190,16 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
         remote_parameters: webrtc.RTCIceParameters | None = None,
         role: webrtc.RTCIceRole | str = 'controlled',
     ) -> None:
-        """Starts connecting a standalone transport to the remote agent, with the candidates added, or later.
+        """Starts connectivity checks of a standalone transport with the remote agent.
 
-        Remote parameters that differ from the ones given before remove the remote candidates.
+        Checks use the remote candidates added so far and any added later. Calling it again with other remote
+        parameters (an ICE restart of the remote agent) drops the remote candidates added before.
 
         Args:
             remote_parameters (:obj:`webrtc.RTCIceParameters`, optional): The username fragment and the password of
-                the remote agent, which are required.
-            role (:obj:`webrtc.RTCIceRole`, optional): Controlling or controlled (the default). When both agents take
-                the same role, one of them switches.
+                the remote agent. Both are required, even though the argument has a default.
+            role (:obj:`webrtc.RTCIceRole`, optional): Controlling or controlled (the default). If both agents pick
+                the same role, the conflict is resolved and one of them switches.
 
         Raises:
             webrtc.InvalidStateError: If it's stopped, started with another role, or belongs to a connection.
@@ -219,9 +225,11 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
     ) -> None:
         """Adds a candidate of the remote agent to a standalone transport.
 
+        The object passed is the one :meth:`get_remote_candidates` returns for it.
+
         Args:
             remote_candidate (:obj:`webrtc.RTCIceCandidate` or :obj:`webrtc.RTCIceCandidateInit`, optional): The
-                candidate, which needs ``sdp_mid`` or ``sdp_m_line_index``.
+                candidate, which needs ``sdp_mid`` or ``sdp_m_line_index`` to be set.
 
         Raises:
             TypeError: If the candidate has neither ``sdp_mid`` nor ``sdp_m_line_index``.
@@ -241,7 +249,9 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
         self._remember(candidate)
 
     def stop(self) -> None:
-        """Stops a standalone transport: it's closed, without a ``statechange`` event.
+        """Stops a standalone transport for good.
+
+        Its :attr:`state` becomes ``closed`` without a ``statechange`` event.
 
         Raises:
             webrtc.InvalidStateError: If it belongs to a connection.
@@ -252,8 +262,13 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
     def get_selected_candidate_pair(self) -> webrtc.RTCIceCandidatePair | None:
         """Returns the local and the remote candidate the transport sends and receives with.
 
+        A remote peer-reflexive candidate comes from connectivity checks. It has an empty ``candidate`` and no
+        address.
+
+        See :mdn:`RTCIceTransport/getSelectedCandidatePair`.
+
         Returns:
-            :obj:`webrtc.RTCIceCandidatePair`, optional: The pair, :obj:`None` until one is selected.
+            :obj:`webrtc.RTCIceCandidatePair`, optional: The pair, or :obj:`None` until one is selected.
         """
         pair = self._native_obj.getSelectedCandidatePair()
         if pair is None:
@@ -266,7 +281,12 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
         return RTCIceCandidatePair(RTCIceCandidate(**local.kwargs()), remote_candidate)
 
     def get_local_candidates(self) -> list[webrtc.RTCIceCandidate]:
-        """Returns the candidates gathered for the transport, sent in ``icecandidate`` events of the connection.
+        """Returns the local candidates gathered for the transport so far.
+
+        Each call returns the same objects. For a standalone transport, they're the ones of its ``icecandidate``
+        events.
+
+        See :mdn:`RTCIceTransport/getLocalCandidates`.
 
         Returns:
             :obj:`list` of :obj:`webrtc.RTCIceCandidate`: The candidates.
@@ -274,9 +294,12 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
         return [self._candidate_of(c) for c in self._native_obj.getLocalCandidates()]
 
     def get_remote_candidates(self) -> list[webrtc.RTCIceCandidate]:
-        """Returns the candidates the remote peer signaled for the transport, but not peer-reflexive ones.
+        """Returns the candidates the remote peer signaled for the transport, without peer-reflexive ones.
 
-        They're signaled in its description or with :meth:`webrtc.RTCPeerConnection.add_ice_candidate`.
+        They come from its description, :meth:`webrtc.RTCPeerConnection.add_ice_candidate` or
+        :meth:`add_remote_candidate`.
+
+        See :mdn:`RTCIceTransport/getRemoteCandidates`.
 
         Returns:
             :obj:`list` of :obj:`webrtc.RTCIceCandidate`: The candidates.
@@ -284,38 +307,50 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
         return [self._candidate_of(c) for c in self._native_obj.getRemoteCandidates()]
 
     def get_local_parameters(self) -> webrtc.RTCIceParameters | None:
-        """Returns the ICE parameters of the transport in the local description.
+        """Returns the local username fragment and password of the transport, with ``ice_lite`` :obj:`False`.
+
+        See :mdn:`RTCIceTransport/getLocalParameters`.
 
         Returns:
-            :obj:`webrtc.RTCIceParameters`, optional: The parameters, :obj:`None` without a local description.
+            :obj:`webrtc.RTCIceParameters`, optional: The parameters, or :obj:`None` without a local description.
         """
         parameters = self._native_obj.getLocalParameters()
         return RTCIceParameters(*parameters, ice_lite=False) if parameters is not None else None
 
     def get_remote_parameters(self) -> webrtc.RTCIceParameters | None:
-        """Returns the ICE parameters of the transport in the remote description.
+        """Returns the remote username fragment and password of the transport, with ``ice_lite`` unknown.
+
+        See :mdn:`RTCIceTransport/getRemoteParameters`.
 
         Returns:
-            :obj:`webrtc.RTCIceParameters`, optional: The parameters, :obj:`None` without a remote description.
+            :obj:`webrtc.RTCIceParameters`, optional: The parameters, or :obj:`None` without a remote description.
         """
         parameters = self._native_obj.getRemoteParameters()
         return RTCIceParameters(*parameters) if parameters is not None else None
 
     @property
     def component(self) -> webrtc.RTCIceComponent:
-        """:obj:`webrtc.RTCIceComponent`: The ICE component being used by the transport, ``rtp`` or ``rtcp``."""
+        """:obj:`webrtc.RTCIceComponent`: Whether the transport carries RTP or RTCP. It's ``rtp`` when they're muxed.
+
+        See :mdn:`RTCIceTransport/component`.
+        """
         return self._native_obj.component
 
     @property
     def gathering_state(self) -> webrtc.RTCIceGathererState:
-        """:obj:`webrtc.RTCIceGathererState`: The gathering state of the ICE agent."""
+        """:obj:`webrtc.RTCIceGathererState`: Whether local candidates are being gathered, or all were.
+
+        See :mdn:`RTCIceTransport/gatheringState`.
+        """
         return self._native_obj.gatheringState
 
     @property
     def role(self) -> webrtc.RTCIceRole | None:
-        """:obj:`webrtc.RTCIceRole`, optional: Whether the ICE agent decides the candidate pair to use.
+        """:obj:`webrtc.RTCIceRole`, optional: Whether this agent is the controlling one, which picks the pair.
 
-        :obj:`None` for a standalone transport that isn't started.
+        :obj:`None` for a standalone transport not started yet.
+
+        See :mdn:`RTCIceTransport/role`.
         """
         role = self._native_obj.role
         if role == RTCIceRole.unknown and self._native_obj._standalone:
@@ -324,10 +359,9 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
 
     @property
     def state(self) -> webrtc.RTCIceTransportState:
-        """:obj:`webrtc.RTCIceTransportState`: The current state of the ICE agent.
+        """:obj:`webrtc.RTCIceTransportState`: Whether the transport is checking, connected, failed or closed.
 
-        Note:
-            For more details of values: https://developer.mozilla.org/en-US/docs/Web/API/RTCIceTransportState
+        See :mdn:`RTCIceTransport/state`.
         """
         return self._native_obj.state
 

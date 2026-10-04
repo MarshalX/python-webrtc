@@ -27,7 +27,7 @@ Writes received video and audio to raw files.
 :link: janus_streaming
 :link-type: doc
 
-Watches a public stream: video as colored characters, audio on your speakers.
+Watches a public stream, with the video as colored characters and the audio on your speakers.
 :::
 
 :::{grid-item-card} {octicon}`unmute;1em;sd-mr-1` Voice chat with OpenAI GPT-Live

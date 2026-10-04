@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Event objects passed to the handlers registered with ``on()`` (see :obj:`webrtc.utils.events.EventTarget`)."""
+"""The event objects that :obj:`webrtc.EventTarget` handlers are called with, and their init dictionaries."""
 
 from __future__ import annotations
 
@@ -24,13 +24,17 @@ if TYPE_CHECKING:
 
 
 class Event:
-    """An event of a WebRTC object.
+    """An event of a WebRTC object. Events that carry nothing but their name are of this class.
+
+    See :mdn:`Event`.
 
     Args:
         type (:obj:`str`): The name of the event, like ``'signalingstatechange'``.
 
     Attributes:
-        target (:obj:`object`): The object that emitted the event, :obj:`None` until it's dispatched.
+        type (:obj:`str`): The name of the event. See :mdn:`Event/type`.
+        target (:obj:`webrtc.EventTarget`, optional): The object that emitted the event, or :obj:`None` until
+            it's dispatched. See :mdn:`Event/target`.
     """
 
     def __init__(self, type: str) -> None:
@@ -44,11 +48,14 @@ class Event:
 
 @dataclass
 class RTCPeerConnectionIceEventInit(Dictionary):
-    """The members of a :obj:`RTCPeerConnectionIceEvent`.
+    """The members of an :obj:`RTCPeerConnectionIceEvent`.
+
+    See :mdn:`RTCPeerConnectionIceEvent/RTCPeerConnectionIceEvent`.
 
     Args:
-        candidate (:obj:`webrtc.RTCIceCandidate`, optional): The new candidate, :obj:`None` at the end of candidates.
-        url (:obj:`str`, optional): The URL of the STUN or TURN server that gathered the candidate.
+        candidate (:obj:`webrtc.RTCIceCandidate`, optional): The gathered candidate, or :obj:`None` when gathering
+            has ended.
+        url (:obj:`str`, optional): The address of the STUN or TURN server that found the candidate.
     """
 
     candidate: webrtc.RTCIceCandidate | None = None
@@ -56,14 +63,23 @@ class RTCPeerConnectionIceEventInit(Dictionary):
 
 
 class RTCPeerConnectionIceEvent(Event):
-    """An ``icecandidate`` event of :obj:`webrtc.RTCPeerConnection`.
+    """An ``icecandidate`` event of :obj:`webrtc.RTCPeerConnection` or :obj:`webrtc.RTCIceTransport`.
+
+    It's fired when a candidate is gathered and should be sent to the remote peer. The last event has no candidate
+    and marks the end of gathering.
+
+    See :mdn:`RTCPeerConnectionIceEvent`.
 
     Args:
         type (:obj:`str`): The name of the event.
         event_init_dict (:obj:`RTCPeerConnectionIceEventInit`, optional): The members of the event.
     """
 
+    #: :obj:`webrtc.RTCIceCandidate`, optional: The gathered candidate, or :obj:`None` when gathering has ended.
+    #: See :mdn:`RTCPeerConnectionIceEvent/candidate`.
     candidate: webrtc.RTCIceCandidate | None
+    #: :obj:`str`, optional: The address of the STUN or TURN server that found the candidate. Events of an
+    #: :obj:`webrtc.RTCIceTransport` don't set it. See :mdn:`RTCPeerConnectionIceEvent/url`.
     url: str | None
 
     def __init__(self, type: str, event_init_dict: RTCPeerConnectionIceEventInit | None = None) -> None:
@@ -75,14 +91,16 @@ class RTCPeerConnectionIceEvent(Event):
 
 @dataclass
 class RTCPeerConnectionIceErrorEventInit(Dictionary):
-    """The members of a :obj:`RTCPeerConnectionIceErrorEvent`.
+    """The members of an :obj:`RTCPeerConnectionIceErrorEvent`.
+
+    See :mdn:`RTCPeerConnectionIceErrorEvent/RTCPeerConnectionIceErrorEvent`.
 
     Args:
-        error_code (:obj:`int`): The STUN error code, or 701 if the server couldn't be reached.
-        address (:obj:`str`, optional): The local address used to reach the server.
-        port (:obj:`int`, optional): The local port used to reach the server.
+        error_code (:obj:`int`): The STUN or TURN error code, or 701 if the server couldn't be reached.
+        address (:obj:`str`, optional): The local address the server was contacted from.
+        port (:obj:`int`, optional): The local port the server was contacted from.
         url (:obj:`str`, optional): The URL of the server.
-        error_text (:obj:`str`, optional): The STUN reason text.
+        error_text (:obj:`str`, optional): The reason text of the server's response.
     """
 
     error_code: int
@@ -98,17 +116,30 @@ class RTCPeerConnectionIceErrorEventInit(Dictionary):
 
 
 class RTCPeerConnectionIceErrorEvent(Event):
-    """An ``icecandidateerror`` event of :obj:`webrtc.RTCPeerConnection`: a STUN or TURN server failed.
+    """An ``icecandidateerror`` event of :obj:`webrtc.RTCPeerConnection`.
+
+    It's fired when gathering from a STUN or TURN server fails. Gathering goes on with the other servers and
+    interfaces.
+
+    See :mdn:`RTCPeerConnectionIceErrorEvent`.
 
     Args:
         type (:obj:`str`): The name of the event.
         event_init_dict (:obj:`RTCPeerConnectionIceErrorEventInit`): The members of the event.
     """
 
+    #: :obj:`str`, optional: The local address the server was contacted from, or :obj:`None` if it isn't known.
+    #: See :mdn:`RTCPeerConnectionIceErrorEvent/address`.
     address: str | None
+    #: :obj:`int`, optional: The local port the server was contacted from, or :obj:`None` if it isn't known.
+    #: See :mdn:`RTCPeerConnectionIceErrorEvent/port`.
     port: int | None
+    #: :obj:`str`: The URL of the server. See :mdn:`RTCPeerConnectionIceErrorEvent/url`.
     url: str
+    #: :obj:`int`: The STUN or TURN error code, or 701 if the server couldn't be reached.
+    #: See :mdn:`RTCPeerConnectionIceErrorEvent/errorCode`.
     error_code: int
+    #: :obj:`str`: The reason text of the server's response. See :mdn:`RTCPeerConnectionIceErrorEvent/errorText`.
     error_text: str
 
     def __init__(self, type: str, event_init_dict: RTCPeerConnectionIceErrorEventInit) -> None:
@@ -126,14 +157,18 @@ class RTCPeerConnectionIceErrorEvent(Event):
 
 
 class MessageEvent(Event):
-    """A ``message`` event of :obj:`webrtc.RTCDataChannel`.
+    """A ``message`` event of :obj:`webrtc.RTCDataChannel`, fired when a message is received.
+
+    See :mdn:`MessageEvent`.
 
     Args:
         type (:obj:`str`): The name of the event.
-        data (:obj:`str`, :obj:`bytes` or :obj:`webrtc.Blob`): The message, :obj:`bytes` (or a :obj:`webrtc.Blob`
-            with the ``blob`` binary type) if it was sent as binary.
+        data (:obj:`str`, :obj:`bytes` or :obj:`webrtc.Blob`): The message.
     """
 
+    #: :obj:`str`, :obj:`bytes` or :obj:`webrtc.Blob`: The message. It's a :obj:`str` if it was sent as text.
+    #: Otherwise it's :obj:`bytes`, or a :obj:`webrtc.Blob` with the ``blob`` binary type.
+    #: See :mdn:`MessageEvent/data`.
     data: str | bytes | webrtc.Blob
 
     def __init__(self, type: str, data: str | bytes | webrtc.Blob) -> None:
@@ -143,23 +178,28 @@ class MessageEvent(Event):
 
 @dataclass
 class RTCDataChannelEventInit(Dictionary):
-    """The members of a :obj:`RTCDataChannelEvent`.
+    """The members of an :obj:`RTCDataChannelEvent`.
+
+    See :mdn:`RTCDataChannelEvent/RTCDataChannelEvent`.
 
     Args:
-        channel (:obj:`webrtc.RTCDataChannel`): The new channel.
+        channel (:obj:`webrtc.RTCDataChannel`): The channel the remote peer created.
     """
 
     channel: webrtc.RTCDataChannel
 
 
 class RTCDataChannelEvent(Event):
-    """A ``datachannel`` event of :obj:`webrtc.RTCPeerConnection`: the remote peer created a channel.
+    """A ``datachannel`` event of :obj:`webrtc.RTCPeerConnection`, fired when the remote peer creates a channel.
+
+    See :mdn:`RTCDataChannelEvent`.
 
     Args:
         type (:obj:`str`): The name of the event.
         event_init_dict (:obj:`RTCDataChannelEventInit`): The members of the event.
     """
 
+    #: :obj:`webrtc.RTCDataChannel`: The channel the remote peer created. See :mdn:`RTCDataChannelEvent/channel`.
     channel: webrtc.RTCDataChannel
 
     def __init__(self, type: str, event_init_dict: RTCDataChannelEventInit) -> None:
@@ -171,8 +211,10 @@ class RTCDataChannelEvent(Event):
 class MediaStreamTrackEventInit(Dictionary):
     """The members of a :obj:`MediaStreamTrackEvent`.
 
+    See :mdn:`MediaStreamTrackEvent/MediaStreamTrackEvent`.
+
     Args:
-        track (:obj:`webrtc.MediaStreamTrack`): The track added or removed.
+        track (:obj:`webrtc.MediaStreamTrack`): The track added to or removed from the stream.
     """
 
     track: webrtc.MediaStreamTrack
@@ -181,11 +223,17 @@ class MediaStreamTrackEventInit(Dictionary):
 class MediaStreamTrackEvent(Event):
     """An ``addtrack`` or ``removetrack`` event of :obj:`webrtc.MediaStream`.
 
+    It's fired when the remote peer changes the tracks of the stream.
+
+    See :mdn:`MediaStreamTrackEvent`.
+
     Args:
         type (:obj:`str`): The name of the event.
         event_init_dict (:obj:`MediaStreamTrackEventInit`): The members of the event.
     """
 
+    #: :obj:`webrtc.MediaStreamTrack`: The track added to or removed from the stream.
+    #: See :mdn:`MediaStreamTrackEvent/track`.
     track: webrtc.MediaStreamTrack
 
     def __init__(self, type: str, event_init_dict: MediaStreamTrackEventInit) -> None:
@@ -195,23 +243,29 @@ class MediaStreamTrackEvent(Event):
 
 @dataclass
 class RTCDTMFToneChangeEventInit(Dictionary):
-    """The members of a :obj:`RTCDTMFToneChangeEvent`.
+    """The members of an :obj:`RTCDTMFToneChangeEvent`.
+
+    See :mdn:`RTCDTMFToneChangeEvent/RTCDTMFToneChangeEvent`.
 
     Args:
-        tone (:obj:`str`, optional): The tone that started playing, empty when all tones were played.
+        tone (:obj:`str`, optional): The tone that started playing, or empty when the queue ran out.
     """
 
     tone: str = ''
 
 
 class RTCDTMFToneChangeEvent(Event):
-    """A ``tonechange`` event of :obj:`webrtc.RTCDTMFSender`.
+    """A ``tonechange`` event of :obj:`webrtc.RTCDTMFSender`, fired when a tone starts playing or the queue runs out.
+
+    See :mdn:`RTCDTMFToneChangeEvent`.
 
     Args:
         type (:obj:`str`): The name of the event.
         event_init_dict (:obj:`RTCDTMFToneChangeEventInit`, optional): The members of the event.
     """
 
+    #: :obj:`str`: The tone that started playing, like ``'1'``, or ``','`` for a pause. It's empty when the queue
+    #: ran out. See :mdn:`RTCDTMFToneChangeEvent/tone`.
     tone: str
 
     def __init__(self, type: str, event_init_dict: RTCDTMFToneChangeEventInit | None = None) -> None:
@@ -233,12 +287,18 @@ class DeviceChangeEventInit(Dictionary):
 class DeviceChangeEvent(Event):
     """A ``devicechange`` event of :obj:`webrtc.MediaDevices`.
 
+    It's never fired, because the devices of this library are fixed.
+
+    See :mdn:`MediaDevices/devicechange_event`.
+
     Args:
         type (:obj:`str`): The name of the event.
         event_init_dict (:obj:`DeviceChangeEventInit`, optional): The members of the event.
     """
 
+    #: :obj:`list` of :obj:`webrtc.MediaDeviceInfo`: The devices after the change.
     devices: list[webrtc.MediaDeviceInfo]
+    #: :obj:`list` of :obj:`webrtc.MediaDeviceInfo`: The devices the user connected. It's always empty.
     user_inserted_devices: list[webrtc.MediaDeviceInfo]
 
     def __init__(self, type: str, event_init_dict: DeviceChangeEventInit | None = None) -> None:
@@ -252,23 +312,28 @@ class DeviceChangeEvent(Event):
 
 @dataclass
 class RTCErrorEventInit(Dictionary):
-    """The members of a :obj:`RTCErrorEvent`.
+    """The members of an :obj:`RTCErrorEvent`.
+
+    See :mdn:`RTCErrorEvent/RTCErrorEvent`.
 
     Args:
-        error (:obj:`webrtc.RTCError`): The error.
+        error (:obj:`webrtc.RTCError`): The error that occurred.
     """
 
     error: webrtc.RTCError
 
 
 class RTCErrorEvent(Event):
-    """An ``error`` event, carrying the :obj:`webrtc.RTCError` that occurred.
+    """An ``error`` event of :obj:`webrtc.RTCDataChannel` or :obj:`webrtc.RTCDtlsTransport`.
+
+    See :mdn:`RTCErrorEvent`.
 
     Args:
         type (:obj:`str`): The name of the event.
         event_init_dict (:obj:`RTCErrorEventInit`): The members of the event.
     """
 
+    #: :obj:`webrtc.RTCError`: The error that occurred, with its detail. See :mdn:`RTCErrorEvent/error`.
     error: webrtc.RTCError
 
     def __init__(self, type: str, event_init_dict: RTCErrorEventInit) -> None:
@@ -278,13 +343,15 @@ class RTCErrorEvent(Event):
 
 @dataclass
 class RTCTrackEventInit(Dictionary):
-    """The members of a :obj:`RTCTrackEvent`.
+    """The members of an :obj:`RTCTrackEvent`.
+
+    See :mdn:`RTCTrackEvent/RTCTrackEvent`.
 
     Args:
         receiver (:obj:`webrtc.RTCRtpReceiver`): The receiver of the track.
         track (:obj:`webrtc.MediaStreamTrack`): The remote track.
         transceiver (:obj:`webrtc.RTCRtpTransceiver`): The transceiver of the receiver.
-        streams (:obj:`list` of :obj:`webrtc.MediaStream`, optional): The remote streams of the track.
+        streams (:obj:`list` of :obj:`webrtc.MediaStream`, optional): The remote streams the track is in.
     """
 
     receiver: webrtc.RTCRtpReceiver
@@ -294,16 +361,22 @@ class RTCTrackEventInit(Dictionary):
 
 
 class RTCTrackEvent(Event):
-    """A ``track`` event of :obj:`webrtc.RTCPeerConnection`: a remote track was negotiated.
+    """A ``track`` event of :obj:`webrtc.RTCPeerConnection`, fired when a remote description adds a track to receive.
+
+    See :mdn:`RTCTrackEvent`.
 
     Args:
         type (:obj:`str`): The name of the event.
         event_init_dict (:obj:`RTCTrackEventInit`): The members of the event.
     """
 
+    #: :obj:`webrtc.RTCRtpReceiver`: The receiver of the track. See :mdn:`RTCTrackEvent/receiver`.
     receiver: webrtc.RTCRtpReceiver
+    #: :obj:`webrtc.MediaStreamTrack`: The remote track. See :mdn:`RTCTrackEvent/track`.
     track: webrtc.MediaStreamTrack
+    #: :obj:`list` of :obj:`webrtc.MediaStream`: The remote streams the track is in. See :mdn:`RTCTrackEvent/streams`.
     streams: list[webrtc.MediaStream]
+    #: :obj:`webrtc.RTCRtpTransceiver`: The transceiver of the receiver. See :mdn:`RTCTrackEvent/transceiver`.
     transceiver: webrtc.RTCRtpTransceiver
 
     def __init__(self, type: str, event_init_dict: RTCTrackEventInit) -> None:
@@ -317,11 +390,17 @@ class RTCTrackEvent(Event):
 class RTCTransformEvent(Event):
     """The ``rtctransform`` event the worker of a :obj:`webrtc.RTCRtpScriptTransform` is called with.
 
+    The worker is a Python callable that runs on the event loop. There is no worker script.
+
+    See :mdn:`RTCTransformEvent`.
+
     Args:
         type (:obj:`str`): The name of the event.
         transformer (:obj:`webrtc.RTCRtpScriptTransformer`): The transformer of the transform.
     """
 
+    #: :obj:`webrtc.RTCRtpScriptTransformer`: The transformer, with the streams of frames to transform.
+    #: See :mdn:`RTCTransformEvent/transformer`.
     transformer: webrtc.RTCRtpScriptTransformer
 
     def __init__(self, type: str, transformer: webrtc.RTCRtpScriptTransformer) -> None:
@@ -330,13 +409,16 @@ class RTCTransformEvent(Event):
 
 
 class KeyFrameRequestEvent(Event):
-    """A ``keyframerequest`` event of :obj:`webrtc.RTCRtpScriptTransformer`: the receiver asked for a key frame.
+    """A ``keyframerequest`` event of :obj:`webrtc.RTCRtpScriptTransformer`.
+
+    It's fired when the remote peer asks for a key frame.
 
     Args:
         type (:obj:`str`): The name of the event.
-        rid (:obj:`str`, optional): The ``rid`` of the layer the key frame is asked for, :obj:`None` for any.
+        rid (:obj:`str`, optional): The ``rid`` of the layer the key frame is asked for, or :obj:`None` for any layer.
     """
 
+    #: :obj:`str`, optional: The ``rid`` of the layer the key frame is asked for, or :obj:`None` for any layer.
     rid: str | None
 
     def __init__(self, type: str, rid: str | None = None) -> None:
@@ -346,12 +428,13 @@ class KeyFrameRequestEvent(Event):
 
 @dataclass
 class SFrameTransformErrorEventInit(Dictionary):
-    """The members of a :obj:`SFrameTransformErrorEvent`.
+    """The members of an :obj:`SFrameTransformErrorEvent`.
 
     Args:
-        error_type (:obj:`webrtc.SFrameTransformErrorEventType`): Why the frame didn't decrypt, or its value.
+        error_type (:obj:`webrtc.SFrameTransformErrorEventType`): Why the frame didn't decrypt, as a member or its
+            string value.
         frame (:obj:`webrtc.RTCEncodedVideoFrame`, :obj:`webrtc.RTCEncodedAudioFrame` or :obj:`bytes`): The frame
-            that didn't decrypt, the chunk for a buffer written to an :obj:`webrtc.SFrameDecryptorStream`.
+            that didn't decrypt. For a buffer written to an :obj:`webrtc.SFrameDecryptorStream`, it's the chunk.
         key_id (:obj:`int`, optional): The unknown key id, for a ``keyID`` error.
 
     Raises:
@@ -372,7 +455,7 @@ class SFrameTransformErrorEventInit(Dictionary):
 
 
 class SFrameTransformErrorEvent(Event):
-    """An ``error`` event of an SFrame decryptor: a frame didn't decrypt, and was dropped.
+    """An ``error`` event of an SFrame decryptor, fired when a frame doesn't decrypt and is dropped.
 
     It's an event of :obj:`webrtc.RTCRtpSFrameDecryptor` and :obj:`webrtc.SFrameDecryptorStream`.
 
@@ -381,8 +464,12 @@ class SFrameTransformErrorEvent(Event):
         event_init_dict (:obj:`SFrameTransformErrorEventInit`): The members of the event.
     """
 
+    #: :obj:`webrtc.SFrameTransformErrorEventType`: Why the frame didn't decrypt.
     error_type: SFrameTransformErrorEventType
+    #: :obj:`int`, optional: The unknown key id for a ``keyID`` error, or :obj:`None` otherwise.
     key_id: int | None
+    #: :obj:`webrtc.RTCEncodedVideoFrame`, :obj:`webrtc.RTCEncodedAudioFrame` or :obj:`bytes`: The dropped frame.
+    #: For a buffer written to an :obj:`webrtc.SFrameDecryptorStream`, it's the chunk.
     frame: webrtc.RTCEncodedVideoFrame | webrtc.RTCEncodedAudioFrame | bytes
 
     def __init__(self, type: str, event_init_dict: SFrameTransformErrorEventInit) -> None:

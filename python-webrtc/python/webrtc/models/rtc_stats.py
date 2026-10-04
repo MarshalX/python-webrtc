@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""The stats of the WebRTC Statistics specification."""
+"""The stats dictionaries of the WebRTC Statistics specification, and the report that holds them."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 
 def _enum_value(cls: type[enum.Enum], value: object) -> object:
-    """The member of an enum with a value, or the value itself if libwebrtc reports one the enum lacks."""
+    """The member of an enum with a value, or the value itself if the native engine reports one the enum lacks."""
     try:
         return cls(value)
     except ValueError:
@@ -46,13 +46,14 @@ def _enum_value(cls: type[enum.Enum], value: object) -> object:
 
 @dataclass(init=False)
 class RTCStats(Dictionary):
-    """Stats of one object, like an outbound RTP stream: the members every stats dictionary has.
+    """The members every stats dictionary has, and the base of all of them.
 
-    A report has the dictionary of the type of the stats, like :obj:`webrtc.RTCOutboundRtpStreamStats`, or this one
-    for a type the specification doesn't define. Members are keyword-only.
+    A report holds the dictionary of the type of the stats, like :obj:`webrtc.RTCOutboundRtpStreamStats`. It holds
+    this base one for a type this library doesn't model, or when a required member is missing from the stats.
+    Members are keyword-only. A string value that its enum lacks is kept as a plain :obj:`str`.
 
     Args:
-        timestamp (:obj:`float`): When the stats were collected, in milliseconds since the epoch.
+        timestamp (:obj:`float`): When the stats were collected, in milliseconds since the Unix epoch.
         type (:obj:`webrtc.RTCStatsType`): The type of the stats, like ``'outbound-rtp'``.
         id (:obj:`str`): Identifies the stats in its report.
 
@@ -93,13 +94,15 @@ class RTCStats(Dictionary):
 class RTCRtpStreamStats(RTCStats):
     """Stats of an RTP stream.
 
-    Has the members of :obj:`webrtc.RTCStats` too.
+    It has the members of :obj:`webrtc.RTCStats` too.
 
     Args:
-        ssrc (:obj:`int`): The SSRC of the RTP stream.
-        kind (:obj:`str`): The kind of the media, ``'audio'`` or ``'video'``.
-        transport_id (:obj:`str`, optional): The id of the stats of the transport of the stream.
-        codec_id (:obj:`str`, optional): The id of the stats of the codec of the stream.
+        ssrc (:obj:`int`): The SSRC of the RTP stream. See :mdn:`RTCInboundRtpStreamStats/ssrc`.
+        kind (:obj:`str`): The kind of the media, ``'audio'`` or ``'video'``. See :mdn:`RTCInboundRtpStreamStats/kind`.
+        transport_id (:obj:`str`, optional): The id of the stats of the transport of the stream. See
+            :mdn:`RTCInboundRtpStreamStats/transportId`.
+        codec_id (:obj:`str`, optional): The id of the stats of the codec of the stream. See
+            :mdn:`RTCInboundRtpStreamStats/codecId`.
     """
 
     ssrc: int
@@ -117,15 +120,20 @@ class RTCRtpStreamStats(RTCStats):
 class RTCCodecStats(RTCStats):
     """Stats of a codec negotiated on a transport, of type ``'codec'``.
 
-    Has the members of :obj:`webrtc.RTCStats` too.
+    It has the members of :obj:`webrtc.RTCStats` too.
+
+    See :mdn:`RTCCodecStats`.
 
     Args:
-        payload_type (:obj:`int`): The RTP payload type of the codec.
-        transport_id (:obj:`str`): The id of the stats of the transport the codec is negotiated on.
-        mime_type (:obj:`str`): The type and subtype of the codec, like ``'audio/opus'``.
-        clock_rate (:obj:`int`, optional): The clock rate in Hz.
-        channels (:obj:`int`, optional): The number of audio channels.
-        sdp_fmtp_line (:obj:`str`, optional): The parameters of the codec, as in the ``a=fmtp`` line of SDP.
+        payload_type (:obj:`int`): The RTP payload type of the codec. See :mdn:`RTCCodecStats/payloadType`.
+        transport_id (:obj:`str`): The id of the stats of the transport the codec is negotiated on. See
+            :mdn:`RTCCodecStats/transportId`.
+        mime_type (:obj:`str`): The type and subtype of the codec, like ``'audio/opus'``. See
+            :mdn:`RTCCodecStats/mimeType`.
+        clock_rate (:obj:`int`, optional): The clock rate in Hz. See :mdn:`RTCCodecStats/clockRate`.
+        channels (:obj:`int`, optional): The number of audio channels. See :mdn:`RTCCodecStats/channels`.
+        sdp_fmtp_line (:obj:`str`, optional): The parameters of the codec, as in the ``a=fmtp`` line of SDP. See
+            :mdn:`RTCCodecStats/sdpFmtpLine`.
     """
 
     payload_type: int
@@ -151,17 +159,19 @@ class RTCCodecStats(RTCStats):
 class RTCReceivedRtpStreamStats(RTCRtpStreamStats):
     """Stats of an RTP stream, as its receiver measures it.
 
-    Has the members of :obj:`webrtc.RTCRtpStreamStats` too.
+    It has the members of :obj:`webrtc.RTCRtpStreamStats` too.
 
     Args:
-        packets_received (:obj:`int`, optional): The packets received.
+        packets_received (:obj:`int`, optional): The packets received. See
+            :mdn:`RTCInboundRtpStreamStats/packetsReceived`.
         packets_received_with_ect1 (:obj:`int`, optional): The packets received with the ECT(1) ECN marking.
         packets_received_with_ce (:obj:`int`, optional): The packets received with the CE ECN marking.
         packets_reported_as_lost (:obj:`int`, optional): The packets reported lost in congestion control feedback.
         packets_reported_as_lost_but_recovered (:obj:`int`, optional): The packets reported lost that were received
             later.
-        packets_lost (:obj:`int`, optional): The packets lost, as RTCP reports count them.
-        jitter (:obj:`float`, optional): The packet jitter in seconds.
+        packets_lost (:obj:`int`, optional): The packets lost, as RTCP reports count them. See
+            :mdn:`RTCInboundRtpStreamStats/packetsLost`.
+        jitter (:obj:`float`, optional): The packet jitter in seconds. See :mdn:`RTCInboundRtpStreamStats/jitter`.
     """
 
     packets_received: int | None = None
@@ -190,64 +200,94 @@ class RTCReceivedRtpStreamStats(RTCRtpStreamStats):
 class RTCInboundRtpStreamStats(RTCReceivedRtpStreamStats):
     """Stats of an RTP stream the connection receives, of type ``'inbound-rtp'``.
 
-    Has the members of :obj:`webrtc.RTCReceivedRtpStreamStats` too.
+    It has the members of :obj:`webrtc.RTCReceivedRtpStreamStats` too.
+
+    See :mdn:`RTCInboundRtpStreamStats`.
 
     Args:
-        track_identifier (:obj:`str`): The id of the track.
-        mid (:obj:`str`, optional): The media id of the transceiver.
-        remote_id (:obj:`str`, optional): The id of the remote-outbound-rtp stats of the stream.
-        frames_decoded (:obj:`int`, optional): The frames decoded.
-        key_frames_decoded (:obj:`int`, optional): The key frames decoded.
+        track_identifier (:obj:`str`): The id of the track. See :mdn:`RTCInboundRtpStreamStats/trackIdentifier`.
+        mid (:obj:`str`, optional): The media id of the transceiver. See :mdn:`RTCInboundRtpStreamStats/mid`.
+        remote_id (:obj:`str`, optional): The id of the remote-outbound-rtp stats of the stream. See
+            :mdn:`RTCInboundRtpStreamStats/remoteId`.
+        frames_decoded (:obj:`int`, optional): The frames decoded. See :mdn:`RTCInboundRtpStreamStats/framesDecoded`.
+        key_frames_decoded (:obj:`int`, optional): The key frames decoded. See
+            :mdn:`RTCInboundRtpStreamStats/keyFramesDecoded`.
         frames_rendered (:obj:`int`, optional): The frames rendered.
         frames_dropped (:obj:`int`, optional): The frames dropped before decoding.
-        frame_width (:obj:`int`, optional): The width of the last frame.
-        frame_height (:obj:`int`, optional): The height of the last frame.
-        frames_per_second (:obj:`float`, optional): The frames per second over the last second.
-        qp_sum (:obj:`int`, optional): The sum of the quantization parameters of the frames.
-        total_decode_time (:obj:`float`, optional): The total seconds spent decoding.
-        total_inter_frame_delay (:obj:`float`, optional): The total seconds between rendered frames.
+        frame_width (:obj:`int`, optional): The width of the last frame. See :mdn:`RTCInboundRtpStreamStats/frameWidth`.
+        frame_height (:obj:`int`, optional): The height of the last frame. See
+            :mdn:`RTCInboundRtpStreamStats/frameHeight`.
+        frames_per_second (:obj:`float`, optional): The frames per second over the last second. See
+            :mdn:`RTCInboundRtpStreamStats/framesPerSecond`.
+        qp_sum (:obj:`int`, optional): The sum of the quantization parameters of the frames. See
+            :mdn:`RTCInboundRtpStreamStats/qpSum`.
+        total_decode_time (:obj:`float`, optional): The total seconds spent decoding. See
+            :mdn:`RTCInboundRtpStreamStats/totalDecodeTime`.
+        total_inter_frame_delay (:obj:`float`, optional): The total seconds between rendered frames. See
+            :mdn:`RTCInboundRtpStreamStats/totalInterFrameDelay`.
         total_squared_inter_frame_delay (:obj:`float`, optional): The sum of the squared seconds between rendered
-            frames.
-        pause_count (:obj:`int`, optional): The video pauses.
-        total_pauses_duration (:obj:`float`, optional): The total seconds of the pauses.
-        freeze_count (:obj:`int`, optional): The video freezes.
-        total_freezes_duration (:obj:`float`, optional): The total seconds of the freezes.
+            frames. See :mdn:`RTCInboundRtpStreamStats/totalSquaredInterFrameDelay`.
+        pause_count (:obj:`int`, optional): The video pauses. See :mdn:`RTCInboundRtpStreamStats/pauseCount`.
+        total_pauses_duration (:obj:`float`, optional): The total seconds of the pauses. See
+            :mdn:`RTCInboundRtpStreamStats/totalPausesDuration`.
+        freeze_count (:obj:`int`, optional): The video freezes. See :mdn:`RTCInboundRtpStreamStats/freezeCount`.
+        total_freezes_duration (:obj:`float`, optional): The total seconds of the freezes. See
+            :mdn:`RTCInboundRtpStreamStats/totalFreezesDuration`.
         last_packet_received_timestamp (:obj:`float`, optional): When the last packet was received, in milliseconds
-            since the epoch.
-        header_bytes_received (:obj:`int`, optional): The bytes of RTP headers and padding received.
-        packets_discarded (:obj:`int`, optional): The packets the jitter buffer discarded.
+            since the epoch. See :mdn:`RTCInboundRtpStreamStats/lastPacketReceivedTimestamp`.
+        header_bytes_received (:obj:`int`, optional): The bytes of RTP headers and padding received. See
+            :mdn:`RTCInboundRtpStreamStats/headerBytesReceived`.
+        packets_discarded (:obj:`int`, optional): The packets the jitter buffer discarded. See
+            :mdn:`RTCInboundRtpStreamStats/packetsDiscarded`.
         fec_bytes_received (:obj:`int`, optional): The bytes of FEC payload received.
-        fec_packets_received (:obj:`int`, optional): The FEC packets received.
-        fec_packets_discarded (:obj:`int`, optional): The FEC packets discarded.
-        bytes_received (:obj:`int`, optional): The bytes received.
-        nack_count (:obj:`int`, optional): The NACK packets.
+        fec_packets_received (:obj:`int`, optional): The FEC packets received. See
+            :mdn:`RTCInboundRtpStreamStats/fecPacketsReceived`.
+        fec_packets_discarded (:obj:`int`, optional): The FEC packets discarded. See
+            :mdn:`RTCInboundRtpStreamStats/fecPacketsDiscarded`.
+        bytes_received (:obj:`int`, optional): The bytes received. See :mdn:`RTCInboundRtpStreamStats/bytesReceived`.
+        nack_count (:obj:`int`, optional): The NACK packets. See :mdn:`RTCInboundRtpStreamStats/nackCount`.
         fir_count (:obj:`int`, optional): The FIR packets.
         pli_count (:obj:`int`, optional): The PLI packets.
         total_processing_delay (:obj:`float`, optional): The total seconds from receiving frames or samples to decoding
-            them.
+            them. See :mdn:`RTCInboundRtpStreamStats/totalProcessingDelay`.
         estimated_playout_timestamp (:obj:`float`, optional): When the last frame or sample is estimated to play out, in
-            milliseconds since the epoch.
+            milliseconds since the epoch. See :mdn:`RTCInboundRtpStreamStats/estimatedPlayoutTimestamp`.
         jitter_buffer_delay (:obj:`float`, optional): The total seconds frames or samples spent in the jitter buffer.
+            See :mdn:`RTCInboundRtpStreamStats/jitterBufferDelay`.
         jitter_buffer_target_delay (:obj:`float`, optional): The sum of the target delays of the jitter buffer, in
-            seconds.
-        jitter_buffer_emitted_count (:obj:`int`, optional): The frames or samples that left the jitter buffer.
+            seconds. See :mdn:`RTCInboundRtpStreamStats/jitterBufferTargetDelay`.
+        jitter_buffer_emitted_count (:obj:`int`, optional): The frames or samples that left the jitter buffer. See
+            :mdn:`RTCInboundRtpStreamStats/jitterBufferEmittedCount`.
         jitter_buffer_minimum_delay (:obj:`float`, optional): The sum of the minimum delays of the jitter buffer, in
-            seconds.
-        total_samples_received (:obj:`int`, optional): The audio samples received.
-        concealed_samples (:obj:`int`, optional): The audio samples concealed.
-        silent_concealed_samples (:obj:`int`, optional): The audio samples concealed with silence.
-        concealment_events (:obj:`int`, optional): The concealment events.
-        inserted_samples_for_deceleration (:obj:`int`, optional): The audio samples inserted to slow playout down.
-        removed_samples_for_acceleration (:obj:`int`, optional): The audio samples removed to speed playout up.
-        audio_level (:obj:`float`, optional): The audio level, between 0 and 1.
-        total_audio_energy (:obj:`float`, optional): The total audio energy.
-        total_samples_duration (:obj:`float`, optional): The total seconds of the audio samples.
-        frames_received (:obj:`int`, optional): The complete frames received.
+            seconds. See :mdn:`RTCInboundRtpStreamStats/jitterBufferMinimumDelay`.
+        total_samples_received (:obj:`int`, optional): The audio samples received. See
+            :mdn:`RTCInboundRtpStreamStats/totalSamplesReceived`.
+        concealed_samples (:obj:`int`, optional): The audio samples concealed. See
+            :mdn:`RTCInboundRtpStreamStats/concealedSamples`.
+        silent_concealed_samples (:obj:`int`, optional): The audio samples concealed with silence. See
+            :mdn:`RTCInboundRtpStreamStats/silentConcealedSamples`.
+        concealment_events (:obj:`int`, optional): The concealment events. See
+            :mdn:`RTCInboundRtpStreamStats/concealmentEvents`.
+        inserted_samples_for_deceleration (:obj:`int`, optional): The audio samples inserted to slow playout down. See
+            :mdn:`RTCInboundRtpStreamStats/insertedSamplesForDeceleration`.
+        removed_samples_for_acceleration (:obj:`int`, optional): The audio samples removed to speed playout up. See
+            :mdn:`RTCInboundRtpStreamStats/removedSamplesForAcceleration`.
+        audio_level (:obj:`float`, optional): The audio level, between 0 and 1. See
+            :mdn:`RTCInboundRtpStreamStats/audioLevel`.
+        total_audio_energy (:obj:`float`, optional): The total audio energy. See
+            :mdn:`RTCInboundRtpStreamStats/totalAudioEnergy`.
+        total_samples_duration (:obj:`float`, optional): The total seconds of the audio samples. See
+            :mdn:`RTCInboundRtpStreamStats/totalSamplesDuration`.
+        frames_received (:obj:`int`, optional): The complete frames received. See
+            :mdn:`RTCInboundRtpStreamStats/framesReceived`.
         decoder_implementation (:obj:`str`, optional): The decoder, like ``libvpx``.
-        playout_id (:obj:`str`, optional): The id of the media-playout stats of the audio.
+        playout_id (:obj:`str`, optional): The id of the media-playout stats of the audio. See
+            :mdn:`RTCInboundRtpStreamStats/playoutId`.
         power_efficient_decoder (:obj:`bool`, optional): Whether the decoder is power efficient.
         frames_assembled_from_multiple_packets (:obj:`int`, optional): The frames assembled from more than one packet.
-        total_assembly_time (:obj:`float`, optional): The total seconds spent assembling those frames.
+            See :mdn:`RTCInboundRtpStreamStats/framesAssembledFromMultiplePackets`.
+        total_assembly_time (:obj:`float`, optional): The total seconds spent assembling those frames. See
+            :mdn:`RTCInboundRtpStreamStats/totalAssemblyTime`.
         retransmitted_packets_received (:obj:`int`, optional): The retransmitted packets received.
         retransmitted_bytes_received (:obj:`int`, optional): The bytes of retransmitted payload received.
         rtx_ssrc (:obj:`int`, optional): The SSRC of the RTX stream.
@@ -429,16 +469,23 @@ class RTCInboundRtpStreamStats(RTCReceivedRtpStreamStats):
 
 @dataclass(init=False)
 class RTCRemoteInboundRtpStreamStats(RTCReceivedRtpStreamStats):
-    """Stats of a stream the connection sends, as the remote peer receives it, of type ``'remote-inbound-rtp'``.
+    """Stats of a stream the connection sends, as the remote peer receives it. Its type is ``'remote-inbound-rtp'``.
 
-    Has the members of :obj:`webrtc.RTCReceivedRtpStreamStats` too.
+    It has the members of :obj:`webrtc.RTCReceivedRtpStreamStats` too.
+
+    See :mdn:`RTCRemoteInboundRtpStreamStats`.
 
     Args:
-        local_id (:obj:`str`, optional): The id of the outbound-rtp stats of the stream.
-        round_trip_time (:obj:`float`, optional): The last round trip time in seconds.
-        total_round_trip_time (:obj:`float`, optional): The total seconds of the round trip times.
-        fraction_lost (:obj:`float`, optional): The fraction of packets lost in the last RTCP report.
-        round_trip_time_measurements (:obj:`int`, optional): The round trip time measurements.
+        local_id (:obj:`str`, optional): The id of the outbound-rtp stats of the stream. See
+            :mdn:`RTCRemoteInboundRtpStreamStats/localId`.
+        round_trip_time (:obj:`float`, optional): The last round trip time in seconds. See
+            :mdn:`RTCRemoteInboundRtpStreamStats/roundTripTime`.
+        total_round_trip_time (:obj:`float`, optional): The total seconds of the round trip times. See
+            :mdn:`RTCRemoteInboundRtpStreamStats/totalRoundTripTime`.
+        fraction_lost (:obj:`float`, optional): The fraction of packets lost in the last RTCP report. See
+            :mdn:`RTCRemoteInboundRtpStreamStats/fractionLost`.
+        round_trip_time_measurements (:obj:`int`, optional): The round trip time measurements. See
+            :mdn:`RTCRemoteInboundRtpStreamStats/roundTripTimeMeasurements`.
         packets_with_bleached_ect1_marking (:obj:`int`, optional): The packets sent with ECT(1) that arrived without it.
     """
 
@@ -467,11 +514,11 @@ class RTCRemoteInboundRtpStreamStats(RTCReceivedRtpStreamStats):
 class RTCSentRtpStreamStats(RTCRtpStreamStats):
     """Stats of an RTP stream, as its sender measures it.
 
-    Has the members of :obj:`webrtc.RTCRtpStreamStats` too.
+    It has the members of :obj:`webrtc.RTCRtpStreamStats` too.
 
     Args:
-        packets_sent (:obj:`int`, optional): The packets sent.
-        bytes_sent (:obj:`int`, optional): The bytes sent.
+        packets_sent (:obj:`int`, optional): The packets sent. See :mdn:`RTCOutboundRtpStreamStats/packetsSent`.
+        bytes_sent (:obj:`int`, optional): The bytes sent. See :mdn:`RTCOutboundRtpStreamStats/bytesSent`.
     """
 
     packets_sent: int | None = None
@@ -487,46 +534,63 @@ class RTCSentRtpStreamStats(RTCRtpStreamStats):
 class RTCOutboundRtpStreamStats(RTCSentRtpStreamStats):
     """Stats of an RTP stream the connection sends, of type ``'outbound-rtp'``.
 
-    Has the members of :obj:`webrtc.RTCSentRtpStreamStats` too.
+    It has the members of :obj:`webrtc.RTCSentRtpStreamStats` too.
+
+    See :mdn:`RTCOutboundRtpStreamStats`.
 
     Args:
-        mid (:obj:`str`, optional): The media id of the transceiver.
-        media_source_id (:obj:`str`, optional): The id of the media-source stats of the track sent.
-        remote_id (:obj:`str`, optional): The id of the remote-inbound-rtp stats of the stream.
-        rid (:obj:`str`, optional): The RTP stream id of the simulcast layer.
+        mid (:obj:`str`, optional): The media id of the transceiver. See :mdn:`RTCOutboundRtpStreamStats/mid`.
+        media_source_id (:obj:`str`, optional): The id of the media-source stats of the track sent. See
+            :mdn:`RTCOutboundRtpStreamStats/mediaSourceId`.
+        remote_id (:obj:`str`, optional): The id of the remote-inbound-rtp stats of the stream. See
+            :mdn:`RTCOutboundRtpStreamStats/remoteId`.
+        rid (:obj:`str`, optional): The RTP stream id of the simulcast layer. See :mdn:`RTCOutboundRtpStreamStats/rid`.
         encoding_index (:obj:`int`, optional): The index of the encoding in the parameters of the sender.
-        header_bytes_sent (:obj:`int`, optional): The bytes of RTP headers and padding sent.
-        retransmitted_packets_sent (:obj:`int`, optional): The packets retransmitted.
-        retransmitted_bytes_sent (:obj:`int`, optional): The bytes of payload retransmitted.
+        header_bytes_sent (:obj:`int`, optional): The bytes of RTP headers and padding sent. See
+            :mdn:`RTCOutboundRtpStreamStats/headerBytesSent`.
+        retransmitted_packets_sent (:obj:`int`, optional): The packets retransmitted. See
+            :mdn:`RTCOutboundRtpStreamStats/retransmittedPacketsSent`.
+        retransmitted_bytes_sent (:obj:`int`, optional): The bytes of payload retransmitted. See
+            :mdn:`RTCOutboundRtpStreamStats/retransmittedBytesSent`.
         rtx_ssrc (:obj:`int`, optional): The SSRC of the RTX stream.
-        target_bitrate (:obj:`float`, optional): The target bitrate of the encoder, in bits per second.
+        target_bitrate (:obj:`float`, optional): The target bitrate of the encoder, in bits per second. See
+            :mdn:`RTCOutboundRtpStreamStats/targetBitrate`.
         total_encoded_bytes_target (:obj:`int`, optional): The sum of the target sizes of the encoded frames, in bytes.
-        frame_width (:obj:`int`, optional): The width of the last frame.
-        frame_height (:obj:`int`, optional): The height of the last frame.
-        frames_per_second (:obj:`float`, optional): The frames per second over the last second.
-        frames_sent (:obj:`int`, optional): The frames sent.
+            See :mdn:`RTCOutboundRtpStreamStats/totalEncodedBytesTarget`.
+        frame_width (:obj:`int`, optional): The width of the last frame. See
+            :mdn:`RTCOutboundRtpStreamStats/frameWidth`.
+        frame_height (:obj:`int`, optional): The height of the last frame. See
+            :mdn:`RTCOutboundRtpStreamStats/frameHeight`.
+        frames_per_second (:obj:`float`, optional): The frames per second over the last second. See
+            :mdn:`RTCOutboundRtpStreamStats/framesPerSecond`.
+        frames_sent (:obj:`int`, optional): The frames sent. See :mdn:`RTCOutboundRtpStreamStats/framesSent`.
         huge_frames_sent (:obj:`int`, optional): The huge frames sent, like key frames.
-        frames_encoded (:obj:`int`, optional): The frames encoded.
-        key_frames_encoded (:obj:`int`, optional): The key frames encoded.
-        qp_sum (:obj:`int`, optional): The sum of the quantization parameters of the frames.
+        frames_encoded (:obj:`int`, optional): The frames encoded. See :mdn:`RTCOutboundRtpStreamStats/framesEncoded`.
+        key_frames_encoded (:obj:`int`, optional): The key frames encoded. See
+            :mdn:`RTCOutboundRtpStreamStats/keyFramesEncoded`.
+        qp_sum (:obj:`int`, optional): The sum of the quantization parameters of the frames. See
+            :mdn:`RTCOutboundRtpStreamStats/qpSum`.
         psnr_sum (:obj:`dict` of :obj:`str` to :obj:`float`, optional): The sums of the PSNR of the encoded frames, by
             component (``y``, ``u``, ``v``).
         psnr_measurements (:obj:`int`, optional): The PSNR measurements.
-        total_encode_time (:obj:`float`, optional): The total seconds spent encoding.
-        total_packet_send_delay (:obj:`float`, optional): The total seconds packets waited to be sent.
+        total_encode_time (:obj:`float`, optional): The total seconds spent encoding. See
+            :mdn:`RTCOutboundRtpStreamStats/totalEncodeTime`.
+        total_packet_send_delay (:obj:`float`, optional): The total seconds packets waited to be sent. See
+            :mdn:`RTCOutboundRtpStreamStats/totalPacketSendDelay`.
         quality_limitation_reason (:obj:`webrtc.RTCQualityLimitationReason`, optional): What limits the resolution or
-            frame rate the most.
+            frame rate the most. See :mdn:`RTCOutboundRtpStreamStats/qualityLimitationReason`.
         quality_limitation_durations (:obj:`dict` of :obj:`str` to :obj:`float`, optional): The seconds limited by each
-            reason.
+            reason. See :mdn:`RTCOutboundRtpStreamStats/qualityLimitationDurations`.
         quality_limitation_resolution_changes (:obj:`int`, optional): The resolution changes because of quality
             limitations.
-        nack_count (:obj:`int`, optional): The NACK packets.
+        nack_count (:obj:`int`, optional): The NACK packets. See :mdn:`RTCOutboundRtpStreamStats/nackCount`.
         fir_count (:obj:`int`, optional): The FIR packets.
         pli_count (:obj:`int`, optional): The PLI packets.
         encoder_implementation (:obj:`str`, optional): The encoder, like ``libvpx``.
         power_efficient_encoder (:obj:`bool`, optional): Whether the encoder is power efficient.
-        active (:obj:`bool`, optional): Whether the encoding is sent.
-        scalability_mode (:obj:`str`, optional): The scalability mode, like ``'L1T3'``.
+        active (:obj:`bool`, optional): Whether the encoding is sent. See :mdn:`RTCOutboundRtpStreamStats/active`.
+        scalability_mode (:obj:`str`, optional): The scalability mode, like ``'L1T3'``. See
+            :mdn:`RTCOutboundRtpStreamStats/scalabilityMode`.
         packets_sent_with_ect1 (:obj:`int`, optional): The packets sent with the ECT(1) ECN marking.
     """
 
@@ -635,18 +699,23 @@ class RTCOutboundRtpStreamStats(RTCSentRtpStreamStats):
 
 @dataclass(init=False)
 class RTCRemoteOutboundRtpStreamStats(RTCSentRtpStreamStats):
-    """Stats of a stream the connection receives, as the remote peer sends it, of type ``'remote-outbound-rtp'``.
+    """Stats of a stream the connection receives, as the remote peer sends it. Its type is ``'remote-outbound-rtp'``.
 
-    Has the members of :obj:`webrtc.RTCSentRtpStreamStats` too.
+    It has the members of :obj:`webrtc.RTCSentRtpStreamStats` too.
+
+    See :mdn:`RTCRemoteOutboundRtpStreamStats`.
 
     Args:
-        local_id (:obj:`str`, optional): The id of the inbound-rtp stats of the stream.
+        local_id (:obj:`str`, optional): The id of the inbound-rtp stats of the stream. See
+            :mdn:`RTCRemoteOutboundRtpStreamStats/localId`.
         remote_timestamp (:obj:`float`, optional): When the remote peer sent its report, in milliseconds since the
-            epoch.
+            epoch. See :mdn:`RTCRemoteOutboundRtpStreamStats/remoteTimestamp`.
         reports_sent (:obj:`int`, optional): The RTCP sender reports sent.
         round_trip_time (:obj:`float`, optional): The last round trip time in seconds.
-        total_round_trip_time (:obj:`float`, optional): The total seconds of the round trip times.
-        round_trip_time_measurements (:obj:`int`, optional): The round trip time measurements.
+        total_round_trip_time (:obj:`float`, optional): The total seconds of the round trip times. See
+            :mdn:`RTCRemoteOutboundRtpStreamStats/totalRoundTripTime`.
+        round_trip_time_measurements (:obj:`int`, optional): The round trip time measurements. See
+            :mdn:`RTCRemoteOutboundRtpStreamStats/roundTripTimeMeasurements`.
     """
 
     local_id: str | None = None
@@ -674,11 +743,11 @@ class RTCRemoteOutboundRtpStreamStats(RTCSentRtpStreamStats):
 class RTCMediaSourceStats(RTCStats):
     """Stats of a track a sender sends, of type ``'media-source'``.
 
-    Has the members of :obj:`webrtc.RTCStats` too.
+    It has the members of :obj:`webrtc.RTCStats` too.
 
     Args:
-        track_identifier (:obj:`str`): The id of the track.
-        kind (:obj:`str`): The kind of the track, ``'audio'`` or ``'video'``.
+        track_identifier (:obj:`str`): The id of the track. See :mdn:`RTCAudioSourceStats/trackIdentifier`.
+        kind (:obj:`str`): The kind of the track, ``'audio'`` or ``'video'``. See :mdn:`RTCAudioSourceStats/kind`.
     """
 
     track_identifier: str
@@ -692,12 +761,17 @@ class RTCMediaSourceStats(RTCStats):
 class RTCAudioSourceStats(RTCMediaSourceStats):
     """Stats of an audio track a sender sends, of type ``'media-source'``.
 
-    Has the members of :obj:`webrtc.RTCMediaSourceStats` too.
+    It has the members of :obj:`webrtc.RTCMediaSourceStats` too.
+
+    See :mdn:`RTCAudioSourceStats`.
 
     Args:
-        audio_level (:obj:`float`, optional): The audio level, between 0 and 1.
-        total_audio_energy (:obj:`float`, optional): The total audio energy.
-        total_samples_duration (:obj:`float`, optional): The total seconds of the audio samples.
+        audio_level (:obj:`float`, optional): The audio level, between 0 and 1. See
+            :mdn:`RTCAudioSourceStats/audioLevel`.
+        total_audio_energy (:obj:`float`, optional): The total audio energy. See
+            :mdn:`RTCAudioSourceStats/totalAudioEnergy`.
+        total_samples_duration (:obj:`float`, optional): The total seconds of the audio samples. See
+            :mdn:`RTCAudioSourceStats/totalSamplesDuration`.
         echo_return_loss (:obj:`float`, optional): The echo return loss in decibels.
         echo_return_loss_enhancement (:obj:`float`, optional): The echo return loss enhancement in decibels.
     """
@@ -724,13 +798,16 @@ class RTCAudioSourceStats(RTCMediaSourceStats):
 class RTCVideoSourceStats(RTCMediaSourceStats):
     """Stats of a video track a sender sends, of type ``'media-source'``.
 
-    Has the members of :obj:`webrtc.RTCMediaSourceStats` too.
+    It has the members of :obj:`webrtc.RTCMediaSourceStats` too.
+
+    See :mdn:`RTCVideoSourceStats`.
 
     Args:
-        width (:obj:`int`, optional): The width of the last frame.
-        height (:obj:`int`, optional): The height of the last frame.
-        frames (:obj:`int`, optional): The frames from the source.
-        frames_per_second (:obj:`float`, optional): The frames per second over the last second.
+        width (:obj:`int`, optional): The width of the last frame. See :mdn:`RTCVideoSourceStats/width`.
+        height (:obj:`int`, optional): The height of the last frame. See :mdn:`RTCVideoSourceStats/height`.
+        frames (:obj:`int`, optional): The frames from the source. See :mdn:`RTCVideoSourceStats/frames`.
+        frames_per_second (:obj:`float`, optional): The frames per second over the last second. See
+            :mdn:`RTCVideoSourceStats/framesPerSecond`.
     """
 
     width: int | None = None
@@ -746,7 +823,7 @@ class RTCVideoSourceStats(RTCMediaSourceStats):
 class RTCAudioPlayoutStats(RTCStats):
     """Stats of the playout of received audio, of type ``'media-playout'``.
 
-    Has the members of :obj:`webrtc.RTCStats` too.
+    It has the members of :obj:`webrtc.RTCStats` too.
 
     Args:
         kind (:obj:`str`): The kind of the media, ``'audio'``.
@@ -780,11 +857,15 @@ class RTCAudioPlayoutStats(RTCStats):
 class RTCPeerConnectionStats(RTCStats):
     """Stats of the connection, of type ``'peer-connection'``.
 
-    Has the members of :obj:`webrtc.RTCStats` too.
+    It has the members of :obj:`webrtc.RTCStats` too.
+
+    See :mdn:`RTCPeerConnectionStats`.
 
     Args:
-        data_channels_opened (:obj:`int`, optional): The data channels opened.
-        data_channels_closed (:obj:`int`, optional): The data channels closed.
+        data_channels_opened (:obj:`int`, optional): The data channels opened. See
+            :mdn:`RTCPeerConnectionStats/dataChannelsOpened`.
+        data_channels_closed (:obj:`int`, optional): The data channels closed. See
+            :mdn:`RTCPeerConnectionStats/dataChannelsClosed`.
     """
 
     data_channels_opened: int | None = None
@@ -800,17 +881,21 @@ class RTCPeerConnectionStats(RTCStats):
 class RTCDataChannelStats(RTCStats):
     """Stats of a data channel, of type ``'data-channel'``.
 
-    Has the members of :obj:`webrtc.RTCStats` too.
+    It has the members of :obj:`webrtc.RTCStats` too.
+
+    See :mdn:`RTCDataChannelStats`.
 
     Args:
-        label (:obj:`str`, optional): The label of the channel.
-        protocol (:obj:`str`, optional): The subprotocol of the channel.
-        data_channel_identifier (:obj:`int`, optional): The id of the channel.
-        state (:obj:`webrtc.RTCDataChannelState`): The state of the channel.
-        messages_sent (:obj:`int`, optional): The messages sent.
-        bytes_sent (:obj:`int`, optional): The bytes sent.
-        messages_received (:obj:`int`, optional): The messages received.
-        bytes_received (:obj:`int`, optional): The bytes received.
+        label (:obj:`str`, optional): The label of the channel. See :mdn:`RTCDataChannelStats/label`.
+        protocol (:obj:`str`, optional): The subprotocol of the channel. See :mdn:`RTCDataChannelStats/protocol`.
+        data_channel_identifier (:obj:`int`, optional): The id of the channel. See
+            :mdn:`RTCDataChannelStats/dataChannelIdentifier`.
+        state (:obj:`webrtc.RTCDataChannelState`): The state of the channel. See :mdn:`RTCDataChannelStats/state`.
+        messages_sent (:obj:`int`, optional): The messages sent. See :mdn:`RTCDataChannelStats/messagesSent`.
+        bytes_sent (:obj:`int`, optional): The bytes sent. See :mdn:`RTCDataChannelStats/bytesSent`.
+        messages_received (:obj:`int`, optional): The messages received. See
+            :mdn:`RTCDataChannelStats/messagesReceived`.
+        bytes_received (:obj:`int`, optional): The bytes received. See :mdn:`RTCDataChannelStats/bytesReceived`.
     """
 
     label: str | None = None
@@ -840,25 +925,32 @@ class RTCDataChannelStats(RTCStats):
 class RTCTransportStats(RTCStats):
     """Stats of a transport, of type ``'transport'``.
 
-    Has the members of :obj:`webrtc.RTCStats` too.
+    It has the members of :obj:`webrtc.RTCStats` too.
+
+    See :mdn:`RTCTransportStats`.
 
     Args:
-        packets_sent (:obj:`int`, optional): The packets sent.
-        packets_received (:obj:`int`, optional): The packets received.
-        bytes_sent (:obj:`int`, optional): The bytes sent.
-        bytes_received (:obj:`int`, optional): The bytes received.
-        ice_role (:obj:`webrtc.RTCIceRole`, optional): The ICE role.
-        ice_local_username_fragment (:obj:`str`, optional): The local ICE username fragment.
-        dtls_state (:obj:`webrtc.RTCDtlsTransportState`): The DTLS state.
-        ice_state (:obj:`webrtc.RTCIceTransportState`, optional): The ICE state.
-        selected_candidate_pair_id (:obj:`str`, optional): The id of the stats of the selected candidate pair.
-        local_certificate_id (:obj:`str`, optional): The id of the stats of the local certificate.
-        remote_certificate_id (:obj:`str`, optional): The id of the stats of the remote certificate.
-        tls_version (:obj:`str`, optional): The DTLS version, in hex.
-        dtls_cipher (:obj:`str`, optional): The DTLS cipher suite.
-        dtls_role (:obj:`webrtc.RTCDtlsRole`, optional): The DTLS role.
-        srtp_cipher (:obj:`str`, optional): The SRTP protection profile.
-        selected_candidate_pair_changes (:obj:`int`, optional): The changes of the selected candidate pair.
+        packets_sent (:obj:`int`, optional): The packets sent. See :mdn:`RTCTransportStats/packetsSent`.
+        packets_received (:obj:`int`, optional): The packets received. See :mdn:`RTCTransportStats/packetsReceived`.
+        bytes_sent (:obj:`int`, optional): The bytes sent. See :mdn:`RTCTransportStats/bytesSent`.
+        bytes_received (:obj:`int`, optional): The bytes received. See :mdn:`RTCTransportStats/bytesReceived`.
+        ice_role (:obj:`webrtc.RTCIceRole`, optional): The ICE role. See :mdn:`RTCTransportStats/iceRole`.
+        ice_local_username_fragment (:obj:`str`, optional): The local ICE username fragment. See
+            :mdn:`RTCTransportStats/iceLocalUsernameFragment`.
+        dtls_state (:obj:`webrtc.RTCDtlsTransportState`): The DTLS state. See :mdn:`RTCTransportStats/dtlsState`.
+        ice_state (:obj:`webrtc.RTCIceTransportState`, optional): The ICE state. See :mdn:`RTCTransportStats/iceState`.
+        selected_candidate_pair_id (:obj:`str`, optional): The id of the stats of the selected candidate pair. See
+            :mdn:`RTCTransportStats/selectedCandidatePairId`.
+        local_certificate_id (:obj:`str`, optional): The id of the stats of the local certificate. See
+            :mdn:`RTCTransportStats/localCertificateId`.
+        remote_certificate_id (:obj:`str`, optional): The id of the stats of the remote certificate. See
+            :mdn:`RTCTransportStats/remoteCertificateId`.
+        tls_version (:obj:`str`, optional): The DTLS version, in hex. See :mdn:`RTCTransportStats/tlsVersion`.
+        dtls_cipher (:obj:`str`, optional): The DTLS cipher suite. See :mdn:`RTCTransportStats/dtlsCipher`.
+        dtls_role (:obj:`webrtc.RTCDtlsRole`, optional): The DTLS role. See :mdn:`RTCTransportStats/dtlsRole`.
+        srtp_cipher (:obj:`str`, optional): The SRTP protection profile. See :mdn:`RTCTransportStats/srtpCipher`.
+        selected_candidate_pair_changes (:obj:`int`, optional): The changes of the selected candidate pair. See
+            :mdn:`RTCTransportStats/selectedCandidatePairChanges`.
         ccfb_messages_sent (:obj:`int`, optional): The congestion control feedback messages sent.
         ccfb_messages_received (:obj:`int`, optional): The congestion control feedback messages received.
     """
@@ -931,22 +1023,29 @@ class RTCTransportStats(RTCStats):
 class RTCIceCandidateStats(RTCStats):
     """Stats of an ICE candidate, of type ``'local-candidate'`` or ``'remote-candidate'``.
 
-    Has the members of :obj:`webrtc.RTCStats` too.
+    It has the members of :obj:`webrtc.RTCStats` too.
+
+    See :mdn:`RTCIceCandidateStats`.
 
     Args:
-        transport_id (:obj:`str`): The id of the stats of the transport of the candidate.
-        address (:obj:`str`, optional): The address of the candidate, :obj:`None` if it isn't exposed.
-        port (:obj:`int`, optional): The port.
-        protocol (:obj:`str`, optional): The protocol, ``'udp'`` or ``'tcp'``.
-        candidate_type (:obj:`webrtc.RTCIceCandidateType`): The type of the candidate.
-        priority (:obj:`int`, optional): The priority.
-        url (:obj:`str`, optional): The URL of the ICE server the candidate is from.
+        transport_id (:obj:`str`): The id of the stats of the transport of the candidate. See
+            :mdn:`RTCIceCandidateStats/transportId`.
+        address (:obj:`str`, optional): The address of the candidate, or :obj:`None` if it isn't exposed. See
+            :mdn:`RTCIceCandidateStats/address`.
+        port (:obj:`int`, optional): The port. See :mdn:`RTCIceCandidateStats/port`.
+        protocol (:obj:`str`, optional): The protocol, ``'udp'`` or ``'tcp'``. See :mdn:`RTCIceCandidateStats/protocol`.
+        candidate_type (:obj:`webrtc.RTCIceCandidateType`): The type of the candidate. See
+            :mdn:`RTCIceCandidateStats/candidateType`.
+        priority (:obj:`int`, optional): The priority. See :mdn:`RTCIceCandidateStats/priority`.
+        url (:obj:`str`, optional): The URL of the ICE server the candidate is from. See
+            :mdn:`RTCIceCandidateStats/url`.
         relay_protocol (:obj:`webrtc.RTCIceServerTransportProtocol`, optional): The protocol between the client and the
-            TURN server.
-        foundation (:obj:`str`, optional): The foundation.
+            TURN server. See :mdn:`RTCIceCandidateStats/relayProtocol`.
+        foundation (:obj:`str`, optional): The foundation. See :mdn:`RTCIceCandidateStats/foundation`.
         related_address (:obj:`str`, optional): The related address.
         related_port (:obj:`int`, optional): The related port.
-        username_fragment (:obj:`str`, optional): The ICE username fragment.
+        username_fragment (:obj:`str`, optional): The ICE username fragment. See
+            :mdn:`RTCIceCandidateStats/usernameFragment`.
         tcp_type (:obj:`webrtc.RTCIceTcpCandidateType`, optional): The type of a TCP candidate.
     """
 
@@ -990,35 +1089,51 @@ class RTCIceCandidateStats(RTCStats):
 class RTCIceCandidatePairStats(RTCStats):
     """Stats of an ICE candidate pair, of type ``'candidate-pair'``.
 
-    Has the members of :obj:`webrtc.RTCStats` too.
+    It has the members of :obj:`webrtc.RTCStats` too.
+
+    See :mdn:`RTCIceCandidatePairStats`.
 
     Args:
-        transport_id (:obj:`str`): The id of the stats of the transport of the pair.
-        local_candidate_id (:obj:`str`): The id of the stats of the local candidate.
-        remote_candidate_id (:obj:`str`): The id of the stats of the remote candidate.
-        state (:obj:`webrtc.RTCStatsIceCandidatePairState`): The state of the pair in the checklist.
-        nominated (:obj:`bool`, optional): Whether the pair is nominated.
-        packets_sent (:obj:`int`, optional): The packets sent.
-        packets_received (:obj:`int`, optional): The packets received.
-        bytes_sent (:obj:`int`, optional): The bytes sent.
-        bytes_received (:obj:`int`, optional): The bytes received.
+        transport_id (:obj:`str`): The id of the stats of the transport of the pair. See
+            :mdn:`RTCIceCandidatePairStats/transportId`.
+        local_candidate_id (:obj:`str`): The id of the stats of the local candidate. See
+            :mdn:`RTCIceCandidatePairStats/localCandidateId`.
+        remote_candidate_id (:obj:`str`): The id of the stats of the remote candidate. See
+            :mdn:`RTCIceCandidatePairStats/remoteCandidateId`.
+        state (:obj:`webrtc.RTCStatsIceCandidatePairState`): The state of the pair in the checklist. See
+            :mdn:`RTCIceCandidatePairStats/state`.
+        nominated (:obj:`bool`, optional): Whether the pair is nominated. See :mdn:`RTCIceCandidatePairStats/nominated`.
+        packets_sent (:obj:`int`, optional): The packets sent. See :mdn:`RTCIceCandidatePairStats/packetsSent`.
+        packets_received (:obj:`int`, optional): The packets received. See
+            :mdn:`RTCIceCandidatePairStats/packetsReceived`.
+        bytes_sent (:obj:`int`, optional): The bytes sent. See :mdn:`RTCIceCandidatePairStats/bytesSent`.
+        bytes_received (:obj:`int`, optional): The bytes received. See :mdn:`RTCIceCandidatePairStats/bytesReceived`.
         last_packet_sent_timestamp (:obj:`float`, optional): When the last packet was sent, in milliseconds since the
-            epoch.
+            epoch. See :mdn:`RTCIceCandidatePairStats/lastPacketSentTimestamp`.
         last_packet_received_timestamp (:obj:`float`, optional): When the last packet was received, in milliseconds
-            since the epoch.
-        total_round_trip_time (:obj:`float`, optional): The total seconds of the round trip times of STUN requests.
-        current_round_trip_time (:obj:`float`, optional): The last round trip time of STUN requests, in seconds.
+            since the epoch. See :mdn:`RTCIceCandidatePairStats/lastPacketReceivedTimestamp`.
+        total_round_trip_time (:obj:`float`, optional): The total seconds of the round trip times of STUN requests. See
+            :mdn:`RTCIceCandidatePairStats/totalRoundTripTime`.
+        current_round_trip_time (:obj:`float`, optional): The last round trip time of STUN requests, in seconds. See
+            :mdn:`RTCIceCandidatePairStats/currentRoundTripTime`.
         available_outgoing_bitrate (:obj:`float`, optional): The estimated outgoing bitrate available, in bits per
-            second.
+            second. See :mdn:`RTCIceCandidatePairStats/availableOutgoingBitrate`.
         available_incoming_bitrate (:obj:`float`, optional): The estimated incoming bitrate available, in bits per
-            second.
-        requests_received (:obj:`int`, optional): The connectivity check requests received.
-        requests_sent (:obj:`int`, optional): The connectivity check requests sent.
-        responses_received (:obj:`int`, optional): The connectivity check responses received.
-        responses_sent (:obj:`int`, optional): The connectivity check responses sent.
-        consent_requests_sent (:obj:`int`, optional): The consent requests sent.
-        packets_discarded_on_send (:obj:`int`, optional): The packets that failed to be sent.
-        bytes_discarded_on_send (:obj:`int`, optional): The bytes that failed to be sent.
+            second. See :mdn:`RTCIceCandidatePairStats/availableIncomingBitrate`.
+        requests_received (:obj:`int`, optional): The connectivity check requests received. See
+            :mdn:`RTCIceCandidatePairStats/requestsReceived`.
+        requests_sent (:obj:`int`, optional): The connectivity check requests sent. See
+            :mdn:`RTCIceCandidatePairStats/requestsSent`.
+        responses_received (:obj:`int`, optional): The connectivity check responses received. See
+            :mdn:`RTCIceCandidatePairStats/responsesReceived`.
+        responses_sent (:obj:`int`, optional): The connectivity check responses sent. See
+            :mdn:`RTCIceCandidatePairStats/responsesSent`.
+        consent_requests_sent (:obj:`int`, optional): The consent requests sent. See
+            :mdn:`RTCIceCandidatePairStats/consentRequestsSent`.
+        packets_discarded_on_send (:obj:`int`, optional): The packets that failed to be sent. See
+            :mdn:`RTCIceCandidatePairStats/packetsDiscardedOnSend`.
+        bytes_discarded_on_send (:obj:`int`, optional): The bytes that failed to be sent. See
+            :mdn:`RTCIceCandidatePairStats/bytesDiscardedOnSend`.
     """
 
     transport_id: str
@@ -1092,13 +1207,18 @@ class RTCIceCandidatePairStats(RTCStats):
 class RTCCertificateStats(RTCStats):
     """Stats of a certificate, of type ``'certificate'``.
 
-    Has the members of :obj:`webrtc.RTCStats` too.
+    It has the members of :obj:`webrtc.RTCStats` too.
+
+    See :mdn:`RTCCertificateStats`.
 
     Args:
-        fingerprint (:obj:`str`): The fingerprint of the certificate.
-        fingerprint_algorithm (:obj:`str`): The hash function of the fingerprint, like ``'sha-256'``.
-        base64_certificate (:obj:`str`): The DER of the certificate, in base64.
-        issuer_certificate_id (:obj:`str`, optional): The id of the stats of the issuer certificate.
+        fingerprint (:obj:`str`): The fingerprint of the certificate. See :mdn:`RTCCertificateStats/fingerprint`.
+        fingerprint_algorithm (:obj:`str`): The hash function of the fingerprint, like ``'sha-256'``. See
+            :mdn:`RTCCertificateStats/fingerprintAlgorithm`.
+        base64_certificate (:obj:`str`): The DER of the certificate, in base64. See
+            :mdn:`RTCCertificateStats/base64Certificate`.
+        issuer_certificate_id (:obj:`str`, optional): The id of the stats of the issuer certificate. See
+            :mdn:`RTCCertificateStats/issuerCertificateId`.
     """
 
     fingerprint: str
@@ -1149,10 +1269,16 @@ def _stats(entry: Mapping[str, object]) -> RTCStats:
 
 
 class RTCStatsReport(Mapping[str, RTCStats]):
-    """The stats of a connection, or of a sender or a receiver.
+    """The stats of a connection, a sender or a receiver, as a read-only mapping of stats ids to stats.
 
-    A read-only mapping of their ids to the stats, each the dictionary of its type, like
-    :obj:`webrtc.RTCInboundRtpStreamStats` for ``'inbound-rtp'``.
+    Each value is the dictionary of its type, like :obj:`webrtc.RTCInboundRtpStreamStats` for ``'inbound-rtp'``.
+    The ``track_identifier`` of inbound RTP stats is the :attr:`webrtc.MediaStreamTrack.id` of the remote track, and
+    the ``address`` of a candidate is :obj:`None` when it isn't exposed, like for peer-reflexive ones.
+
+    See :mdn:`RTCStatsReport`.
+
+    Args:
+        stats (:obj:`dict` of :obj:`str` to :obj:`webrtc.RTCStats`): The stats, by their ids.
     """
 
     def __init__(self, stats: Mapping[str, RTCStats]) -> None:
@@ -1160,7 +1286,7 @@ class RTCStatsReport(Mapping[str, RTCStats]):
 
     @classmethod
     def _from_native(cls, report: str, receivers: Iterable[webrtc.RTCRtpReceiver] = ()) -> RTCStatsReport:
-        """The report from the JSON libwebrtc serializes it to, with the receivers whose tracks it refers to."""
+        """The report from its native JSON, with the receivers whose tracks it refers to."""
         # remote tracks have their own ids, rather than the libwebrtc ones in the stats
         track_ids = {receiver.track._native_obj._nativeId: receiver.track.id for receiver in receivers}
         entries: list[dict[str, object]] = json.loads(report if report != '' else '[]')

@@ -45,9 +45,10 @@ _Parameters = Union[
     ConstrainBooleanOrDOMStringParameters,
 ]
 
-#: The device of the video tracks of :meth:`webrtc.MediaDevices.get_user_media`
+#: The device ID of the synthetic camera, which feeds the video tracks of :meth:`webrtc.MediaDevices.get_user_media`
 CAMERA_DEVICE_ID = 'synthetic-camera'
-#: The device of the audio tracks of :meth:`webrtc.MediaDevices.get_user_media`
+#: The device ID of the synthetic microphone, which feeds the audio tracks of
+#: :meth:`webrtc.MediaDevices.get_user_media`
 MICROPHONE_DEVICE_ID = 'synthetic-microphone'
 _GROUP_ID = 'synthetic'
 
@@ -206,13 +207,15 @@ def _unsatisfied(
 class MediaStreamTrack(
     WebRTCObject[wrtc.MediaStreamTrack], UniformEventTarget[Literal['mute', 'unmute', 'ended'], Event]
 ):
-    """A single audio or video track of media, within a stream.
+    """A single audio or video track. It comes from a synthetic device or a generator, or from a remote peer.
 
-    Events (see :meth:`on`):
-        ``mute`` and ``unmute`` (:obj:`webrtc.Event`): :attr:`muted` changed: a remote track is muted until media
-        arrives, and when it's no longer negotiated.
-        ``ended`` (:obj:`webrtc.Event`): The track ended, other than with :meth:`stop`, like when the remote peer
-        stopped sending it.
+    See :mdn:`MediaStreamTrack`.
+
+    Events:
+        mute and unmute (:obj:`webrtc.Event`): The value of :attr:`muted` changed. A remote track is muted
+            until media arrives, and again when it's no longer negotiated.
+        ended (:obj:`webrtc.Event`): The track ended for a reason other than :meth:`stop`, for example because
+            the remote peer stopped sending it.
 
     An ended track fires no more events, so its handlers are released then.
     """
@@ -230,9 +233,11 @@ class MediaStreamTrack(
 
     @property
     def enabled(self) -> bool:
-        """:obj:`bool`: Whether the track renders its source, rather than silence or blackness.
+        """:obj:`bool`: Whether the track carries its source. A disabled track carries silence or black frames.
 
-        Once the track is disconnected, it can still be changed, to no effect.
+        It can still be set after the track has ended, but that has no effect.
+
+        See :mdn:`MediaStreamTrack/enabled`.
         """
         return self._native_obj.enabled
 
@@ -242,35 +247,56 @@ class MediaStreamTrack(
 
     @property
     def id(self) -> str:
-        """:obj:`str`: A unique identifier (GUID) for the track."""
+        """:obj:`str`: The ID of the track. A remote track gets a random UUID and doesn't use the ID its peer gave.
+
+        See :mdn:`MediaStreamTrack/id`.
+        """
         return self._native_obj.id
 
     @property
     def label(self) -> str:
-        """:obj:`str`: The label of the source, ``'remote audio'`` or ``'remote video'`` for a remote track."""
+        """:obj:`str`: The label of the source. It's empty for a local track.
+
+        A remote track has ``'remote audio'`` or ``'remote video'``. A clone keeps the label.
+
+        See :mdn:`MediaStreamTrack/label`.
+        """
         return self._native_obj.label
 
     @property
     def kind(self) -> webrtc.MediaType:
-        """:obj:`webrtc.MediaType`: The kind of media, audio or video, even once detached from the source."""
+        """:obj:`webrtc.MediaType`: Whether the track carries audio or video. It stays set after the track ends.
+
+        See :mdn:`MediaStreamTrack/kind`.
+        """
         return self._native_obj.kind
 
     @property
     def ready_state(self) -> webrtc.MediaStreamTrackState:
-        """:obj:`webrtc.MediaStreamTrackState`: Returns an enumerated value giving the status of the track."""
+        """:obj:`webrtc.MediaStreamTrackState`: Whether the track is ``live`` or has ``ended``. Ending is final.
+
+        See :mdn:`MediaStreamTrack/readyState`.
+        """
         return self._native_obj.readyState
 
     @property
     def muted(self) -> bool:
-        """:obj:`bool`: Whether the track can't provide media, due to a technical issue."""
+        """:obj:`bool`: Whether the source can't provide media for now. A remote track is muted until media arrives.
+
+        Unlike :attr:`enabled`, the application can't change it.
+
+        See :mdn:`MediaStreamTrack/muted`.
+        """
         return self._native_obj.muted
 
     @property
     def content_hint(self) -> str:
-        """:obj:`str`: What the track carries, which encoders optimize for, empty if unknown (the default).
+        """:obj:`str`: What the track carries, so encoders can optimize for it. The default is empty, for unknown.
 
-        ``'speech'``, ``'speaking'`` or ``'music'`` for audio, ``'motion'``, ``'detail'`` or ``'text'`` for video.
-        Other values, and the ones of the other kind, are ignored.
+        Audio accepts ``'speech'``, ``'speaking'`` and ``'music'``. Video accepts ``'motion'``, ``'detail'`` and
+        ``'text'``. Other values are ignored, as are the values meant for the other kind.
+
+        See :mdn:`MediaStreamTrack/contentHint`.
         """
         return self._native_obj.contentHint
 
@@ -279,10 +305,13 @@ class MediaStreamTrack(
         self._native_obj.contentHint = str(value)
 
     def get_settings(self) -> MediaTrackSettings:
-        """Returns what the track carries.
+        """Returns what the track carries now.
 
-        The size and frame rate of the frames last seen, the format of the audio, and the device of the tracks of
-        :meth:`webrtc.MediaDevices.get_user_media`.
+        The settings hold the size and frame rate of the last frames seen and the format of the audio. Tracks of
+        :meth:`webrtc.MediaDevices.get_user_media` also report the device. Members that aren't known yet are
+        :obj:`None`.
+
+        See :mdn:`MediaStreamTrack/getSettings`.
 
         Returns:
             :obj:`webrtc.MediaTrackSettings`: The settings.
@@ -311,8 +340,10 @@ class MediaStreamTrack(
     def get_capabilities(self) -> MediaTrackCapabilities:
         """Returns what the source of the track can do.
 
-        The synthetic camera and microphone of :meth:`webrtc.MediaDevices.get_user_media` have capabilities, other
-        tracks (remote, generated) have none.
+        Only the synthetic camera and microphone of :meth:`webrtc.MediaDevices.get_user_media` have capabilities.
+        For remote and generated tracks every member is :obj:`None`.
+
+        See :mdn:`MediaStreamTrack/getCapabilities`.
 
         Returns:
             :obj:`webrtc.MediaTrackCapabilities`: The capabilities.
@@ -327,6 +358,8 @@ class MediaStreamTrack(
     def get_constraints(self) -> MediaTrackConstraints:
         """Returns the last constraints of :meth:`apply_constraints` or :meth:`~webrtc.MediaDevices.get_user_media`.
 
+        See :mdn:`MediaStreamTrack/getConstraints`.
+
         Returns:
             :obj:`webrtc.MediaTrackConstraints`: The constraints, none by default.
         """
@@ -334,17 +367,21 @@ class MediaStreamTrack(
         return constraints if constraints is not None else MediaTrackConstraints()
 
     def apply_constraints(self, constraints: MediaTrackConstraints | None = None) -> asyncio.Future[None]:
-        """Applies constraints to the track.
+        """Applies constraints to the track, checking them against :meth:`get_capabilities` or the current settings.
 
-        The synthetic camera of :meth:`webrtc.MediaDevices.get_user_media` changes its size and frame rate, the source
-        of other tracks stays as it is.
+        Only the synthetic camera of :meth:`webrtc.MediaDevices.get_user_media` reacts, by changing its size and
+        frame rate. The sources of other tracks stay as they are, and the constraints are only checked and kept. On
+        an ended track, only the numbers are checked and the constraints aren't kept.
+
+        See :mdn:`MediaStreamTrack/applyConstraints`.
 
         Args:
             constraints (:obj:`webrtc.MediaTrackConstraints`, optional): The constraints, none to remove them.
 
         Returns:
-            :obj:`asyncio.Future`: Done once applied, failed with :obj:`webrtc.OverconstrainedError` if a required
-            constraint can't be satisfied, which leaves the track as it was.
+            :obj:`asyncio.Future`: Done once applied. It fails with :obj:`webrtc.OverconstrainedError` if a
+            required constraint can't be satisfied, or with :obj:`TypeError` if a number isn't finite or an integer
+            is negative. A failure leaves the track as it was.
         """
         future = asyncio.get_running_loop().create_future()
         try:
@@ -380,11 +417,22 @@ class MediaStreamTrack(
         self._native_obj._constraints = constraints
 
     def clone(self) -> webrtc.MediaStreamTrack:
-        """Returns a duplicate of the :obj:`webrtc.MediaStreamTrack`."""
+        """Returns a new track with a new :attr:`id`, sharing the source of this one.
+
+        The clone keeps :attr:`label` and the device, and is ended if this track is.
+
+        See :mdn:`MediaStreamTrack/clone`.
+
+        Returns:
+            :obj:`webrtc.MediaStreamTrack`: The clone.
+        """
         return self._wrap(self._native_obj.clone())
 
     def stop(self) -> None:
-        """Stops the track, detached from its source: its :attr:`ready_state` becomes ended."""
+        """Stops the track and detaches it from its source. :attr:`ready_state` becomes ``ended`` with no event.
+
+        See :mdn:`MediaStreamTrack/stop`.
+        """
         self._native_obj.stop()
 
     #: Alias for :attr:`ready_state`

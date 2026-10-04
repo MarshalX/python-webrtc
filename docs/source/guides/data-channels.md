@@ -1,6 +1,6 @@
 # Data channels
 
-An {obj}`~webrtc.RTCDataChannel` sends messages between the peers, over SCTP inside the encrypted connection.
+An {obj}`~webrtc.RTCDataChannel` sends messages between the peers, over SCTP inside the encrypted connection. See {mdn}`RTCDataChannel`.
 
 ## Opening
 
@@ -45,7 +45,7 @@ init = webrtc.RTCDataChannelInit(ordered=False, max_retransmits=0)
 channel = pc.create_data_channel('positions', init)
 ```
 
-A channel can also be negotiated by the application: both sides create it with the same `id`, and no
+The application can also negotiate a channel itself. Both sides then create it with the same `id`, and no
 `datachannel` event fires.
 
 ```python
@@ -72,5 +72,5 @@ for chunk in chunks:
 
 ## Closing
 
-{meth}`~webrtc.RTCDataChannel.close` closes the channel on both ends: `close` fires on each, after `closing` on the
-remote one. Closing the connection closes its channels.
+{meth}`~webrtc.RTCDataChannel.close` closes the channel on both ends. Each end fires `close`, and the remote one
+fires `closing` before it. Closing the connection closes its channels.

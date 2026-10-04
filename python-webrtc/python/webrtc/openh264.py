@@ -9,9 +9,12 @@
 
 OpenH264 Video Codec provided by Cisco Systems, Inc.
 
-Cisco's patent license covers the binary only on the conditions of its license (see THIRD_PARTY_LICENSES.md): the
-application lets its users enable and disable it, shows :data:`NOTICE` where they do, and reproduces :data:`LICENSE`
-where it presents licensing information.
+:func:`install` downloads Cisco's prebuilt binary for macOS (x64, arm64), Linux (x64, arm64, glibc 2.34 or newer)
+or Windows (x64), checks its SHA-256 and loads it.
+
+Cisco's patent license covers the binary only under the conditions of its license (see THIRD_PARTY_LICENSES.md).
+The application must let its users enable and disable it, show :data:`NOTICE` where they do, and reproduce
+:data:`LICENSE` where it presents licensing information.
 """
 
 from __future__ import annotations
@@ -32,13 +35,15 @@ import webrtc
 
 __all__ = ['LICENSE', 'NOTICE', 'VERSION', 'disable', 'install', 'isEnabled', 'is_enabled']
 
-#: The OpenH264 release the extension is built against
+#: The OpenH264 release the extension is built against, and that :func:`install` downloads
 VERSION = '2.6.0'
 
 #: The text Cisco's license requires where users enable or disable H.264
 NOTICE = 'OpenH264 Video Codec provided by Cisco Systems, Inc.'
 
 #: Cisco's license of the binary, which applications must reproduce where they present licensing information
+#:
+#: :meta hide-value:
 LICENSE = importlib.resources.files('webrtc').joinpath('openh264_license.txt').read_text(encoding='utf-8')
 
 _URL = 'http://ciscobinary.openh264.org/'
@@ -132,21 +137,23 @@ async def install(cache_dir: str | os.PathLike[str] | None = None, *, print_noti
     OpenH264 Video Codec provided by Cisco Systems, Inc.
 
     Calling it is the opt-in Cisco's license requires, and it re-enables H.264 after :func:`disable`. Call it before
-    creating peer connections: the codecs of a connection are fixed when it's created. The download runs in a thread,
-    so the event loop keeps running.
+    creating peer connections, because the codecs of a connection are fixed when it's created. The download runs in a
+    thread, so the event loop keeps running. It's skipped when the binary is already in the cache.
 
     Args:
-        cache_dir (:obj:`str`, optional): Where the binary is kept. Defaults to python-webrtc's cache directory.
+        cache_dir (:obj:`str`, optional): The directory the binary is kept in. Defaults to ``openh264-<VERSION>`` in
+            the cache directory. That is ``WRTC_CACHE_DIR``, else ``python-webrtc`` in ``LOCALAPPDATA`` or
+            ``XDG_CACHE_HOME``, else ``~/.cache/python-webrtc``.
         print_notice (:obj:`bool`, optional): Whether to print :data:`NOTICE`. Pass :obj:`False` only when the
-            application shows :data:`NOTICE` itself where its users enable and disable H.264: Cisco's license requires
-            it there.
+            application shows :data:`NOTICE` itself where its users enable and disable H.264, as Cisco's license
+            requires.
 
     Returns:
         :obj:`str`: The version of the loaded binary.
 
     Raises:
-        RuntimeError: If there's no binary for this platform (on Linux, it needs glibc 2.34 or newer), or it can't be
-            downloaded or loaded.
+        RuntimeError: If Cisco has no binary for this platform (on Linux, it needs glibc 2.34 or newer), or it can't
+            be downloaded, doesn't match its SHA-256, or can't be loaded.
     """
     version = await asyncio.to_thread(_load, Path(cache_dir) if cache_dir is not None else None)
     if print_notice:
@@ -194,13 +201,13 @@ def disable() -> None:
 
     OpenH264 Video Codec provided by Cisco Systems, Inc.
 
-    Connections created before keep the codecs they had.
+    Connections created earlier keep their codecs. The binary stays in the cache.
     """
     webrtc.wrtc.disableOpenH264()
 
 
 def is_enabled() -> bool:
-    """Whether H.264 is offered.
+    """Whether H.264 through OpenH264 is offered to new connections.
 
     Returns:
         :obj:`bool`: :obj:`True` after :func:`install`, until :func:`disable`.

@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""RTCSctpTransport of WebRTC."""
+"""The SCTP transport that data channels go over."""
 
 from __future__ import annotations
 
@@ -19,13 +19,14 @@ from webrtc.utils.events import UniformEventTarget
 
 
 class RTCSctpTransport(WebRTCObject[wrtc.RTCSctpTransport], UniformEventTarget[Literal['statechange'], Event]):
-    """The Stream Control Transmission Protocol (SCTP) transport of a :obj:`webrtc.RTCPeerConnection`.
+    """The SCTP transport the data channels of a :obj:`webrtc.RTCPeerConnection` share.
 
-    It tells the limitations of the transport, and gives the Datagram Transport Layer Security (DTLS) transport
-    over which the SCTP packets of all the data channels of the connection are sent and received.
+    It reports the negotiated limits of the data channels, and the DTLS transport its packets go over.
 
-    Events (see :meth:`on`):
-        ``statechange`` (:obj:`webrtc.Event`): :attr:`state` changed.
+    See :mdn:`RTCSctpTransport`.
+
+    Events:
+        statechange (:obj:`webrtc.Event`): :attr:`state` changed.
     """
 
     _class = wrtc.RTCSctpTransport
@@ -38,22 +39,37 @@ class RTCSctpTransport(WebRTCObject[wrtc.RTCSctpTransport], UniformEventTarget[L
 
     @property
     def transport(self) -> webrtc.RTCDtlsTransport:
-        """:obj:`webrtc.RTCDtlsTransport`: The DTLS transport the data packets are sent and received over."""
+        """:obj:`webrtc.RTCDtlsTransport`: The DTLS transport the SCTP packets go over.
+
+        See :mdn:`RTCSctpTransport/transport`.
+        """
         return webrtc.RTCDtlsTransport._wrap(self._native_obj.transport)
 
     @property
     def state(self) -> webrtc.RTCSctpTransportState:
-        """:obj:`webrtc.RTCSctpTransportState`: An enumerated value indicating the state of the SCTP transport."""
+        """:obj:`webrtc.RTCSctpTransportState`: Whether the SCTP association is connecting, connected or closed.
+
+        See :mdn:`RTCSctpTransport/state`.
+        """
         return self._native_obj.state
 
     @property
     def max_message_size(self) -> float | None:
-        """:obj:`float`, optional: The maximum size in bytes of a message :meth:`webrtc.RTCDataChannel.send` sends."""
+        """:obj:`float`, optional: The largest message in bytes :meth:`webrtc.RTCDataChannel.send` accepts.
+
+        It's ``math.inf`` when there's no limit and :obj:`None` while it isn't known.
+
+        See :mdn:`RTCSctpTransport/maxMessageSize`.
+        """
         return self._native_obj.maxMessageSize
 
     @property
     def max_channels(self) -> int | None:
-        """:obj:`int`, optional: The maximum number of :obj:`webrtc.RTCDataChannel` open at the same time."""
+        """:obj:`int`, optional: How many data channels can be open at once.
+
+        It's :obj:`None` until the transport is connected.
+        See :mdn:`RTCSctpTransport/maxChannels`.
+        """
         return self._native_obj.maxChannels
 
     #: Alias for :attr:`max_message_size`

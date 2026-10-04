@@ -1,7 +1,7 @@
 # Live stream in the terminal
 
-Plays a stream of the public [Janus](https://janus.conf.meetecho.com/) demo server: the video drawn with colored
-characters, the audio on your speakers. No account or key:
+Plays a stream of the public [Janus](https://janus.conf.meetecho.com/) demo server. The video is drawn with colored
+characters and the audio plays on your speakers. It needs no account or key:
 
 ```bash
 uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/janus_streaming.py

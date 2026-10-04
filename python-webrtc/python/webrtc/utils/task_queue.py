@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""The queue of the callbacks libwebrtc threads post to an event loop."""
+"""The queue of the callbacks that native threads post to an event loop."""
 
 from __future__ import annotations
 

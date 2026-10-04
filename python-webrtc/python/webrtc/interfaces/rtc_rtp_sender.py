@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""RTCRtpSender of WebRTC."""
+"""The sender that encodes and sends the media of a track."""
 
 from __future__ import annotations
 
@@ -32,34 +32,50 @@ if TYPE_CHECKING:
 
 
 class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
-    """Sends the media of a track, encoded, to the remote peer, and controls how it's sent.
+    """Encodes the media of a track and sends it to the remote peer, and controls how it's sent.
 
-    It's the sender of an :obj:`webrtc.RTCRtpTransceiver` of an :obj:`webrtc.RTCPeerConnection`.
+    Each :obj:`webrtc.RTCRtpTransceiver` of an :obj:`webrtc.RTCPeerConnection` has one.
+
+    See :mdn:`RTCRtpSender`.
     """
 
     _class = wrtc.RTCRtpSender
 
     @property
     def track(self) -> webrtc.MediaStreamTrack | None:
-        """:obj:`webrtc.MediaStreamTrack`, optional: The track the sender sends, :obj:`None` to send nothing."""
+        """:obj:`webrtc.MediaStreamTrack`, optional: The track being sent, or :obj:`None` if nothing is.
+
+        Change it with :meth:`replace_track`.
+
+        See :mdn:`RTCRtpSender/track`.
+        """
         return webrtc.MediaStreamTrack._wrap_optional(self._native_obj.track)
 
     @property
     def transport(self) -> webrtc.RTCDtlsTransport | None:
-        """:obj:`webrtc.RTCDtlsTransport`, optional: The transport of the packets, :obj:`None` until there's one."""
+        """:obj:`webrtc.RTCDtlsTransport`, optional: The transport the packets go over.
+
+        It's :obj:`None` until there's one.
+        See :mdn:`RTCRtpSender/transport`.
+        """
         return webrtc.RTCDtlsTransport._wrap_optional(self._native_obj.transport)
 
     @property
     def dtmf(self) -> webrtc.RTCDTMFSender | None:
-        """:obj:`webrtc.RTCDTMFSender`, optional: Sends DTMF tones, for an audio sender."""
+        """:obj:`webrtc.RTCDTMFSender`, optional: Sends DTMF tones, or is :obj:`None` for a video sender.
+
+        See :mdn:`RTCRtpSender/dtmf`.
+        """
         return webrtc.RTCDTMFSender._wrap_optional(self._native_obj.dtmf)
 
     @property
     def transform(self) -> webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameEncryptor | None:
         """:obj:`webrtc.RTCRtpScriptTransform` or :obj:`webrtc.RTCRtpSFrameEncryptor`, optional: The frame transform.
 
-        It transforms the encoded frames before they're sent, :obj:`None` sends them as they're encoded.
-        A transform is used by one sender or receiver only: a transform that had one can't be set again.
+        It changes the encoded frames before they're sent. With :obj:`None`, frames are sent as encoded.
+        A transform serves one sender or receiver for its lifetime, so once attached it can't be set elsewhere.
+
+        See :mdn:`RTCRtpSender/transform`.
 
         Raises:
             TypeError: If the value set isn't a transform of a sender.
@@ -82,8 +98,11 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
     def get_parameters(self) -> webrtc.RTCRtpSendParameters:
         """Returns the parameters the sender sends with.
 
-        To change them, modify the returned parameters and pass them to :meth:`set_parameters` before the current
-        task of the event loop ends: parameters from an earlier task aren't accepted anymore.
+        To change them, modify the result and pass it to :meth:`set_parameters` before the current task of the
+        event loop ends. Parameters from an earlier task are rejected. Video encodings without
+        ``scale_resolution_down_by`` get the effective value filled in.
+
+        See :mdn:`RTCRtpSender/getParameters`.
 
         Returns:
             :obj:`webrtc.RTCRtpSendParameters`: The parameters, with a new ``transaction_id``.
@@ -100,20 +119,24 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         parameters: webrtc.RTCRtpSendParameters,
         set_parameter_options: webrtc.RTCSetParameterOptions | None = None,
     ) -> None:
-        """Changes how the sender sends: its encodings and degradation preference.
+        """Changes the encodings and the degradation preference the sender sends with.
+
+        See :mdn:`RTCRtpSender/setParameters`.
 
         Args:
             parameters (:obj:`webrtc.RTCRtpSendParameters`): The parameters :meth:`get_parameters` returned in the
-                current task, modified.
+                current task, with the changes made.
             set_parameter_options (:obj:`webrtc.RTCSetParameterOptions`, optional): How to change the encodings,
                 like sending a key frame right away.
 
         Raises:
-            webrtc.InvalidStateError: If :meth:`get_parameters` wasn't called in the current task.
+            webrtc.InvalidStateError: If :meth:`get_parameters` wasn't called in the current task, or the
+                transceiver of the sender is stopped.
             webrtc.InvalidModificationError: If the ``transaction_id``, the codecs, the header extensions,
                 the RTCP parameters, the number of encodings or their ``rid`` changed, the codec of an encoding
                 isn't negotiated, or ``encoding_options`` aren't one per encoding.
             webrtc.InvalidRangeError: If a value is out of range, like ``scale_resolution_down_by`` below 1.
+            TypeError: If ``max_bitrate`` isn't an unsigned 32-bit integer, or a video value isn't a finite number.
         """
         if self._native_obj._transceiverStopped():
             msg = 'The transceiver of the sender is stopped'
@@ -139,18 +162,20 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         await call_native(self._native_obj.setParameters, last)
 
     async def replace_track(self, with_track: webrtc.MediaStreamTrack | None) -> None:
-        """Replaces the track the sender sends, without negotiation.
+        """Replaces the track the sender sends, without renegotiating.
 
-        The track is replaced in the operations chain of the connection, after the operations started before
-        (like setting a description), and not before the code that called it runs on.
+        It runs in the operations chain of the connection, after the operations queued before it (like setting a
+        description), and never before the calling code continues.
+
+        See :mdn:`RTCRtpSender/replaceTrack`.
 
         Args:
-            with_track (:obj:`webrtc.MediaStreamTrack`, optional): The new track, of the same kind, or :obj:`None`
+            with_track (:obj:`webrtc.MediaStreamTrack`, optional): The new track of the same kind, or :obj:`None`
                 to stop sending.
 
         Raises:
             TypeError: If the track is of another kind.
-            webrtc.InvalidStateError: If the transceiver of the sender is stopped, or the connection closed.
+            webrtc.InvalidStateError: If the transceiver of the sender is stopped, or the connection is closed.
         """
         if with_track is not None and with_track.kind != self._kind:
             msg = f'a {with_track.kind} track can not replace the track of a {self._kind} sender'
@@ -173,10 +198,14 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
             replace()
 
     def set_streams(self, *streams: webrtc.MediaStream) -> None:
-        """Sets the streams the remote peer associates the track of the sender with, from the next negotiation.
+        """Sets the streams the remote peer puts the track of the sender in, from the next negotiation.
+
+        Repeated streams count once.
+
+        See :mdn:`RTCRtpSender/setStreams`.
 
         Args:
-            *streams (:obj:`webrtc.MediaStream`): The streams, none to associate the track with no stream.
+            *streams (:obj:`webrtc.MediaStream`): The streams. Pass none to put the track in no stream.
         """
         ids: list[str] = []
         for stream in streams:
@@ -188,16 +217,20 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
     def get_capabilities(kind: webrtc.MediaType | webrtc.MediaTypeValue) -> webrtc.RTCRtpCapabilities | None:
         """Returns the codecs and header extensions senders of a kind support.
 
+        See :mdn:`RTCRtpSender/getCapabilities_static`.
+
         Args:
             kind (:obj:`webrtc.MediaType`): Audio or video.
 
         Returns:
-            :obj:`webrtc.RTCRtpCapabilities`, optional: The capabilities, :obj:`None` for another kind.
+            :obj:`webrtc.RTCRtpCapabilities`, optional: The capabilities, or :obj:`None` for another kind.
         """
         return RTCRtpCapabilities._supported(wrtc.RTCRtpSender, kind)
 
     async def get_stats(self) -> webrtc.RTCStatsReport:
-        """Collects the stats of the sender, and of the objects its stats refer to.
+        """Collects the stats of the sender and of the objects they refer to.
+
+        See :mdn:`RTCRtpSender/getStats`.
 
         Returns:
             :obj:`webrtc.RTCStatsReport`: The stats.
@@ -262,7 +295,7 @@ def _check_unchanged(
 
 
 def _check_video_ranges(encodings: list[webrtc.RTCRtpEncodingParameters]) -> None:
-    """Checks the values of video encodings, before libwebrtc gets them.
+    """Checks the values of video encodings, before the native WebRTC engine gets them.
 
     Raises:
         webrtc.InvalidRangeError: If a value is out of range.

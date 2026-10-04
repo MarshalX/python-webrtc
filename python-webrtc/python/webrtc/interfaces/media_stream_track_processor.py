@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""MediaStreamTrackProcessor of Chrome, the media of a track as a stream."""
+"""MediaStreamTrackProcessor, which reads the media of a track as a readable stream."""
 
 from __future__ import annotations
 
@@ -23,9 +23,9 @@ from webrtc.utils.names import Alias, alias
 if TYPE_CHECKING:
     from webrtc.streams import ReadableStreamDefaultController
 
-#: How many frames of video are queued for reads, as the specification says
+#: How many video frames are queued for reads by default, as set by the specification
 DEFAULT_VIDEO_BUFFER_SIZE = 1
-#: How many 10 ms chunks of audio are queued for reads, as Chrome does
+#: How many 10 ms chunks of audio are queued for reads by default, which makes 100 ms in all
 DEFAULT_AUDIO_BUFFER_SIZE = 10
 _MAX_BUFFER_SIZE = 65535
 # the members of a native item of video: the buffer, timestamp, rotation and RTP timestamp (6 for audio)
@@ -34,11 +34,13 @@ _VIDEO_ITEM_SIZE = 4
 
 @dataclass
 class MediaStreamTrackProcessorInit(Dictionary):
-    """How to create a :obj:`MediaStreamTrackProcessor`.
+    """The options of a :obj:`MediaStreamTrackProcessor`.
 
     Args:
         track (:obj:`webrtc.MediaStreamTrack`): The track to read.
-        max_buffer_size (:obj:`int`, optional): How many frames are queued for reads before the oldest one is dropped.
+        max_buffer_size (:obj:`int`, optional): How many items are queued before the oldest one is dropped. It
+            ranges from 0 to 65535, and 0 is treated as 1. If unset, it's :data:`DEFAULT_VIDEO_BUFFER_SIZE` or
+            :data:`DEFAULT_AUDIO_BUFFER_SIZE`.
     """
 
     track: MediaStreamTrack
@@ -92,18 +94,18 @@ class _TrackSource:
 
 
 class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], EventTarget[Never]):
-    """Reads the media of a track as a stream, as Chrome does.
+    """Reads the media of a track as a stream.
 
-    See https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrackProcessor. It reads
-    :obj:`webrtc.VideoFrame` objects for a video track, :obj:`webrtc.AudioData` ones (10 ms each) for an audio track.
+    :attr:`readable` gives :obj:`webrtc.VideoFrame` objects for a video track and :obj:`webrtc.AudioData` objects
+    of 10 ms each for an audio track. Media is queued as it arrives, up to ``max_buffer_size`` items. When the
+    queue is full, the oldest item is dropped and counted in :attr:`discarded_frames`, so a slow reader never makes
+    memory grow. The stream closes when the track ends. Close each frame you read once you're done with it.
 
-    Media is queued as it arrives, up to ``max_buffer_size`` items: when the queue is full, the oldest item is
-    dropped (and counted in :attr:`discarded_frames`), so a slow reader never makes memory grow. The stream closes
-    when the track ends. Frames read are to be closed once used.
+    See :mdn:`MediaStreamTrackProcessor`.
 
     Args:
-        init (:obj:`MediaStreamTrackProcessorInit`): The track to read, and how many items are queued: 1 frame of
-            video by default, 10 chunks of audio.
+        init (:obj:`MediaStreamTrackProcessorInit`): The track to read and how many items are queued. By
+            default that's 1 frame of video or 10 chunks of audio.
 
     Raises:
         TypeError: If the size isn't an integer from 0 to 65535.
@@ -158,17 +160,28 @@ class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], Ev
 
     @property
     def readable(self) -> ReadableStream[VideoFrame | AudioData]:
-        """:obj:`webrtc.ReadableStream`: The media of the track."""
+        """:obj:`webrtc.ReadableStream`: The media of the track. It closes once the track ends.
+
+        Canceling it makes the processor stop reading the track.
+
+        See :mdn:`MediaStreamTrackProcessor/readable`.
+        """
         return self._readable
 
     @property
     def total_frames(self) -> int:
-        """:obj:`int`: How many frames (or chunks of audio) the track delivered."""
+        """:obj:`int`: How many frames or chunks of audio the track delivered to the processor, read or not.
+
+        See :mdn:`MediaStreamTrackProcessor/totalFrames`.
+        """
         return self._native_obj.totalFrames
 
     @property
     def discarded_frames(self) -> int:
-        """:obj:`int`: How many of them were dropped because the queue was full."""
+        """:obj:`int`: How many of :attr:`total_frames` were dropped unread because the queue was full.
+
+        See :mdn:`MediaStreamTrackProcessor/discardedFrames`.
+        """
         return self._native_obj.discardedFrames
 
     #: Alias for :attr:`total_frames`

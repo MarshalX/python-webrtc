@@ -26,13 +26,15 @@ if TYPE_CHECKING:
 class RTCRtpTransceiverInit(Dictionary):
     """The options of a new transceiver, for :meth:`webrtc.RTCPeerConnection.add_transceiver`.
 
+    It isn't changed by the call, so it can be reused. See :mdn:`RTCPeerConnection/addTransceiver`.
+
     Args:
-        direction (:obj:`webrtc.RTCRtpTransceiverDirection`, optional): The direction of the transceiver, ``sendrecv``
-            by default.
-        streams (:obj:`list` of :obj:`webrtc.MediaStream`, optional): The streams the remote peer receives the track
-            of its sender in.
-        send_encodings (:obj:`list` of :obj:`webrtc.RTCRtpEncodingParameters`, optional): The encodings of its
-            sender, one per simulcast layer.
+        direction (:obj:`webrtc.RTCRtpTransceiverDirection`, optional): The preferred direction of the transceiver,
+            or its value. It's ``sendrecv`` by default.
+        streams (:obj:`list` of :obj:`webrtc.MediaStream`, optional): The local streams that the remote peer
+            receives the sender's track in. They're signaled by their ids.
+        send_encodings (:obj:`list` of :obj:`webrtc.RTCRtpEncodingParameters`, optional): The encodings of the
+            sender, one per simulcast layer. With several, each needs a distinct ``rid``.
 
     Raises:
         ValueError: If the direction isn't a member of :obj:`webrtc.RTCRtpTransceiverDirection`.

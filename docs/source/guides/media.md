@@ -3,21 +3,20 @@
 Media is read from tracks and written to them with the APIs of the browsers:
 
 - {obj}`~webrtc.MediaStreamTrackProcessor` reads a track, local or remote, as a {obj}`~webrtc.ReadableStream` of
-  {obj}`~webrtc.VideoFrame` or {obj}`~webrtc.AudioData` objects
-  ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrackProcessor)).
-- {obj}`~webrtc.VideoTrackGenerator` is a video track of the frames written to its {obj}`~webrtc.WritableStream`
-  ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/VideoTrackGenerator)).
-- {obj}`~webrtc.MediaStreamTrackGenerator` is the same for audio and video, as Chrome has it
-  ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrackGenerator)).
+  {obj}`~webrtc.VideoFrame` or {obj}`~webrtc.AudioData` objects. See {mdn}`MediaStreamTrackProcessor`.
+- {obj}`~webrtc.VideoTrackGenerator` is a video track of the frames written to its {obj}`~webrtc.WritableStream`.
+  See {mdn}`VideoTrackGenerator`.
+- {obj}`~webrtc.MediaStreamTrackGenerator` does the same for audio and video. It isn't part of a standard.
+  See {mdn}`MediaStreamTrackGenerator`.
 
-Frames hold memory until closed: close each frame once it's used. A processor queues `max_buffer_size` frames (1 of
+Frames hold memory until they are closed, so close each frame once it's used. A processor queues `max_buffer_size` frames (1 of
 video, 10 chunks of 10 ms of audio by default) and drops the oldest when a reader is slower than the track, so
-memory never grows. Media threads never wait for the GIL: Python is woken once when frames are there.
+memory never grows. Media threads never wait for the GIL. Python is woken once when frames are there.
 
 ## Tracks to start with
 
-`webrtc.media_devices`, the {obj}`~webrtc.MediaDevices` of the library, has a synthetic camera and microphone,
-handy for tests and for sending something before you have media of your own:
+`webrtc.media_devices`, the {obj}`~webrtc.MediaDevices` of the library, has a synthetic camera and microphone.
+Use them in tests, or to send something before you have media of your own:
 
 ```python
 stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True, video=True))
@@ -70,4 +69,4 @@ generator = webrtc.VideoTrackGenerator()
 await processor.readable.pipe_through(webrtc.TransformStream(transformer)).pipe_to(generator.writable)
 ```
 
-The [echo example](../examples/echo.md) is a complete one: it sends the received video back in grayscale.
+The [echo example](../examples/echo.md) is a complete program that sends the received video back in grayscale.

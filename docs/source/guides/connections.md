@@ -17,8 +17,8 @@ config = webrtc.RTCConfiguration(
 pc = webrtc.RTCPeerConnection(config)
 ```
 
-Dictionaries of the specification are typed dataclasses, with the names in snake_case. Methods take them, not plain
-dicts, so a misspelled member fails where it's written rather than being ignored.
+Dictionaries of the specification are typed dataclasses, with the names in snake_case. Methods take these classes
+in place of plain dicts, so a misspelled member raises an error where it's written. See {mdn}`RTCPeerConnection`.
 
 ## Signalling
 
@@ -44,8 +44,8 @@ await pc.set_remote_description(answer)
 `type` and an `sdp`, which is all a channel has to carry.
 
 Candidates are gathered after `set_local_description`, and trickle in the `icecandidate` event. Send each one to the
-other side, which adds it with {meth}`~webrtc.RTCPeerConnection.add_ice_candidate`. The last event has no candidate:
-gathering is complete.
+other side, which adds it with {meth}`~webrtc.RTCPeerConnection.add_ice_candidate`. The last event has no candidate,
+which means gathering is complete. See {mdn}`RTCPeerConnection/icecandidate_event`.
 
 ```python
 @pc.on('icecandidate')
@@ -60,7 +60,7 @@ every candidate in it.
 ## States
 
 The state of a connection is in {attr}`~webrtc.RTCPeerConnection.connection_state`, and each change fires
-`connectionstatechange`:
+`connectionstatechange` (see {mdn}`RTCPeerConnection/connectionState`):
 
 ```python
 @pc.on('connectionstatechange')
@@ -75,7 +75,7 @@ Enums are strings: `pc.connection_state == webrtc.RTCPeerConnectionState.connect
 ## Stats
 
 {meth}`~webrtc.RTCPeerConnection.get_stats` returns an {obj}`~webrtc.RTCStatsReport`, a mapping of ids to typed
-stats objects:
+stats objects (see {mdn}`RTCStatsReport`):
 
 ```python
 report = await pc.get_stats()
@@ -87,4 +87,4 @@ for stats in report.values():
 ## Closing
 
 {meth}`~webrtc.RTCPeerConnection.close` stops the transports and the media at once. A closed connection can't be
-reused: create a new one.
+reused, so create a new one to connect again.

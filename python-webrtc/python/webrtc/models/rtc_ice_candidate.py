@@ -146,8 +146,8 @@ def _parse_fields(value: str, *, strict: bool) -> _CandidateFields:
 def _parse_candidate(value: str, *, strict: bool = True) -> _CandidateFields | None:
     """Parses a candidate-attribute (RFC 8839, with the tcptype of RFC 6544).
 
-    Not strict, a candidate other than a host one may have no related address, as libwebrtc describes
-    peer-reflexive candidates.
+    When not strict, a candidate other than a host one may have no related address, since the native WebRTC
+    engine describes peer-reflexive candidates that way.
 
     Returns:
         :obj:`dict`: The fields, or :obj:`None` if the candidate doesn't parse.
@@ -170,10 +170,13 @@ def _member_or_none(cls: type[_EnumT], value: object) -> _EnumT | None:
 class RTCIceParameters(Dictionary):
     """The ICE username fragment and password of one end of an :obj:`webrtc.RTCIceTransport`.
 
+    See :mdn:`RTCIceParameters`.
+
     Args:
-        username_fragment (:obj:`str`, optional): The username fragment (``a=ice-ufrag``).
-        password (:obj:`str`, optional): The password (``a=ice-pwd``).
-        ice_lite (:obj:`bool`, optional): Whether the agent is an ICE lite one, unknown for a remote agent.
+        username_fragment (:obj:`str`, optional): The username fragment, as in ``a=ice-ufrag`` of SDP.
+        password (:obj:`str`, optional): The password, as in ``a=ice-pwd`` of SDP.
+        ice_lite (:obj:`bool`, optional): Whether the agent implements ICE lite. It's :obj:`None` for a remote
+            agent, since that isn't known.
     """
 
     username_fragment: str | None = None
@@ -190,12 +193,14 @@ class RTCIceParameters(Dictionary):
 class RTCIceCandidateInit(Dictionary):
     """A candidate as it's signaled, for :meth:`webrtc.RTCPeerConnection.add_ice_candidate`.
 
-    The JSON form :meth:`webrtc.RTCIceCandidate.to_json` returns, which :meth:`from_json` reads.
+    It's the JSON form that :meth:`webrtc.RTCIceCandidate.to_json` returns and :meth:`from_json` reads.
+
+    See :mdn:`RTCIceCandidate/RTCIceCandidate`.
 
     Args:
-        candidate (:obj:`str`, optional): The candidate-attribute from SDP. An empty string means the end of
+        candidate (:obj:`str`, optional): The candidate-attribute from SDP. An empty string marks the end of
             candidates.
-        sdp_mid (:obj:`str`, optional): The media stream identification tag of the media section of the candidate.
+        sdp_mid (:obj:`str`, optional): The ``mid`` of the media section the candidate belongs to.
         sdp_m_line_index (:obj:`int`, optional): The index of the media section of the candidate.
         username_fragment (:obj:`str`, optional): The ICE username fragment the candidate belongs to.
     """
@@ -215,16 +220,19 @@ class RTCIceCandidateInit(Dictionary):
 
 @dataclass
 class RTCLocalIceCandidateInit(RTCIceCandidateInit):
-    """A candidate with what's only known locally, the members :obj:`webrtc.RTCIceCandidate` is created from.
+    """A candidate with the members that are only known locally.
+
+    It takes every argument of :obj:`webrtc.RTCIceCandidate`.
 
     Args:
         candidate (:obj:`str`, optional): The candidate-attribute from SDP.
-        sdp_mid (:obj:`str`, optional): The media stream identification tag of the media section of the candidate.
+        sdp_mid (:obj:`str`, optional): The ``mid`` of the media section the candidate belongs to.
         sdp_m_line_index (:obj:`int`, optional): The index of the media section of the candidate.
         username_fragment (:obj:`str`, optional): The ICE username fragment the candidate belongs to.
         relay_protocol (:obj:`webrtc.RTCIceServerTransportProtocol`, optional): For a local relay candidate,
             the protocol used to reach the TURN server.
-        url (:obj:`str`, optional): For a local candidate, the STUN or TURN server that gathered it.
+        url (:obj:`str`, optional): For a local server-reflexive or relay candidate, the address of the STUN or
+            TURN server it came from.
     """
 
     relay_protocol: RTCIceServerTransportProtocol | RTCIceServerTransportProtocolValue | None = None
@@ -240,6 +248,8 @@ class RTCLocalIceCandidateInit(RTCIceCandidateInit):
 class RTCIceCandidatePair:
     """The local and the remote candidate an :obj:`webrtc.RTCIceTransport` sends and receives with.
 
+    See :mdn:`RTCIceCandidatePair`.
+
     Args:
         local (:obj:`webrtc.RTCIceCandidate`): The local candidate.
         remote (:obj:`webrtc.RTCIceCandidate`): The remote candidate.
@@ -251,21 +261,25 @@ class RTCIceCandidatePair:
 
 @dataclass(frozen=True, repr=False)
 class RTCIceCandidate:
-    """An ICE candidate: a way the remote peer may be reached.
+    """An ICE candidate, which is an address and port where a peer may be reached.
 
-    Candidates are gathered by :obj:`webrtc.RTCPeerConnection` (see its ``icecandidate`` event), sent to the remote
-    peer, and added there with :meth:`webrtc.RTCPeerConnection.add_ice_candidate`. The fields parsed from
-    :attr:`candidate` are :obj:`None` if it can't be parsed, the candidate string isn't validated here.
+    A :obj:`webrtc.RTCPeerConnection` gathers them (see its ``icecandidate`` event). Each one is sent to the remote
+    peer and added there with :meth:`webrtc.RTCPeerConnection.add_ice_candidate`. The constructor doesn't reject an
+    unparsable :attr:`candidate`, and the properties parsed from it are :obj:`None` then. Instances are immutable.
+
+    See :mdn:`RTCIceCandidate`.
 
     Args:
         candidate (:obj:`str`, optional): The candidate-attribute from SDP, like ``'candidate:1 1 udp ...'``.
-            An empty string means the end of candidates.
-        sdp_mid (:obj:`str`, optional): The media stream identification tag of the media section of the candidate.
+            An empty string marks the end of candidates.
+        sdp_mid (:obj:`str`, optional): The ``mid`` of the media section the candidate belongs to.
         sdp_m_line_index (:obj:`int`, optional): The index of the media section of the candidate.
         username_fragment (:obj:`str`, optional): The ICE username fragment the candidate belongs to.
         relay_protocol (:obj:`webrtc.RTCIceServerTransportProtocol`, optional): For a local relay candidate,
-            the protocol used to reach the TURN server. Not signaled, so :obj:`None` for remote candidates.
-        url (:obj:`str`, optional): For a local candidate, the STUN or TURN server that gathered it.
+            the protocol used to reach the TURN server. It isn't signaled, so it's :obj:`None` for remote
+            candidates.
+        url (:obj:`str`, optional): For a local server-reflexive or relay candidate, the address of the STUN or
+            TURN server it came from. It isn't signaled either.
 
     Raises:
         TypeError: If both ``sdp_mid`` and ``sdp_m_line_index`` are :obj:`None`.
@@ -328,56 +342,90 @@ class RTCIceCandidate:
 
     @property
     def foundation(self) -> str | None:
-        """:obj:`str`, optional: An identifier of candidates of the same type, base and server."""
+        """:obj:`str`, optional: An id shared by candidates of the same type, base address and server.
+
+        See :mdn:`RTCIceCandidate/foundation`.
+        """
         return self._parsed.get('foundation')
 
     @property
     def component(self) -> RTCIceComponent | None:
-        """:obj:`webrtc.RTCIceComponent`, optional: Whether the candidate is for RTP or RTCP."""
+        """:obj:`webrtc.RTCIceComponent`, optional: Whether the candidate is for RTP or RTCP.
+
+        See :mdn:`RTCIceCandidate/component`.
+        """
         return _member_or_none(RTCIceComponent, self._parsed.get('component'))
 
     @property
     def priority(self) -> int | None:
-        """:obj:`int`, optional: The priority of the candidate."""
+        """:obj:`int`, optional: The priority of the candidate. Higher ones are tried first.
+
+        See :mdn:`RTCIceCandidate/priority`.
+        """
         return self._parsed.get('priority')
 
     @property
     def address(self) -> str | None:
-        """:obj:`str`, optional: The IP address or the host name of the candidate."""
+        """:obj:`str`, optional: The IP address or host name (like an mDNS ``.local`` one) of the candidate.
+
+        It's :obj:`None` for a remote peer-reflexive candidate.
+
+        See :mdn:`RTCIceCandidate/address`.
+        """
         return self._parsed.get('address')
 
     @property
     def protocol(self) -> RTCIceProtocol | None:
-        """:obj:`webrtc.RTCIceProtocol`, optional: The transport protocol of the candidate."""
+        """:obj:`webrtc.RTCIceProtocol`, optional: The transport protocol of the candidate, UDP or TCP.
+
+        See :mdn:`RTCIceCandidate/protocol`.
+        """
         return _member_or_none(RTCIceProtocol, self._parsed.get('protocol'))
 
     @property
     def port(self) -> int | None:
-        """:obj:`int`, optional: The port of the candidate."""
+        """:obj:`int`, optional: The port of the candidate.
+
+        See :mdn:`RTCIceCandidate/port`.
+        """
         return self._parsed.get('port')
 
     @property
     def type(self) -> RTCIceCandidateType | None:
-        """:obj:`webrtc.RTCIceCandidateType`, optional: The type of the candidate."""
+        """:obj:`webrtc.RTCIceCandidateType`, optional: How the candidate was found: host, reflexive or relay.
+
+        See :mdn:`RTCIceCandidate/type`.
+        """
         return _member_or_none(RTCIceCandidateType, self._parsed.get('type'))
 
     @property
     def tcp_type(self) -> RTCIceTcpCandidateType | None:
-        """:obj:`webrtc.RTCIceTcpCandidateType`, optional: The type of a TCP candidate."""
+        """:obj:`webrtc.RTCIceTcpCandidateType`, optional: For a TCP candidate, how it opens connections.
+
+        See :mdn:`RTCIceCandidate/tcpType`.
+        """
         return _member_or_none(RTCIceTcpCandidateType, self._parsed.get('tcp_type'))
 
     @property
     def related_address(self) -> str | None:
-        """:obj:`str`, optional: For a candidate that isn't a host one, the address it's derived from."""
+        """:obj:`str`, optional: For a candidate other than a host one, the address it was derived from.
+
+        See :mdn:`RTCIceCandidate/relatedAddress`.
+        """
         return self._parsed.get('related_address')
 
     @property
     def related_port(self) -> int | None:
-        """:obj:`int`, optional: For a candidate that isn't a host one, the port it's derived from."""
+        """:obj:`int`, optional: For a candidate other than a host one, the port it was derived from.
+
+        See :mdn:`RTCIceCandidate/relatedPort`.
+        """
         return self._parsed.get('related_port')
 
     def to_json(self) -> dict[str, str | int | None]:
-        """The candidate as a JSON-serializable dictionary, to send to the remote peer.
+        """Returns the candidate as a JSON-serializable dictionary, to signal it to the remote peer.
+
+        See :mdn:`RTCIceCandidate/toJSON`.
 
         Returns:
             :obj:`dict`: ``candidate``, ``sdpMid``, ``sdpMLineIndex`` and ``usernameFragment``.

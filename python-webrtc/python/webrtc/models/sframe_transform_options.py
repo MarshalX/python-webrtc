@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""The options of the SFrame transforms of WebRTC Encoded Transform."""
+"""Options of the SFrame transforms and streams of WebRTC Encoded Transform."""
 
 from __future__ import annotations
 
@@ -22,10 +22,13 @@ if TYPE_CHECKING:
 
 @dataclass
 class SFrameTransformOptions(Dictionary):
-    """The options of an :obj:`webrtc.RTCRtpSFrameDecryptor` and of the SFrame streams.
+    """The options of an SFrame decryptor or SFrame stream.
+
+    Used by :obj:`webrtc.RTCRtpSFrameDecryptor`, :obj:`webrtc.SFrameEncryptorStream` and
+    :obj:`webrtc.SFrameDecryptorStream`.
 
     Args:
-        cipher_suite (:obj:`webrtc.SFrameCipherSuite`): The cipher suite, or its value.
+        cipher_suite (:obj:`webrtc.SFrameCipherSuite`): The cipher suite, as a member or its string value.
 
     Raises:
         ValueError: If the cipher suite isn't a member of :obj:`webrtc.SFrameCipherSuite`.
@@ -45,9 +48,9 @@ class RTCRtpSFrameEncryptorOptions(SFrameTransformOptions):
     """The options of an :obj:`webrtc.RTCRtpSFrameEncryptor`.
 
     Args:
-        cipher_suite (:obj:`webrtc.SFrameCipherSuite`): The cipher suite, or its value.
-        type (:obj:`webrtc.SFrameType`, optional): Whether whole frames or RTP packets are encrypted, or its value.
-            Only ``'per-frame'`` is supported.
+        cipher_suite (:obj:`webrtc.SFrameCipherSuite`): The cipher suite, as a member or its string value.
+        type (:obj:`webrtc.SFrameType`, optional): Whether whole frames or RTP packets are encrypted, as a member or
+            its string value. The encryptor only supports ``'per-frame'``.
 
     Raises:
         ValueError: If the cipher suite or the type isn't a member of its enum.

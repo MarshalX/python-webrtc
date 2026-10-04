@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Certificates of DTLS."""
+"""DTLS certificates of a connection and the key algorithms to generate them with."""
 
 from __future__ import annotations
 
@@ -22,11 +22,13 @@ from webrtc.utils.names import Alias, alias
 
 @dataclass
 class RTCCertificateExpiration(Dictionary):
-    """When a generated certificate expires, a member of the algorithm it's generated with.
+    """The lifetime of a generated certificate. It's the base of :obj:`webrtc.Algorithm`.
+
+    See :mdn:`RTCPeerConnection/generateCertificate_static`.
 
     Args:
-        expires (:obj:`int`, optional): In how many milliseconds the certificate expires, at most a year
-            (the default is 30 days).
+        expires (:obj:`int`, optional): In how many milliseconds the certificate expires, capped at a year.
+            It's 30 days if omitted.
     """
 
     expires: int | None = None
@@ -35,11 +37,13 @@ class RTCCertificateExpiration(Dictionary):
 # the members are required, but expires keyword-only after them, which dataclasses can't do before 3.10
 @dataclass(init=False)
 class Algorithm(RTCCertificateExpiration):
-    """A WebCrypto algorithm, by its name, for :meth:`webrtc.RTCPeerConnection.generate_certificate`.
+    """A key algorithm by its WebCrypto name, for :meth:`webrtc.RTCPeerConnection.generate_certificate`.
+
+    ``'ECDSA'`` uses the P-256 curve. ``'RSASSA-PKCS1-v1_5'`` needs an :obj:`webrtc.RsaHashedKeyGenParams` instead.
 
     Args:
-        name (:obj:`str`): The name, like ``'ECDSA'``.
-        expires (:obj:`int`, optional): In how many milliseconds the certificate expires.
+        name (:obj:`str`): The name, like ``'ECDSA'``, compared case-insensitively.
+        expires (:obj:`int`, optional): In how many milliseconds the certificate expires (keyword-only).
     """
 
     name: str
@@ -51,12 +55,14 @@ class Algorithm(RTCCertificateExpiration):
 
 @dataclass(init=False)
 class EcKeyGenParams(Algorithm):
-    """A WebCrypto algorithm of an elliptic curve key.
+    """An ECDSA key algorithm with an explicit curve.
+
+    See :mdn:`EcKeyGenParams`.
 
     Args:
         name (:obj:`str`): ``'ECDSA'``.
-        named_curve (:obj:`str`): The curve, ``'P-256'`` as the only one supported.
-        expires (:obj:`int`, optional): In how many milliseconds the certificate expires.
+        named_curve (:obj:`str`): The curve, of which only ``'P-256'`` is supported.
+        expires (:obj:`int`, optional): In how many milliseconds the certificate expires (keyword-only).
     """
 
     named_curve: str
@@ -71,13 +77,15 @@ class EcKeyGenParams(Algorithm):
 
 @dataclass(init=False)
 class RsaHashedKeyGenParams(Algorithm):
-    """A WebCrypto algorithm of an RSA key.
+    """An RSA key algorithm. Every member but the name is keyword-only.
+
+    See :mdn:`RsaHashedKeyGenParams`.
 
     Args:
         name (:obj:`str`): ``'RSASSA-PKCS1-v1_5'``.
         modulus_length (:obj:`int`): The length of the modulus in bits, like 2048.
         public_exponent (:obj:`bytes`): The public exponent, big-endian, like ``bytes([1, 0, 1])`` for 65537.
-        hash (:obj:`str` or :obj:`webrtc.Algorithm`): The hash function, ``'SHA-256'`` as the only one supported.
+        hash (:obj:`str` or :obj:`webrtc.Algorithm`): The hash function, of which only ``'SHA-256'`` is supported.
         expires (:obj:`int`, optional): In how many milliseconds the certificate expires.
     """
 
@@ -107,17 +115,19 @@ class RsaHashedKeyGenParams(Algorithm):
     publicExponent: ClassVar[Alias[bytes]] = alias('public_exponent')
 
 
-#: A WebCrypto algorithm, or its name
+#: A key algorithm, or its name (like ``'ECDSA'``), as :meth:`webrtc.RTCPeerConnection.generate_certificate` takes it
 AlgorithmIdentifier = Union[str, Algorithm]
 
 
 @dataclass(frozen=True)
 class RTCDtlsFingerprint(Dictionary):
-    """A fingerprint of a certificate, as in the ``a=fingerprint`` line of SDP.
+    """A fingerprint of a certificate, as the ``a=fingerprint`` line of SDP carries it. It's immutable.
+
+    See :mdn:`RTCCertificate/getFingerprints`.
 
     Args:
         algorithm (:obj:`str`, optional): The hash function, like ``'sha-256'``.
-        value (:obj:`str`, optional): The hash in lowercase hex bytes separated with colons.
+        value (:obj:`str`, optional): The hash as lowercase hex bytes separated with colons.
     """
 
     algorithm: str | None = None
@@ -161,10 +171,11 @@ def _key_params(algorithm: AlgorithmIdentifier) -> _KeyParams:
 
 
 class RTCCertificate(WebRTCObject[wrtc.RTCCertificate]):
-    """A certificate a connection uses to authenticate with DTLS.
+    """A certificate and its private key, which a connection authenticates with in DTLS.
 
-    Generated with :meth:`webrtc.RTCPeerConnection.generate_certificate` and set with
-    :attr:`webrtc.RTCConfiguration.certificates`. Without one, a connection generates its own.
+    Only :meth:`webrtc.RTCPeerConnection.generate_certificate` creates it, and a connection uses it through
+    :attr:`webrtc.RTCConfiguration.certificates`. A connection without one generates its own.
+    See :mdn:`RTCCertificate`.
     """
 
     _class = wrtc.RTCCertificate
@@ -188,14 +199,20 @@ class RTCCertificate(WebRTCObject[wrtc.RTCCertificate]):
 
     @property
     def expires(self) -> float:
-        """:obj:`float`: When the certificate expires, in milliseconds since the epoch."""
+        """:obj:`float`: When the certificate expires, in milliseconds since the Unix epoch.
+
+        A configuration with an expired certificate raises :obj:`webrtc.InvalidAccessError`.
+        See :mdn:`RTCCertificate/expires`.
+        """
         return float(self._native_obj.expires)
 
     def _expired(self) -> bool:
         return self.expires <= time.time() * 1000
 
     def get_fingerprints(self) -> list[RTCDtlsFingerprint]:
-        """Returns the fingerprints of the certificate.
+        """Returns the fingerprints of the certificate, as the remote peer sees them in the SDP.
+
+        See :mdn:`RTCCertificate/getFingerprints`.
 
         Returns:
             :obj:`list` of :obj:`webrtc.RTCDtlsFingerprint`: The fingerprints.
