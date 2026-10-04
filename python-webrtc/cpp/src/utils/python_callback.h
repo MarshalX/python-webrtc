@@ -9,10 +9,11 @@
 #define PYTHON_WEBRTC_UTILS_PYTHON_CALLBACK_H_
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
-#include <unordered_map>
 #include <utility>
 
 #include <pybind11/pybind11.h>
@@ -58,6 +59,7 @@ namespace python_webrtc {
     struct Operation {
       std::atomic<bool> settled{false};
       std::function<void()> fail;
+      uint64_t id = 0;
     };
 
     // with the GIL
@@ -67,7 +69,8 @@ namespace python_webrtc {
       {
         const std::scoped_lock lock(Mutex());
         if (!PythonExiting()) {
-          Operations().emplace(operation.get(), operation);
+          operation->id = ++NextId();
+          Operations().emplace(operation->id, operation);
           return operation;
         }
       }
@@ -81,20 +84,20 @@ namespace python_webrtc {
         return false;
       }
       const std::scoped_lock lock(Mutex());
-      Operations().erase(&operation);
+      Operations().erase(operation.id);
       return true;
     }
 
     // with the GIL, on the exiting thread
     static void FailAll() {
-      std::unordered_map<Operation *, std::shared_ptr<Operation>> pending;
+      std::map<uint64_t, std::shared_ptr<Operation>> pending;
       {
         const std::scoped_lock lock(Mutex());
         pending.swap(Operations());
       }
-      for (auto &[_, operation] : pending) {
-        if (!operation->settled.exchange(true)) {
-          operation->fail();
+      for (auto &entry : pending) {
+        if (!entry.second->settled.exchange(true)) {
+          entry.second->fail();
         }
       }
     }
@@ -105,9 +108,14 @@ namespace python_webrtc {
       return mutex;
     }
 
-    static std::unordered_map<Operation *, std::shared_ptr<Operation>> &Operations() {
-      static std::unordered_map<Operation *, std::shared_ptr<Operation>> operations;
+    static std::map<uint64_t, std::shared_ptr<Operation>> &Operations() {
+      static std::map<uint64_t, std::shared_ptr<Operation>> operations;
       return operations;
+    }
+
+    static uint64_t &NextId() {
+      static uint64_t id = 0;
+      return id;
     }
   };
 

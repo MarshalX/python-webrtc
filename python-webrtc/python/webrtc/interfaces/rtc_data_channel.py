@@ -14,20 +14,13 @@ from typing import TYPE_CHECKING, Callable, ClassVar, Literal, TypeVar, cast, ov
 
 from typing_extensions import override
 
-from webrtc import (
-    BinaryType,
-    Blob,
-    Event,
-    MessageEvent,
-    RTCDataChannelState,
-    RTCErrorEvent,
-    RTCErrorEventInit,
-    RTCPriorityType,
-    WebRTCObject,
-    wrtc,
-)
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.enums import BinaryType, RTCDataChannelState, RTCPriorityType
 from webrtc.exceptions import _event_error
+from webrtc.models.blob import Blob
 from webrtc.models.dictionary import Dictionary
+from webrtc.models.events import Event, MessageEvent, RTCErrorEvent, RTCErrorEventInit
 from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
 from webrtc.utils.names import Alias, alias
 

@@ -19,18 +19,13 @@ from typing import TYPE_CHECKING, Generic, Literal, Union, cast
 
 from typing_extensions import Buffer, TypeVar
 
-from webrtc import (
-    InvalidModificationError,
-    InvalidRangeError,
-    NotSupportedError,
-    RTCEncodedAudioFrame,
-    RTCEncodedVideoFrame,
-    SFrameTransformErrorEvent,
-    SFrameTransformErrorEventInit,
-    WebRTCObject,
-    wrtc,
-)
+import webrtc
+import wrtc
+from webrtc.base import WebRTCObject
 from webrtc.enums import SFrameCipherSuite, SFrameTransformErrorEventType, SFrameType
+from webrtc.exceptions import InvalidRangeError, NotSupportedError
+from webrtc.models.events import SFrameTransformErrorEvent, SFrameTransformErrorEventInit
+from webrtc.models.rtc_encoded_frame import RTCEncodedAudioFrame, RTCEncodedVideoFrame
 from webrtc.models.sframe_transform_options import RTCRtpSFrameEncryptorOptions, SFrameTransformOptions
 from webrtc.streams import ReadableStream, TransformStream, WritableStream
 from webrtc.utils.events import UniformEventTarget
@@ -126,7 +121,7 @@ class _SFrameEncryptorManager:
         raw, key_id = _key(key), _key_id(key_id)
         if not self._native_obj.setEncryptionKey(raw, key_id):
             msg = 'The key can not be derived'
-            raise InvalidModificationError(msg)
+            raise webrtc.InvalidModificationError(msg)
 
     #: Alias for :meth:`set_encryption_key`
     setEncryptionKey = set_encryption_key
@@ -153,7 +148,7 @@ class _SFrameDecryptorManager:
         raw, key_id = _key(key), _key_id(key_id)
         if not self._native_obj.addDecryptionKey(raw, key_id):
             msg = 'The key can not be derived'
-            raise InvalidModificationError(msg)
+            raise webrtc.InvalidModificationError(msg)
 
     async def remove_decryption_key(self, key_id: int) -> None:
         """Removes the key of a key id. From now on, frames with that id fail with a ``keyID`` error.

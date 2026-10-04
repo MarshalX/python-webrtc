@@ -24,7 +24,7 @@
 #include "rtc_dtls_transport.h"
 #include "rtc_dtmf_sender.h"
 #include "rtc_ice_transport.h"
-#include "rtc_peer_connection.h"
+#include "rtc_peer_connection/rtc_peer_connection.h"
 #include "rtc_rtp_receiver.h"
 #include "rtc_rtp_sender.h"
 #include "rtc_rtp_transceiver.h"

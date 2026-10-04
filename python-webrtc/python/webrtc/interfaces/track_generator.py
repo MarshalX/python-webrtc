@@ -12,10 +12,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from webrtc import AudioData, AudioSampleFormat, MediaStreamTrack, MediaType, VideoFrame, wrtc
+import wrtc
+from webrtc.enums import AudioSampleFormat, MediaType
 from webrtc.exceptions import NotSupportedError
-from webrtc.models.audio_data import AudioDataCopyToOptions
+from webrtc.interfaces.media_stream_track import MediaStreamTrack
+from webrtc.models.audio_data import AudioData, AudioDataCopyToOptions
 from webrtc.models.dictionary import Dictionary
+from webrtc.models.video_frame import VideoFrame
 from webrtc.streams import WritableStream
 
 if TYPE_CHECKING:

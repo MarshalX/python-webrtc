@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 from typing_extensions import TypedDict
 
-from webrtc import MediaType, RTCDegradationPreference, RTCPriorityType, RTCRtpTransceiverDirection, wrtc
+import wrtc
+from webrtc.enums import MediaType, RTCDegradationPreference, RTCPriorityType, RTCRtpTransceiverDirection
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
 

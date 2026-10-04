@@ -14,7 +14,9 @@ from typing import Literal, cast
 from typing_extensions import override
 
 import webrtc
-from webrtc import Event, WebRTCObject, wrtc
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.models.events import Event
 from webrtc.utils.events import UniformEventTarget
 
 

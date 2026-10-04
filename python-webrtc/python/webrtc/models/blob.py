@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeVar, Union
 
 import webrtc  # the streams come after the models in the package
-from webrtc import EndingType, EndingTypeValue
+from webrtc.enums import EndingType, EndingTypeValue
 from webrtc.models.dictionary import Dictionary
 
 if TYPE_CHECKING:

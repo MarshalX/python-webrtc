@@ -9,7 +9,7 @@
 
 #include "../exceptions.h"
 #include "../utils/gil.h"
-#include "rtc_peer_connection.h"
+#include "rtc_peer_connection/rtc_peer_connection.h"
 
 namespace python_webrtc {
 

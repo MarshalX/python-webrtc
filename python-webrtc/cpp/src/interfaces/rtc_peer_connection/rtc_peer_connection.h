@@ -5,8 +5,8 @@
 // that can be found in the LICENSE.md file in the root of the project.
 //
 
-#ifndef PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_H_
-#define PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_H_
+#ifndef PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_RTC_PEER_CONNECTION_H_
+#define PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_RTC_PEER_CONNECTION_H_
 
 #include <array>
 #include <atomic>
@@ -27,20 +27,20 @@
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 
-#include "../exceptions.h"
-#include "../models/python_webrtc/rtc_configuration.h"
-#include "../models/python_webrtc/rtc_session_description.h"
-#include "../utils/alive_count.h"
-#include "../utils/held_events.h"
-#include "../utils/listeners.h"
-#include "../utils/surfaced.h"
+#include "../../exceptions.h"
+#include "../../models/python_webrtc/rtc_configuration.h"
+#include "../../models/python_webrtc/rtc_session_description.h"
+#include "../../utils/alive_count.h"
+#include "../../utils/held_events.h"
+#include "../../utils/listeners.h"
+#include "../../utils/surfaced.h"
 
-#include "media_stream.h"
-#include "media_stream_track.h"
-#include "rtc_data_channel.h"
-#include "rtc_rtp_sender.h"
-#include "rtc_rtp_transceiver.h"
-#include "rtc_sctp_transport.h"
+#include "../media_stream.h"
+#include "../media_stream_track.h"
+#include "../rtc_data_channel.h"
+#include "../rtc_rtp_sender.h"
+#include "../rtc_rtp_transceiver.h"
+#include "../rtc_sctp_transport.h"
 
 namespace webrtc {
   struct PeerConnectionDependencies;
@@ -309,6 +309,9 @@ namespace python_webrtc {
 
     void Adopt(const std::shared_ptr<RTCDtlsTransport> &dtls);
 
+    template <typename T>
+    std::vector<webrtc::RtpCodecParameters> NegotiatedCodecsOf(const webrtc::scoped_refptr<T> &endpoint);
+
     // the maxMessageSize of the SCTP transport, from the descriptions until the transport knows it
     std::optional<double> MaxMessageSize();
 
@@ -445,4 +448,4 @@ namespace python_webrtc {
 
 } // namespace python_webrtc
 
-#endif // PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_H_
+#endif // PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_RTC_PEER_CONNECTION_H_

@@ -10,15 +10,15 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Literal, cast
+from typing import Literal, cast
 
 from typing_extensions import override
 
-from webrtc import InvalidCharacterError, RTCDTMFToneChangeEvent, RTCDTMFToneChangeEventInit, WebRTCObject, wrtc
+import webrtc
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.models.events import RTCDTMFToneChangeEvent, RTCDTMFToneChangeEventInit
 from webrtc.utils.events import UniformEventTarget
-
-if TYPE_CHECKING:
-    import webrtc
 
 _TONES = re.compile(r'[0-9A-Da-d#*,]*')
 
@@ -67,7 +67,7 @@ class RTCDTMFSender(
         """
         if _TONES.fullmatch(tones) is None:
             msg = f'{tones!r} has characters that are not DTMF tones'
-            raise InvalidCharacterError(msg)
+            raise webrtc.InvalidCharacterError(msg)
         duration = min(max(int(duration), 40), 6000)
         inter_tone_gap = min(max(int(inter_tone_gap), 30), 6000)
         self._native_obj.insertDTMF(tones.upper(), duration, inter_tone_gap)

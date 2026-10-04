@@ -22,7 +22,7 @@ import atheris
 with atheris.instrument_imports():
     from inputs import Input
 
-from webrtc import wrtc
+import wrtc
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 from tests.helpers import mistyped

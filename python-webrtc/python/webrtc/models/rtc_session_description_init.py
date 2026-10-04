@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from webrtc import wrtc
+import wrtc
 from webrtc.enums import RTCSdpType, RTCSdpTypeValue
 from webrtc.models.dictionary import Dictionary
 

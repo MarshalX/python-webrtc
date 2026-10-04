@@ -144,7 +144,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["I001", "E402"]  # the import order resolves the cycles
 # camelCase aliases of the W3C names; spec internal slots shared between the classes of the package
 "python-webrtc/python/webrtc/**" = ["N815", "N816", "SLF001"]
 "python-webrtc/python/webrtc/interfaces/rtc_peer_connection.py" = ["PLR0904"]  # the W3C interface

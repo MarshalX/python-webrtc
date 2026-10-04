@@ -125,6 +125,19 @@ def test_everything_alive_shares_one_factory() -> None:
         pc.close()
 
 
+@pytest.mark.asyncio
+async def test_async_with_closes_connection() -> None:
+    """Leaving async with closes the connection, also on an error."""
+    async with webrtc.RTCPeerConnection() as pc:
+        assert pc.connection_state == webrtc.RTCPeerConnectionState.new
+    assert pc.connection_state == webrtc.RTCPeerConnectionState.closed
+
+    with pytest.raises(RuntimeError):
+        async with webrtc.RTCPeerConnection() as pc:
+            raise RuntimeError
+    assert pc.connection_state == webrtc.RTCPeerConnectionState.closed
+
+
 def test_closed_connection_keeps_its_factory_shared() -> None:
     """A closed connection and its tracks keep their factory, which new connections reuse."""
     pc = webrtc.RTCPeerConnection()

@@ -31,7 +31,7 @@ import threading
 import urllib.request
 from pathlib import Path
 
-import webrtc
+import wrtc
 
 __all__ = ['LICENSE', 'NOTICE', 'VERSION', 'disable', 'install', 'isEnabled', 'is_enabled']
 
@@ -180,7 +180,7 @@ def _load(cache_dir: Path | None) -> str:
                 msg = f'{name}.bz2 has SHA-256 {actual}, expected {sha256}'
                 raise RuntimeError(msg)
             _atomic_write(library, bz2.decompress(data))
-        return webrtc.wrtc.loadOpenH264(str(library))
+        return wrtc.loadOpenH264(str(library))
 
 
 def _archive(path: Path) -> bytes:
@@ -203,7 +203,7 @@ def disable() -> None:
 
     Connections created earlier keep their codecs. The binary stays in the cache.
     """
-    webrtc.wrtc.disableOpenH264()
+    wrtc.disableOpenH264()
 
 
 def is_enabled() -> bool:
@@ -212,7 +212,7 @@ def is_enabled() -> bool:
     Returns:
         :obj:`bool`: :obj:`True` after :func:`install`, until :func:`disable`.
     """
-    return webrtc.wrtc.openH264Enabled()
+    return wrtc.openH264Enabled()
 
 
 #: Alias for :func:`is_enabled`

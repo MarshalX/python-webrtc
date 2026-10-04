@@ -16,17 +16,10 @@ from typing import TYPE_CHECKING, ClassVar, Literal, cast
 
 from typing_extensions import override
 
-from webrtc import (
-    DeviceChangeEvent,
-    MediaDeviceKind,
-    MediaStream,
-    MediaStreamConstraints,
-    MediaTrackConstraints,
-    MediaTrackSettings,
-    MediaTrackSupportedConstraints,
-    OverconstrainedError,
-    wrtc,
-)
+import wrtc
+from webrtc.enums import MediaDeviceKind
+from webrtc.exceptions import OverconstrainedError
+from webrtc.interfaces.media_stream import MediaStream
 from webrtc.interfaces.media_stream_track import (
     _CAMERA_CAPABILITIES,
     _GROUP_ID,
@@ -36,6 +29,13 @@ from webrtc.interfaces.media_stream_track import (
     _camera_mode,
     _converted,
     _unsatisfied,
+)
+from webrtc.models.events import DeviceChangeEvent
+from webrtc.models.media_track_constraints import (
+    MediaStreamConstraints,
+    MediaTrackConstraints,
+    MediaTrackSettings,
+    MediaTrackSupportedConstraints,
 )
 from webrtc.utils.events import UniformEventTarget
 from webrtc.utils.names import Alias, alias

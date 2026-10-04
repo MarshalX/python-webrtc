@@ -77,7 +77,7 @@ namespace python_webrtc {
           ReleaseThreads()++;
           std::thread([&thread]() { thread.Run(); }).detach();
         }
-        thread._releases.push_back({std::move(release), generation});
+        thread._releases.push_back({.release = std::move(release), .generation = generation});
       }
       thread._posted.notify_one();
     }
@@ -89,7 +89,7 @@ namespace python_webrtc {
   private:
     struct Release {
       std::function<void()> release;
-      int generation;
+      int generation = 0;
     };
 
     static ReleaseThread &Instance() {

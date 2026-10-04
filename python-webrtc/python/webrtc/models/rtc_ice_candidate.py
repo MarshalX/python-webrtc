@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 from typing_extensions import TypedDict
 
-from webrtc import (
+from webrtc.enums import (
     RTCIceCandidateType,
     RTCIceComponent,
     RTCIceProtocol,

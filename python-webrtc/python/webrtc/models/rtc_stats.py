@@ -15,7 +15,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import MISSING, dataclass, fields
 from typing import TYPE_CHECKING, ClassVar
 
-from webrtc import (
+from webrtc.enums import (
     RTCDataChannelState,
     RTCDtlsRole,
     RTCDtlsTransportState,

@@ -13,7 +13,11 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from typing_extensions import override
 
-from webrtc import MediaStreamTrack, MediaStreamTrackEvent, MediaStreamTrackEventInit, MediaType, WebRTCObject, wrtc
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.enums import MediaType
+from webrtc.interfaces.media_stream_track import MediaStreamTrack
+from webrtc.models.events import MediaStreamTrackEvent, MediaStreamTrackEventInit
 from webrtc.utils.events import UniformEventTarget
 
 if TYPE_CHECKING:

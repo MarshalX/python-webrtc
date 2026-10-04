@@ -16,39 +16,30 @@ from typing import TYPE_CHECKING, Callable, ClassVar, Literal, TypeVar, Union, c
 from typing_extensions import override
 
 import webrtc
-from webrtc import (
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.enums import MediaType, RTCIceGathererState, RTCRtpTransceiverDirection, RTCSdpType, RTCSignalingState
+from webrtc.interfaces.rtc_data_channel import RTCDataChannelInit, check_utf8_length
+from webrtc.models.events import (
     Event,
-    InvalidAccessError,
-    InvalidStateError,
-    MediaType,
-    OperationError,
-    RTCAnswerOptions,
-    RTCCertificate,
-    RTCConfiguration,
     RTCDataChannelEvent,
     RTCDataChannelEventInit,
-    RTCIceCandidate,
-    RTCIceGathererState,
-    RTCLocalSessionDescriptionInit,
-    RTCOfferOptions,
     RTCPeerConnectionIceErrorEvent,
     RTCPeerConnectionIceErrorEventInit,
     RTCPeerConnectionIceEvent,
     RTCPeerConnectionIceEventInit,
-    RTCRtpCodec,
-    RTCRtpTransceiverDirection,
-    RTCRtpTransceiverInit,
-    RTCSdpType,
-    RTCSessionDescription,
-    RTCSessionDescriptionInit,
-    RTCSignalingState,
-    RTCStatsReport,
     RTCTrackEvent,
     RTCTrackEventInit,
-    WebRTCObject,
-    wrtc,
 )
-from webrtc.interfaces.rtc_data_channel import RTCDataChannelInit, check_utf8_length
+from webrtc.models.rtc_certificate import RTCCertificate
+from webrtc.models.rtc_configuration import RTCConfiguration
+from webrtc.models.rtc_ice_candidate import RTCIceCandidate
+from webrtc.models.rtc_offer_answer_options import RTCAnswerOptions, RTCOfferOptions
+from webrtc.models.rtc_rtp_transceiver_init import RTCRtpTransceiverInit
+from webrtc.models.rtc_session_description import RTCSessionDescription
+from webrtc.models.rtc_session_description_init import RTCLocalSessionDescriptionInit, RTCSessionDescriptionInit
+from webrtc.models.rtc_stats import RTCStatsReport
+from webrtc.models.rtp_parameters import RTCRtpCodec
 from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
 from webrtc.utils.native_calls import call_native
 from webrtc.utils.operations import OperationsChain, later
@@ -111,7 +102,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         track (:obj:`webrtc.RTCTrackEvent`): A remote track was negotiated.
         datachannel (:obj:`webrtc.RTCDataChannelEvent`): The remote peer created a data channel.
 
-    A closed connection emits no events, including the ones queued before :meth:`close`.
+    A closed connection emits no events, including the ones queued before :meth:`close`. Leaving an
+    ``async with`` block closes the connection.
 
     Args:
         configuration (:obj:`webrtc.RTCConfiguration`, optional): The configuration of the connection.
@@ -299,10 +291,10 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         state = self.signaling_state
         if state == RTCSignalingState.closed:
             msg = f"Can not {operation}: the RTCPeerConnection's signalingState is 'closed'"
-            raise InvalidStateError(msg)
+            raise webrtc.InvalidStateError(msg)
         if len(allowed) > 0 and state not in allowed:
             msg = f'Can not {operation} in the {state} signaling state'
-            raise InvalidStateError(msg)
+            raise webrtc.InvalidStateError(msg)
 
     @override
     def _on_event(self, name: str, *args: object) -> None:
@@ -669,7 +661,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             self._check_state('add an ICE candidate')
             if self.remote_description is None:
                 msg = 'A candidate can only be added once there is a remote description'
-                raise InvalidStateError(msg)
+                raise webrtc.InvalidStateError(msg)
             await later()
             await call_native(self._native_obj.addIceCandidate, candidate_str, sdp_mid, sdp_m_line_index, ufrag)
 
@@ -735,7 +727,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             matches += [r for r in self.get_receivers() if r.track == selector]
             if len(matches) != 1:
                 msg = f'{len(matches)} senders and receivers have the track, not exactly one'
-                raise InvalidAccessError(msg)
+                raise webrtc.InvalidAccessError(msg)
             return await matches[0].get_stats()
         return RTCStatsReport._from_native(await call_native(self._native_obj.getStats), self.get_receivers())
 
@@ -811,6 +803,12 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         Does nothing if it's already closed. See :mdn:`RTCPeerConnection/close`.
         """
         self._native_obj.close()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        self.close()
 
     @property
     def sctp(self) -> webrtc.RTCSctpTransport | None:
@@ -1027,4 +1025,4 @@ def _check_send_encodings(encodings: list[webrtc.RTCRtpEncodingParameters], kind
         for codec in codecs:
             if not any(RTCRtpCodec._matches(c, codec) for c in supported):
                 msg = f'{codec.mime_type} can not be sent'
-                raise OperationError(msg)
+                raise webrtc.OperationError(msg)

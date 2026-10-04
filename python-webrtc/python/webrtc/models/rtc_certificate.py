@@ -15,7 +15,9 @@ from dataclasses import dataclass
 from itertools import starmap
 from typing import ClassVar, Union
 
-from webrtc import NotSupportedError, WebRTCObject, wrtc
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.exceptions import NotSupportedError
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
 

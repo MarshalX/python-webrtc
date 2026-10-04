@@ -21,22 +21,14 @@ from typing import TYPE_CHECKING, Callable, Literal, NamedTuple, Union
 
 from typing_extensions import override
 
-from webrtc import (
-    DataCloneError,
-    InvalidStateError,
-    KeyFrameRequestEvent,
-    NotAllowedError,
-    NotFoundError,
-    NotSupportedError,
-    RTCEncodedAudioFrame,
-    RTCEncodedVideoFrame,
-    RTCRtpScriptTransformType,
-    RTCTransformEvent,
-    WebRTCObject,
-    wrtc,
-)
-from webrtc.enums import EncodedVideoChunkType
+import webrtc
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.enums import EncodedVideoChunkType, RTCRtpScriptTransformType
+from webrtc.exceptions import DataCloneError, InvalidStateError, NotSupportedError
 from webrtc.models.dictionary import Dictionary
+from webrtc.models.events import KeyFrameRequestEvent, RTCTransformEvent
+from webrtc.models.rtc_encoded_frame import RTCEncodedAudioFrame, RTCEncodedVideoFrame
 from webrtc.streams import QueuingStrategy, ReadableStream, WritableStream, _handled
 from webrtc.utils.events import UniformEventTarget, call_handler
 
@@ -152,12 +144,11 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
 
     def _deliver(self) -> None:
         native = self._native_obj
-        stream = self._readable
         controller = self._source._controller
         if controller is None:
             return
         owner = native.sourceId
-        while stream._state == 'readable' and stream._reader is not None and len(stream._reader._read_requests) > 0:
+        while controller._has_pending_reads():
             item = native.read()
             if item is None:
                 break
@@ -246,18 +237,18 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
         kind = self._native_obj.sourceKind
         if kind is None or not kind[0] or not kind[1]:
             msg = 'generate_key_frame() is for the transform of a video sender'
-            raise InvalidStateError(msg)
+            raise webrtc.InvalidStateError(msg)
         if rid is not None and _RID.fullmatch(rid) is None:
             msg = f'{rid!r} is not a valid rid'
-            raise NotAllowedError(msg)
+            raise webrtc.NotAllowedError(msg)
         future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         result = self._native_obj.generateKeyFrame(rid)
         if result == _KEY_FRAME_INVALID_STATE:
             msg = 'generate_key_frame() is for the transform of a video sender'
-            raise InvalidStateError(msg)
+            raise webrtc.InvalidStateError(msg)
         if result == _KEY_FRAME_NOT_FOUND:
             msg = f'The sender has no layer of rid {rid!r}'
-            raise NotFoundError(msg)
+            raise webrtc.NotFoundError(msg)
         self._key_frame_requests.append(_KeyFrameRequest(rid, future))
         await future
 
@@ -271,7 +262,7 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
         """
         if not self._native_obj.sendKeyFrameRequest():
             msg = 'send_key_frame_request() is for the transform of a video receiver'
-            raise InvalidStateError(msg)
+            raise webrtc.InvalidStateError(msg)
 
     #: Alias for :meth:`generate_key_frame`
     generateKeyFrame = generate_key_frame
