@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import webrtc
-from webrtc import InvalidModificationError, RTCRtpCodec, RTCRtpHeaderExtensionCapability, WebRTCObject, wrtc
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.models.rtp_parameters import RTCRtpCodec, RTCRtpHeaderExtensionCapability
 
 
 class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
@@ -122,7 +124,7 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
             native = next((n for n in natives if RTCRtpCodec._from_native(n)._matches(codec)), None)
             if native is None:
                 msg = f'{codec.mime_type} is not a {kind} codec that can be negotiated'
-                raise InvalidModificationError(msg)
+                raise webrtc.InvalidModificationError(msg)
             preferences.append(native)
         self._native_obj.setCodecPreferences(preferences)
 

@@ -13,6 +13,8 @@
 #include <utility>
 #include <vector>
 
+#include "gil.h"
+
 namespace python_webrtc {
 
   // Events emitted while held are kept, and emitted in order on release: an event mustn't come before one that
@@ -20,11 +22,13 @@ namespace python_webrtc {
   class HeldEvents {
   public:
     void Hold() {
+      CheckGilNotHeld("HeldEvents::Hold");
       const std::scoped_lock lock(_mutex);
       _held = true;
     }
 
     void Release() {
+      CheckGilNotHeld("HeldEvents::Release");
       const std::scoped_lock lock(_mutex);
       // emitted under the lock, so that events emitted meanwhile come after these
       for (auto &emit : _events) {
@@ -35,6 +39,7 @@ namespace python_webrtc {
     }
 
     bool IsHeld() {
+      CheckGilNotHeld("HeldEvents::IsHeld");
       const std::scoped_lock lock(_mutex);
       return _held;
     }
@@ -42,6 +47,7 @@ namespace python_webrtc {
     // emits an event now, or on release while held
     template <typename F>
     void Emit(F &&emit) {
+      CheckGilNotHeld("HeldEvents::Emit");
       {
         const std::scoped_lock lock(_mutex);
         if (_held) {

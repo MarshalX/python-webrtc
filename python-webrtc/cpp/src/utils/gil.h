@@ -11,12 +11,21 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <optional>
 #include <thread>
 #include <utility>
 
 #include <pybind11/pybind11.h>
+
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define WRTC_SANITIZED
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+#define WRTC_SANITIZED
+#endif
+#endif
 
 namespace python_webrtc {
 
@@ -142,6 +151,29 @@ namespace python_webrtc {
   private:
     std::optional<gil_release> _release;
   };
+
+  // sanitizer builds: the GIL must not be held here (lock-before-GIL order)
+  inline void CheckGilNotHeld([[maybe_unused]] const char *where) {
+#ifdef WRTC_SANITIZED
+    if ((Py_IsInitialized() != 0) && (PyGILState_Check() != 0)) {
+      (void)std::fprintf(stderr, "python-webrtc: %s called with the GIL held, which can deadlock\n", where);
+      std::abort();
+    }
+#endif
+  }
+
+  // Reports any exception as unraisable
+  template <typename F>
+  void CallUnraisable(const char *context, F &&call) {
+    try {
+      std::forward<F>(call)();
+    } catch (pybind11::error_already_set &e) {
+      e.discard_as_unraisable(context);
+    } catch (const std::exception &e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      pybind11::error_already_set().discard_as_unraisable(context);
+    }
+  }
 
   // Releases a Python object on any thread, from destructors too: leaked once the interpreter is gone, or if
   // pybind11 fails to take the GIL, which is reported rather than terminating

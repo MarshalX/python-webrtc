@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
-from webrtc import wrtc
+import wrtc
 from webrtc.enums import RTCRtpTransceiverDirection, RTCRtpTransceiverDirectionValue
 from webrtc.models.dictionary import Dictionary
 from webrtc.models.rtp_parameters import RTCRtpEncodingParameters

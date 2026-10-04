@@ -14,14 +14,10 @@ import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, NamedTuple, cast
 
-from webrtc import (
-    AudioSampleFormat,
-    AudioSampleFormatValue,
-    InvalidRangeError,
-    InvalidStateError,
-    NotSupportedError,
-    wrtc,
-)
+import webrtc
+import wrtc
+from webrtc.enums import AudioSampleFormat, AudioSampleFormatValue
+from webrtc.exceptions import InvalidRangeError, InvalidStateError
 from webrtc.models.closable import Closable
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
@@ -363,7 +359,7 @@ class AudioData(Closable):
         plan = self._plan_copy(options)
         if memoryview(destination).nbytes < plan.size:
             msg = f'The destination must be at least {plan.size} bytes'
-            raise InvalidRangeError(msg)
+            raise webrtc.InvalidRangeError(msg)
         try:
             wrtc.copyAudioSamples(
                 plan.data,
@@ -377,7 +373,7 @@ class AudioData(Closable):
                 plan.frame_count,
             )
         except ValueError as e:
-            raise NotSupportedError(str(e)) from None
+            raise webrtc.NotSupportedError(str(e)) from None
 
     def clone(self) -> AudioData:
         """Creates another data that shares these samples without copying them. Each must be closed separately.
@@ -392,7 +388,7 @@ class AudioData(Closable):
         """
         if self._data is None:
             msg = 'The data is closed'
-            raise InvalidStateError(msg)
+            raise webrtc.InvalidStateError(msg)
         audio = AudioData.__new__(AudioData)
         audio.__dict__.update(self.__dict__)
         return audio

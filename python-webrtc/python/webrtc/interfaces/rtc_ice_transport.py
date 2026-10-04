@@ -11,33 +11,19 @@ from __future__ import annotations
 
 import re
 import weakref
-from typing import TYPE_CHECKING, Callable, Literal, TypeVar, cast, overload
+from typing import Callable, Literal, TypeVar, cast, overload
 
 from typing_extensions import override
 
-from webrtc import (
-    Event,
-    InvalidStateError,
-    InvalidSyntaxError,
-    RTCIceCandidate,
-    RTCIceCandidateInit,
-    RTCIceCandidatePair,
-    RTCIceGathererState,
-    RTCIceGatherOptions,
-    RTCIceParameters,
-    RTCIceRole,
-    RTCIceServer,
-    RTCIceTransportState,
-    RTCPeerConnectionIceEvent,
-    RTCPeerConnectionIceEventInit,
-    WebRTCObject,
-    wrtc,
-)
+import webrtc
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.enums import RTCIceGathererState, RTCIceRole, RTCIceTransportState
+from webrtc.exceptions import InvalidStateError
+from webrtc.models.events import Event, RTCPeerConnectionIceEvent, RTCPeerConnectionIceEventInit
+from webrtc.models.rtc_configuration import RTCIceGatherOptions, RTCIceServer
+from webrtc.models.rtc_ice_candidate import RTCIceCandidate, RTCIceCandidateInit, RTCIceCandidatePair, RTCIceParameters
 from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
-
-if TYPE_CHECKING:
-    import webrtc
-
 
 # RFC 8839: ice-char is ALPHA / DIGIT / "+" / "/", the username fragment is 4 to 256 of them, the password 22 to 256
 _UFRAG = re.compile(r'[A-Za-z0-9+/]{4,256}')
@@ -180,7 +166,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
         self._check_open('gather')
         if self.gathering_state != RTCIceGathererState.new:
             msg = 'The transport gathers its candidates already'
-            raise InvalidStateError(msg)
+            raise webrtc.InvalidStateError(msg)
         options = options if options is not None else RTCIceGatherOptions()
         servers = options.ice_servers if options.ice_servers is not None else ()
         self._native_obj.gather(options.gather_policy, RTCIceServer._to_native_list(servers))
@@ -211,10 +197,10 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
         ufrag, password = parameters.username_fragment, parameters.password
         if ufrag is None or _UFRAG.fullmatch(ufrag) is None:
             msg = f'{ufrag!r} is not a valid ICE username fragment'
-            raise InvalidSyntaxError(msg)
+            raise webrtc.InvalidSyntaxError(msg)
         if password is None or _PASSWORD.fullmatch(password) is None:
             msg = 'the ICE password is not valid'
-            raise InvalidSyntaxError(msg)
+            raise webrtc.InvalidSyntaxError(msg)
         if role not in {RTCIceRole.controlling, RTCIceRole.controlled}:
             msg = 'role must be controlling or controlled'
             raise ValueError(msg)

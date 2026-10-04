@@ -17,15 +17,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, ClassVar, NamedTuple, TypeVar, cast, overload
 
-from webrtc import (
+import webrtc
+import wrtc
+from webrtc.enums import (
     AlphaOption,
     AlphaOptionValue,
-    DataCloneError,
-    InvalidStateError,
-    NotSupportedError,
     PredefinedColorSpace,
     PredefinedColorSpaceValue,
-    RTCException,
     VideoColorPrimaries,
     VideoColorPrimariesValue,
     VideoMatrixCoefficients,
@@ -34,8 +32,8 @@ from webrtc import (
     VideoPixelFormatValue,
     VideoTransferCharacteristics,
     VideoTransferCharacteristicsValue,
-    wrtc,
 )
+from webrtc.exceptions import DataCloneError, InvalidStateError, NotSupportedError, RTCException
 from webrtc.models.closable import Closable
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
@@ -986,7 +984,7 @@ class VideoFrame(Closable):
         """
         if self._resource is None:
             msg = 'The frame is closed'
-            raise InvalidStateError(msg)
+            raise webrtc.InvalidStateError(msg)
         return _copy_metadata(self._metadata)
 
     def _plan_copy(self, options: VideoFrameCopyToOptions | None) -> _CopyPlan:
@@ -1097,7 +1095,7 @@ class VideoFrame(Closable):
         """
         if self._resource is None:
             msg = 'The frame is closed'
-            raise InvalidStateError(msg)
+            raise webrtc.InvalidStateError(msg)
         frame = VideoFrame.__new__(VideoFrame)
         frame.__dict__.update(self.__dict__)
         return frame

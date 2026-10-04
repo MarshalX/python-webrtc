@@ -20,7 +20,7 @@ import atheris
 with atheris.instrument_imports():
     from inputs import Input
 
-from webrtc import wrtc
+import wrtc
 
 PIXEL_FORMATS = [
     'I420', 'I420P10', 'I420P12', 'I420A', 'I420AP10', 'I420AP12', 'I422', 'I422P10', 'I422P12', 'I422A', 'I422AP10',

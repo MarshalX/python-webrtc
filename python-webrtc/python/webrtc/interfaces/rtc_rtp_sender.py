@@ -12,17 +12,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import webrtc
-from webrtc import (
-    InvalidModificationError,
-    InvalidRangeError,
-    InvalidStateError,
-    MediaType,
-    RTCRtpCapabilities,
-    RTCRtpSendParameters,
-    RTCStatsReport,
-    WebRTCObject,
-    wrtc,
-)
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.enums import MediaType
+from webrtc.exceptions import InvalidStateError
+from webrtc.models.rtc_stats import RTCStatsReport
+from webrtc.models.rtp_parameters import RTCRtpCapabilities, RTCRtpSendParameters
 from webrtc.utils.native_calls import call_native
 from webrtc.utils.operations import later
 from webrtc.utils.task_queue import TaskQueue
@@ -140,11 +135,11 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         """
         if self._native_obj._transceiverStopped():
             msg = 'The transceiver of the sender is stopped'
-            raise InvalidStateError(msg)
+            raise webrtc.InvalidStateError(msg)
         last = self._native_obj._lastParameters()
         if last is None:
             msg = 'get_parameters() must be called before set_parameters(), in the same task'
-            raise InvalidStateError(msg)
+            raise webrtc.InvalidStateError(msg)
         options = set_parameter_options.encoding_options if set_parameter_options is not None else None
         _check_unchanged(parameters, RTCRtpSendParameters._from_native(last), options)
         if self._kind == MediaType.video:
@@ -281,17 +276,17 @@ def _check_unchanged(
     """
     if parameters.transaction_id != returned.transaction_id:
         msg = "The transaction_id doesn't match the one of the last get_parameters()"
-        raise InvalidModificationError(msg)
+        raise webrtc.InvalidModificationError(msg)
     for name in ('codecs', 'header_extensions', 'rtcp'):
         if getattr(parameters, name) != getattr(returned, name):
             msg = f'{name} of the parameters can not be changed'
-            raise InvalidModificationError(msg)
+            raise webrtc.InvalidModificationError(msg)
     if [e.rid for e in parameters.encodings] != [e.rid for e in returned.encodings]:
         msg = 'The number of encodings and their rid can not be changed'
-        raise InvalidModificationError(msg)
+        raise webrtc.InvalidModificationError(msg)
     if encoding_options is not None and len(encoding_options) not in {0, len(parameters.encodings)}:
         msg = 'encoding_options must have one value per encoding'
-        raise InvalidModificationError(msg)
+        raise webrtc.InvalidModificationError(msg)
 
 
 def _check_video_ranges(encodings: list[webrtc.RTCRtpEncodingParameters]) -> None:
@@ -303,10 +298,10 @@ def _check_video_ranges(encodings: list[webrtc.RTCRtpEncodingParameters]) -> Non
     for encoding in encodings:
         if encoding.scale_resolution_down_by is not None and encoding.scale_resolution_down_by < 1:
             msg = 'scale_resolution_down_by must be at least 1'
-            raise InvalidRangeError(msg)
+            raise webrtc.InvalidRangeError(msg)
         if encoding.max_framerate is not None and encoding.max_framerate < 0:
             msg = 'max_framerate must not be negative'
-            raise InvalidRangeError(msg)
+            raise webrtc.InvalidRangeError(msg)
 
 
 def _default_scale_resolution_down_by(encodings: list[webrtc.RTCRtpEncodingParameters]) -> None:

@@ -304,3 +304,26 @@ async def test_event_delivered_after_the_collector_cleared_its_listeners() -> No
         assert reported == []
     finally:
         loop.set_exception_handler(None)
+
+
+@pytest.mark.asyncio
+async def test_async_handler_exception_goes_to_the_loop(pc: webrtc.RTCPeerConnection) -> None:
+    """An async handler's exception reaches the loop's exception handler."""
+    loop = asyncio.get_running_loop()
+    reported = loop.create_future()
+    loop.set_exception_handler(lambda _loop, context: reported.done() or reported.set_result(context))
+    try:
+
+        @pc.on('negotiationneeded')
+        async def handler(_event: webrtc.Event) -> None:
+            await asyncio.sleep(0)
+            msg = 'handler'
+            raise ValueError(msg)
+
+        pc.create_data_channel('events')
+        context = await asyncio.wait_for(reported, 5)
+        assert context['message'] == "Exception in 'negotiationneeded' event handler"
+        assert isinstance(context['exception'], ValueError)
+        assert isinstance(context['event'], webrtc.Event)
+    finally:
+        loop.set_exception_handler(None)

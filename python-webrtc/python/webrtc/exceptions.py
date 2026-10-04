@@ -18,7 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
-from webrtc import RTCErrorDetailType, wrtc
+import wrtc
+from webrtc.enums import RTCErrorDetailType
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
 

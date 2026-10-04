@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from webrtc import RTCSessionDescriptionInit, WebRTCObject, wrtc
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.models.rtc_session_description_init import RTCSessionDescriptionInit
 
 if TYPE_CHECKING:
     import webrtc

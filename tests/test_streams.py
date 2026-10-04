@@ -447,3 +447,25 @@ async def test_pipe_options_and_locked_pipe_through() -> None:
     _ = transform.writable.get_writer()
     with pytest.raises(TypeError):
         webrtc.ReadableStream(Chunks([1])).pipe_through(transform)
+
+
+@pytest.mark.asyncio
+async def test_pending_start_is_not_collected() -> None:
+    """An unreferenced pending start survives gc."""
+
+    class Source:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+
+        async def start(self, _controller: webrtc.ReadableStreamDefaultController) -> None:
+            self.started.set()
+            await asyncio.get_running_loop().create_future()
+
+    source = Source()
+    stream = webrtc.ReadableStream(source)
+    await source.started.wait()
+    gc.collect()
+    tasks = [t for t in asyncio.all_tasks() if getattr(t.get_coro(), '__qualname__', '').endswith('Source.start')]
+    assert len(tasks) == 1
+    tasks[0].cancel()
+    assert stream is not None

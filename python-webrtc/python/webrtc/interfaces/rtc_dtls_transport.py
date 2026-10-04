@@ -9,14 +9,19 @@
 
 from __future__ import annotations
 
-from typing import Callable, Literal, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Callable, Literal, TypeVar, cast, overload
 
 from typing_extensions import override
 
 import webrtc
-from webrtc import Event, RTCDtlsTransportState, RTCErrorEvent, RTCErrorEventInit, WebRTCObject, wrtc
+import wrtc
+from webrtc.base import WebRTCObject
 from webrtc.exceptions import _event_error
+from webrtc.models.events import Event, RTCErrorEvent, RTCErrorEventInit
 from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
+
+if TYPE_CHECKING:
+    from webrtc.enums import RTCDtlsTransportState
 
 _DtlsTransportEvent = Literal['statechange', 'error']
 _R = TypeVar('_R')

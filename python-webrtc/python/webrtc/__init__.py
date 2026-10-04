@@ -12,236 +12,177 @@ Every public class, enum and exception is importable from this package, like ``w
 
 from __future__ import annotations
 
-import wrtc as wrtc  # re-exported, the modules import it from the package
-
+from . import openh264
+from .base import WebRTCObject
 from .enums import (
-    RTCPeerConnectionState,
-    RTCSignalingState,
-    RTCIceConnectionState,
-    RTCIceGatheringState,
-    RTCSdpType,
-    MediaStreamTrackState,
-    MediaStreamSourceState,
-    RTCRtpTransceiverDirection,
-    RTCIceComponent,
-    RTCIceRole,
-    RTCIceTransportState,
-    RTCIceGathererState,
-    RTCDtlsTransportState,
-    RTCSctpTransportState,
-    MediaType,
-    RTCDataChannelState,
-    RTCPriorityType,
-    RTCDegradationPreference,
-    RTCIceTransportPolicy,
-    RTCBundlePolicy,
-    RTCRtcpMuxPolicy,
-    RTCRtpHeaderEncryptionPolicy,
-    RTCIceCandidateType,
-    RTCIceProtocol,
-    RTCIceTcpCandidateType,
-    RTCIceServerTransportProtocol,
-    RTCStatsType,
-    RTCQualityLimitationReason,
-    RTCDtlsRole,
-    RTCStatsIceCandidatePairState,
-    RTCErrorDetailType,
-    BinaryType,
-    EndingType,
-    VideoPixelFormat,
-    VideoColorPrimaries,
-    VideoTransferCharacteristics,
-    VideoMatrixCoefficients,
     AlphaOption,
-    PredefinedColorSpace,
-    AudioSampleFormat,
-    ReadableStreamReaderMode,
-    RTCSdpTypeValue,
-    RTCRtpTransceiverDirectionValue,
-    MediaTypeValue,
-    RTCPriorityTypeValue,
-    RTCDegradationPreferenceValue,
-    RTCIceTransportPolicyValue,
-    RTCBundlePolicyValue,
-    RTCRtcpMuxPolicyValue,
-    RTCRtpHeaderEncryptionPolicyValue,
-    RTCIceServerTransportProtocolValue,
-    RTCErrorDetailTypeValue,
-    BinaryTypeValue,
-    EndingTypeValue,
-    VideoPixelFormatValue,
-    VideoColorPrimariesValue,
-    VideoTransferCharacteristicsValue,
-    VideoMatrixCoefficientsValue,
     AlphaOptionValue,
-    PredefinedColorSpaceValue,
+    AudioSampleFormat,
     AudioSampleFormatValue,
-    ReadableStreamReaderModeValue,
-    MediaDeviceKind,
-    VideoFacingModeEnum,
-    VideoResizeModeEnum,
+    BinaryType,
+    BinaryTypeValue,
     EchoCancellationModeEnum,
     EncodedVideoChunkType,
+    EndingType,
+    EndingTypeValue,
+    MediaDeviceKind,
+    MediaStreamSourceState,
+    MediaStreamTrackState,
+    MediaType,
+    MediaTypeValue,
+    PredefinedColorSpace,
+    PredefinedColorSpaceValue,
+    ReadableStreamReaderMode,
+    ReadableStreamReaderModeValue,
+    RTCBundlePolicy,
+    RTCBundlePolicyValue,
+    RTCDataChannelState,
+    RTCDegradationPreference,
+    RTCDegradationPreferenceValue,
+    RTCDtlsRole,
+    RTCDtlsTransportState,
+    RTCErrorDetailType,
+    RTCErrorDetailTypeValue,
+    RTCIceCandidateType,
+    RTCIceComponent,
+    RTCIceConnectionState,
+    RTCIceGathererState,
+    RTCIceGatheringState,
+    RTCIceProtocol,
+    RTCIceRole,
+    RTCIceServerTransportProtocol,
+    RTCIceServerTransportProtocolValue,
+    RTCIceTcpCandidateType,
+    RTCIceTransportPolicy,
+    RTCIceTransportPolicyValue,
+    RTCIceTransportState,
+    RTCPeerConnectionState,
+    RTCPriorityType,
+    RTCPriorityTypeValue,
+    RTCQualityLimitationReason,
+    RTCRtcpMuxPolicy,
+    RTCRtcpMuxPolicyValue,
+    RTCRtpHeaderEncryptionPolicy,
+    RTCRtpHeaderEncryptionPolicyValue,
     RTCRtpScriptTransformType,
     RTCRtpScriptTransformTypeValue,
+    RTCRtpTransceiverDirection,
+    RTCRtpTransceiverDirectionValue,
+    RTCSctpTransportState,
+    RTCSdpType,
+    RTCSdpTypeValue,
+    RTCSignalingState,
+    RTCStatsIceCandidatePairState,
+    RTCStatsType,
     SFrameCipherSuite,
     SFrameCipherSuiteValue,
-    SFrameType,
-    SFrameTypeValue,
     SFrameTransformErrorEventType,
     SFrameTransformErrorEventTypeValue,
+    SFrameType,
+    SFrameTypeValue,
+    VideoColorPrimaries,
+    VideoColorPrimariesValue,
+    VideoFacingModeEnum,
+    VideoMatrixCoefficients,
+    VideoMatrixCoefficientsValue,
+    VideoPixelFormat,
+    VideoPixelFormatValue,
+    VideoResizeModeEnum,
+    VideoTransferCharacteristics,
+    VideoTransferCharacteristicsValue,
 )
-from .base import WebRTCObject
 from .exceptions import (
-    PythonWebRTCExceptionBase,
-    PythonWebRTCException,
-    RTCException,
-    InvalidStateError,
-    InvalidAccessError,
-    InvalidModificationError,
-    OperationError,
-    NotSupportedError,
-    NetworkError,
     DataCloneError,
-    NotFoundError,
-    NotAllowedError,
-    InvalidSyntaxError,
-    InvalidRangeError,
+    InvalidAccessError,
     InvalidCharacterError,
+    InvalidModificationError,
+    InvalidRangeError,
+    InvalidStateError,
+    InvalidSyntaxError,
+    NetworkError,
+    NotAllowedError,
+    NotFoundError,
+    NotSupportedError,
+    OperationError,
     OverconstrainedError,
+    PythonWebRTCException,
+    PythonWebRTCExceptionBase,
     RTCError,
     RTCErrorInit,
+    RTCException,
 )
-from .utils.events import EventTarget, HandlerDecorator, UniformEventTarget
+from .interfaces.media_devices import InputDeviceInfo, MediaDeviceInfo, MediaDevices, media_devices, mediaDevices
+from .interfaces.media_stream import MediaStream
+from .interfaces.media_stream_track import MediaStreamTrack
+from .interfaces.media_stream_track_processor import MediaStreamTrackProcessor, MediaStreamTrackProcessorInit
+from .interfaces.rtc_data_channel import RTCDataChannel, RTCDataChannelInit
+from .interfaces.rtc_dtls_transport import RTCDtlsTransport
+from .interfaces.rtc_dtmf_sender import RTCDTMFSender
+from .interfaces.rtc_ice_transport import RTCIceTransport
+from .interfaces.rtc_peer_connection import RTCPeerConnection
+from .interfaces.rtc_rtp_receiver import RTCRtpReceiver
+from .interfaces.rtc_rtp_script_transform import RTCRtpScriptTransform, RTCRtpScriptTransformer, WorkerAndParameters
+from .interfaces.rtc_rtp_sender import RTCRtpSender
+from .interfaces.rtc_rtp_transceiver import RTCRtpTransceiver
+from .interfaces.rtc_sctp_transport import RTCSctpTransport
+from .interfaces.sframe_transform import (
+    RTCRtpSFrameDecryptor,
+    RTCRtpSFrameEncryptor,
+    SFrameDecryptorStream,
+    SFrameEncryptorStream,
+)
+from .interfaces.track_generator import (
+    MediaStreamTrackGenerator,
+    MediaStreamTrackGeneratorInit,
+    VideoTrackGenerator,
+)
+from .models.audio_data import AudioData, AudioDataCopyToOptions, AudioDataInit
+from .models.blob import Blob, BlobPropertyBag
 from .models.events import (
-    Event,
-    RTCPeerConnectionIceEvent,
-    RTCPeerConnectionIceErrorEvent,
-    RTCTrackEvent,
-    RTCErrorEvent,
-    MessageEvent,
-    RTCDataChannelEvent,
-    MediaStreamTrackEvent,
-    RTCDTMFToneChangeEvent,
-    RTCPeerConnectionIceEventInit,
-    RTCPeerConnectionIceErrorEventInit,
-    RTCTrackEventInit,
-    RTCErrorEventInit,
-    RTCDataChannelEventInit,
-    MediaStreamTrackEventInit,
-    RTCDTMFToneChangeEventInit,
     DeviceChangeEvent,
     DeviceChangeEventInit,
-    RTCTransformEvent,
+    Event,
     KeyFrameRequestEvent,
+    MediaStreamTrackEvent,
+    MediaStreamTrackEventInit,
+    MessageEvent,
+    RTCDataChannelEvent,
+    RTCDataChannelEventInit,
+    RTCDTMFToneChangeEvent,
+    RTCDTMFToneChangeEventInit,
+    RTCErrorEvent,
+    RTCErrorEventInit,
+    RTCPeerConnectionIceErrorEvent,
+    RTCPeerConnectionIceErrorEventInit,
+    RTCPeerConnectionIceEvent,
+    RTCPeerConnectionIceEventInit,
+    RTCTrackEvent,
+    RTCTrackEventInit,
+    RTCTransformEvent,
     SFrameTransformErrorEvent,
     SFrameTransformErrorEventInit,
 )
-
-# the order matters: modules import each other through the package namespace
-from .models.rtc_session_description_init import RTCSessionDescriptionInit, RTCLocalSessionDescriptionInit
-from .models.rtc_offer_answer_options import RTCOfferAnswerOptions, RTCOfferOptions, RTCAnswerOptions
-from .models.rtc_session_description import RTCSessionDescription
 from .models.media_track_constraints import (
-    ULongRange,
-    DoubleRange,
-    ConstrainULongRange,
-    ConstrainDoubleRange,
+    ConstrainBooleanOrDOMStringParameters,
     ConstrainBooleanParameters,
     ConstrainDOMStringParameters,
-    ConstrainBooleanOrDOMStringParameters,
-    MediaTrackSettings,
-    MediaTrackSupportedConstraints,
+    ConstrainDoubleRange,
+    ConstrainULongRange,
+    DoubleRange,
     MediaStreamConstraints,
     MediaTrackCapabilities,
-    MediaTrackConstraintSet,
     MediaTrackConstraints,
+    MediaTrackConstraintSet,
+    MediaTrackSettings,
+    MediaTrackSupportedConstraints,
+    ULongRange,
 )
-from .models.blob import BlobPropertyBag, Blob
-from .models.video_frame import (
-    DOMRectReadOnly,
-    DOMRectInit,
-    PlaneLayout,
-    VideoColorSpace,
-    VideoColorSpaceInit,
-    VideoFrameMetadata,
-    VideoFrameBufferInit,
-    VideoFrameInit,
-    VideoFrameCopyToOptions,
-    VideoFrame,
-)
-from .models.audio_data import AudioDataInit, AudioDataCopyToOptions, AudioData
-from .models.rtc_encoded_frame import (
-    RTCEncodedFrameMetadata,
-    RTCEncodedVideoFrameMetadata,
-    RTCEncodedAudioFrameMetadata,
-    RTCEncodedVideoFrameOptions,
-    RTCEncodedAudioFrameOptions,
-    RTCEncodedVideoFrame,
-    RTCEncodedAudioFrame,
-)
-from .models.sframe_transform_options import SFrameTransformOptions, RTCRtpSFrameEncryptorOptions
-from .streams import (
-    ReadableStream,
-    ReadableStreamDefaultReader,
-    ReadableStreamDefaultController,
-    ReadableStreamReadResult,
-    ReadableStreamGetReaderOptions,
-    ReadableStreamIteratorOptions,
-    ReadableWritablePair,
-    StreamPipeOptions,
-    QueuingStrategy,
-    WritableStream,
-    WritableStreamDefaultWriter,
-    WritableStreamDefaultController,
-    TransformStream,
-    TransformStreamDefaultController,
-)
-from .models.rtp_parameters import (
-    RTCRtpParameters,
-    RTCRtpCodingParameters,
-    RTCEncodingOptions,
-    RTCSetParameterOptions,
-    RTCRtpCodec,
-    RTCRtpCodecParameters,
-    RTCRtpHeaderExtensionParameters,
-    RTCRtcpParameters,
-    RTCRtpEncodingParameters,
-    RTCRtpReceiveParameters,
-    RTCRtpSendParameters,
-    RTCRtpHeaderExtensionCapability,
-    RTCRtpCapabilities,
-)
-from .models.rtc_rtp_transceiver_init import RTCRtpTransceiverInit
-from .models.rtc_stats import (
-    RTCStats,
-    RTCRtpStreamStats,
-    RTCCodecStats,
-    RTCReceivedRtpStreamStats,
-    RTCInboundRtpStreamStats,
-    RTCRemoteInboundRtpStreamStats,
-    RTCSentRtpStreamStats,
-    RTCOutboundRtpStreamStats,
-    RTCRemoteOutboundRtpStreamStats,
-    RTCMediaSourceStats,
-    RTCAudioSourceStats,
-    RTCVideoSourceStats,
-    RTCAudioPlayoutStats,
-    RTCPeerConnectionStats,
-    RTCDataChannelStats,
-    RTCTransportStats,
-    RTCIceCandidateStats,
-    RTCIceCandidatePairStats,
-    RTCCertificateStats,
-    RTCStatsReport,
-)
-from .models.rtp_source import RTCRtpContributingSource, RTCRtpSynchronizationSource
 from .models.rtc_certificate import (
     Algorithm,
     EcKeyGenParams,
-    RTCCertificateExpiration,
     RsaHashedKeyGenParams,
     RTCCertificate,
+    RTCCertificateExpiration,
     RTCDtlsFingerprint,
 )
 from .models.rtc_configuration import (
@@ -250,42 +191,94 @@ from .models.rtc_configuration import (
     RTCIceServer,
     RTCOAuthCredential,
 )
+from .models.rtc_encoded_frame import (
+    RTCEncodedAudioFrame,
+    RTCEncodedAudioFrameMetadata,
+    RTCEncodedAudioFrameOptions,
+    RTCEncodedFrameMetadata,
+    RTCEncodedVideoFrame,
+    RTCEncodedVideoFrameMetadata,
+    RTCEncodedVideoFrameOptions,
+)
 from .models.rtc_ice_candidate import (
     RTCIceCandidate,
     RTCIceCandidateInit,
-    RTCLocalIceCandidateInit,
     RTCIceCandidatePair,
     RTCIceParameters,
+    RTCLocalIceCandidateInit,
 )
-
-from .interfaces.rtc_peer_connection import RTCPeerConnection
-from .interfaces.media_stream_track import MediaStreamTrack
-from .interfaces.media_stream import MediaStream
-from .interfaces.rtc_rtp_sender import RTCRtpSender
-from .interfaces.rtc_rtp_receiver import RTCRtpReceiver
-from .interfaces.rtc_rtp_transceiver import RTCRtpTransceiver
-from .interfaces.rtc_ice_transport import RTCIceTransport
-from .interfaces.rtc_dtls_transport import RTCDtlsTransport
-from .interfaces.rtc_sctp_transport import RTCSctpTransport
-from .interfaces.rtc_data_channel import RTCDataChannel, RTCDataChannelInit
-from .interfaces.media_stream_track_processor import MediaStreamTrackProcessorInit, MediaStreamTrackProcessor
-from .interfaces.track_generator import (
-    VideoTrackGenerator,
-    MediaStreamTrackGeneratorInit,
-    MediaStreamTrackGenerator,
+from .models.rtc_offer_answer_options import RTCAnswerOptions, RTCOfferAnswerOptions, RTCOfferOptions
+from .models.rtc_rtp_transceiver_init import RTCRtpTransceiverInit
+from .models.rtc_session_description import RTCSessionDescription
+from .models.rtc_session_description_init import RTCLocalSessionDescriptionInit, RTCSessionDescriptionInit
+from .models.rtc_stats import (
+    RTCAudioPlayoutStats,
+    RTCAudioSourceStats,
+    RTCCertificateStats,
+    RTCCodecStats,
+    RTCDataChannelStats,
+    RTCIceCandidatePairStats,
+    RTCIceCandidateStats,
+    RTCInboundRtpStreamStats,
+    RTCMediaSourceStats,
+    RTCOutboundRtpStreamStats,
+    RTCPeerConnectionStats,
+    RTCReceivedRtpStreamStats,
+    RTCRemoteInboundRtpStreamStats,
+    RTCRemoteOutboundRtpStreamStats,
+    RTCRtpStreamStats,
+    RTCSentRtpStreamStats,
+    RTCStats,
+    RTCStatsReport,
+    RTCTransportStats,
+    RTCVideoSourceStats,
 )
-from .interfaces.rtc_dtmf_sender import RTCDTMFSender
-from .interfaces.rtc_rtp_script_transform import WorkerAndParameters, RTCRtpScriptTransformer, RTCRtpScriptTransform
-from .interfaces.sframe_transform import (
-    RTCRtpSFrameEncryptor,
-    RTCRtpSFrameDecryptor,
-    SFrameEncryptorStream,
-    SFrameDecryptorStream,
+from .models.rtp_parameters import (
+    RTCEncodingOptions,
+    RTCRtcpParameters,
+    RTCRtpCapabilities,
+    RTCRtpCodec,
+    RTCRtpCodecParameters,
+    RTCRtpCodingParameters,
+    RTCRtpEncodingParameters,
+    RTCRtpHeaderExtensionCapability,
+    RTCRtpHeaderExtensionParameters,
+    RTCRtpParameters,
+    RTCRtpReceiveParameters,
+    RTCRtpSendParameters,
+    RTCSetParameterOptions,
 )
-
-from .interfaces.media_devices import MediaDeviceInfo, InputDeviceInfo, MediaDevices, media_devices, mediaDevices
-from . import openh264
-
+from .models.rtp_source import RTCRtpContributingSource, RTCRtpSynchronizationSource
+from .models.sframe_transform_options import RTCRtpSFrameEncryptorOptions, SFrameTransformOptions
+from .models.video_frame import (
+    DOMRectInit,
+    DOMRectReadOnly,
+    PlaneLayout,
+    VideoColorSpace,
+    VideoColorSpaceInit,
+    VideoFrame,
+    VideoFrameBufferInit,
+    VideoFrameCopyToOptions,
+    VideoFrameInit,
+    VideoFrameMetadata,
+)
+from .streams import (
+    QueuingStrategy,
+    ReadableStream,
+    ReadableStreamDefaultController,
+    ReadableStreamDefaultReader,
+    ReadableStreamGetReaderOptions,
+    ReadableStreamIteratorOptions,
+    ReadableStreamReadResult,
+    ReadableWritablePair,
+    StreamPipeOptions,
+    TransformStream,
+    TransformStreamDefaultController,
+    WritableStream,
+    WritableStreamDefaultController,
+    WritableStreamDefaultWriter,
+)
+from .utils.events import EventTarget, HandlerDecorator, UniformEventTarget
 
 __all__ = [
     'Algorithm',

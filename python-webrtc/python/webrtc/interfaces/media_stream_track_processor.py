@@ -14,13 +14,18 @@ from typing import TYPE_CHECKING, ClassVar
 
 from typing_extensions import Never, override
 
-from webrtc import AudioData, MediaStreamTrack, MediaType, VideoFrame, WebRTCObject, wrtc
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.enums import MediaType
+from webrtc.models.audio_data import AudioData
 from webrtc.models.dictionary import Dictionary
+from webrtc.models.video_frame import VideoFrame
 from webrtc.streams import QueuingStrategy, ReadableStream
 from webrtc.utils.events import EventTarget
 from webrtc.utils.names import Alias, alias
 
 if TYPE_CHECKING:
+    from webrtc.interfaces.media_stream_track import MediaStreamTrack
     from webrtc.streams import ReadableStreamDefaultController
 
 #: How many video frames are queued for reads by default, as set by the specification
@@ -79,17 +84,16 @@ class _TrackSource:
     def deliver(self) -> None:
         """Fulfills the pending reads with the media queued, and closes the stream once the track ended."""
         native = self._processor._native_obj
-        stream = self._processor._readable
         controller = self._controller
         if controller is None:
             msg = 'the stream of the processor has not started'
             raise RuntimeError(msg)
-        while stream._state == 'readable' and stream._reader is not None and len(stream._reader._read_requests) > 0:
+        while controller._has_pending_reads():
             item = native.read()
             if item is None:
                 break
             controller.enqueue(self._processor._wrap_media(item))
-        if native.ended and stream._state == 'readable' and not controller._close_requested:
+        if native.ended and controller._can_close_or_enqueue():
             controller.close()
 
 

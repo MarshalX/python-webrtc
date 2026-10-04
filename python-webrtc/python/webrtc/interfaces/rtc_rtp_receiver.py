@@ -12,17 +12,13 @@ from __future__ import annotations
 from typing import TypeVar
 
 import webrtc
-from webrtc import (
-    InvalidRangeError,
-    RTCRtpCapabilities,
-    RTCRtpContributingSource,
-    RTCRtpReceiveParameters,
-    RTCRtpSynchronizationSource,
-    RTCStatsReport,
-    WebRTCObject,
-    wrtc,
-)
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.exceptions import InvalidRangeError
 from webrtc.interfaces.rtc_rtp_sender import _native_transform
+from webrtc.models.rtc_stats import RTCStatsReport
+from webrtc.models.rtp_parameters import RTCRtpCapabilities, RTCRtpReceiveParameters
+from webrtc.models.rtp_source import RTCRtpContributingSource, RTCRtpSynchronizationSource
 from webrtc.utils.native_calls import call_native
 
 _SourceT = TypeVar('_SourceT', bound=RTCRtpContributingSource)

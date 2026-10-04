@@ -16,22 +16,22 @@ from typing import TYPE_CHECKING, Literal, TypeVar, Union, cast
 
 from typing_extensions import override
 
-from webrtc import (
+import wrtc
+from webrtc.base import WebRTCObject
+from webrtc.exceptions import OverconstrainedError
+from webrtc.models.events import Event
+from webrtc.models.media_track_constraints import (
     ConstrainBooleanOrDOMStringParameters,
     ConstrainBooleanParameters,
     ConstrainDOMStringParameters,
     ConstrainDoubleRange,
     ConstrainULongRange,
     DoubleRange,
-    Event,
     MediaTrackCapabilities,
     MediaTrackConstraints,
     MediaTrackConstraintSet,
     MediaTrackSettings,
-    OverconstrainedError,
     ULongRange,
-    WebRTCObject,
-    wrtc,
 )
 from webrtc.utils.events import UniformEventTarget
 from webrtc.utils.names import camel_case

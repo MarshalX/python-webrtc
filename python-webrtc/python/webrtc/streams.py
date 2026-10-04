@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import enum
 import inspect
 import math
 from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Generator, Iterable, Iterator
@@ -59,6 +60,19 @@ _R = TypeVar('_R')
 _W_contra = TypeVar('_W_contra', contravariant=True, default=object)
 
 
+class _ReadableState(enum.Enum):
+    readable = 'readable'
+    closed = 'closed'
+    errored = 'errored'
+
+
+class _WritableState(enum.Enum):
+    writable = 'writable'
+    erroring = 'erroring'
+    closed = 'closed'
+    errored = 'errored'
+
+
 def _loop() -> asyncio.AbstractEventLoop:
     try:
         return asyncio.get_running_loop()
@@ -79,6 +93,8 @@ def _resolved(value: _R) -> asyncio.Future[_R]:
 
 # pipes running, see ReadableStream.pipe_to
 _running_pipes: set[asyncio.Future[None]] = set()
+# see _then
+_running_algorithms: set[asyncio.Future[object]] = set()
 
 
 def _rejected(error: BaseException) -> asyncio.Future[_R]:
@@ -164,6 +180,9 @@ def _then(result: object, on_done: Callable[[], None], on_error: Callable[[BaseE
             on_done()
 
     task: asyncio.Future[object] = asyncio.ensure_future(result)
+    # asyncio keeps tasks weakly
+    _running_algorithms.add(task)
+    task.add_done_callback(_running_algorithms.discard)
     task.add_done_callback(done)
 
 
@@ -364,9 +383,9 @@ class ReadableStreamDefaultController(Generic[_T]):
         See :mdn:`ReadableStreamDefaultController/desiredSize`.
         """
         state = self._stream._state
-        if state == 'errored':
+        if state == _ReadableState.errored:
             return None
-        if state == 'closed':
+        if state == _ReadableState.closed:
             return 0
         return self._strategy.high_water_mark - self._queue_total_size
 
@@ -411,13 +430,16 @@ class ReadableStreamDefaultController(Generic[_T]):
         Args:
             e (optional): The error. A value that isn't an exception is raised as a :obj:`TypeError`.
         """
-        if self._stream._state != 'readable':
+        if self._stream._state != _ReadableState.readable:
             return
         self._reset_queue()
         self._stream._error(_error_of(e))
 
     def _can_close_or_enqueue(self) -> bool:
-        return not self._close_requested and self._stream._state == 'readable'
+        return not self._close_requested and self._stream._state == _ReadableState.readable
+
+    def _has_pending_reads(self) -> bool:
+        return self._can_close_or_enqueue() and self._stream._has_read_requests()
 
     def _enqueue(self, chunk: _T) -> None:
         reader = self._stream._reader
@@ -451,7 +473,7 @@ class ReadableStreamDefaultController(Generic[_T]):
 
     def _should_call_pull(self) -> bool:
         stream = self._stream
-        if not self._started or self._close_requested or stream._state != 'readable':
+        if not self._started or self._close_requested or stream._state != _ReadableState.readable:
             return False
         if stream._has_read_requests():
             return True
@@ -515,7 +537,7 @@ class ReadableStream(Generic[_T]):
 
     def __init__(self, underlying_source: object = None, strategy: QueuingStrategy[_T] | None = None) -> None:
         extracted = _extract_strategy(strategy, 1)
-        self._state = 'readable'
+        self._state: _ReadableState = _ReadableState.readable
         self._stored_error: BaseException | None = None
         self._reader: ReadableStreamDefaultReader[_T] | None = None
         self._controller = ReadableStreamDefaultController(self, underlying_source, extracted)
@@ -704,17 +726,17 @@ class ReadableStream(Generic[_T]):
         return self.values()
 
     def _close(self) -> None:
-        if self._state != 'readable':
+        if self._state != _ReadableState.readable:
             return
-        self._state = 'closed'
+        self._state = _ReadableState.closed
         if self._reader is not None:
             self._reader._settle_read_requests(ReadableStreamReadResult(None, done=True))
             _settle(self._reader._closed, None)
 
     def _error(self, error: BaseException) -> None:
-        if self._state != 'readable':
+        if self._state != _ReadableState.readable:
             return
-        self._state = 'errored'
+        self._state = _ReadableState.errored
         self._stored_error = error
         if self._reader is not None:
             self._reader._fail_read_requests(error)
@@ -728,9 +750,9 @@ class ReadableStream(Generic[_T]):
         return _error_of(self._stored_error)
 
     def _cancel(self, reason: object) -> asyncio.Future[None]:
-        if self._state == 'closed':
+        if self._state == _ReadableState.closed:
             return _resolved(None)
-        if self._state == 'errored':
+        if self._state == _ReadableState.errored:
             return _rejected(self._error_stored())
         self._close()
         return _future_of(self._controller._cancel(reason))
@@ -763,9 +785,9 @@ class ReadableStreamDefaultReader(Generic[_T]):
         self._read_requests: collections.deque[asyncio.Future[ReadableStreamReadResult[_T]]] = collections.deque()
         self._closed: asyncio.Future[None] = _handled(_pending())
         stream._reader = self
-        if stream._state == 'closed':
+        if stream._state == _ReadableState.closed:
             _settle(self._closed, None)
-        elif stream._state == 'errored':
+        elif stream._state == _ReadableState.errored:
             _settle(self._closed, None, stream._stored_error)
 
     @property
@@ -788,9 +810,9 @@ class ReadableStreamDefaultReader(Generic[_T]):
         stream = self._stream
         if stream is None:
             return _rejected(TypeError('The reader is released'))
-        if stream._state == 'closed':
+        if stream._state == _ReadableState.closed:
             return _resolved(ReadableStreamReadResult(None, done=True))
-        if stream._state == 'errored':
+        if stream._state == _ReadableState.errored:
             return _rejected(stream._error_stored())
         request: asyncio.Future[ReadableStreamReadResult[_T]] = _pending()
         stream._controller._read(self, request)
@@ -824,7 +846,7 @@ class ReadableStreamDefaultReader(Generic[_T]):
             return
         error = TypeError('The reader is released')
         self._fail_read_requests(error)
-        if stream._state == 'readable':
+        if stream._state == _ReadableState.readable:
             _fail(self._closed, error)
         else:
             self._closed = _handled(_rejected(error))
@@ -874,7 +896,7 @@ async def _stop_pipe(
     if stream is None:
         msg = 'The writer is released'
         raise TypeError(msg)
-    if stream._state in {'erroring', 'errored'}:
+    if stream._state in {_WritableState.erroring, _WritableState.errored}:
         if not options.prevent_cancel:
             await _handled(reader.cancel(error))
     elif not options.prevent_abort:
@@ -1032,7 +1054,7 @@ class WritableStreamDefaultController(Generic[_W_contra]):
         Args:
             e (optional): The error. A value that isn't an exception is raised as a :obj:`TypeError`.
         """
-        if self._stream._state == 'writable':
+        if self._stream._state == _WritableState.writable:
             self._stream._start_erroring(_error_of(e))
 
     def _desired_size(self) -> float:
@@ -1070,10 +1092,10 @@ class WritableStreamDefaultController(Generic[_W_contra]):
         stream = self._stream
         if not self._started or self._in_flight or len(self._queue) == 0:
             return
-        if stream._state == 'erroring':
+        if stream._state == _WritableState.erroring:
             stream._finish_erroring()
             return
-        if stream._state != 'writable':
+        if stream._state != _WritableState.writable:
             return
         chunk, future, _ = self._queue[0]
         self._in_flight = True
@@ -1100,7 +1122,7 @@ class WritableStreamDefaultController(Generic[_W_contra]):
     def _closed(self, future: asyncio.Future[None]) -> None:
         self._settle_in_flight(future)
         stream = self._stream
-        stream._state = 'closed'
+        stream._state = _WritableState.closed
         if stream._writer is not None:
             _settle(stream._writer._closed, None)
 
@@ -1131,7 +1153,7 @@ class WritableStream(Generic[_W_contra]):
 
     def __init__(self, underlying_sink: object = None, strategy: QueuingStrategy[_W_contra] | None = None) -> None:
         extracted = _extract_strategy(strategy, 1)
-        self._state = 'writable'
+        self._state: _WritableState = _WritableState.writable
         self._stored_error: BaseException | None = None
         self._writer: WritableStreamDefaultWriter[_W_contra] | None = None
         self._close_requested = False
@@ -1192,7 +1214,7 @@ class WritableStream(Generic[_W_contra]):
         return self._abort(reason)
 
     def _close(self) -> asyncio.Future[None]:
-        if self._state in {'closed', 'errored'} or self._close_requested:
+        if self._state in {_WritableState.closed, _WritableState.errored} or self._close_requested:
             return _rejected(TypeError('The stream is closed or closing'))
         self._close_requested = True
         future: asyncio.Future[None] = _pending()
@@ -1200,17 +1222,17 @@ class WritableStream(Generic[_W_contra]):
         return future
 
     def _abort(self, reason: object) -> asyncio.Future[None]:
-        if self._state in {'closed', 'errored'}:
+        if self._state in {_WritableState.closed, _WritableState.errored}:
             return _resolved(None)
         error = reason if isinstance(reason, BaseException) else asyncio.CancelledError(reason)
         self._controller._reject_queue(error)
-        self._state = 'errored'
+        self._state = _WritableState.errored
         self._stored_error = error
         self._reject_writer(error)
         return _future_of(_call(self._controller._sink, 'abort', reason))
 
     def _start_erroring(self, error: BaseException) -> None:
-        self._state = 'erroring'
+        self._state = _WritableState.erroring
         self._stored_error = error
         if self._writer is not None:
             _fail(self._writer._ready, error)
@@ -1220,16 +1242,16 @@ class WritableStream(Generic[_W_contra]):
             self._finish_erroring()
 
     def _finish_erroring(self) -> None:
-        self._state = 'errored'
+        self._state = _WritableState.errored
         error = _error_of(self._stored_error)
         self._controller._reject_queue(error)
         self._reject_writer(error)
         _ = _call(self._controller._sink, 'abort', self._stored_error)
 
     def _deal_with_rejection(self, error: BaseException) -> None:
-        if self._state == 'writable':
+        if self._state == _WritableState.writable:
             self._start_erroring(error)
-        if self._state == 'erroring':
+        if self._state == _WritableState.erroring:
             self._finish_erroring()
 
     def _reject_writer(self, error: BaseException) -> None:
@@ -1241,7 +1263,7 @@ class WritableStream(Generic[_W_contra]):
 
     def _update_backpressure(self) -> None:
         writer = self._writer
-        if writer is None or self._state != 'writable':
+        if writer is None or self._state != _WritableState.writable:
             return
         backpressure = self._controller._desired_size() <= 0
         if backpressure and writer._ready.done():
@@ -1274,10 +1296,10 @@ class WritableStreamDefaultWriter(Generic[_W_contra]):
         stream._writer = self
         self._closed: asyncio.Future[None] = _handled(_pending())
         self._ready: asyncio.Future[None] = _handled(_pending())
-        if stream._state == 'writable':
+        if stream._state == _WritableState.writable:
             if stream._controller._desired_size() > 0 or stream._close_requested:
                 _settle(self._ready, None)
-        elif stream._state == 'closed':
+        elif stream._state == _WritableState.closed:
             _settle(self._ready, None)
             _settle(self._closed, None)
         else:
@@ -1317,9 +1339,9 @@ class WritableStreamDefaultWriter(Generic[_W_contra]):
         if stream is None:
             msg = 'The writer is released'
             raise TypeError(msg)
-        if stream._state in {'errored', 'erroring'}:
+        if stream._state in {_WritableState.errored, _WritableState.erroring}:
             return None
-        if stream._state == 'closed':
+        if stream._state == _WritableState.closed:
             return 0
         return stream._controller._desired_size()
 
@@ -1338,9 +1360,9 @@ class WritableStreamDefaultWriter(Generic[_W_contra]):
         stream = self._stream
         if stream is None:
             return _rejected(TypeError('The writer is released'))
-        if stream._state in {'errored', 'erroring'}:
+        if stream._state in {_WritableState.errored, _WritableState.erroring}:
             return _rejected(_error_of(stream._stored_error))
-        if stream._close_requested or stream._state == 'closed':
+        if stream._close_requested or stream._state == _WritableState.closed:
             return _rejected(TypeError('The stream is closed or closing'))
         future: asyncio.Future[None] = _pending()
         stream._controller._write(cast('_W_contra', chunk), future)
@@ -1448,7 +1470,7 @@ class TransformStreamDefaultController(Generic[_T, _O]):
         See :mdn:`TransformStreamDefaultController/terminate`.
         """
         controller = self._stream._readable._controller
-        if not controller._close_requested and self._stream._readable._state == 'readable':
+        if controller._can_close_or_enqueue():
             controller.close()
         self._stream._writable._controller.error(TypeError('The stream is terminated'))
 
@@ -1524,7 +1546,7 @@ class _TransformSink(Generic[_T, _O]):
     async def write(self, chunk: _T, _controller: WritableStreamDefaultController[_T]) -> None:
         stream = self._stream
         # waits for the readable side to have room
-        while stream._readable._state == 'readable' and not self._has_room():
+        while stream._readable._state == _ReadableState.readable and not self._has_room():
             waiter: asyncio.Future[None] = _pending()
             stream._pull_waiter = waiter
             await waiter
@@ -1538,7 +1560,7 @@ class _TransformSink(Generic[_T, _O]):
     async def close(self) -> None:
         stream = self._stream
         _ = await _await(_call(stream._transformer, 'flush', stream._controller))
-        if stream._readable._state == 'readable' and not stream._readable._controller._close_requested:
+        if stream._readable._controller._can_close_or_enqueue():
             stream._readable._controller.close()
 
     def abort(self, reason: object) -> None:

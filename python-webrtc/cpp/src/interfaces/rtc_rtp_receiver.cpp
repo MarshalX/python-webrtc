@@ -16,7 +16,7 @@
 #include "../enums/enums.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
-#include "rtc_peer_connection.h"
+#include "rtc_peer_connection/rtc_peer_connection.h"
 
 namespace python_webrtc {
 

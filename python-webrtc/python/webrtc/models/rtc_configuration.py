@@ -14,18 +14,12 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
-from webrtc import (
-    InvalidAccessError,
-    InvalidSyntaxError,
-    NotSupportedError,
-    RTCBundlePolicy,
-    RTCCertificate,
-    RTCIceTransportPolicy,
-    RTCRtcpMuxPolicy,
-    RTCRtpHeaderEncryptionPolicy,
-    wrtc,
-)
+import webrtc
+import wrtc
+from webrtc.enums import RTCBundlePolicy, RTCIceTransportPolicy, RTCRtcpMuxPolicy, RTCRtpHeaderEncryptionPolicy
+from webrtc.exceptions import InvalidAccessError, InvalidSyntaxError, NotSupportedError
 from webrtc.models.dictionary import Dictionary
+from webrtc.models.rtc_certificate import RTCCertificate
 from webrtc.utils.names import Alias, alias
 
 if TYPE_CHECKING:
@@ -60,7 +54,7 @@ def _check_url(url: str) -> str:
     match = _URL.fullmatch(url)
     if match is None or match['scheme'] not in {'stun', 'stuns', 'turn', 'turns'}:
         msg = f'{url!r} is not a valid STUN or TURN URL'
-        raise InvalidSyntaxError(msg)
+        raise webrtc.InvalidSyntaxError(msg)
 
     host: str = match['host']
     port: str | None = match['port']
@@ -70,17 +64,17 @@ def _check_url(url: str) -> str:
             _ = ipaddress.IPv6Address(host[1:-1])
         except ValueError:
             msg = f'{url!r} has an invalid IPv6 address'
-            raise InvalidSyntaxError(msg) from None
+            raise webrtc.InvalidSyntaxError(msg) from None
     elif _REG_NAME.fullmatch(host) is None:
         msg = f'{url!r} has an invalid host'
-        raise InvalidSyntaxError(msg)
+        raise webrtc.InvalidSyntaxError(msg)
 
     if port is not None and (port == '' or int(port) > _MAX_PORT):
         msg = f'{url!r} has an invalid port'
-        raise InvalidSyntaxError(msg)
+        raise webrtc.InvalidSyntaxError(msg)
     if transport is not None and (match['scheme'].startswith('stun') or transport not in {'udp', 'tcp'}):
         msg = f'{url!r} has an invalid transport'
-        raise InvalidSyntaxError(msg)
+        raise webrtc.InvalidSyntaxError(msg)
     return match['scheme']
 
 
@@ -271,7 +265,7 @@ class RTCConfiguration(Dictionary):
             for certificate in self.certificates:
                 if certificate._expired():
                     msg = 'the certificate has expired'
-                    raise InvalidAccessError(msg)
+                    raise webrtc.InvalidAccessError(msg)
             native.certificates = [certificate._native_obj for certificate in self.certificates]
 
         if self.port_range is not None:

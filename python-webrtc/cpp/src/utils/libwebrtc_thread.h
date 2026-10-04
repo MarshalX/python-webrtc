@@ -9,9 +9,13 @@
 #define PYTHON_WEBRTC_UTILS_LIBWEBRTC_THREAD_H_
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -48,14 +52,84 @@ namespace python_webrtc {
     return forks;
   }
 
-  // Runs a release right away, or on a thread of its own on a libwebrtc thread; leaks while the interpreter finalizes
+  // for tests
+  inline std::atomic<int> &ReleaseThreads() {
+    static std::atomic<int> threads{0};
+    return threads;
+  }
+
+  // One thread releasing what libwebrtc threads can't (they'd block on themselves)
+  class ReleaseThread {
+  public:
+    static void Post(std::function<void()> release, int generation = Forks().load()) {
+      auto &thread = Instance();
+      {
+        const std::scoped_lock lock(thread._mutex);
+        if (thread._generation != Forks().load()) {
+          // forked child: thread gone, parent's releases leaked
+          thread._generation = Forks().load();
+          (void)new std::deque<Release>(std::move(thread._releases));
+          thread._releases.clear();
+          thread._started = false;
+        }
+        if (!thread._started) {
+          thread._started = true;
+          ReleaseThreads()++;
+          std::thread([&thread]() { thread.Run(); }).detach();
+        }
+        thread._releases.push_back({.release = std::move(release), .generation = generation});
+      }
+      thread._posted.notify_one();
+    }
+
+    static void LockForFork() { Instance()._mutex.lock(); }
+
+    static void UnlockAfterFork() { Instance()._mutex.unlock(); }
+
+  private:
+    struct Release {
+      std::function<void()> release;
+      int generation = 0;
+    };
+
+    static ReleaseThread &Instance() {
+      // leaked: its thread may outlive exit
+      static auto *thread = new ReleaseThread();
+      return *thread;
+    }
+
+    [[noreturn]] void Run() {
+      while (true) {
+        Release next;
+        {
+          std::unique_lock<std::mutex> lock(_mutex);
+          _posted.wait(lock, [this]() { return !_releases.empty(); });
+          next = std::move(_releases.front());
+          _releases.pop_front();
+        }
+        if (!PythonAlive() || next.generation != Forks().load()) {
+          (void)new std::function<void()>(std::move(next.release));
+          continue;
+        }
+        next.release();
+      }
+    }
+
+    std::mutex _mutex;
+    int _generation = Forks().load();
+    bool _started = false;
+    std::condition_variable _posted;
+    std::deque<Release> _releases;
+  };
+
+  // Runs a release right away, or on the release thread on a libwebrtc thread; leaks while the interpreter finalizes
   template <typename F>
   void ReleaseOffLibwebrtcThread(F &&release, int generation = Forks().load()) {
     if (!PythonAlive() || generation != Forks().load()) {
       return;
     }
     if (OnLibwebrtcThread()) {
-      std::thread(std::forward<F>(release)).detach();
+      ReleaseThread::Post(std::forward<F>(release), generation);
     } else {
       release();
     }

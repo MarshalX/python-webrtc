@@ -155,15 +155,7 @@ namespace python_webrtc {
       }
       // keeps the listeners alive even if a handler registration replaces them meanwhile
       const pybind11::object listeners = _listeners;
-      try {
-        listeners(name, args...);
-      } catch (pybind11::error_already_set &e) {
-        e.discard_as_unraisable(name);
-      } catch (const std::exception &e) {
-        // like an argument pybind11 can't convert: nowhere to propagate to on a libwebrtc thread
-        PyErr_SetString(PyExc_RuntimeError, e.what());
-        PyErr_WriteUnraisable(listeners.ptr());
-      }
+      CallUnraisable(name, [&]() { listeners(name, args...); });
     }
 
     std::atomic<bool> _active{false};
