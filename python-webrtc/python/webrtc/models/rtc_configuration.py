@@ -226,7 +226,7 @@ class RTCConfiguration(Dictionary):
             be changed.
         rtp_header_encryption_policy (:obj:`webrtc.RTCRtpHeaderEncryptionPolicy`, optional): ``negotiate`` (the
             default) encrypts RTP header extensions with cryptex (RFC 9335) when the remote peer supports it,
-            and ``require`` fails a remote description without it. It can't be changed.
+            ``require`` fails a remote description without it, and ``disable`` never encrypts. It can't be changed.
     """
 
     ice_servers: list[RTCIceServer] = field(default_factory=list)

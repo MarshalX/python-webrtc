@@ -27,8 +27,8 @@ WPT_ROOT = Path(__file__).resolve().parents[2] / 'wpt'
 # needs the WPT checkout, PythonMonkey to parse and inspect.get_annotations
 AVAILABLE = sys.version_info >= (3, 10) and WPT_ROOT.is_dir() and find_spec('pythonmonkey') is not None
 
-# IDL files under wpt/interfaces, with the definitions to take from them: None takes all of them. Dictionaries and
-# enums the taken definitions use come along, typedefs always do.
+# IDL files under wpt/interfaces (or vendored here), with the definitions to take: None takes all. Partials, used
+# dictionaries and enums follow the taken definitions, typedefs always come.
 FILES: dict[str, set[str] | None] = {
     'webrtc.idl': None,
     'webrtc-ice.idl': None,
@@ -36,6 +36,8 @@ FILES: dict[str, set[str] | None] = {
     'webrtc-svc.idl': None,
     'webrtc-stats.idl': None,
     'webrtc-encoded-transform.idl': None,
+    'webrtc-extensions.idl': None,
+    'webrtc-identity.idl': {'RTCError', 'RTCErrorInit'},
     'mediacapture-streams.idl': None,
     'mediacapture-transform.idl': None,
     'mst-content-hint.idl': None,
@@ -222,7 +224,13 @@ class Spec:
 
 def load() -> Spec:
     """The spec of :data:`FILES`."""
-    return parse({name: (WPT_ROOT / 'interfaces' / name).read_text() for name in FILES}, FILES)
+    return parse({name: _path(name).read_text() for name in FILES}, FILES)
+
+
+def _path(name: str) -> Path:
+    """A vendored IDL file, else the WPT one."""
+    vendored = Path(__file__).with_name(name)
+    return vendored if vendored.exists() else WPT_ROOT / 'interfaces' / name
 
 
 def parse(texts: dict[str, str], files: dict[str, set[str] | None]) -> Spec:
@@ -236,7 +244,7 @@ def parse(texts: dict[str, str], files: dict[str, set[str] | None]) -> Spec:
             check=True,
         ).stdout
     )
-    spec = Spec(_merge(nodes), {node['name']: node['idlType'] for node in nodes if node['type'] == 'typedef'})
+    spec = Spec(_merge(nodes, files), {node['name']: node['idlType'] for node in nodes if node['type'] == 'typedef'})
     taken: set[str] = set()
     for node in nodes:
         if node['type'] == 'includes' or node['name'] not in spec.definitions or _is_partial(node):
@@ -268,7 +276,7 @@ def _definitions(nodes: list[Node]) -> dict[str, Definition]:
     return definitions
 
 
-def _merge(nodes: list[Node]) -> dict[str, Definition]:
+def _merge(nodes: list[Node], files: dict[str, set[str] | None]) -> dict[str, Definition]:
     """The interfaces, dictionaries and enums, with the members of their partials and mixins."""
     definitions = _definitions(nodes)
     mixins: dict[str, list[Member]] = {}
@@ -281,7 +289,9 @@ def _merge(nodes: list[Node]) -> dict[str, Definition]:
             if node['target'] in definitions:
                 definitions[node['target']].members.extend(mixins.get(node['includes'], []))
         elif node['name'] in definitions and _is_partial(node):
-            definitions[node['name']].members.extend(node['members'])
+            wanted = files[node['file']]
+            if wanted is None or node['name'] in wanted:
+                definitions[node['name']].members.extend(node['members'])
     return definitions
 
 

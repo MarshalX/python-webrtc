@@ -305,6 +305,7 @@ namespace python_webrtc {
     using Policy = webrtc::CryptoOptions::Srtp::CryptexPolicy;
     static constexpr auto name = pybind11::detail::const_name("RTCRtpHeaderEncryptionPolicy");
     static constexpr auto values = std::to_array<std::pair<Policy, const char *>>({
+        {Policy::kDisabled, "disable"},
         {Policy::kNegotiate, "negotiate"},
         {Policy::kRequire, "require"},
     });

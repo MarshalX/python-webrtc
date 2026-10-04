@@ -448,6 +448,8 @@ RTCRtcpMuxPolicyValue = Literal['require']
 class RTCRtpHeaderEncryptionPolicy(_StrEnum):
     """Whether RTP header extensions are encrypted with cryptex (RFC 9335)."""
 
+    #: Never encrypts them
+    disable = 'disable'
     #: Encrypts them when the remote peer supports it
     negotiate = 'negotiate'
     #: Always encrypts them, so a remote description without cryptex fails
@@ -455,7 +457,7 @@ class RTCRtpHeaderEncryptionPolicy(_StrEnum):
 
 
 #: The string values of :obj:`RTCRtpHeaderEncryptionPolicy`, which parameters accept in place of its members
-RTCRtpHeaderEncryptionPolicyValue = Literal['negotiate', 'require']
+RTCRtpHeaderEncryptionPolicyValue = Literal['disable', 'negotiate', 'require']
 
 
 class RTCIceCandidateType(_StrEnum):

@@ -95,7 +95,6 @@ from .base import WebRTCObject
 from .exceptions import (
     PythonWebRTCExceptionBase,
     PythonWebRTCException,
-    SdpParseException,
     RTCException,
     InvalidStateError,
     InvalidAccessError,
@@ -515,7 +514,6 @@ __all__ = [
     'SFrameTransformOptions',
     'SFrameType',
     'SFrameTypeValue',
-    'SdpParseException',
     'StreamPipeOptions',
     'TransformStream',
     'TransformStreamDefaultController',

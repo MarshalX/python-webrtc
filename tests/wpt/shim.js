@@ -113,7 +113,6 @@
   const JS_ERROR_BY_CLASS = {
     TypeError,
     InvalidRangeError: RangeError,
-    ValueError: TypeError,
     OverflowError: TypeError,
   };
 
@@ -566,8 +565,7 @@
     async getStats() { return callAsyncMethod(this, 'get_stats'); }
     async setParameters(parameters, options) {
       const converted = toSendParameters(parameters);
-      const {encodingOptions} = requireDictionary(options, 'RTCSetParameterOptions');
-      if (encodingOptions === undefined) return callAsyncMethod(this, 'set_parameters', converted);
+      const {encodingOptions = []} = requireDictionary(options, 'RTCSetParameterOptions');
       const encodingOptionsList = Array.from(encodingOptions,
         (option) => pyModel('RTCEncodingOptions', {key_frame: Boolean(option?.keyFrame)}));
       return callAsyncMethod(this, 'set_parameters', converted,
@@ -925,7 +923,7 @@
       receiver: () => RTCRtpReceiver, track: () => MediaStreamTrack, transceiver: () => RTCRtpTransceiver}),
     RTCErrorEvent: defineEvent('RTCErrorEvent', ['error']),
     RTCDataChannelEvent: defineEvent('RTCDataChannelEvent', ['channel'], {}, {channel: () => RTCDataChannel}),
-    MediaStreamTrackEvent: defineEvent('MediaStreamTrackEvent', ['track']),
+    MediaStreamTrackEvent: defineEvent('MediaStreamTrackEvent', ['track'], {}, {track: () => MediaStreamTrack}),
     RTCDTMFToneChangeEvent: defineEvent('RTCDTMFToneChangeEvent', [], {tone: ''}),
     MessageEvent: defineEvent('MessageEvent', [], {data: null, origin: '', lastEventId: '', source: null, ports: []}),
     RTCTransformEvent: defineEvent('RTCTransformEvent', ['transformer'], {}, {transformer: () => RTCRtpScriptTransformer}),
@@ -1398,23 +1396,31 @@
   const {Event: _, ...eventInterfaces} = events;
   Object.assign(globalThis, eventInterfaces, {RTCError, RTCStatsReport});
 
-  // each a value, or a constraint on it (ConstrainULong, ConstrainDouble) the library has a model of
-  const constrain = (name) => (v) => (typeof v === 'object' && v !== null ? pyJson(name, v) : v);
-  const VIDEO_CONSTRAINTS = {
-    width: ['width', constrain('ConstrainULongRange')],
-    height: ['height', constrain('ConstrainULongRange')],
-    frameRate: ['frame_rate', constrain('ConstrainDoubleRange')],
-  };
+  class MediaDeviceInfo extends Interface {
+    toJSON() { return callMethod(this, 'to_json'); }
+  }
+  defineAttributes(MediaDeviceInfo, [
+    ['deviceId', 'device_id'],
+    ['kind', 'kind'],
+    ['label', 'label'],
+    ['groupId', 'group_id'],
+  ]);
 
-  globalThis.navigator = {
-    mediaDevices: {
-      async getUserMedia(constraints = {}) {
-        const video = typeof constraints.video === 'object' && constraints.video !== null
-          ? pyModel('MediaTrackConstraints', convertDictionary(constraints.video, 'MediaTrackConstraints', VIDEO_CONSTRAINTS))
-          : Boolean(constraints.video);
-        return unwrap(await bridge.get_user_media(
-          pyModel('MediaStreamConstraints', {audio: Boolean(constraints.audio), video})));
-      },
-    },
-  };
+  class InputDeviceInfo extends MediaDeviceInfo {
+    getCapabilities() { return callMethod(this, 'get_capabilities'); }
+  }
+
+  class MediaDevices extends Interface {
+    async enumerateDevices() { return callAsyncMethod(this, 'enumerate_devices'); }
+    getSupportedConstraints() { return callMethod(this, 'get_supported_constraints'); }
+    async getUserMedia(constraints) {
+      return callAsyncMethod(this, 'get_user_media',
+        pyJson('MediaStreamConstraints', requireDictionary(constraints, 'MediaStreamConstraints')));
+    }
+  }
+  defineEventHandlers(MediaDevices, ['devicechange']);
+
+  Object.assign(interfaces, {MediaDeviceInfo, InputDeviceInfo, MediaDevices});
+  Object.assign(globalThis, {MediaDeviceInfo, InputDeviceInfo, MediaDevices});
+  globalThis.navigator = {mediaDevices: unwrap(bridge.media_devices())};
 })();

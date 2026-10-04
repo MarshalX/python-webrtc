@@ -853,11 +853,19 @@ class VideoFrame(Closable):
         return frame
 
     def _take_resource(self) -> wrtc.VideoFrameBuffer:
-        """The pixels, for a generator, which closes the frame."""
-        if self._resource is None:
+        """The visible pixels, for a generator, which closes the frame."""
+        resource = self._resource
+        if resource is None:
             msg = 'The frame is closed'
             raise InvalidStateError(msg)
-        resource = self._resource
+        rect = self._visible_rect
+        if (rect.x, rect.y, rect.width, rect.height) != (0, 0, resource.width, resource.height):
+            pixels = bytearray(self.allocation_size())
+            layout = self._copy_to(pixels, None)
+            planes = [(plane.offset, plane.stride) for plane in layout]
+            resource = wrtc.VideoFrameBuffer.fromData(
+                self._format.value, int(rect.width), int(rect.height), pixels, planes
+            )
         self._resource = None
         return resource
 

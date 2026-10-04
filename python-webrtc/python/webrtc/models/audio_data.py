@@ -167,9 +167,9 @@ class _CopyPlan(NamedTuple):
 class AudioData(Closable):
     """A block of audio samples with their format and presentation time.
 
-    The samples are held until :meth:`close` is called or a ``with`` block around the data ends. Data read from a
-    track is interleaved ``u8``, ``s16`` or ``s32``. It emits a :obj:`ResourceWarning` if it is garbage collected
-    while open.
+    The samples are held until :meth:`close` is called or a ``with`` block around the data ends. Data that is
+    garbage collected while open emits a :obj:`ResourceWarning`. Data read from a track is interleaved ``u8``,
+    ``s16`` or ``s32``.
 
     See :mdn:`AudioData`.
 
@@ -199,8 +199,6 @@ class AudioData(Closable):
     _frames: int
     _channels: int
     _timestamp: int
-    #: Whether a data read from a track warns if garbage collected without being closed
-    _warn_unclosed: bool = False
 
     def __init__(self, init: AudioDataInit) -> None:
         format = _sample_format(init.format)
@@ -231,7 +229,6 @@ class AudioData(Closable):
         audio = cls.__new__(cls)
         format = {8: AudioSampleFormat.u8, 16: AudioSampleFormat.s16, 32: AudioSampleFormat.s32}[bits_per_sample]
         audio._set(data, _Layout(format, float(sample_rate), frames, channels), timestamp)
-        audio._warn_unclosed = True
         return audio
 
     def _take(self) -> AudioData:
@@ -244,7 +241,7 @@ class AudioData(Closable):
         return copy
 
     def __del__(self) -> None:
-        if getattr(self, '_data', None) is not None and getattr(self, '_warn_unclosed', False):
+        if getattr(self, '_data', None) is not None:
             warnings.warn('An AudioData was garbage collected without being closed', ResourceWarning, stacklevel=2)
 
     @property

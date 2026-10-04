@@ -132,18 +132,28 @@ async def test_close_states_and_events(caller: webrtc.RTCPeerConnection, callee:
         ({'max_packet_life_time': 1, 'max_retransmits': 1}, 'can not both be set'),
         ({'negotiated': True}, 'needs an id'),
         ({'negotiated': True, 'id': 65535}, 'id must be from 0 to 65534'),
+        ({'id': 65536}, 'id must be from 0 to 65535'),
+        ({'max_retransmits': -1}, 'max_retransmits must be from 0 to 65535'),
+        ({'max_packet_life_time': 65536}, 'max_packet_life_time must be from 0 to 65535'),
+        ({'protocol': 'x' * 65536}, 'protocol is longer than 65535 bytes'),
     ],
-    ids=['both limits', 'negotiated without id', 'id out of range'],
+    ids=['both limits', 'negotiated without id', 'reserved id', 'id out of range', 'negative', 'too long', 'protocol'],
 )
 def test_invalid_data_channel_init(pc: webrtc.RTCPeerConnection, init: ChannelOptions, error: str) -> None:
-    """A channel has at most one of the limits, and a negotiated one an id in range."""
-    with pytest.raises(ValueError, match=error):
+    """Invalid options raise TypeError."""
+    with pytest.raises(TypeError, match=error):
         pc.create_data_channel('x', webrtc.RTCDataChannelInit(**init))
 
 
 def test_id_is_ignored_unless_negotiated(pc: webrtc.RTCPeerConnection) -> None:
     """The id of a channel that isn't negotiated is chosen once SCTP is up."""
     assert pc.create_data_channel('x', webrtc.RTCDataChannelInit(id=65535)).id is None
+
+
+def test_label_too_long(pc: webrtc.RTCPeerConnection) -> None:
+    """A label longer than 65535 bytes in UTF-8 raises TypeError."""
+    with pytest.raises(TypeError, match='label is longer than 65535 bytes'):
+        pc.create_data_channel('я' * 32768)
 
 
 def test_id_taken(pc: webrtc.RTCPeerConnection) -> None:
@@ -192,7 +202,7 @@ async def test_send_larger_than_max_message_size(
     assert size is not None
     assert size > 65536
 
-    with pytest.raises(ValueError, match='larger than the maxMessageSize'):
+    with pytest.raises(TypeError, match='larger than the maxMessageSize'):
         channel.send(bytes(int(size) + 1))
     assert channel.buffered_amount == 0
     assert channel.ready_state == webrtc.RTCDataChannelState.open

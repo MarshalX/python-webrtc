@@ -145,7 +145,7 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
                 :meth:`get_header_extensions_to_negotiate` returns, with directions changed.
 
         Raises:
-            ValueError: If an extension has an empty URI.
+            TypeError: If an extension has an empty URI.
             webrtc.InvalidModificationError: If the extensions or their order differ, or a mandatory
                 extension is stopped.
         """
@@ -154,7 +154,7 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
         for extension in extensions:
             if extension.uri == '':
                 msg = 'the URI of a header extension must not be empty'
-                raise ValueError(msg)
+                raise TypeError(msg)
             native = wrtc.RtpHeaderExtensionCapability()
             native.uri = extension.uri
             if extension.uri in current:

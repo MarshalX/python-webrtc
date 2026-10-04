@@ -149,21 +149,21 @@ def test_7(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> No
 
 @pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
 def test_8(pc: webrtc.RTCPeerConnection, kind: webrtc.MediaType) -> None:
-    """add_transceiver with rid containing invalid non-alphanumeric characters should throw ValueError."""
+    """add_transceiver with rid containing invalid non-alphanumeric characters should throw TypeError."""
     encodings = [webrtc.RTCRtpEncodingParameters(rid='@Invalid!')]
     init = webrtc.RTCRtpTransceiverInit(send_encodings=encodings)
 
-    with pytest.raises(ValueError, match='is not a valid rid'):
+    with pytest.raises(TypeError, match='is not a valid rid'):
         pc.add_transceiver(kind, init)
 
 
 @pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
 def test_9(pc: webrtc.RTCPeerConnection, kind: webrtc.MediaType) -> None:
-    """add_transceiver with rid longer than 16 characters should throw ValueError."""
+    """add_transceiver with rid longer than 16 characters should throw TypeError."""
     encodings = [webrtc.RTCRtpEncodingParameters(rid='a' * 17)]
     init = webrtc.RTCRtpTransceiverInit(send_encodings=encodings)
 
-    with pytest.raises(ValueError, match='is not a valid rid'):
+    with pytest.raises(TypeError, match='is not a valid rid'):
         pc.add_transceiver(kind, init)
 
 

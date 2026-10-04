@@ -273,7 +273,7 @@ namespace python_webrtc {
     auto getter = _maxMessageSizeGetter.Get();
     auto maxMessageSize = getter ? getter() : std::nullopt;
     if (maxMessageSize && static_cast<double>(data.size()) > *maxMessageSize) {
-      throw pybind11::value_error("The message is larger than the maxMessageSize of the SCTP transport");
+      throw pybind11::type_error("The message is larger than the maxMessageSize of the SCTP transport");
     }
 
     // a full queue fails the send, rather than libwebrtc closing the channel with an error

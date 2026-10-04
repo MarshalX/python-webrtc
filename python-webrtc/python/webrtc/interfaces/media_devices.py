@@ -12,7 +12,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal, cast
 
 from typing_extensions import override
 
@@ -33,8 +33,8 @@ from webrtc.interfaces.media_stream_track import (
     _MICROPHONE_CAPABILITIES,
     CAMERA_DEVICE_ID,
     MICROPHONE_DEVICE_ID,
-    _check_numbers,
-    _selected,
+    _camera_mode,
+    _converted,
     _unsatisfied,
 )
 from webrtc.utils.events import UniformEventTarget
@@ -181,9 +181,9 @@ def _track_constraints(constraints: webrtc.MediaStreamConstraints, kind: str) ->
     return MediaTrackConstraints() if value else None
 
 
-def _check_satisfiable(constraints: MediaTrackConstraints, capabilities: webrtc.MediaTrackCapabilities) -> None:
-    _check_numbers(constraints)
-    failed = _unsatisfied(constraints, capabilities, MediaTrackSettings())
+def _check_satisfiable(constraints: MediaTrackConstraints, device: InputDeviceInfo) -> None:
+    kind = 'audio' if device.kind == MediaDeviceKind.audioinput else 'video'
+    failed = _unsatisfied(constraints, device.get_capabilities(), MediaTrackSettings(), kind=kind)
     if failed is not None:
         raise OverconstrainedError(failed, f"The constraint {failed} can't be satisfied")
 
@@ -193,11 +193,7 @@ def _capture_mode(
 ) -> tuple[float, float, float]:
     """The width, height and frame rate of the camera: its defaults, within the constraints and its capabilities."""
     constraints = video if video is not None else MediaTrackConstraints()
-    return (
-        _selected(constraints.width, 640, camera.width),
-        _selected(constraints.height, 480, camera.height),
-        _selected(constraints.frame_rate, 30.0, camera.frame_rate),
-    )
+    return _camera_mode(constraints, camera, MediaTrackSettings(), current=(640, 480, 30.0))
 
 
 class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent]):
@@ -225,9 +221,6 @@ class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent
     def _native_obj(self) -> SimpleNamespace:
         return self._native
 
-    def _capabilities(self) -> dict[webrtc.MediaDeviceKind, webrtc.MediaTrackCapabilities]:
-        return {d.kind: d.get_capabilities() for d in self._devices if isinstance(d, InputDeviceInfo)}
-
     async def enumerate_devices(self) -> list[webrtc.MediaDeviceInfo]:
         """Lists the synthetic microphone and camera. Labels are included and no permission prompt is shown.
 
@@ -251,8 +244,8 @@ class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent
     async def get_user_media(self, constraints: webrtc.MediaStreamConstraints | None = None) -> webrtc.MediaStream:
         """Returns a stream with a track of the synthetic microphone, the synthetic camera, or both.
 
-        The camera starts at 640x480 and 30 frames per second, adjusted to fit the given constraints. The microphone
-        has a fixed format. The constraints become the constraints of the tracks, as
+        The camera starts at 640x480 and 30 frames per second, adjusted to fit the constraints. The microphone has a
+        fixed format. The constraints become the constraints of the tracks, as
         :meth:`webrtc.MediaStreamTrack.get_constraints` shows.
 
         See :mdn:`MediaDevices/getUserMedia`.
@@ -265,8 +258,7 @@ class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent
             :obj:`webrtc.MediaStream`: The stream.
 
         Raises:
-            TypeError: If neither audio nor video is requested, or a value isn't a finite number. A size also
-                can't be negative.
+            TypeError: If neither audio nor video is requested, or a double isn't finite.
             webrtc.OverconstrainedError: If an ``exact``, ``min`` or ``max`` value is beyond what the device can
                 do, like a camera more than 4096 pixels wide or faster than 120 frames per second. Other values
                 are clamped to the capabilities.
@@ -277,15 +269,19 @@ class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent
         if audio is None and video is None:
             msg = 'audio or video must be requested'
             raise TypeError(msg)
-        capabilities = self._capabilities()
-        for requested, kind in ((audio, MediaDeviceKind.audioinput), (video, MediaDeviceKind.videoinput)):
+        microphone, camera = cast('list[InputDeviceInfo]', self._devices)
+        audio = _converted(audio) if audio is not None else None
+        video = _converted(video) if video is not None else None
+        for requested, device in ((audio, microphone), (video, camera)):
             if requested is not None:
-                _check_satisfiable(requested, capabilities[kind])
-        width, height, frame_rate = _capture_mode(video, capabilities[MediaDeviceKind.videoinput])
+                _check_satisfiable(requested, device)
+        width, height, frame_rate = _capture_mode(video, camera.get_capabilities())
         stream = MediaStream._wrap(wrtc.getUserMedia(audio is not None, video is not None, width, height, frame_rate))
         for track in stream.get_audio_tracks():
+            track._native_obj._setLabel(microphone.label)
             track._native_obj._constraints = audio
         for track in stream.get_video_tracks():
+            track._native_obj._setLabel(camera.label)
             track._native_obj._constraints = video
         return stream
 

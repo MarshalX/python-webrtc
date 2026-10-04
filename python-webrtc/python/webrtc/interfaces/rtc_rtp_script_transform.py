@@ -18,7 +18,7 @@ import re
 import weakref
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Literal, NamedTuple, Union, cast
+from typing import TYPE_CHECKING, Callable, Literal, NamedTuple, Union
 
 from typing_extensions import override
 
@@ -28,6 +28,7 @@ from webrtc import (
     KeyFrameRequestEvent,
     NotAllowedError,
     NotFoundError,
+    NotSupportedError,
     RTCEncodedAudioFrame,
     RTCEncodedVideoFrame,
     RTCRtpScriptTransformType,
@@ -66,7 +67,8 @@ class WorkerAndParameters(Dictionary):
     Args:
         worker (:obj:`callable`): Called with the ``rtctransform`` event. A coroutine function runs as a task.
         type (:obj:`webrtc.RTCRtpScriptTransformType`, optional): ``'sframe'`` if the worker outputs
-            SFrame-encrypted frames. It's accepted but has no effect, and frames are packetized as usual.
+            SFrame-encrypted frames. :obj:`RTCRtpScriptTransform` doesn't support it, because the native engine
+            has no SFrame packetization of RTP.
 
     Raises:
         TypeError: If the worker isn't callable.
@@ -295,6 +297,7 @@ class RTCRtpScriptTransform(WebRTCObject[wrtc.RTCRtpScriptTransform]):
 
     Raises:
         TypeError: If the worker isn't callable or ``transfer`` isn't a sequence.
+        webrtc.NotSupportedError: If the type of the worker is ``'sframe'``.
         webrtc.DataCloneError: If an object is in ``transfer`` more than once.
         RuntimeError: If called outside of a running event loop.
 
@@ -319,10 +322,11 @@ class RTCRtpScriptTransform(WebRTCObject[wrtc.RTCRtpScriptTransform]):
         options: object = None,
         transfer: Iterable[object] | None = None,
     ) -> None:
-        self._type: RTCRtpScriptTransformType | None = None
         if isinstance(worker_or_worker_and_parameters, WorkerAndParameters):
             worker = worker_or_worker_and_parameters.worker
-            self._type = cast('RTCRtpScriptTransformType | None', worker_or_worker_and_parameters.type)
+            if worker_or_worker_and_parameters.type == RTCRtpScriptTransformType.sframe:
+                msg = 'SFrame packetization of RTP is not supported'
+                raise NotSupportedError(msg)
         else:
             worker = worker_or_worker_and_parameters
         if not callable(worker):

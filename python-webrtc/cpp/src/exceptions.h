@@ -41,10 +41,6 @@ namespace python_webrtc {
     webrtc::RTCError _error;
   };
 
-  class SdpParseException : public PythonWebRTCException {
-    using PythonWebRTCException::PythonWebRTCException;
-  };
-
   // An RTCException passed to a Python callback of an asynchronous operation instead of being raised
   class RTCCallbackException {
   public:

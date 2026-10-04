@@ -134,7 +134,7 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
                 transceiver of the sender is stopped.
             webrtc.InvalidModificationError: If the ``transaction_id``, the codecs, the header extensions,
                 the RTCP parameters, the number of encodings or their ``rid`` changed, the codec of an encoding
-                isn't negotiated, or ``encoding_options`` aren't one per encoding.
+                isn't negotiated, or ``encoding_options`` isn't empty or one per encoding.
             webrtc.InvalidRangeError: If a value is out of range, like ``scale_resolution_down_by`` below 1.
             TypeError: If ``max_bitrate`` isn't an unsigned 32-bit integer, or a video value isn't a finite number.
         """
@@ -277,7 +277,7 @@ def _check_unchanged(
     """Checks what set_parameters() can't change against the parameters get_parameters() returned last.
 
     Raises:
-        webrtc.InvalidModificationError: If something changed, or ``encoding_options`` aren't one per encoding.
+        webrtc.InvalidModificationError: If something changed, or ``encoding_options`` isn't empty or one per encoding.
     """
     if parameters.transaction_id != returned.transaction_id:
         msg = "The transaction_id doesn't match the one of the last get_parameters()"
@@ -289,7 +289,7 @@ def _check_unchanged(
     if [e.rid for e in parameters.encodings] != [e.rid for e in returned.encodings]:
         msg = 'The number of encodings and their rid can not be changed'
         raise InvalidModificationError(msg)
-    if encoding_options is not None and len(encoding_options) != len(parameters.encodings):
+    if encoding_options is not None and len(encoding_options) not in {0, len(parameters.encodings)}:
         msg = 'encoding_options must have one value per encoding'
         raise InvalidModificationError(msg)
 
