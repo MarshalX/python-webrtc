@@ -10,8 +10,9 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import math
-from typing import TYPE_CHECKING, Literal, Union, cast
+from typing import TYPE_CHECKING, Literal, TypeVar, Union, cast
 
 from typing_extensions import override
 
@@ -33,6 +34,7 @@ from webrtc import (
     wrtc,
 )
 from webrtc.utils.events import UniformEventTarget
+from webrtc.utils.names import camel_case
 
 if TYPE_CHECKING:
     import webrtc
@@ -58,16 +60,22 @@ _CAMERA_CAPABILITIES = MediaTrackCapabilities(
     aspect_ratio=DoubleRange(1 / 4096, 4096),
     frame_rate=DoubleRange(1, 120),
     resize_mode=['none'],
+    facing_mode=[],
     device_id=CAMERA_DEVICE_ID,
     group_id=_GROUP_ID,
 )
+# sample rate, sample size, channel count
+_MICROPHONE_FORMAT = (48000, 16, 1)
+_MICROPHONE_LATENCY = 0.01  # a 10 ms libwebrtc frame
 _MICROPHONE_CAPABILITIES = MediaTrackCapabilities(
-    sample_rate=ULongRange(48000, 48000),
-    sample_size=ULongRange(16, 16),
-    channel_count=ULongRange(1, 1),
+    sample_rate=ULongRange(_MICROPHONE_FORMAT[0], _MICROPHONE_FORMAT[0]),
+    sample_size=ULongRange(_MICROPHONE_FORMAT[1], _MICROPHONE_FORMAT[1]),
+    channel_count=ULongRange(_MICROPHONE_FORMAT[2], _MICROPHONE_FORMAT[2]),
     echo_cancellation=[False],
     auto_gain_control=[False],
     noise_suppression=[False],
+    latency=DoubleRange(_MICROPHONE_LATENCY, _MICROPHONE_LATENCY),
+    voice_isolation=[False],
     device_id=MICROPHONE_DEVICE_ID,
     group_id=_GROUP_ID,
 )
@@ -89,7 +97,28 @@ _CONSTRAINABLE = (
     'facing_mode',
     'latency',
     'background_blur',
+    'voice_isolation',
 )
+# ignored by the other kind
+_VIDEO_CONSTRAINTS = frozenset({
+    'width',
+    'height',
+    'aspect_ratio',
+    'frame_rate',
+    'resize_mode',
+    'facing_mode',
+    'background_blur',
+})
+_AUDIO_CONSTRAINTS = frozenset({
+    'sample_rate',
+    'sample_size',
+    'channel_count',
+    'echo_cancellation',
+    'auto_gain_control',
+    'noise_suppression',
+    'latency',
+    'voice_isolation',
+})
 
 
 # the constraints with required parts, the others are ideal values
@@ -172,36 +201,103 @@ def _selected(
 # the members of constraints that are numbers: unsigned longs, and restricted doubles
 _ULONG_CONSTRAINTS = ('width', 'height', 'sample_rate', 'sample_size', 'channel_count')
 _DOUBLE_CONSTRAINTS = ('aspect_ratio', 'frame_rate', 'latency')
+_MAX_ULONG = 2**32 - 1
+
+_SetT = TypeVar('_SetT', bound=MediaTrackConstraintSet)
 
 
-def _check_numbers(constraint_set: MediaTrackConstraintSet) -> None:
-    """The WebIDL types of the numbers of a constraint set: finite, and not negative for unsigned longs."""
+def _clamped(member: object, name: str) -> int:
+    """WebIDL [Clamp] unsigned long."""
+    if isinstance(member, bool) or not isinstance(member, (int, float)):
+        msg = f'{name} must be a number, not {member!r}'
+        raise TypeError(msg)
+    if math.isnan(member):
+        return 0
+    if math.isinf(member):
+        return 0 if member < 0 else _MAX_ULONG
+    return min(max(round(member), 0), _MAX_ULONG)
+
+
+def _restricted(member: object, name: str) -> float:
+    """WebIDL restricted double."""
+    if isinstance(member, bool) or not isinstance(member, (int, float)) or not math.isfinite(member):
+        msg = f'{name} must be a finite number, not {member!r}'
+        raise TypeError(msg)
+    return member
+
+
+def _converted_set(constraint_set: _SetT) -> _SetT:
+    """A copy with WebIDL-converted numbers."""
+    converted = copy.copy(constraint_set)
     for name in _ULONG_CONSTRAINTS + _DOUBLE_CONSTRAINTS:
         value = getattr(constraint_set, name)
-        members = [value.exact, value.ideal, value.min, value.max] if isinstance(value, _RANGES) else [value]
-        unsigned = name in _ULONG_CONSTRAINTS
-        for member in members:
-            if member is not None and not _valid_number(member, unsigned=unsigned):
-                kind = 'a finite number that is not negative' if unsigned else 'a finite number'
-                msg = f'{name} must be {kind}, not {member!r}'
-                raise TypeError(msg)
+        convert = _clamped if name in _ULONG_CONSTRAINTS else _restricted
+        if isinstance(value, _RANGES):
+            value = copy.copy(value)
+            parts = {part: getattr(value, part) for part in ('exact', 'ideal', 'min', 'max')}
+            for part, member in ((p, m) for p, m in parts.items() if m is not None):
+                setattr(value, part, convert(member, name))
+            setattr(converted, name, value)
+        elif value is not None:
+            setattr(converted, name, convert(value, name))
+    return converted
 
 
-def _valid_number(member: object, *, unsigned: bool) -> bool:
-    if isinstance(member, bool) or not isinstance(member, (int, float)):
-        return False
-    return math.isfinite(member) and not (unsigned and member < 0)
+def _converted(constraints: MediaTrackConstraints) -> MediaTrackConstraints:
+    """A copy with WebIDL-converted numbers, advanced sets included."""
+    converted = _converted_set(constraints)
+    if constraints.advanced is not None:
+        converted.advanced = [_converted_set(c) for c in constraints.advanced]
+    return converted
+
+
+def _as_exact(constraint_set: MediaTrackConstraintSet) -> MediaTrackConstraintSet:
+    """An advanced set, whose bare values are exact."""
+    exact = copy.copy(constraint_set)
+    for name in _CONSTRAINABLE:
+        value: object = getattr(constraint_set, name)
+        if value is not None and not isinstance(value, _PARAMETERS):
+            constraint = cast('type[_Parameters]', MediaTrackConstraintSet._dictionaries[name])
+            setattr(exact, name, constraint.from_json({'exact': value}))
+    return exact
 
 
 def _unsatisfied(
-    constraint_set: MediaTrackConstraintSet, capabilities: MediaTrackCapabilities, settings: MediaTrackSettings
+    constraint_set: MediaTrackConstraintSet,
+    capabilities: MediaTrackCapabilities,
+    settings: MediaTrackSettings,
+    *,
+    kind: str,
 ) -> str | None:
-    """The name of the first constraint of the set that can't be satisfied, if any."""
+    """The WebIDL name of the first unsatisfiable constraint."""
+    ignored = _AUDIO_CONSTRAINTS if kind == 'video' else _VIDEO_CONSTRAINTS
     for name in _CONSTRAINABLE:
         value = getattr(constraint_set, name)
-        if value is not None and not _satisfied(value, getattr(capabilities, name), getattr(settings, name)):
-            return name
+        if name in ignored or value is None:
+            continue
+        if not _satisfied(value, getattr(capabilities, name), getattr(settings, name)):
+            return camel_case(name)
     return None
+
+
+def _camera_mode(
+    constraints: MediaTrackConstraints,
+    capabilities: MediaTrackCapabilities,
+    settings: MediaTrackSettings,
+    *,
+    current: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    """The camera size and frame rate: the basic set, then each satisfiable advanced set."""
+    width, height, frame_rate = current
+    advanced: list[MediaTrackConstraintSet] = []
+    if constraints.advanced is not None:
+        advanced = [_as_exact(c) for c in constraints.advanced]
+    satisfiable = [c for c in advanced if _unsatisfied(c, capabilities, settings, kind='video') is None]
+    for constraint_set in [constraints, *satisfiable]:
+        width = _selected(constraint_set.width, width, capabilities.width)
+        height = _selected(constraint_set.height, height, capabilities.height)
+        frame_rate = _selected(constraint_set.frame_rate, frame_rate, capabilities.frame_rate)
+    return width, height, frame_rate
 
 
 class MediaStreamTrack(
@@ -255,9 +351,10 @@ class MediaStreamTrack(
 
     @property
     def label(self) -> str:
-        """:obj:`str`: The label of the source. It's empty for a local track.
+        """:obj:`str`: The label of the source. It's empty for a generated track.
 
-        A remote track has ``'remote audio'`` or ``'remote video'``. A clone keeps the label.
+        A track of :meth:`webrtc.MediaDevices.get_user_media` has the label of its device, and a remote track has
+        ``'remote audio'`` or ``'remote video'``. A clone keeps the label.
 
         See :mdn:`MediaStreamTrack/label`.
         """
@@ -308,8 +405,8 @@ class MediaStreamTrack(
         """Returns what the track carries now.
 
         The settings hold the size and frame rate of the last frames seen and the format of the audio. Tracks of
-        :meth:`webrtc.MediaDevices.get_user_media` also report the device. Members that aren't known yet are
-        :obj:`None`.
+        :meth:`webrtc.MediaDevices.get_user_media` also report the device, and its format before media flows.
+        Members that aren't known yet are :obj:`None`.
 
         See :mdn:`MediaStreamTrack/getSettings`.
 
@@ -335,6 +432,10 @@ class MediaStreamTrack(
         elif device == 'microphone':
             settings.device_id, settings.group_id = MICROPHONE_DEVICE_ID, _GROUP_ID
             settings.echo_cancellation = settings.auto_gain_control = settings.noise_suppression = False
+            settings.voice_isolation = False
+            settings.latency = _MICROPHONE_LATENCY
+            if settings.sample_rate is None:
+                settings.sample_rate, settings.sample_size, settings.channel_count = _MICROPHONE_FORMAT
         return settings
 
     def get_capabilities(self) -> MediaTrackCapabilities:
@@ -380,8 +481,8 @@ class MediaStreamTrack(
 
         Returns:
             :obj:`asyncio.Future`: Done once applied. It fails with :obj:`webrtc.OverconstrainedError` if a
-            required constraint can't be satisfied, or with :obj:`TypeError` if a number isn't finite or an integer
-            is negative. A failure leaves the track as it was.
+            required constraint can't be satisfied, or with :obj:`TypeError` if a double isn't finite. A failure
+            leaves the track as it was.
         """
         future = asyncio.get_running_loop().create_future()
         try:
@@ -392,26 +493,18 @@ class MediaStreamTrack(
         return future
 
     def _apply_constraints(self, constraints: MediaTrackConstraints) -> None:
-        advanced: list[MediaTrackConstraintSet] = list(constraints.advanced) if constraints.advanced is not None else []
-        for constraint_set in [constraints, *advanced]:
-            _check_numbers(constraint_set)
+        constraints = _converted(constraints)
         if self.ready_state == 'ended':
             return
         capabilities = self.get_capabilities()
         settings = self.get_settings()
-        failed = _unsatisfied(constraints, capabilities, settings)
+        failed = _unsatisfied(constraints, capabilities, settings, kind=self.kind)
         if failed is not None:
             raise OverconstrainedError(failed, f"The constraint {failed} can't be satisfied")
 
         camera = self._native_obj._camera()
         if camera is not None:
-            width, height, frame_rate = camera
-            # the advanced sets that can be satisfied apply in order after the basic one
-            satisfiable = [c for c in advanced if _unsatisfied(c, capabilities, settings) is None]
-            for constraint_set in [constraints, *satisfiable]:
-                width = _selected(constraint_set.width, width, capabilities.width)
-                height = _selected(constraint_set.height, height, capabilities.height)
-                frame_rate = _selected(constraint_set.frame_rate, frame_rate, capabilities.frame_rate)
+            width, height, frame_rate = _camera_mode(constraints, capabilities, settings, current=camera)
             if (width, height, frame_rate) != camera:
                 _ = self._native_obj._reconfigureCamera(int(width), int(height), float(frame_rate))
         self._native_obj._constraints = constraints

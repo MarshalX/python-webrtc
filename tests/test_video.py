@@ -47,14 +47,14 @@ def test_get_user_media_needs_audio_or_video() -> None:
             webrtc.MediaTrackConstraints(frame_rate=webrtc.ConstrainDoubleRange(max=0)),
             webrtc.OverconstrainedError,
         ),
-        (webrtc.MediaTrackConstraints(width=webrtc.ConstrainULongRange(min=0, max=-1)), TypeError),
+        (webrtc.MediaTrackConstraints(width=webrtc.ConstrainULongRange(min=0, max=-1)), webrtc.OverconstrainedError),
     ],
     ids=['exact', 'max', 'negative'],
 )
 def test_get_user_media_constraint_beyond_the_camera(
     constraints: webrtc.MediaTrackConstraints, error: type[Exception]
 ) -> None:
-    """A required value the camera can't have is overconstrained, a negative size isn't an unsigned long."""
+    """A required value the camera can't have is overconstrained; a negative size clamps to 0."""
     with pytest.raises(error):
         asyncio.run(webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=constraints)))
 

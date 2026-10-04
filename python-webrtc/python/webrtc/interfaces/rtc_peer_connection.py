@@ -575,9 +575,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             :obj:`webrtc.RTCRtpTransceiver`: The new transceiver.
 
         Raises:
-            TypeError: If the kind is neither audio nor video.
-            ValueError: If a ``rid`` of the send encodings is invalid, or missing or repeated with several
-                encodings.
+            TypeError: If the kind is neither audio nor video, or a ``rid`` of the send encodings is invalid, or
+                missing or repeated with several encodings.
             webrtc.OperationError: If the codec of a send encoding can't be sent.
             webrtc.InvalidStateError: If the connection is closed.
         """
@@ -691,7 +690,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             :obj:`webrtc.RTCDataChannel`: The channel.
 
         Raises:
-            ValueError: If the label or an option is out of range, or both ``max_packet_life_time`` and
+            TypeError: If the label or an option is out of range, or both ``max_packet_life_time`` and
                 ``max_retransmits`` are set, or ``negotiated`` is set without ``id``.
             webrtc.InvalidStateError: If the connection is closed.
             webrtc.OperationError: If the ``id`` is in use, or no id is left.
@@ -1009,17 +1008,17 @@ def _check_send_encodings(encodings: list[webrtc.RTCRtpEncodingParameters], kind
     """Validates the send encodings of a new transceiver, as the specification requires.
 
     Raises:
-        ValueError: If a ``rid`` is invalid, or missing or repeated with several encodings.
+        TypeError: If a ``rid`` is invalid, or missing or repeated with several encodings.
         webrtc.OperationError: If the codec of an encoding can't be sent.
     """
     rids = [e.rid for e in encodings]
     for rid in rids:
         if rid is not None and _RID.fullmatch(rid) is None:
             msg = f'{rid!r} is not a valid rid: 1 to 16 letters and digits'
-            raise ValueError(msg)
+            raise TypeError(msg)
     if len(encodings) > 1 and (None in rids or len(set(rids)) != len(rids)):
         msg = 'every encoding needs a distinct rid when there are several'
-        raise ValueError(msg)
+        raise TypeError(msg)
 
     codecs = [e.codec for e in encodings if e.codec is not None]
     if len(codecs) > 0:

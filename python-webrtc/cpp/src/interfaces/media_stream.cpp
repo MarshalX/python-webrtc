@@ -91,7 +91,6 @@ namespace python_webrtc {
         .def("getTrackById", &MediaStream::GetTrackById, nogil(), pybind11::arg("id"))
         .def("addTrack", &MediaStream::AddTrack, nogil(), pybind11::arg("track"))
         .def("removeTrack", &MediaStream::RemoveTrack, nogil(), pybind11::arg("track"))
-        .def("clone", &MediaStream::Clone, nogil())
         .def_static("create", &MediaStream::Create, nogil(), pybind11::arg("tracks"));
   }
 
@@ -175,27 +174,6 @@ namespace python_webrtc {
     } else {
       _stream->RemoveTrack(static_cast<webrtc::scoped_refptr<webrtc::VideoTrackInterface>>(mediaStreamTrack));
     }
-  }
-
-  std::shared_ptr<MediaStream> MediaStream::Clone() {
-    auto clonedStream = _factory->factory()->CreateLocalMediaStream(webrtc::CreateRandomUuid());
-
-    for (const auto &track : this->tracks()) {
-      if (track->kind() == webrtc::MediaStreamTrackInterface::kAudioKind) {
-        auto *audioTrack = dynamic_cast<webrtc::AudioTrackInterface *>(track.get());
-        auto *source = audioTrack->GetSource();
-        auto clonedTrack = _factory->factory()->CreateAudioTrack(webrtc::CreateRandomUuid(), source);
-        clonedStream->AddTrack(clonedTrack);
-      } else {
-        auto *videoTrack = dynamic_cast<webrtc::VideoTrackInterface *>(track.get());
-        auto *source = videoTrack->GetSource();
-        auto clonedTrack = _factory->factory()->CreateVideoTrack(
-            webrtc::scoped_refptr<webrtc::VideoTrackSourceInterface>(source), webrtc::CreateRandomUuid());
-        clonedStream->AddTrack(clonedTrack);
-      }
-    }
-
-    return MediaStream::holder().GetOrCreate(_factory, clonedStream);
   }
 
   std::shared_ptr<MediaStream> MediaStream::Create(const std::vector<std::shared_ptr<MediaStreamTrack>> &tracks) {

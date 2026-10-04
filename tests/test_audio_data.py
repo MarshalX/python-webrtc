@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import array
+import gc
 import struct
 from typing import TYPE_CHECKING
 
@@ -94,6 +95,18 @@ def test_invalid_init(create: Callable[[], webrtc.AudioData]) -> None:
     """An invalid init, or data too small for it, is a TypeError."""
     with pytest.raises(TypeError):
         create()
+
+
+def drop_unclosed_data() -> None:
+    audio_data()
+    gc.collect()
+
+
+def test_unclosed_data_warns() -> None:
+    """A data garbage collected without being closed warns."""
+    gc.collect()
+    with pytest.warns(ResourceWarning, match='AudioData'):
+        drop_unclosed_data()
 
 
 def test_close_and_clone() -> None:

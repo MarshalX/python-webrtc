@@ -20,6 +20,7 @@ import webrtc
 from tests.helpers import QUIET_PERIOD, wait_for_event, wait_until
 
 TIMEOUT = 10
+I420_4X2 = bytes(range(1, 13))
 
 
 def i420(width: int, height: int) -> bytes:
@@ -185,6 +186,32 @@ async def test_generator_forwards_frames_with_their_timestamps() -> None:
     for f in frames:
         f.close()
     track.stop()
+
+
+@pytest.mark.asyncio
+async def test_generator_sends_the_visible_rect() -> None:
+    """A generator sends the visible rect of a frame, not its whole coded buffer."""
+    generator = webrtc.VideoTrackGenerator()
+    reader = webrtc.MediaStreamTrackProcessor(
+        webrtc.MediaStreamTrackProcessorInit(generator.track)
+    ).readable.get_reader()
+    rect = webrtc.DOMRectInit(x=2, y=0, width=2, height=2)
+    init = webrtc.VideoFrameBufferInit(format='I420', coded_width=4, coded_height=2, timestamp=0)
+    with webrtc.VideoFrame(I420_4X2, init) as source:
+        cropped = webrtc.VideoFrame(source, webrtc.VideoFrameInit(visible_rect=rect))
+    init.visible_rect = rect
+    for frame in (webrtc.VideoFrame(I420_4X2, init), cropped):
+        expected = bytearray(frame.allocation_size())
+        await frame.copy_to(expected)
+        writer = generator.writable.get_writer()
+        await writer.write(frame)
+        writer.release_lock()
+        with as_video_frame((await read(reader)).value) as received:
+            assert (received.coded_width, received.coded_height) == (2, 2)
+            out = bytearray(received.allocation_size())
+            await received.copy_to(out)
+            assert out == expected
+    generator.track.stop()
 
 
 @pytest.mark.asyncio

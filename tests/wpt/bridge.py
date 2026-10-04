@@ -58,6 +58,8 @@ _PLAIN_INTERFACES = (
     webrtc.RTCRtpScriptTransformer,
     webrtc.RTCEncodedVideoFrame,
     webrtc.RTCEncodedAudioFrame,
+    webrtc.MediaDevices,
+    webrtc.MediaDeviceInfo,
 )
 
 
@@ -336,9 +338,8 @@ def construct(name: str, kwargs: dict[str, object], args: list[object] | None = 
     )
 
 
-def get_user_media(constraints: object) -> asyncio.Future[Result]:
-    # the shim converts the constraints as WebIDL does, the library validates them
-    return call_async_method(webrtc.media_devices, 'get_user_media', {'args': [constraints]})
+def media_devices() -> Result:
+    return _guard(lambda: webrtc.media_devices)
 
 
 def call_static(class_name: str, name: str, args: list[object]) -> Result:
@@ -410,7 +411,7 @@ EXPORTS = {
         await_attr,
         video_frame_copy_to,
         audio_data_copy_to,
-        get_user_media,
+        media_devices,
         now,
         subscribe,
         wrap,

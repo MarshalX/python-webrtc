@@ -168,6 +168,15 @@ async def test_always_negotiate_data_channels_and_header_encryption(create_pc: C
 
 
 @pytest.mark.asyncio
+async def test_header_encryption_disabled(create_pc: CreatePC) -> None:
+    """A disabled policy doesn't offer cryptex."""
+    pc = create_pc(webrtc.RTCConfiguration(rtp_header_encryption_policy='disable'))
+    assert pc.get_configuration().rtp_header_encryption_policy == webrtc.RTCRtpHeaderEncryptionPolicy.disable
+    pc.add_transceiver(webrtc.MediaType.audio)
+    assert 'a=cryptex' not in (await pc.create_offer()).sdp
+
+
+@pytest.mark.asyncio
 async def test_generate_ecdsa_certificate() -> None:
     """An ECDSA certificate expires in the future and has a SHA-256 fingerprint."""
     certificate = await webrtc.RTCPeerConnection.generate_certificate('ECDSA')

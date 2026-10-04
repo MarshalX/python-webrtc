@@ -47,19 +47,18 @@ def check_utf8_length(name: str, value: str) -> None:
         value (:obj:`str`): The string.
 
     Raises:
-        ValueError: If it's longer.
+        TypeError: If it's longer.
     """
     if len(value.encode()) > MAX_UNSIGNED_SHORT:
         msg = f'{name} is longer than {MAX_UNSIGNED_SHORT} bytes'
-        raise ValueError(msg)
+        raise TypeError(msg)
 
 
 @dataclass
 class RTCDataChannelInit(Dictionary):
     """The options of :meth:`webrtc.RTCPeerConnection.create_data_channel`.
 
-    :meth:`webrtc.RTCPeerConnection.create_data_channel` checks them and raises :obj:`ValueError` for invalid ones,
-    including some for which browsers raise ``TypeError``.
+    :meth:`webrtc.RTCPeerConnection.create_data_channel` checks them and raises :obj:`TypeError` for invalid ones.
 
     See :mdn:`RTCPeerConnection/createDataChannel`.
 
@@ -90,27 +89,27 @@ class RTCDataChannelInit(Dictionary):
         """Checks the members, as the specification requires.
 
         Raises:
-            ValueError: If a member is out of range, or both ``max_packet_life_time`` and ``max_retransmits`` are
+            TypeError: If a member is out of range, or both ``max_packet_life_time`` and ``max_retransmits`` are
                 set, or ``negotiated`` is set without ``id``.
         """
         check_utf8_length('protocol', self.protocol)
-        for name in ('max_packet_life_time', 'max_retransmits'):
+        for name in ('max_packet_life_time', 'max_retransmits', 'id'):
             value = getattr(self, name)
             if value is not None and not 0 <= value <= MAX_UNSIGNED_SHORT:
                 msg = f'{name} must be from 0 to {MAX_UNSIGNED_SHORT}, not {value}'
-                raise ValueError(msg)
+                raise TypeError(msg)
         if self.max_packet_life_time is not None and self.max_retransmits is not None:
             msg = 'max_packet_life_time and max_retransmits can not both be set'
-            raise ValueError(msg)
+            raise TypeError(msg)
         if not self.negotiated:
             return
         if self.id is None:
             msg = 'a negotiated channel needs an id'
-            raise ValueError(msg)
+            raise TypeError(msg)
         # the last stream id is reserved
-        if not 0 <= self.id < MAX_UNSIGNED_SHORT:
+        if self.id == MAX_UNSIGNED_SHORT:
             msg = f'id must be from 0 to {MAX_UNSIGNED_SHORT - 1}, not {self.id}'
-            raise ValueError(msg)
+            raise TypeError(msg)
 
     #: Alias for :attr:`max_packet_life_time`
     maxPacketLifeTime: ClassVar[Alias[int | None]] = alias('max_packet_life_time')
@@ -373,8 +372,8 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannel
             data (:obj:`str`, bytes-like or :obj:`webrtc.Blob`): The message.
 
         Raises:
-            TypeError: If the data is neither a :obj:`str`, bytes-like nor a :obj:`webrtc.Blob`.
-            ValueError: If the message is larger than the maximum message size of the SCTP transport.
+            TypeError: If the data is neither a :obj:`str`, bytes-like nor a :obj:`webrtc.Blob`, or the message is
+                larger than the maximum message size of the SCTP transport.
             webrtc.InvalidStateError: If the channel isn't open.
             webrtc.OperationError: If the send queue is full.
         """

@@ -4,6 +4,37 @@
     "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-in-service-worker.https.html": "needs a service worker",
     "mediacapture-insertable-streams/legacy/MediaStreamTrackGenerator-in-shared-worker.https.html": "runs in a Worker, which a Python library has no counterpart of",
     "mediacapture-insertable-streams/legacy/MediaStreamTrackProcessor-backpressure.https.html": "draws frames with canvas, ImageBitmap or WebGL, which a Python library has no counterpart of",
+    "mediacapture-streams/BrowserCaptureMediaStreamTrack-cropTo.https.html": "needs getDisplayMedia and DOM elements to crop to",
+    "mediacapture-streams/BrowserCaptureMediaStreamTrack-restrictTo.https.html": "needs getDisplayMedia and DOM elements to restrict to",
+    "mediacapture-streams/GUM-deny.https.html": "denies permission, which the synthetic devices never ask for",
+    "mediacapture-streams/GUM-permissions-query.https.html": "needs the Permissions API",
+    "mediacapture-streams/GUM-required-constraint-with-ideal-value.https.html": "plays a stream in DOM media elements, which a Python library has no counterpart of",
+    "mediacapture-streams/MediaDevices-SecureContext.html": "needs an insecure context",
+    "mediacapture-streams/MediaDevices-after-discard.https.html": "needs a discarded iframe",
+    "mediacapture-streams/MediaDevices-enumerateDevices-not-allowed-camera.https.html": "needs Permissions-Policy",
+    "mediacapture-streams/MediaDevices-enumerateDevices-not-allowed-mic.https.html": "needs Permissions-Policy",
+    "mediacapture-streams/MediaDevices-enumerateDevices-per-origin-ids.sub.https.html": "needs cross-origin iframes",
+    "mediacapture-streams/MediaDevices-enumerateDevices-persistent-permission.https.html": "needs iframes and persistent permissions",
+    "mediacapture-streams/MediaStream-MediaElement-firstframe.https.html": "plays a stream in DOM media elements, which a Python library has no counterpart of",
+    "mediacapture-streams/MediaStream-MediaElement-preload-none.https.html": "plays a stream in DOM media elements, which a Python library has no counterpart of",
+    "mediacapture-streams/MediaStream-MediaElement-srcObject.https.html": "plays a stream in DOM media elements, which a Python library has no counterpart of",
+    "mediacapture-streams/MediaStream-default-permissions-policy.https.html": "needs Permissions-Policy",
+    "mediacapture-streams/MediaStream-removetrack.https.html": "plays a stream in DOM media elements, which a Python library has no counterpart of",
+    "mediacapture-streams/MediaStream-supported-by-permissions-policy.html": "needs Permissions-Policy",
+    "mediacapture-streams/MediaStreamTrack-MediaElement-disabled-audio-is-silence.https.html": "plays a stream in DOM media elements, which a Python library has no counterpart of",
+    "mediacapture-streams/MediaStreamTrack-MediaElement-disabled-video-is-black.https.html": "plays a stream in DOM media elements, which a Python library has no counterpart of",
+    "mediacapture-streams/MediaStreamTrack-end-manual.https.html": "a manual test",
+    "mediacapture-streams/MediaStreamTrack-iframe-audio-transfer.https.html": "transfers tracks to iframes with postMessage",
+    "mediacapture-streams/MediaStreamTrack-iframe-transfer.https.html": "transfers tracks to iframes with postMessage",
+    "mediacapture-streams/MediaStreamTrack-transfer-video.https.html": "transfers tracks to iframes with postMessage",
+    "mediacapture-streams/MediaStreamTrack-transfer.https.html": "transfers tracks with postMessage",
+    "mediacapture-streams/crashtests/enumerateDevices-after-discard-1.https.html": "needs a discarded iframe",
+    "mediacapture-streams/enumerateDevices-with-navigation.https.html": "needs window navigation",
+    "mediacapture-streams/idlharness.https.window.js": "checks the shape of JS interfaces, which shim.js defines rather than the library",
+    "mediacapture-streams/iframe-enumerate-cleared.html": "a helper page of the iframe tests",
+    "mediacapture-streams/iframe-enumerate-nogum.html": "a helper page of the iframe tests",
+    "mediacapture-streams/iframe-enumerate.html": "a helper page of the iframe tests",
+    "mediacapture-streams/parallel-capture-requests.https.html": "needs getDisplayMedia",
     "webcodecs/audio-data-serialization.any.js": "transfers frames with postMessage or structured clone, which a Python library has no counterpart of",
     "webcodecs/video-frame-serialization.any.js": "transfers frames with postMessage or structured clone, which a Python library has no counterpart of",
     "webcodecs/videoFrame-alpha.any.js": "draws frames with canvas, ImageBitmap or WebGL, which a Python library has no counterpart of",
@@ -89,6 +120,44 @@
       "Tests that frames are actually rendered correctly in a stream sent over a peer connection.": "FAIL",
       "Tests that frames are actually rendered correctly in a stream used for a video element.": "FAIL",
       "Tests that frames are sent correctly with RTCRtpEncodingParameters.scaleResolutionDownBy.": "FAIL"
+    },
+    "mediacapture-streams/GUM-echoCancellation-all.https.html": {
+      "getUserMedia suports \"all\"": "FAIL"
+    },
+    "mediacapture-streams/GUM-echoCancellation-boolean.https.html": {
+      "getUserMedia suports true": "FAIL"
+    },
+    "mediacapture-streams/GUM-echoCancellation-remote-only.https.html": {
+      "getUserMedia suports \"remote-only\"": "FAIL"
+    },
+    "mediacapture-streams/GUM-empty-option-param.https.html": {
+      "Tests that getUserMedia is rejected with a TypeError when used with an empty options parameter": "FAIL"
+    },
+    "mediacapture-streams/MediaDevices-enumerateDevices-returned-objects.https.html": {
+      "enumerateDevices exposes expected objects after successful getUserMedia call": "FAIL",
+      "enumerateDevices exposes mostly empty objects ahead of successful getUserMedia call": "FAIL"
+    },
+    "mediacapture-streams/MediaDevices-enumerateDevices.https.html": {
+      "mediaDevices.enumerateDevices() is present and working - before capture": "FAIL",
+      "mediaDevices.enumerateDevices() is working - after video capture": "FAIL"
+    },
+    "mediacapture-streams/MediaDevices-getUserMedia.https.html": {
+      "getUserMedia() supports setting crop-and-scale as resizeMode with decimation.": "FAIL",
+      "getUserMedia() supports setting crop-and-scale as resizeMode with downscaling.": "FAIL",
+      "getUserMedia() supports setting crop-and-scale as resizeMode without downscaling.": "FAIL"
+    },
+    "mediacapture-streams/MediaStreamTrack-applyConstraints.https.html": {
+      "applyConstraints rejects long string ideal groupID": "FAIL"
+    },
+    "mediacapture-streams/MediaStreamTrack-getCapabilities.https.html": {
+      "Video device getCapabilities() resizeMode properly supported. Value: crop-and-scale": "FAIL",
+      "Video track getCapabilities() resizeMode properly supported. Value: crop-and-scale": "FAIL"
+    },
+    "mediacapture-streams/MediaStreamTrackEvent-constructor.https.html": {
+      "The MediaStreamTrackEvent instance's track attribute is set.": "FAIL"
+    },
+    "mediacapture-streams/overconstrained_error.https.html": {
+      "Error of OverconstrainedError type inherit from DOMException": "FAIL"
     },
     "webcodecs/audio-data.crossOriginIsolated.https.any.js": {
       "Test construction and copyTo() using a SharedArrayBuffer": "FAIL",
@@ -589,7 +658,10 @@
       "Sending and receiving a stereo track with opus": "FAIL"
     },
     "webrtc/RTCRtpParameters-codec.html?interop-2026": {
-      "Stats output-rtp should match the selected codec in simulcast usecase on a video sender": "FAIL"
+      "Stats output-rtp should match the selected codec in simulcast usecase on a video sender": [
+        "FAIL",
+        "PASS"
+      ]
     },
     "webrtc/RTCRtpParameters-codec.html?rest": {
       "Stats output-rtp should match the selected mixed codecs in simulcast usecase on a video sender": "FAIL"
@@ -625,10 +697,22 @@
       "ReplaceTrack transmits the new track not the old track": "FAIL"
     },
     "webrtc/RTCRtpTransceiver-setCodecPreferences.html?interop-2026": {
-      "setCodecPreferences() filters on receiver and prefers receiver order": "FAIL",
-      "setCodecPreferences() modifies the order of video codecs in createOffer": "FAIL",
-      "setCodecPreferences() should allow setting H264 as first codec": "FAIL",
-      "setCodecPreferences() with only H264 should succeed": "FAIL"
+      "setCodecPreferences() filters on receiver and prefers receiver order": [
+        "FAIL",
+        "PASS"
+      ],
+      "setCodecPreferences() modifies the order of video codecs in createOffer": [
+        "FAIL",
+        "PASS"
+      ],
+      "setCodecPreferences() should allow setting H264 as first codec": [
+        "FAIL",
+        "PASS"
+      ],
+      "setCodecPreferences() with only H264 should succeed": [
+        "FAIL",
+        "PASS"
+      ]
     },
     "webrtc/RTCRtpTransceiver.https.html?rest": {
       "checkRemoveTrackNegotiation": "FAIL",
@@ -653,7 +737,10 @@
       "Can set up a basic WebRTC call with only data using promises.": "FAIL"
     },
     "webrtc/protocol/additional-codecs.html": {
-      "Listing an additional codec in the answer causes it to be sent.": "FAIL"
+      "Listing an additional codec in the answer causes it to be sent.": [
+        "FAIL",
+        "PASS"
+      ]
     },
     "webrtc/protocol/av1-profile-asymmetry.https.html": {
       "setParameters() ignores the asymmetrical AV1 parameter 'profile'": "FAIL"
@@ -666,7 +753,10 @@
       "not negotiating BUNDLE creates two separate ice and dtls transports": "FAIL"
     },
     "webrtc/protocol/codecs-subsequent-offer.https.html": {
-      "A subsequent offer after a VP8-only negotiation includes at least all mandatory to implement codecs": "FAIL"
+      "A subsequent offer after a VP8-only negotiation includes at least all mandatory to implement codecs": [
+        "FAIL",
+        "PASS"
+      ]
     },
     "webrtc/protocol/h264-profile-levels.https.html?interop-2026": {
       "Level 3.1 H264 video is appropriately constrained": "FAIL",
@@ -692,7 +782,10 @@
       "Level 6.2 H264 video is appropriately constrained": "FAIL"
     },
     "webrtc/protocol/h264-unidirectional-codec-offer.https.html": {
-      "Offer to receive a recvonly H264 codec on a recvonly transceiver": "PRECONDITION_FAILED",
+      "Offer to receive a recvonly H264 codec on a recvonly transceiver": [
+        "PASS",
+        "PRECONDITION_FAILED"
+      ],
       "Offer to send a sendonly H264 codec on a sendonly transceiver": "PRECONDITION_FAILED",
       "Offering a recvonly codec on a sendrecv transceiver": "PRECONDITION_FAILED"
     },
@@ -712,8 +805,14 @@
       "Offer description with no mid is accepted": "FAIL"
     },
     "webrtc/protocol/rtp-demuxing.html": {
-      "Can demux two video tracks with different payload types on a bundled connection": "FAIL",
-      "Can demux two video tracks with the same payload type on an unbundled connection": "TIMEOUT",
+      "Can demux two video tracks with different payload types on a bundled connection": [
+        "FAIL",
+        "TIMEOUT"
+      ],
+      "Can demux two video tracks with the same payload type on an unbundled connection": [
+        "NOTRUN",
+        "TIMEOUT"
+      ],
       "[harness]": "ERROR"
     },
     "webrtc/protocol/simulcast-answer.html": {
@@ -728,8 +827,14 @@
       "sendrecv transceiver is matched to remote recvonly m-section when offer has sendonly before recvonly": "FAIL"
     },
     "webrtc/protocol/video-codecs.https.html": {
-      "H.264 and VP8 should be negotiated after handshake": "FAIL",
-      "H.264 and VP8 should be supported in initial offer": "FAIL"
+      "H.264 and VP8 should be negotiated after handshake": [
+        "FAIL",
+        "PASS"
+      ],
+      "H.264 and VP8 should be supported in initial offer": [
+        "FAIL",
+        "PASS"
+      ]
     },
     "webrtc/receiver-track-live.https.html": {
       "Setup audio call": "FAIL"
@@ -747,7 +852,11 @@
       "[harness]": "ERROR"
     },
     "webrtc/simulcast/h264.https.html": {
-      "H264 simulcast setup with two streams": "FAIL"
+      "H264 simulcast setup with two streams": "FAIL",
+      "[harness]": [
+        "ERROR",
+        "OK"
+      ]
     },
     "webrtc/simulcast/negotiation-encodings.https.html?interop-2026": {
       "sRD(recv simulcast answer) can narrow the simulcast envelope from a previous negotiation": "FAIL",

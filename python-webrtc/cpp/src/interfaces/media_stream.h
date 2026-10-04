@@ -67,8 +67,6 @@ namespace python_webrtc {
 
     void RemoveTrack(MediaStreamTrack &mediaStreamTrack);
 
-    std::shared_ptr<MediaStream> Clone();
-
   private:
     std::vector<webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface>> tracks();
 

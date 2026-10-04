@@ -32,6 +32,7 @@ TEST_DIRS = (
     'webrtc-priority',
     'webrtc-stats',
     'mediacapture-insertable-streams',
+    'mediacapture-streams',
     # the frames of WebCodecs, which media processing reads and writes, not its codecs
     'webcodecs/audio-data*',
     'webcodecs/videoFrame-*',

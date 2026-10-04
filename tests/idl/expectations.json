@@ -8,34 +8,77 @@
   "MediaStreamTrackProcessorInit": [
     "track: type lacks MediaStreamTrackHandle"
   ],
+  "MediaTrackCapabilities": [
+    "voice_isolation: extra member"
+  ],
+  "MediaTrackConstraintSet": [
+    "voice_isolation: extra member"
+  ],
+  "MediaTrackSettings": [
+    "voice_isolation: extra member"
+  ],
+  "MediaTrackSupportedConstraints": [
+    "voice_isolation: extra member"
+  ],
   "RTCConfiguration": [
-    "always_negotiate_data_channels: extra member",
     "port_range: extra member",
-    "rtp_header_encryption_policy: extra member"
+    "targetLatency: missing member"
   ],
-  "RTCError": [
-    "http_request_status_code: extra member"
+  "RTCConfigurationTargetLatency": [
+    "missing enum"
   ],
-  "RTCErrorInit": [
-    "http_request_status_code: extra member"
+  "RTCDiagnosticLoggingOptions": [
+    "missing dictionary"
+  ],
+  "RTCIceCandidatePairEvent": [
+    "missing interface"
+  ],
+  "RTCIceCandidatePairEventInit": [
+    "missing dictionary"
   ],
   "RTCIceServer": [
     "credential_type: extra member"
   ],
+  "RTCIceTransport": [
+    "onicecandidatepairadd: missing event",
+    "onicecandidatepairnominate: missing event",
+    "onicecandidatepairremove: missing event",
+    "removeCandidatePair: missing method",
+    "selectCandidatePair: missing method"
+  ],
+  "RTCPeerConnection": [
+    "cancelDiagnosticLogging: missing method",
+    "startDiagnosticLogging: missing method",
+    "stopDiagnosticLogging: missing method"
+  ],
+  "RTCResolutionRestriction": [
+    "missing dictionary"
+  ],
+  "RTCRtpContributingSource": [
+    "captureTimestamp: missing member",
+    "senderCaptureTimeOffset: missing member"
+  ],
   "RTCRtpEncodingParameters": [
-    "adaptive_ptime: extra member"
+    "ptime: missing member",
+    "scaleResolutionDownTo: missing member"
   ],
   "RTCRtpHeaderExtensionCapability": [
-    "direction: extra member"
+    "direction: should be required"
+  ],
+  "RTCRtpReceiver": [
+    "disableHardwareDecoding: missing method",
+    "oncsrcchange: missing event",
+    "onssrcchange: missing event"
+  ],
+  "RTCRtpSender": [
+    "disableHardwareEncoding: missing method"
+  ],
+  "RTCRtpSynchronizationSource": [
+    "captureTimestamp: missing member",
+    "senderCaptureTimeOffset: missing member"
   ],
   "RTCRtpTransceiver": [
-    "get_header_extensions_to_negotiate: extra member",
-    "get_negotiated_header_extensions: extra member",
-    "set_header_extensions_to_negotiate: extra member",
     "stopped: extra member"
-  ],
-  "RTCSetParameterOptions": [
-    "encoding_options: extra member"
   ],
   "StreamPipeOptions": [
     "signal: missing member"

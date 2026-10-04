@@ -52,7 +52,10 @@ class _TrackSink:
         if data._data is None:
             msg = 'The data is closed'
             raise TypeError(msg)
-        audio = data._take()
+        with data._take() as audio:
+            self._send_audio(audio)
+
+    def _send_audio(self, audio: AudioData) -> None:
         data_bytes = audio._data
         if audio.format == AudioSampleFormat.s16 and data_bytes is not None:
             samples = bytes(data_bytes)
@@ -67,8 +70,6 @@ class _TrackSink:
             self._native.writeAudio(samples, rate, audio.number_of_channels, audio.number_of_frames)
         except ValueError as e:
             raise NotSupportedError(str(e)) from None
-        finally:
-            audio.close()
 
     def close(self) -> None:
         # ends the tracks of the generator
@@ -81,8 +82,9 @@ class _TrackSink:
 class VideoTrackGenerator:
     """A video track of the frames the application writes to a stream.
 
-    Each :obj:`webrtc.VideoFrame` written is sent on :attr:`track` and closed. Writing anything else or a closed
-    frame errors :attr:`writable`. Closing or aborting :attr:`writable` ends the track.
+    The visible rect of each :obj:`webrtc.VideoFrame` written is sent on :attr:`track`, and the frame is closed.
+    Writing anything else or a closed frame errors :attr:`writable`. Closing or aborting :attr:`writable` ends the
+    track.
 
     See :mdn:`VideoTrackGenerator`.
 

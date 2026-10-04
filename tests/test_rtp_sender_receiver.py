@@ -108,7 +108,7 @@ async def test_parameters_expire_with_their_task(pc: webrtc.RTCPeerConnection) -
 def test_invalid_send_encodings(pc: webrtc.RTCPeerConnection, rids: list[str | None], error: str) -> None:
     """The rids of send encodings are unique, present when there are several, and alphanumeric."""
     init = webrtc.RTCRtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(rid=rid) for rid in rids])
-    with pytest.raises(ValueError, match=error):
+    with pytest.raises(TypeError, match=error):
         pc.add_transceiver(webrtc.MediaType.video, init)
 
 
@@ -159,6 +159,9 @@ def test_codec_preferences_and_header_extensions(pc: webrtc.RTCPeerConnection) -
     extensions[-1].direction = webrtc.RTCRtpTransceiverDirection.stopped
     transceiver.set_header_extensions_to_negotiate(extensions)
     assert transceiver.get_header_extensions_to_negotiate()[-1].direction == webrtc.RTCRtpTransceiverDirection.stopped
+    extensions[0].uri = ''
+    with pytest.raises(TypeError, match='must not be empty'):
+        transceiver.set_header_extensions_to_negotiate(extensions)
 
 
 @pytest.mark.asyncio
@@ -209,6 +212,14 @@ async def test_set_parameters_key_frames(caller: webrtc.RTCPeerConnection, calle
     await sender.set_parameters(
         sender.get_parameters(), webrtc.RTCSetParameterOptions([webrtc.RTCEncodingOptions(key_frame=True)])
     )
+
+
+@pytest.mark.asyncio
+async def test_set_parameters_with_default_options(pc: webrtc.RTCPeerConnection) -> None:
+    """Empty encoding options, the default, are the same as none."""
+    sender = add_simulcast_sender(pc)
+    await sender.set_parameters(sender.get_parameters(), webrtc.RTCSetParameterOptions())
+    await sender.set_parameters(sender.get_parameters(), webrtc.RTCSetParameterOptions.from_json({}))
 
 
 @pytest.mark.asyncio

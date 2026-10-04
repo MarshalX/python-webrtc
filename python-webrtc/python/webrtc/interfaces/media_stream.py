@@ -160,14 +160,12 @@ class MediaStream(
     def clone(self) -> webrtc.MediaStream:
         """Returns a copy of the stream with a new :attr:`id`, holding clones of its tracks.
 
-        Each cloned track has a new ID and shares the source of the original one.
-
         See :mdn:`MediaStream/clone`.
 
         Returns:
             :obj:`webrtc.MediaStream`: The clone.
         """
-        return self._wrap(self._native_obj.clone())
+        return MediaStream([track.clone() for track in self.get_tracks()])
 
     #: Alias for :meth:`get_audio_tracks`
     getAudioTracks = get_audio_tracks

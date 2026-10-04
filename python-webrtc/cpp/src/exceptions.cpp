@@ -47,7 +47,6 @@ namespace python_webrtc {
     static const pybind11::exception<PythonWebRTCException> baseExc(m, "PythonWebRTCExceptionBase");
 
     pybind11::register_exception<PythonWebRTCException>(m, "PythonWebRTCException", baseExc);
-    pybind11::register_exception<SdpParseException>(m, "SdpParseException", baseExc);
 
     // registered last to be tried first; pybind11's translator type takes the pointer by value
     // NOLINTNEXTLINE(performance-unnecessary-value-param)

@@ -410,7 +410,9 @@ async def test_rtctransform_event() -> None:
 
     parameters = webrtc.WorkerAndParameters(events.append, 'sframe')
     assert parameters.type == webrtc.RTCRtpScriptTransformType.sframe
-    webrtc.RTCRtpScriptTransform(parameters)
+    with pytest.raises(webrtc.NotSupportedError):
+        webrtc.RTCRtpScriptTransform(parameters)
+    webrtc.RTCRtpScriptTransform(webrtc.WorkerAndParameters(events.append))
     with pytest.raises(ValueError, match='other'):
         webrtc.WorkerAndParameters(events.append, mistyped('other'))
     with pytest.raises(TypeError):

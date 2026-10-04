@@ -157,6 +157,7 @@ class MediaTrackSupportedConstraints(Dictionary):
         device_id (:obj:`bool`, optional): Whether ``device_id`` is recognized.
         group_id (:obj:`bool`, optional): Whether ``group_id`` is recognized.
         background_blur (:obj:`bool`, optional): Whether ``background_blur`` is recognized.
+        voice_isolation (:obj:`bool`, optional): Whether ``voice_isolation`` is recognized.
     """
 
     width: bool = True
@@ -175,6 +176,7 @@ class MediaTrackSupportedConstraints(Dictionary):
     device_id: bool = True
     group_id: bool = True
     background_blur: bool = True
+    voice_isolation: bool = True
 
     #: Alias for :attr:`aspect_ratio`
     aspectRatio: ClassVar[Alias[bool]] = alias('aspect_ratio')
@@ -202,6 +204,8 @@ class MediaTrackSupportedConstraints(Dictionary):
     groupId: ClassVar[Alias[bool]] = alias('group_id')
     #: Alias for :attr:`background_blur`
     backgroundBlur: ClassVar[Alias[bool]] = alias('background_blur')
+    #: Alias for :attr:`voice_isolation`
+    voiceIsolation: ClassVar[Alias[bool]] = alias('voice_isolation')
 
 
 @dataclass
@@ -209,7 +213,7 @@ class MediaTrackSettings(Dictionary):
     """What a track carries now, as :meth:`webrtc.MediaStreamTrack.get_settings` returns.
 
     Members are :obj:`None` when they don't apply to the track or aren't known yet. The library never fills
-    :attr:`facing_mode`, :attr:`latency` or :attr:`background_blur`.
+    :attr:`facing_mode` or :attr:`background_blur`.
 
     See :mdn:`MediaTrackSettings`.
 
@@ -231,6 +235,7 @@ class MediaTrackSettings(Dictionary):
         facing_mode (:obj:`str`, optional): Where the camera faces, like ``'user'``.
         latency (:obj:`float`, optional): The latency of the audio in seconds.
         background_blur (:obj:`bool`, optional): Whether the background is blurred.
+        voice_isolation (:obj:`bool`, optional): Whether voices are isolated from other sounds.
     """
 
     width: int | None = None
@@ -249,6 +254,7 @@ class MediaTrackSettings(Dictionary):
     facing_mode: str | None = None
     latency: float | None = None
     background_blur: bool | None = None
+    voice_isolation: bool | None = None
 
     #: Alias for :attr:`aspect_ratio`
     aspectRatio: ClassVar[Alias[float | None]] = alias('aspect_ratio')
@@ -276,6 +282,8 @@ class MediaTrackSettings(Dictionary):
     facingMode: ClassVar[Alias[str | None]] = alias('facing_mode')
     #: Alias for :attr:`background_blur`
     backgroundBlur: ClassVar[Alias[bool | None]] = alias('background_blur')
+    #: Alias for :attr:`voice_isolation`
+    voiceIsolation: ClassVar[Alias[bool | None]] = alias('voice_isolation')
 
 
 @dataclass
@@ -283,9 +291,9 @@ class MediaTrackCapabilities(Dictionary):
     """What the source of a track can do, as :meth:`webrtc.MediaStreamTrack.get_capabilities` returns.
 
     Only the synthetic camera and microphone of :meth:`webrtc.MediaDevices.get_user_media` have capabilities. The
-    camera supports 1 to 4096 pixels each way at 1 to 120 frames per second. The microphone is 48 kHz 16-bit mono
-    with no processing. For other tracks every member is :obj:`None`, because the library doesn't control their
-    source.
+    camera supports 1 to 4096 pixels each way at 1 to 120 frames per second, and faces no known way. The microphone
+    is 48 kHz 16-bit mono in 10 ms frames, with no processing. For other tracks every member is :obj:`None`, because
+    the library doesn't control their source.
 
     See :mdn:`MediaStreamTrack/getCapabilities`.
 
@@ -306,6 +314,7 @@ class MediaTrackCapabilities(Dictionary):
         facing_mode (:obj:`list` of :obj:`str`, optional): Where the camera can face.
         latency (:obj:`DoubleRange`, optional): The latencies of the audio in seconds.
         background_blur (:obj:`list` of :obj:`bool`, optional): Whether the background can be blurred.
+        voice_isolation (:obj:`list` of :obj:`bool`, optional): Whether voices can be isolated.
     """
 
     width: ULongRange | None = None
@@ -324,6 +333,7 @@ class MediaTrackCapabilities(Dictionary):
     facing_mode: list[str] | None = None
     latency: DoubleRange | None = None
     background_blur: list[bool] | None = None
+    voice_isolation: list[bool] | None = None
 
     #: Alias for :attr:`aspect_ratio`
     aspectRatio: ClassVar[Alias[DoubleRange | None]] = alias('aspect_ratio')
@@ -351,6 +361,8 @@ class MediaTrackCapabilities(Dictionary):
     facingMode: ClassVar[Alias[list[str] | None]] = alias('facing_mode')
     #: Alias for :attr:`background_blur`
     backgroundBlur: ClassVar[Alias[list[bool] | None]] = alias('background_blur')
+    #: Alias for :attr:`voice_isolation`
+    voiceIsolation: ClassVar[Alias[list[bool] | None]] = alias('voice_isolation')
 
 
 @dataclass
@@ -381,6 +393,8 @@ class MediaTrackConstraintSet(Dictionary):
         latency (:obj:`float` or :obj:`ConstrainDoubleRange`, optional): The latency of the audio in seconds.
         background_blur (:obj:`bool` or :obj:`ConstrainBooleanParameters`, optional): Whether the background is
             blurred.
+        voice_isolation (:obj:`bool` or :obj:`ConstrainBooleanParameters`, optional): Whether voices are isolated
+            from other sounds.
     """
 
     _dictionaries: ClassVar = {
@@ -400,6 +414,7 @@ class MediaTrackConstraintSet(Dictionary):
         'facing_mode': ConstrainDOMStringParameters,
         'latency': ConstrainDoubleRange,
         'background_blur': ConstrainBooleanParameters,
+        'voice_isolation': ConstrainBooleanParameters,
     }
 
     width: ConstrainULong | None = None
@@ -418,6 +433,7 @@ class MediaTrackConstraintSet(Dictionary):
     facing_mode: ConstrainDOMString | None = None
     latency: ConstrainDouble | None = None
     background_blur: ConstrainBoolean | None = None
+    voice_isolation: ConstrainBoolean | None = None
 
     #: Alias for :attr:`aspect_ratio`
     aspectRatio: ClassVar[Alias[ConstrainDouble | None]] = alias('aspect_ratio')
@@ -445,6 +461,8 @@ class MediaTrackConstraintSet(Dictionary):
     facingMode: ClassVar[Alias[ConstrainDOMString | None]] = alias('facing_mode')
     #: Alias for :attr:`background_blur`
     backgroundBlur: ClassVar[Alias[ConstrainBoolean | None]] = alias('background_blur')
+    #: Alias for :attr:`voice_isolation`
+    voiceIsolation: ClassVar[Alias[ConstrainBoolean | None]] = alias('voice_isolation')
 
 
 @dataclass

@@ -6,15 +6,13 @@ import webrtc.enums
 import webrtc.exceptions
 import webrtc.models.media_track_constraints
 import webrtc.utils.events
-__all__: list[str] = ['ConfigurationInit', 'DataChannelMessage', 'IceCandidateInit', 'IceServerInit', 'MediaStream', 'MediaStreamTrack', 'MediaStreamTrackProcessor', 'PeerConnectionFactory', 'PythonWebRTCException', 'PythonWebRTCExceptionBase', 'RTCCallbackException', 'RTCCertificate', 'RTCDTMFSender', 'RTCDataChannel', 'RTCDtlsTransport', 'RTCEncodedFrame', 'RTCIceTransport', 'RTCPeerConnection', 'RTCRtpReceiver', 'RTCRtpScriptTransform', 'RTCRtpSender', 'RTCRtpTransceiver', 'RTCSctpTransport', 'RTCSessionDescription', 'RTCSessionDescriptionInit', 'RtcpParameters', 'RtpCapabilities', 'RtpCodec', 'RtpCodecCapability', 'RtpCodecParameters', 'RtpEncodingParameters', 'RtpExtension', 'RtpHeaderExtensionCapability', 'RtpParameters', 'RtpTransceiverInit', 'SFrameTransform', 'SdpParseException', 'TrackGenerator', 'VideoFrameBuffer', 'copyAudioSamples', 'disableOpenH264', 'getUserMedia', 'loadOpenH264', 'openH264Enabled', 'ping']
+__all__: list[str] = ['ConfigurationInit', 'DataChannelMessage', 'IceCandidateInit', 'IceServerInit', 'MediaStream', 'MediaStreamTrack', 'MediaStreamTrackProcessor', 'PeerConnectionFactory', 'PythonWebRTCException', 'PythonWebRTCExceptionBase', 'RTCCallbackException', 'RTCCertificate', 'RTCDTMFSender', 'RTCDataChannel', 'RTCDtlsTransport', 'RTCEncodedFrame', 'RTCIceTransport', 'RTCPeerConnection', 'RTCRtpReceiver', 'RTCRtpScriptTransform', 'RTCRtpSender', 'RTCRtpTransceiver', 'RTCSctpTransport', 'RTCSessionDescription', 'RTCSessionDescriptionInit', 'RtcpParameters', 'RtpCapabilities', 'RtpCodec', 'RtpCodecCapability', 'RtpCodecParameters', 'RtpEncodingParameters', 'RtpExtension', 'RtpHeaderExtensionCapability', 'RtpParameters', 'RtpTransceiverInit', 'SFrameTransform', 'TrackGenerator', 'VideoFrameBuffer', 'copyAudioSamples', 'disableOpenH264', 'getUserMedia', 'loadOpenH264', 'openH264Enabled', 'ping']
 class RTCCallbackException:
     def toPython(self) -> webrtc.exceptions.RTCException:
         ...
 class PythonWebRTCExceptionBase(Exception):
     pass
 class PythonWebRTCException(PythonWebRTCExceptionBase):
-    pass
-class SdpParseException(PythonWebRTCExceptionBase):
     pass
 class RTCSessionDescriptionInit:
     sdp: str
@@ -323,6 +321,8 @@ class MediaStreamTrack:
         ...
     def _reconfigureCamera(self, width: typing.SupportsInt | typing.SupportsIndex, height: typing.SupportsInt | typing.SupportsIndex, frameRate: typing.SupportsFloat | typing.SupportsIndex) -> bool:
         ...
+    def _setLabel(self, label: str) -> None:
+        ...
     def _settings(self) -> _TrackSettings:
         ...
     def _surfaceEnded(self) -> None:
@@ -357,8 +357,6 @@ class MediaStream:
     def create(tracks: collections.abc.Sequence[MediaStreamTrack]) -> MediaStream:
         ...
     def addTrack(self, track: MediaStreamTrack) -> None:
-        ...
-    def clone(self) -> MediaStream:
         ...
     def getAudioTracks(self) -> list[MediaStreamTrack]:
         ...

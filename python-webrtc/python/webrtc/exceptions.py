@@ -25,13 +25,12 @@ from webrtc.utils.names import Alias, alias
 if TYPE_CHECKING:
     from webrtc.enums import RTCErrorDetailTypeValue
 
-#: The root of every exception of the native module, :obj:`PythonWebRTCException` and :obj:`SdpParseException`
+#: The root of every exception of the native module, :obj:`PythonWebRTCException`
 PythonWebRTCExceptionBase = wrtc.PythonWebRTCExceptionBase
 #: The native exception that :obj:`RTCException` subclasses, and so every WebRTC error of this library does too
 PythonWebRTCException = wrtc.PythonWebRTCException
 #: The native exception for an SDP that doesn't parse. Descriptions that don't parse raise :obj:`RTCError` instead,
 #: with the ``sdp-syntax-error`` detail
-SdpParseException = wrtc.SdpParseException
 
 
 class RTCException(PythonWebRTCException):

@@ -512,7 +512,8 @@ class RTCSetParameterOptions(Dictionary):
     """The options of :meth:`webrtc.RTCRtpSender.set_parameters`, from WebRTC Extensions.
 
     Args:
-        encoding_options (:obj:`list` of :obj:`webrtc.RTCEncodingOptions`, optional): One per encoding, in order.
+        encoding_options (:obj:`list` of :obj:`webrtc.RTCEncodingOptions`, optional): One per encoding, in order,
+            or empty for none.
     """
 
     encoding_options: list[RTCEncodingOptions] = field(default_factory=list)

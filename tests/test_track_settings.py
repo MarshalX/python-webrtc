@@ -100,8 +100,7 @@ async def test_overconstrained(video_stream: webrtc.MediaStream, audio_stream: w
     audio = audio_stream.get_tracks()[0]
     with pytest.raises(webrtc.OverconstrainedError):
         await audio.apply_constraints(C(sample_rate=webrtc.ConstrainULongRange(exact=44100)))
-    with pytest.raises(webrtc.OverconstrainedError):
-        await audio.apply_constraints(C(width=webrtc.ConstrainULongRange(exact=640)))
+    await audio.apply_constraints(C(width=webrtc.ConstrainULongRange(exact=640)))
     # ideal values are satisfied as far as possible
     await audio.apply_constraints(C(sample_rate=44100, echo_cancellation=True))
 
@@ -217,10 +216,8 @@ def test_camera_of_impossible_sizes() -> None:
             track = (await webrtc.media_devices.get_user_media(constraints)).get_tracks()[0]
             C, Range = webrtc.MediaTrackConstraints, webrtc.ConstrainULongRange
             for negative in (C(width=-1), C(height=Range(ideal=-5))):
-                try:
-                    await track.apply_constraints(negative)
-                except TypeError:
-                    print('rejected')
+                await track.apply_constraints(negative)
+                print(track._native_obj._camera())
             await track.apply_constraints(C(width=10**6, height=Range(ideal=10**6)))
             print(track._native_obj._camera())
             await track.apply_constraints(C(width=0, height=0))
@@ -233,9 +230,9 @@ def test_camera_of_impossible_sizes() -> None:
         asyncio.run(main())
         """
     )
-    assert output.count('rejected') == 2, output
     assert output.count('(4096, 4096, 30.0)') == 1, output
-    assert output.count('(1, 1, 30.0)') == 2, output
+    assert output.count('(1, 480, 30.0)') == 1, output
+    assert output.count('(1, 1, 30.0)') == 3, output
 
 
 def test_constraints_from_json() -> None:

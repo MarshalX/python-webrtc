@@ -80,6 +80,7 @@ namespace python_webrtc {
         .def_property_readonly("_nativeId", nogil_fn(&MediaStreamTrack::GetNativeId))
         .def("_surfaceMuted", &MediaStreamTrack::SurfaceMuted, nogil(), pybind11::arg("muted"))
         .def("_surfaceEnded", &MediaStreamTrack::SurfaceEnded, nogil())
+        .def("_setLabel", &MediaStreamTrack::SetLabel, nogil(), pybind11::arg("label"))
         .def("_settings", &MediaStreamTrack::GetSettings)
         .def("_camera", &MediaStreamTrack::GetCamera, nogil())
         .def("_reconfigureCamera", &MediaStreamTrack::ReconfigureCamera, nogil(), pybind11::arg("width"),
