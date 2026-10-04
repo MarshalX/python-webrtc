@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 import webrtc
+from tests.helpers import wait_until
 
 
 @pytest.mark.asyncio
@@ -124,7 +125,7 @@ async def test_stream_clone_clones_each_track() -> None:
     assert cloned_video.label == video.label
     assert cloned_video.get_capabilities() == video.get_capabilities()
     await cloned_video.apply_constraints(webrtc.MediaTrackConstraints(width=320))
-    assert cloned_video.get_settings().width == 320
+    await wait_until(lambda: cloned_video.get_settings().width == 320, 'the new size')
     video.stop()
     cloned_video.stop()
 
