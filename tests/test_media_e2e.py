@@ -165,7 +165,7 @@ async def test_stopped_camera_track_stops_sending(
     while drained < 100:
         try:
             cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), 0.5)).value).close()
-        except TimeoutError:
+        except asyncio.TimeoutError:
             break
         drained += 1
     assert drained < 100

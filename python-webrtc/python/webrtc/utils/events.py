@@ -138,7 +138,7 @@ class _Listeners:
         self, loop: asyncio.AbstractEventLoop, name: str, event: webrtc.Event, *, registrations: list[_Registration]
     ) -> None:
         for registration in registrations:
-            # like the DOM's removed flag: one removed by an earlier handler is skipped
+            # skip ones removed during this dispatch
             if not any(r is registration for r in self.registrations.get(name, ())):
                 continue
             if registration.once:
@@ -232,11 +232,7 @@ class EventTarget(Generic[_N_contra]):
         _ = self._attach_running_loop()
 
     def _attach_running_loop(self) -> bool:
-        """Like :meth:`_attach`. Events posted while there was no open loop were dropped, so was a native wakeup.
-
-        Returns:
-            :obj:`bool`: Whether the running loop took over from none or a closed one, so the caller acks a wakeup.
-        """
+        """Like :meth:`_attach`, and whether it took over from no loop or a closed one."""
         loop = _running_loop()
         if loop is None:
             return False
