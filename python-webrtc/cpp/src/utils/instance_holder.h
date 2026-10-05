@@ -53,18 +53,17 @@ namespace python_webrtc {
 
       // unlocked: constructors may block on libwebrtc threads
       auto key = object.get();
-      std::shared_ptr<T> instance(new T(factory, std::move(object)),
-                                  [this, key, generation = Forks().load()](T *dying) {
-                                    // left to the exit of the process (see ReleaseOffLibwebrtcThread): the lock may be
-                                    // held by a hung thread
-                                    if (!PythonAlive() || generation != Forks().load()) {
-                                      return;
-                                    }
-                                    // the lock's holder may wait for a libwebrtc thread waiting for the GIL
-                                    const gil_release_if_held release;
-                                    StartDestroying(key);
-                                    ReleaseOffLibwebrtcThread([this, key, dying]() { Destroy(key, dying); });
-                                  });
+      const std::shared_ptr<T> instance(new T(factory, std::move(object)),
+                                        [this, key, generation = Forks().load()](T *dying) {
+                                          // left to process exit: a hung thread may hold the lock
+                                          if (!PythonAlive() || generation != Forks().load()) {
+                                            return;
+                                          }
+                                          // the lock's holder may wait for a libwebrtc thread waiting for the GIL
+                                          const gil_release_if_held release;
+                                          StartDestroying(key);
+                                          ReleaseOffLibwebrtcThread([this, key, dying]() { Destroy(key, dying); });
+                                        });
       std::shared_ptr<T> existing;
       {
         const TrackedLock lock(_mutex);
