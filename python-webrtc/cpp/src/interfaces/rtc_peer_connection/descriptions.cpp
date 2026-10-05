@@ -381,7 +381,7 @@ namespace python_webrtc {
     }
     if (!shown) {
       // the description is owned by the peer connection and must be read on the signaling thread
-      _factory->signalingThread()->BlockingCall([&]() {
+      BlockingCallOn(_factory->signalingThread(), [&]() {
         view = ReadDescription(pc, kind);
         live = liveDescriptions(pc);
       });

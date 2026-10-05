@@ -21,7 +21,7 @@ import webrtc
 from tests.helpers import wait_until
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterable
+    from collections.abc import AsyncGenerator, AsyncIterator, Iterable
 
 
 class Chunks:
@@ -469,3 +469,92 @@ async def test_pending_start_is_not_collected() -> None:
     assert len(tasks) == 1
     tasks[0].cancel()
     assert stream is not None
+
+
+@pytest.mark.asyncio
+async def test_transform_write_settles_on_readable_cancel() -> None:
+    """A blocked write rejects on cancel."""
+    transform = webrtc.TransformStream()
+    writer = transform.writable.get_writer()
+    write = writer.write(1)
+    await asyncio.sleep(0)
+    await transform.readable.cancel(ValueError('stop'))
+    with pytest.raises(ValueError, match='stop'):
+        await asyncio.wait_for(write, 1)
+
+
+@pytest.mark.asyncio
+async def test_transform_async_start_runs() -> None:
+    """An async transformer start runs."""
+
+    class Transformer:
+        @staticmethod
+        async def start(controller: webrtc.TransformStreamDefaultController) -> None:
+            controller.enqueue('hi')
+
+    transform = webrtc.TransformStream(Transformer())
+    result = await asyncio.wait_for(transform.readable.get_reader().read(), 1)
+    assert result.value == 'hi'
+
+
+@pytest.mark.asyncio
+async def test_iterator_return_releases_on_cancel_error() -> None:
+    """Closing the iterator unlocks despite a failing cancel."""
+
+    class Source:
+        @staticmethod
+        def pull(controller: webrtc.ReadableStreamDefaultController) -> None:
+            controller.enqueue(1)
+
+        @staticmethod
+        async def cancel(_reason: object) -> None:
+            msg = 'cancel failed'
+            raise ValueError(msg)
+
+    stream = webrtc.ReadableStream(Source())
+    iterator = stream.values()
+    assert await iterator.__anext__() == 1
+    with pytest.raises(ValueError, match='cancel failed'):
+        await cast('AsyncGenerator[int, None]', iterator).aclose()
+    assert not stream.locked
+
+
+@pytest.mark.asyncio
+async def test_cancel_rejects_when_source_cancel_raises() -> None:
+    """A raising source cancel rejects the future."""
+
+    def cancel(_reason: object) -> None:
+        msg = 'cancel failed'
+        raise ValueError(msg)
+
+    future = webrtc.ReadableStream({'cancel': cancel}).cancel('x')
+    with pytest.raises(ValueError, match='cancel failed'):
+        await future
+
+
+@pytest.mark.asyncio
+async def test_abort_rejects_when_sink_abort_raises() -> None:
+    """A raising sink abort rejects the future."""
+
+    def abort(_reason: object) -> None:
+        msg = 'abort failed'
+        raise ValueError(msg)
+
+    future = webrtc.WritableStream({'abort': abort}).abort('x')
+    with pytest.raises(ValueError, match='abort failed'):
+        await future
+
+
+@pytest.mark.asyncio
+async def test_failed_write_does_not_call_sink_abort() -> None:
+    """A failed write doesn't abort the sink."""
+    aborted: list[object] = []
+
+    def write(_chunk: object, _controller: object) -> NoReturn:
+        msg = 'write failed'
+        raise ValueError(msg)
+
+    writer = webrtc.WritableStream({'write': write, 'abort': aborted.append}).get_writer()
+    with pytest.raises(ValueError, match='write failed'):
+        await writer.write(1)
+    assert aborted == []

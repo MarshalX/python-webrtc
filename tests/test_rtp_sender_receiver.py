@@ -276,6 +276,18 @@ async def test_dtmf(
     assert tones == ['1', 'A', '#', '']
 
 
+def test_dtmf_of_a_stopped_transceiver_checks_the_state_first(pc: webrtc.RTCPeerConnection) -> None:
+    """Stopped beats bad tones."""
+    transceiver = pc.add_transceiver(webrtc.MediaType.audio)
+    dtmf = transceiver.sender.dtmf
+    assert dtmf is not None
+    transceiver.stop()
+    with pytest.raises(webrtc.InvalidStateError):
+        dtmf.insert_dtmf('1')
+    with pytest.raises(webrtc.InvalidStateError):
+        dtmf.insert_dtmf('XYZ')
+
+
 @pytest.mark.asyncio
 async def test_synchronization_sources(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, video_stream: webrtc.MediaStream
@@ -339,3 +351,19 @@ def test_transceiver_init_from_json(pc: webrtc.RTCPeerConnection) -> None:
     assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.sendonly
     encodings = transceiver.sender.get_parameters().encodings
     assert [(e.rid, e.max_bitrate) for e in encodings] == [('a', 100000), ('b', None)]
+
+
+def test_add_transceiver_closed_check_comes_first(pc: webrtc.RTCPeerConnection) -> None:
+    """A closed connection raises InvalidStateError first."""
+    pc.close()
+    init = webrtc.RTCRtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(rid='no-dash')])
+    with pytest.raises(webrtc.InvalidStateError):
+        pc.add_transceiver(webrtc.MediaType.video, init)
+
+
+@pytest.mark.parametrize('value', [float('nan'), float('inf')])
+def test_jitter_buffer_target_is_a_restricted_double(pc: webrtc.RTCPeerConnection, value: float) -> None:
+    """A non-finite target raises TypeError."""
+    receiver = pc.add_transceiver(webrtc.MediaType.audio).receiver
+    with pytest.raises(TypeError):
+        receiver.jitter_buffer_target = value

@@ -62,9 +62,10 @@ class RTCDTMFSender(
             inter_tone_gap (:obj:`int`, optional): The pause after each tone in milliseconds, clamped to 30 to 6000.
 
         Raises:
+            webrtc.InvalidStateError: If the sender can't send DTMF now.
             webrtc.InvalidCharacterError: If ``tones`` has another character.
-            webrtc.InvalidStateError: If the transceiver of the sender is stopped or doesn't send.
         """
+        self._native_obj._checkCanSend()
         if _TONES.fullmatch(tones) is None:
             msg = f'{tones!r} has characters that are not DTMF tones'
             raise webrtc.InvalidCharacterError(msg)

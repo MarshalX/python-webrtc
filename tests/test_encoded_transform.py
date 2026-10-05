@@ -423,6 +423,38 @@ async def test_rtctransform_event() -> None:
         webrtc.RTCRtpScriptTransform(events.append, options, [options, options])
 
 
+def test_transformer_reads_in_a_second_loop() -> None:
+    """Reads keep working in a later loop."""
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    started: list[webrtc.RTCTransformEvent] = []
+
+    async def setup() -> None:
+        sender = caller.add_track(await local_track('video'))
+        sender.transform = webrtc.RTCRtpScriptTransform(started.append)
+        await connect(caller, callee)
+        await wait_until(lambda: len(started) == 1, 'the transform event')
+        await read_frames(3)
+
+    async def read_frames(count: int) -> None:
+        reader = started[0].transformer.readable.get_reader()
+        for _ in range(count):
+            result = await asyncio.wait_for(reader.read(), TIMEOUT)
+            assert not result.done
+        reader.release_lock()
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(setup())
+        time.sleep(0.3)
+    finally:
+        loop.close()
+    try:
+        asyncio.run(read_frames(200))
+    finally:
+        caller.close()
+        callee.close()
+
+
 def test_a_transform_needs_a_loop() -> None:
     with pytest.raises(RuntimeError):
         webrtc.RTCRtpScriptTransform(lambda _event: None)
@@ -519,3 +551,22 @@ async def test_async_worker_exception_goes_to_the_loop() -> None:
         assert transform is not None
     finally:
         loop.set_exception_handler(None)
+
+
+@pytest.mark.asyncio
+async def test_generate_key_frame_settles_when_the_transform_is_removed(
+    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection],
+) -> None:
+    """A pending key frame request rejects on removal."""
+    caller, callee = pair
+    started: asyncio.Future[webrtc.RTCRtpScriptTransformer] = asyncio.get_running_loop().create_future()
+    sender, _ = await transformed_call(caller, callee, 'video')
+    sender.transform = webrtc.RTCRtpScriptTransform(lambda event: started.set_result(event.transformer))
+    transformer = await asyncio.wait_for(started, TIMEOUT)
+    await wait_until(lambda: transformer._native_obj.sourceKind is not None, 'a source', TIMEOUT)
+    request = asyncio.ensure_future(transformer.generate_key_frame())
+    await asyncio.sleep(QUIET_PERIOD)
+    assert not request.done()
+    sender.transform = None
+    with pytest.raises(webrtc.InvalidStateError):
+        await asyncio.wait_for(request, TIMEOUT)

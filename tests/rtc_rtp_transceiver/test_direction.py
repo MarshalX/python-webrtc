@@ -57,3 +57,10 @@ async def test_3(pc: webrtc.RTCPeerConnection) -> None:
     assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.sendrecv
 
     assert transceiver.current_direction == webrtc.RTCRtpTransceiverDirection.inactive
+
+
+def test_setting_stopped_raises_type_error(pc: webrtc.RTCPeerConnection) -> None:
+    """Setting stopped is a TypeError."""
+    transceiver = pc.add_transceiver(webrtc.MediaType.audio)
+    with pytest.raises(TypeError):
+        transceiver.direction = webrtc.RTCRtpTransceiverDirection.stopped

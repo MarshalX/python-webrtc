@@ -43,7 +43,7 @@ namespace python_webrtc {
 
     std::string GetKind() const { return _video ? "video" : "audio"; }
 
-    // whether the track can still take frames: it ends with the generator or with stop()
+    // false once the generator or all its tracks ended
     bool GetLive();
 
     bool GetMuted();
@@ -77,6 +77,7 @@ namespace python_webrtc {
     std::shared_ptr<MediaStreamTrack> _initialTrack;
     std::weak_ptr<MediaStreamTrack> _track;
     std::shared_ptr<EndState> _endState = std::make_shared<EndState>();
+    std::shared_ptr<SourceControl> _control = std::make_shared<SourceControl>();
     std::atomic<bool> _muted = false;
 
     // samples short of a 10 ms frame, sent with the next ones of the same format

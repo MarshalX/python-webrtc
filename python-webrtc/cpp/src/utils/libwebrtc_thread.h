@@ -46,6 +46,36 @@ namespace python_webrtc {
     bool _previous;
   };
 
+  inline int &HeldTrackedLocks() {
+    static thread_local int held = 0;
+    return held;
+  }
+
+  // A lock libwebrtc threads take (see BlockingCallOn)
+  template <typename M>
+  class TrackedLock {
+  public:
+    explicit TrackedLock(M &mutex) : _lock(mutex) { HeldTrackedLocks()++; }
+
+    ~TrackedLock() { HeldTrackedLocks()--; }
+
+    TrackedLock(const TrackedLock &) = delete;
+    TrackedLock &operator=(const TrackedLock &) = delete;
+
+  private:
+    std::scoped_lock<M> _lock;
+  };
+
+  // A BlockingCall that aborts under a TrackedLock instead of risking a deadlock
+  template <typename Thread, typename F>
+  decltype(auto) BlockingCallOn(const Thread &thread, F &&function) {
+    if (HeldTrackedLocks() > 0 && !thread->IsCurrent()) {
+      (void)std::fputs("python-webrtc: blocking on a libwebrtc thread while holding a TrackedLock\n", stderr);
+      std::abort();
+    }
+    return thread->BlockingCall(std::forward<F>(function));
+  }
+
   // Forks, counted in the child: objects from before one are never released there, their threads are gone
   inline std::atomic<int> &Forks() {
     static std::atomic<int> forks{0};

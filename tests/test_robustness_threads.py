@@ -291,3 +291,66 @@ def test_held_events_with_the_gil_abort() -> None:
     )
     assert result.returncode != 0
     assert 'HeldEvents' in result.stderr, result.stderr
+
+
+def test_wrapper_released_on_the_worker_while_a_constructor_waits_for_it() -> None:
+    """Worker GC while a constructor waits for the worker."""
+    output = run_isolated(
+        """
+        import asyncio
+        import gc
+        import os
+        import threading
+        import time
+        import webrtc
+        from webrtc.utils import events
+
+        emit = events._Listeners.__call__
+        park_signaling, signaling_parked, release_signaling = threading.Event(), threading.Event(), threading.Event()
+        park_worker, worker_parked = threading.Event(), threading.Event()
+
+        def parking_emit(self, name, *args):
+            if name == 'negotiationneeded' and park_signaling.is_set():
+                park_signaling.clear()
+                signaling_parked.set()
+                release_signaling.wait(5)
+            elif name == 'icecandidate' and park_worker.is_set() and isinstance(self.target, webrtc.RTCIceTransport):
+                park_worker.clear()
+                worker_parked.set()
+                time.sleep(0.5)
+                gc.collect()
+            emit(self, name, *args)
+
+        events._Listeners.__call__ = parking_emit
+        gc.disable()
+        loop = asyncio.new_event_loop()
+        threading.Thread(target=loop.run_forever, daemon=True).start()
+
+        async def setup():
+            garbage = webrtc.RTCIceTransport()
+            garbage.stop()
+            cycle = [garbage]
+            cycle.append(cycle)
+            pc = webrtc.RTCPeerConnection()
+            pc.on('negotiationneeded', lambda event: None)
+            gatherer = webrtc.RTCIceTransport()
+            gatherer.on('icecandidate', lambda event: None)
+            return pc, gatherer
+
+        pc, gatherer = asyncio.run_coroutine_threadsafe(setup(), loop).result(10)
+        park_signaling.set()
+        threading.Thread(target=pc.create_data_channel, args=('x',), daemon=True).start()
+        assert signaling_parked.wait(5)
+        created = threading.Event()
+        threading.Thread(target=lambda: (webrtc.RTCIceTransport(), created.set()), daemon=True).start()
+        time.sleep(0.3)
+        park_worker.set()
+        threading.Thread(target=gatherer.gather, daemon=True).start()
+        assert worker_parked.wait(5)
+        release_signaling.set()
+        print('created' if created.wait(5) else 'stuck', flush=True)
+        os._exit(0)
+        """,
+        timeout=30,
+    )
+    assert 'created' in output

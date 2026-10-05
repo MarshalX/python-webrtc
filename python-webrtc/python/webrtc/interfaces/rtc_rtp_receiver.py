@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TypeVar
 
 import webrtc
@@ -90,12 +91,16 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
         See :mdn:`RTCRtpReceiver/jitterBufferTarget`.
 
         Raises:
+            TypeError: If the value set is NaN or infinite.
             webrtc.InvalidRangeError: If the value set is outside 0 to 4000.
         """
         return self._native_obj.jitterBufferTarget
 
     @jitter_buffer_target.setter
     def jitter_buffer_target(self, value: float | None) -> None:
+        if value is not None and not math.isfinite(value):
+            msg = f'jitter_buffer_target must be a finite number, not {value}'
+            raise TypeError(msg)
         if value is not None and not 0 <= value <= _MAX_JITTER_BUFFER_TARGET:
             msg = f'jitter_buffer_target must be from 0 to 4000 milliseconds, not {value}'
             raise InvalidRangeError(msg)

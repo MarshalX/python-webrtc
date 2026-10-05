@@ -7,15 +7,17 @@
 
 #include "create_session_description_observer.h"
 
+#include <memory>
+
 namespace python_webrtc {
 
   void CreateSessionDescriptionObserver::OnSuccess(webrtc::SessionDescriptionInterface *description) {
+    const std::unique_ptr<webrtc::SessionDescriptionInterface> owned(description);
     if (auto peerConnection = _peerConnection.lock()) {
-      peerConnection->SaveCreatedDescription(RTCSessionDescriptionInit::Wrap(description));
+      peerConnection->SaveCreatedDescription(RTCSessionDescriptionInit::Wrap(owned.get()));
       RTCPeerConnection::ReleaseElsewhere(std::move(peerConnection));
     }
-    _onSuccess(RTCSessionDescription::Wrap(description));
-    delete description;
+    _onSuccess(RTCSessionDescription::Wrap(owned.get()));
   }
 
   void CreateSessionDescriptionObserver::OnFailure(webrtc::RTCError error) {

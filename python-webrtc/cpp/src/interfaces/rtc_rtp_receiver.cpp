@@ -38,7 +38,7 @@ namespace python_webrtc {
     _transform.Release();
 
     // callbacks run on the signaling thread, so after this none of them can be running or start again
-    _factory->signalingThread()->BlockingCall([this]() {
+    BlockingCallOn(_factory->signalingThread(), [this]() {
       // a newer wrapper of the receiver may have taken its single observer slot
       if (holder().TakeObserver(_receiver.get(), this)) {
         _receiver->SetObserver(nullptr);

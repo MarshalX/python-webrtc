@@ -165,9 +165,9 @@ def _matches(exact: object, capability: object) -> bool:
     """Whether an exact value (or one of a list of them) is the capability, or one of a list of them."""
     if exact is None:
         return True
-    if isinstance(capability, list):
-        return exact in capability
-    return exact == capability or (isinstance(exact, list) and capability in exact)
+    exacts = cast('list[object]', exact) if isinstance(exact, list) else [exact]
+    capabilities = cast('list[object]', capability) if isinstance(capability, list) else [capability]
+    return any(value in capabilities for value in exacts)
 
 
 def _satisfied_by_setting(value: _Parameters, current: float | str | None) -> bool:
@@ -512,18 +512,22 @@ class MediaStreamTrack(
     def clone(self) -> webrtc.MediaStreamTrack:
         """Returns a new track with a new :attr:`id`, sharing the source of this one.
 
-        The clone keeps :attr:`label` and the device, and is ended if this track is.
+        The clone keeps :attr:`label`, :attr:`enabled`, :attr:`content_hint`, the constraints and the device, and ends
+        if this does.
 
         See :mdn:`MediaStreamTrack/clone`.
 
         Returns:
             :obj:`webrtc.MediaStreamTrack`: The clone.
         """
-        return self._wrap(self._native_obj.clone())
+        native = self._native_obj.clone()
+        native._constraints = copy.deepcopy(self._native_obj._constraints)
+        return self._wrap(native)
 
     def stop(self) -> None:
         """Stops the track and detaches it from its source. :attr:`ready_state` becomes ``ended`` with no event.
 
+        Its sender sends silence or a black frame a second; clones keep their media.
         See :mdn:`MediaStreamTrack/stop`.
         """
         self._native_obj.stop()

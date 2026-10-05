@@ -41,7 +41,7 @@ namespace python_webrtc {
     const BlockingDestructor release("RTCDataChannel");
 
     // callbacks run on the signaling thread, so after this none of them can be running or start again
-    _factory->signalingThread()->BlockingCall([this]() {
+    BlockingCallOn(_factory->signalingThread(), [this]() {
       // a newer wrapper of the channel may have taken its single observer slot
       if (holder().TakeObserver(_channel.get(), this)) {
         _channel->UnregisterObserver();
@@ -125,6 +125,9 @@ namespace python_webrtc {
         Emit("error", RTCCallbackException(std::move(error)));
       }
       Emit("close", state);
+      if (auto closed = _closedCallback.Get()) {
+        closed();
+      }
       break;
     }
     default:
@@ -157,6 +160,10 @@ namespace python_webrtc {
 
   void RTCDataChannel::SetMaxMessageSizeGetter(std::function<std::optional<double>()> getter) {
     _maxMessageSizeGetter.Set(std::move(getter));
+  }
+
+  void RTCDataChannel::SetClosedCallback(std::function<void()> callback) {
+    _closedCallback.Set(std::move(callback));
   }
 
   std::string RTCDataChannel::GetLabel() {

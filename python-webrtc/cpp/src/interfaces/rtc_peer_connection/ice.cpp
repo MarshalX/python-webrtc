@@ -135,7 +135,7 @@ namespace python_webrtc {
       }
     }
     {
-      const std::scoped_lock lock(_wrappersMutex);
+      const TrackedLock lock(_wrappersMutex);
       std::swap(_dtlsTransports, wrappers);
     }
     // wrappers of transports that are gone are released here, out of the lock
@@ -150,7 +150,7 @@ namespace python_webrtc {
 
     std::vector<webrtc::scoped_refptr<webrtc::DtlsTransportInterface>> transports;
     webrtc::scoped_refptr<webrtc::SctpTransportInterface> sctpTransport;
-    _factory->signalingThread()->BlockingCall([&]() {
+    BlockingCallOn(_factory->signalingThread(), [&]() {
       transports = dtlsTransports(pc);
       sctpTransport = pc->GetSctpTransport();
     });
@@ -185,7 +185,7 @@ namespace python_webrtc {
     auto pc = connection();
     if (mid.empty() && pc) {
       // signaled by the index of its media section
-      _factory->signalingThread()->BlockingCall([&]() {
+      BlockingCallOn(_factory->signalingThread(), [&]() {
         const auto *description = pc->remote_description();
         const auto &contents =
             description ? description->description()->contents() : std::vector<webrtc::ContentInfo>();
@@ -224,7 +224,7 @@ namespace python_webrtc {
     if (!pc) {
       return {};
     }
-    return _factory->signalingThread()->BlockingCall([&]() -> std::optional<std::pair<std::string, std::string>> {
+    return BlockingCallOn(_factory->signalingThread(), [&]() -> std::optional<std::pair<std::string, std::string>> {
       const auto *description = local ? pc->local_description() : pc->remote_description();
       if (!description) {
         return std::nullopt;
@@ -261,7 +261,7 @@ namespace python_webrtc {
     std::optional<RTCCallbackException> error;
     std::set<std::string> mids;
     const webrtc::SessionDescriptionInterface *remote = nullptr;
-    _factory->signalingThread()->BlockingCall([&]() {
+    BlockingCallOn(_factory->signalingThread(), [&]() {
       remote = pc->remote_description();
       error = candidateSections(remote, sdpMid, sdpMLineIndex, usernameFragment, mids);
     });

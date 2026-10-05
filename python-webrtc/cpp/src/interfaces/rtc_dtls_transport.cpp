@@ -45,7 +45,7 @@ namespace python_webrtc {
       : _factory(std::move(factory)), _transport(std::move(transport)) {
     _iceTransport = RTCIceTransport::holder().GetOrCreate(_factory, _transport->ice_transport());
 
-    _factory->workerThread()->BlockingCall([this]() {
+    BlockingCallOn(_factory->workerThread(), [this]() {
       _transport->RegisterObserver(this);
       holder().SetObserver(_transport.get(), this);
       _observing = true;
@@ -64,7 +64,7 @@ namespace python_webrtc {
     const BlockingDestructor release("RTCDtlsTransport");
 
     // callbacks run on the network thread, so after this none of them can be running or start again
-    _factory->workerThread()->BlockingCall([this]() { Unobserve(); });
+    BlockingCallOn(_factory->workerThread(), [this]() { Unobserve(); });
 
     _iceTransport = nullptr;
     _transport = nullptr;

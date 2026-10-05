@@ -90,6 +90,13 @@ namespace python_webrtc {
     _width = frame.width();
     _height = frame.height();
     _broadcaster.OnFrame(frame);
+    constexpr int64_t blackIntervalMs = 1000;
+    auto now = webrtc::TimeMillis();
+    auto last = _lastBlackMs.load();
+    if (_blackBroadcaster.frame_wanted() && now - last >= blackIntervalMs &&
+        _lastBlackMs.compare_exchange_strong(last, now)) {
+      _blackBroadcaster.OnFrame(frame);
+    }
   }
 
   void RTCVideoTrackSource::End() {
@@ -109,11 +116,23 @@ namespace python_webrtc {
 
   void RTCVideoTrackSource::AddOrUpdateSink(webrtc::VideoSinkInterface<webrtc::VideoFrame> *sink,
                                             const webrtc::VideoSinkWants &wants) {
-    _broadcaster.AddOrUpdateSink(sink, wants);
+    const std::scoped_lock lock(_sinksMutex);
+    auto [it, added] = _sinks.try_emplace(sink, wants.black_frames);
+    if (!added && it->second != wants.black_frames) {
+      (it->second ? _blackBroadcaster : _broadcaster).RemoveSink(sink);
+      it->second = wants.black_frames;
+    }
+    (wants.black_frames ? _blackBroadcaster : _broadcaster).AddOrUpdateSink(sink, wants);
   }
 
   void RTCVideoTrackSource::RemoveSink(webrtc::VideoSinkInterface<webrtc::VideoFrame> *sink) {
-    _broadcaster.RemoveSink(sink);
+    const std::scoped_lock lock(_sinksMutex);
+    auto it = _sinks.find(sink);
+    if (it == _sinks.end()) {
+      return;
+    }
+    (it->second ? _blackBroadcaster : _broadcaster).RemoveSink(sink);
+    _sinks.erase(it);
   }
 
 } // namespace python_webrtc

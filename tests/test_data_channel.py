@@ -280,3 +280,24 @@ async def test_binary_type(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCP
     with pytest.raises(ValueError, match='not a valid BinaryType'):
         remote.binary_type = mistyped('buffer')
     assert remote.binary_type == webrtc.BinaryType.blob
+
+
+def test_lone_surrogate_label_is_replaced(pc: webrtc.RTCPeerConnection) -> None:
+    """A lone surrogate label becomes U+FFFD."""
+    channel = pc.create_data_channel('\ud800')
+    assert channel.label == '�'
+
+
+def test_send_lone_surrogate_on_closed_channel(pc: webrtc.RTCPeerConnection) -> None:
+    """A closed channel raises InvalidStateError."""
+    channel = pc.create_data_channel('chat')
+    pc.close()
+    with pytest.raises(webrtc.InvalidStateError):
+        channel.send('a\ud800b')
+
+
+def test_closed_check_comes_before_the_label_check(pc: webrtc.RTCPeerConnection) -> None:
+    """A closed connection raises InvalidStateError first."""
+    pc.close()
+    with pytest.raises(webrtc.InvalidStateError):
+        pc.create_data_channel('x' * 70000)

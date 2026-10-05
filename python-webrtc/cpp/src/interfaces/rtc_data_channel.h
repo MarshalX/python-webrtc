@@ -69,6 +69,9 @@ namespace python_webrtc {
     // the largest message the remote peer takes, from the SCTP transport of the connection
     void SetMaxMessageSizeGetter(std::function<std::optional<double>()> getter);
 
+    // on the signaling thread
+    void SetClosedCallback(std::function<void()> callback);
+
     std::string GetLabel();
 
     bool GetOrdered();
@@ -128,6 +131,7 @@ namespace python_webrtc {
     bool _closeRequested = false;
 
     LockedFunction<std::optional<double>()> _maxMessageSizeGetter;
+    LockedFunction<void()> _closedCallback;
 
     // see AliveGuard
     AliveGuard _alive;

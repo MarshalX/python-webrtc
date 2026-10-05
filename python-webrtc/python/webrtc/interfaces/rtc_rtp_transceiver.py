@@ -65,8 +65,8 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
 
         It can be set with a member or its value. A change leads to a ``negotiationneeded`` event, and the negotiated
         direction is :attr:`current_direction`. Setting it on a stopped transceiver raises
-        :obj:`webrtc.InvalidStateError`. Setting it to ``stopped`` raises :obj:`webrtc.InvalidAccessError`, so use
-        :meth:`stop` for that. See :mdn:`RTCRtpTransceiver/direction`.
+        :obj:`webrtc.InvalidStateError`. Setting it to ``stopped`` raises :obj:`TypeError`, so use :meth:`stop` for
+        that. See :mdn:`RTCRtpTransceiver/direction`.
         """
         return self._native_obj.direction
 
@@ -74,6 +74,10 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
     def direction(
         self, new_direction: webrtc.RTCRtpTransceiverDirection | webrtc.RTCRtpTransceiverDirectionValue
     ) -> None:
+        # stopping raises InvalidStateError natively
+        if new_direction == webrtc.RTCRtpTransceiverDirection.stopped and not self._native_obj.stopping:
+            msg = "direction can not be set to 'stopped', use stop() instead"
+            raise TypeError(msg)
         self._native_obj.direction = new_direction
 
     @property

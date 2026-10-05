@@ -49,6 +49,7 @@ namespace python_webrtc {
       track = _factory->factory()->CreateAudioTrack(webrtc::CreateRandomUuid(), _audioSource.get());
     }
     _webrtcTrack = track;
+    SourceControl::Register(track.get(), track->id(), _control);
     _initialTrack = MediaStreamTrack::holder().GetOrCreate(_factory, track);
     _initialTrack->AddEndObserver(_endState);
     _track = _initialTrack;
@@ -95,11 +96,9 @@ namespace python_webrtc {
   }
 
   bool TrackGenerator::GetLive() {
-    if (_endState->ended) {
-      return false;
-    }
-    auto track = _track.lock();
-    return track ? track->active() : _webrtcTrack->state() == webrtc::MediaStreamTrackInterface::TrackState::kLive;
+    const bool ended = _video ? _videoSource->state() == webrtc::MediaSourceInterface::kEnded
+                              : _audioSource->state() == webrtc::MediaSourceInterface::kEnded;
+    return !ended && _control->AnyLive();
   }
 
   bool TrackGenerator::GetMuted() {
@@ -174,7 +173,7 @@ namespace python_webrtc {
 
   void TrackGenerator::Close() {
     // the tracks observe their source on the signaling thread
-    _factory->signalingThread()->BlockingCall([this]() {
+    BlockingCallOn(_factory->signalingThread(), [this]() {
       if (_video) {
         _videoSource->End();
       } else {

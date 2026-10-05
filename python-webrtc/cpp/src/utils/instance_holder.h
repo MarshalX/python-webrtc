@@ -45,48 +45,47 @@ namespace python_webrtc {
         return instance;
       }
       if (!OnLibwebrtcThread()) {
-        // created on the signaling thread: constructors call it, which may be wrapping objects under the same locks
+        // wrappers are created on the signaling thread
         std::shared_ptr<T> instance;
         RunOnSignalingThread(*factory, [&]() { instance = GetOrCreate(factory, object); });
         return instance;
       }
 
-      // wrappers may create nested wrappers (sctp -> dtls -> ice) while holding the lock
-      const std::unique_lock<std::recursive_mutex> lock(_mutex);
+      // unlocked: constructors may block on libwebrtc threads
       auto key = object.get();
-      auto it = _store.find(key);
-      if (it != _store.end()) {
-        if (auto instance = it->second.lock()) {
-          return instance;
+      const std::shared_ptr<T> instance(new T(factory, std::move(object)),
+                                        [this, key, generation = Forks().load()](T *dying) {
+                                          // left to process exit: a hung thread may hold the lock
+                                          if (!PythonAlive() || generation != Forks().load()) {
+                                            return;
+                                          }
+                                          // the lock's holder may wait for a libwebrtc thread waiting for the GIL
+                                          const gil_release_if_held release;
+                                          StartDestroying(key);
+                                          ReleaseOffLibwebrtcThread([this, key, dying]() { Destroy(key, dying); });
+                                        });
+      std::shared_ptr<T> existing;
+      {
+        const TrackedLock lock(_mutex);
+        auto &entry = _store[key];
+        existing = entry.lock();
+        if (!existing) {
+          entry = instance;
         }
       }
-
-      std::shared_ptr<T> instance(new T(factory, std::move(object)),
-                                  [this, key, generation = Forks().load()](T *dying) {
-                                    // left to the exit of the process (see ReleaseOffLibwebrtcThread): the lock may be
-                                    // held by a hung thread
-                                    if (!PythonAlive() || generation != Forks().load()) {
-                                      return;
-                                    }
-                                    // the lock's holder may wait for a libwebrtc thread waiting for the GIL
-                                    const gil_release_if_held release;
-                                    StartDestroying(key);
-                                    ReleaseOffLibwebrtcThread([this, key, dying]() { Destroy(key, dying); });
-                                  });
-      _store[key] = instance;
-      return instance;
+      return existing ? existing : instance;
     }
 
     // The live wrapper of a libwebrtc object, if there's one
     std::shared_ptr<T> Find(const U *object) {
-      const std::scoped_lock lock(_mutex);
+      const TrackedLock lock(_mutex);
       auto it = _store.find(object);
       return it != _store.end() ? it->second.lock() : nullptr;
     }
 
     // wrappers alive or being destroyed, for tests (wrtc._alive)
     int Alive() {
-      const std::scoped_lock lock(_mutex);
+      const TrackedLock lock(_mutex);
       int alive = static_cast<int>(_destroying.size());
       for (const auto &entry : _store) {
         alive += entry.second.expired() ? 0 : 1;
@@ -113,7 +112,7 @@ namespace python_webrtc {
 
   private:
     void StartDestroying(U *key) {
-      const std::scoped_lock lock(_mutex);
+      const TrackedLock lock(_mutex);
       auto it = _store.find(key);
       if (it != _store.end() && it->second.expired()) {
         _store.erase(it);
@@ -124,13 +123,13 @@ namespace python_webrtc {
     void Destroy(U *key, T *dying) {
       const gil_release_if_held release;
 
-      // out of the lock: destructors block on libwebrtc threads, which may be waiting for it (wrapping an object)
+      // out of the lock: destructors block on libwebrtc threads
       delete dying;
-      const std::scoped_lock lock(_mutex);
+      const TrackedLock lock(_mutex);
       _destroying.erase(_destroying.find(key));
     }
 
-    std::recursive_mutex _mutex;
+    std::mutex _mutex;
     std::unordered_map<const U *, std::weak_ptr<T>> _store;
     // objects whose wrapper is being destroyed
     std::unordered_multiset<U *> _destroying;

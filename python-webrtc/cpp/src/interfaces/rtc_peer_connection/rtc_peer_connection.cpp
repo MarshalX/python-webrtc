@@ -52,7 +52,7 @@ namespace python_webrtc {
     // released here, without the GIL, as it blocks on the signaling thread
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> closed;
     {
-      const std::scoped_lock lock(_connectionMutex);
+      const TrackedLock lock(_connectionMutex);
       closed = std::move(_closedConnection);
     }
     closed = nullptr;
@@ -147,12 +147,12 @@ namespace python_webrtc {
   }
 
   webrtc::scoped_refptr<webrtc::PeerConnectionInterface> RTCPeerConnection::connection() {
-    const std::scoped_lock lock(_connectionMutex);
+    const TrackedLock lock(_connectionMutex);
     return _jinglePeerConnection;
   }
 
   webrtc::scoped_refptr<webrtc::PeerConnectionInterface> RTCPeerConnection::closedConnection() {
-    const std::scoped_lock lock(_connectionMutex);
+    const TrackedLock lock(_connectionMutex);
     return _closedConnection;
   }
 
@@ -165,11 +165,11 @@ namespace python_webrtc {
     if (!OnLibwebrtcThread()) {
       // on the signaling thread, which wraps objects too: the lock isn't held while waiting for it
       const gil_release_if_held release;
-      return _factory->signalingThread()->BlockingCall([&]() { return Wrap(wrappers, std::move(object)); });
+      return BlockingCallOn(_factory->signalingThread(), [&]() { return Wrap(wrappers, std::move(object)); });
     }
     std::shared_ptr<T> wrapper;
     {
-      const std::scoped_lock lock(_wrappersMutex);
+      const TrackedLock lock(_wrappersMutex);
       auto it = wrappers.find(object.get());
       if (it != wrappers.end()) {
         return it->second;
@@ -188,12 +188,12 @@ namespace python_webrtc {
     if (!OnLibwebrtcThread()) {
       // see Wrap
       const gil_release_if_held release;
-      return _factory->signalingThread()->BlockingCall([&]() { return Sync(wrappers, objects); });
+      return BlockingCallOn(_factory->signalingThread(), [&]() { return Sync(wrappers, objects); });
     }
     std::vector<std::shared_ptr<T>> result;
     Wrappers<T, U> current;
     {
-      const std::scoped_lock lock(_wrappersMutex);
+      const TrackedLock lock(_wrappersMutex);
       for (const auto &object : objects) {
         auto it = wrappers.find(object.get());
         auto wrapper = it != wrappers.end() ? it->second : T::holder().GetOrCreate(_factory, object);
@@ -228,7 +228,7 @@ namespace python_webrtc {
     decltype(_channels) channels;
     decltype(_dtlsTransports) dtlsTransports;
     {
-      const std::scoped_lock lock(_wrappersMutex);
+      const TrackedLock lock(_wrappersMutex);
       std::swap(channels, _channels);
       std::swap(dtlsTransports, _dtlsTransports);
       std::swap(transceivers, _transceivers);
@@ -259,6 +259,25 @@ namespace python_webrtc {
       auto sctp = self ? self->GetSctp() : std::nullopt;
       return sctp ? (*sctp)->GetMaxMessageSize() : std::nullopt;
     });
+    channel->SetClosedCallback([weak = weak_from_this(), key = channel->channel().get()]() {
+      if (auto self = weak.lock()) {
+        self->ForgetChannel(key);
+      }
+    });
+  }
+
+  void RTCPeerConnection::ForgetChannel(webrtc::DataChannelInterface *channel) {
+    std::shared_ptr<RTCDataChannel> forgotten;
+    {
+      const TrackedLock lock(_wrappersMutex);
+      auto it = _channels.find(channel);
+      if (it == _channels.end()) {
+        return;
+      }
+      forgotten = std::move(it->second);
+      _channels.erase(it);
+    }
+    // released out of the lock
   }
 
   void RTCPeerConnection::Adopt(const std::shared_ptr<RTCSctpTransport> &sctp) {
@@ -314,10 +333,20 @@ namespace python_webrtc {
       throw RTCException(closedError("removeTrack"));
     }
 
-    auto senders = pc->GetSenders();
-    if (std::ranges::find(senders, sender.sender()) == senders.end()) {
+    if (sender.GetConnection().get() != this) {
       throw RTCException(webrtc::RTCErrorType::INVALID_PARAMETER,
                          "The sender was not created by this RTCPeerConnection");
+    }
+    // stopped or rolled back: a no-op
+    auto transceivers = pc->GetTransceivers();
+    auto transceiver = std::ranges::find_if(
+        transceivers, [&](const auto &candidate) { return candidate->sender() == sender.sender(); });
+    if (transceiver != transceivers.end() && ((*transceiver)->stopping() || (*transceiver)->stopped())) {
+      return;
+    }
+    auto senders = pc->GetSenders();
+    if (std::ranges::find(senders, sender.sender()) == senders.end()) {
+      return;
     }
 
     auto error = pc->RemoveTrackOrError(sender.sender());
@@ -416,7 +445,7 @@ namespace python_webrtc {
     if (!OnLibwebrtcThread()) {
       // see Wrap
       const gil_release_if_held release;
-      return _factory->signalingThread()->BlockingCall([this]() { return GetSctp(); });
+      return BlockingCallOn(_factory->signalingThread(), [this]() { return GetSctp(); });
     }
     auto pc = connection();
     auto transport = pc ? pc->GetSctpTransport() : nullptr;
@@ -424,11 +453,13 @@ namespace python_webrtc {
       return {};
     }
 
+    // unlocked: the constructor blocks
+    auto wrapper = RTCSctpTransport::holder().GetOrCreate(_factory, transport);
     std::shared_ptr<RTCSctpTransport> previous;
-    const std::scoped_lock lock(_wrappersMutex);
-    if (!_sctp || _sctp->transport() != transport) {
+    const TrackedLock lock(_wrappersMutex);
+    if (_sctp != wrapper) {
       previous = std::move(_sctp);
-      _sctp = RTCSctpTransport::holder().GetOrCreate(_factory, transport);
+      _sctp = std::move(wrapper);
       Adopt(_sctp);
     }
     return _sctp;
@@ -441,7 +472,7 @@ namespace python_webrtc {
     if (!pc) {
       return {};
     }
-    return _factory->signalingThread()->BlockingCall([&pc]() -> std::optional<double> {
+    return BlockingCallOn(_factory->signalingThread(), [&pc]() -> std::optional<double> {
       auto sctpSize = [](const webrtc::SessionDescriptionInterface *description) -> std::optional<int> {
         if (!description) {
           return {};
@@ -468,7 +499,7 @@ namespace python_webrtc {
   }
 
   ConfigurationInit RTCPeerConnection::GetConfiguration() {
-    const std::scoped_lock lock(_connectionMutex);
+    const TrackedLock lock(_connectionMutex);
     return _configuration;
   }
 
@@ -479,7 +510,7 @@ namespace python_webrtc {
     }
 
     {
-      const std::scoped_lock lock(_connectionMutex);
+      const TrackedLock lock(_connectionMutex);
       if (init.alwaysNegotiateDataChannels != _configuration.alwaysNegotiateDataChannels ||
           init.rtpHeaderEncryptionPolicy != _configuration.rtpHeaderEncryptionPolicy) {
         throw RTCException(webrtc::RTCErrorType::INVALID_MODIFICATION,
@@ -491,7 +522,7 @@ namespace python_webrtc {
       throw RTCException(error);
     }
 
-    const std::scoped_lock lock(_connectionMutex);
+    const TrackedLock lock(_connectionMutex);
     auto certificates = _configuration.certificates;
     _configuration = init;
     if (!_configuration.certificates) {
@@ -511,7 +542,7 @@ namespace python_webrtc {
   void RTCPeerConnection::QueueNegotiationNeeded() {
     // libwebrtc posts the negotiationneeded event of a change to the signaling thread: once the thread ran it,
     // the event is queued during the call
-    _factory->signalingThread()->BlockingCall([]() {});
+    BlockingCallOn(_factory->signalingThread(), []() {});
   }
 
   bool RTCPeerConnection::ShouldFireNegotiationNeededEvent(uint32_t eventId) {
@@ -523,7 +554,7 @@ namespace python_webrtc {
     // closing changes states, but a closed connection fires no events, nor do its channels and transports
     Mute();
     {
-      const std::scoped_lock lock(_wrappersMutex);
+      const TrackedLock lock(_wrappersMutex);
       for (auto &channel : _channels) {
         channel.second->OnPeerConnectionClosed();
       }
@@ -532,7 +563,7 @@ namespace python_webrtc {
 
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
     {
-      const std::scoped_lock lock(_connectionMutex);
+      const TrackedLock lock(_connectionMutex);
       pc = std::move(_jinglePeerConnection);
       if (pc) {
         _closedConnection = pc;
