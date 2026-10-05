@@ -26,7 +26,7 @@ namespace python_webrtc {
 
   MediaStream::~MediaStream() {
     const BlockingDestructor release("MediaStream");
-    _factory->signalingThread()->BlockingCall([this]() { _stream->UnregisterObserver(this); });
+    BlockingCallOn(_factory->signalingThread(), [this]() { _stream->UnregisterObserver(this); });
     DropListeners();
   }
 

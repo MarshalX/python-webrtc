@@ -80,18 +80,18 @@ namespace python_webrtc {
     _workerThread = Started(webrtc::Thread::CreateWithSocketServer(), "PeerConnectionFactory:workerThread");
     _signalingThread = Started(webrtc::Thread::Create(), "PeerConnectionFactory:signalingThread");
 
-    _workerThread->BlockingCall([this]() {
+    BlockingCallOn(_workerThread, [this]() {
       OnLibwebrtcThread() = true;
       _audioDeviceModule = webrtc::make_ref_counted<PlayoutAudioDevice>();
     });
-    _signalingThread->BlockingCall([]() { OnLibwebrtcThread() = true; });
+    BlockingCallOn(_signalingThread, []() { OnLibwebrtcThread() = true; });
 
     _factory = webrtc::CreatePeerConnectionFactory(
         _workerThread.get(), _workerThread.get(), _signalingThread.get(), _audioDeviceModule,
         webrtc::CreateBuiltinAudioEncoderFactory(), webrtc::CreateBuiltinAudioDecoderFactory(),
         std::make_unique<VideoEncoderFactory>(), std::make_unique<VideoDecoderFactory>(), nullptr, nullptr);
     if (!_factory) {
-      _workerThread->BlockingCall([this]() { _audioDeviceModule = nullptr; });
+      BlockingCallOn(_workerThread, [this]() { _audioDeviceModule = nullptr; });
       throw RTCException(webrtc::RTCErrorType::INTERNAL_ERROR, "Failed to create the peer connection factory");
     }
 
@@ -108,7 +108,7 @@ namespace python_webrtc {
 
     _factory = nullptr;
 
-    _workerThread->BlockingCall([this]() { this->_audioDeviceModule = nullptr; });
+    BlockingCallOn(_workerThread, [this]() { this->_audioDeviceModule = nullptr; });
 
     _workerThread->Stop();
     _signalingThread->Stop();
@@ -121,7 +121,7 @@ namespace python_webrtc {
 
   void RunOnSignalingThread(PeerConnectionFactory &factory, const std::function<void()> &function) {
     const gil_release_if_held release;
-    factory.signalingThread()->BlockingCall([&]() { function(); });
+    BlockingCallOn(factory.signalingThread(), [&]() { function(); });
   }
 
   std::shared_ptr<PeerConnectionFactory> PeerConnectionFactory::Create() {

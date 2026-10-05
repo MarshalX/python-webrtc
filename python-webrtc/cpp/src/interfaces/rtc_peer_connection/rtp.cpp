@@ -97,7 +97,7 @@ namespace python_webrtc {
     if (!pc) {
       return {};
     }
-    return _factory->signalingThread()->BlockingCall([&]() {
+    return BlockingCallOn(_factory->signalingThread(), [&]() {
       const auto *content = negotiatedContent(pc, transceiverOf(pc, endpoint), sending);
       if (content == nullptr) {
         return std::vector<webrtc::RtpCodecParameters>();
@@ -124,7 +124,7 @@ namespace python_webrtc {
     if (!pc) {
       return {};
     }
-    return _factory->signalingThread()->BlockingCall([&]() {
+    return BlockingCallOn(_factory->signalingThread(), [&]() {
       const auto *content = negotiatedContent(pc, transceiverOf(pc, receiver), false);
       return content ? content->rtp_header_extensions() : std::vector<webrtc::RtpExtension>();
     });

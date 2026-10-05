@@ -32,7 +32,7 @@ namespace python_webrtc {
     const BlockingDestructor release("MediaStreamTrack");
 
     // after this the track can't notify us anymore: it notifies on the same thread
-    _factory->signalingThread()->BlockingCall([this]() {
+    BlockingCallOn(_factory->signalingThread(), [this]() {
       DetachMonitor();
       if (_observing) {
         _track->UnregisterObserver(this);
@@ -93,7 +93,7 @@ namespace python_webrtc {
   void MediaStreamTrack::Stop() {
     _stopped = true;
     _surfacedEnded.Reset();
-    _factory->signalingThread()->BlockingCall([this]() { StopOnSignalingThread(); });
+    BlockingCallOn(_factory->signalingThread(), [this]() { StopOnSignalingThread(); });
     CloseListeners();
   }
 

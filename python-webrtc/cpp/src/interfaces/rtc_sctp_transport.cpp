@@ -15,7 +15,7 @@ namespace python_webrtc {
                                      webrtc::scoped_refptr<webrtc::SctpTransportInterface> transport)
       : _factory(std::move(factory)), _transport(std::move(transport)) {
     webrtc::scoped_refptr<webrtc::DtlsTransportInterface> dtlsTransport;
-    _factory->workerThread()->BlockingCall([this, &dtlsTransport]() {
+    BlockingCallOn(_factory->workerThread(), [this, &dtlsTransport]() {
       dtlsTransport = _transport->dtls_transport();
       _transport->RegisterObserver(this);
       holder().SetObserver(_transport.get(), this);
@@ -34,7 +34,7 @@ namespace python_webrtc {
     const BlockingDestructor release("RTCSctpTransport");
 
     // callbacks run on the network thread, so after this none of them can be running or start again
-    _factory->workerThread()->BlockingCall([this]() { Stop(); });
+    BlockingCallOn(_factory->workerThread(), [this]() { Stop(); });
 
     _dtlsTransport = nullptr;
     _transport = nullptr;
@@ -87,7 +87,7 @@ namespace python_webrtc {
 
   webrtc::SctpTransportInformation RTCSctpTransport::Information() {
     // the information is owned by the network thread
-    return _factory->workerThread()->BlockingCall([this]() { return _transport->Information(); });
+    return BlockingCallOn(_factory->workerThread(), [this]() { return _transport->Information(); });
   }
 
   webrtc::SctpTransportState RTCSctpTransport::GetState() {

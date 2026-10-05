@@ -29,7 +29,7 @@ namespace python_webrtc {
     const BlockingDestructor release("RTCDTMFSender");
 
     // callbacks run on the signaling thread, so after this none of them can be running or start again
-    _factory->signalingThread()->BlockingCall([this]() {
+    BlockingCallOn(_factory->signalingThread(), [this]() {
       // a newer wrapper of the sender may have taken its single observer slot
       if (holder().TakeObserver(_dtmf.get(), this)) {
         _dtmf->UnregisterObserver();

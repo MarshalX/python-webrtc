@@ -173,7 +173,7 @@ namespace python_webrtc {
 
   void TrackGenerator::Close() {
     // the tracks observe their source on the signaling thread
-    _factory->signalingThread()->BlockingCall([this]() {
+    BlockingCallOn(_factory->signalingThread(), [this]() {
       if (_video) {
         _videoSource->End();
       } else {
