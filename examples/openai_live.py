@@ -25,6 +25,8 @@ uv installs the dependencies declared above. Without a download, straight from G
 
 Or with pip: pip install wrtc sounddevice httpx, then python openai_live.py.
 
+It connects with WARP, which saves round trips when the call starts: --no-warp turns it off, -v logs the timings.
+
 Press Ctrl+C to hang up. Without headphones the microphone is muted while the assistant speaks, so it doesn't
 hear itself; with headphones pass --barge-in to be able to interrupt it.
 """
@@ -56,6 +58,9 @@ VOICE_LEVEL = 0.02  # the peak level above which audio counts as speech
 ECHO_TAIL = 0.6  # seconds the microphone stays muted after the assistant stops
 MAX_PLAYBACK = 0.5  # seconds of assistant audio buffered before the oldest is dropped
 SILENT_MIC_WARNING = 10  # seconds of silence before the microphone is suspected
+# the trials of WARP, whose DTLS 1.3 is on by default
+WARP_TRIALS = {'WebRTC-Sctp-Snap': 'Enabled', 'WebRTC-IceHandshakeDtls': 'Enabled'}
+WARP_CHANNEL_ID = 4  # the event channel's, sent to the API as dcid
 
 
 class Session(TypedDict, total=False):
@@ -263,6 +268,7 @@ class LiveCall:
         self.tasks: list[asyncio.Future[None]] = []
         self.session_closed = asyncio.Event()
         self.assistant_spoke_at = 0.0  # when the assistant's audio was last above the speech level
+        self.offered_at = 0.0
 
     async def run(self, hang_up: asyncio.Event) -> None:
         """Connects, then talks until hung up."""
@@ -283,11 +289,13 @@ class LiveCall:
         generator = webrtc.MediaStreamTrackGenerator('audio')
         pc.add_track(generator)
         # created before the offer, so the offer negotiates it
-        self.events = pc.create_data_channel('oai-events')
-        self.events.on('open', lambda _event: console.ok('Event channel open'))
+        init = None if args.no_warp else webrtc.RTCDataChannelInit(negotiated=True, id=WARP_CHANNEL_ID)
+        self.events = pc.create_data_channel('oai-events', init)
+        self.events.on('open', self._on_events_open)
         self.events.on('message', self._on_message)
 
         offer = await pc.create_offer()
+        self.offered_at = time.monotonic()
         await pc.set_local_description(offer)
         sdp = await self._gathered(pc)
 
@@ -326,12 +334,15 @@ class LiveCall:
             session['instructions'] = self.args.instructions
         if self.args.voice:
             session['audio'] = {'output': {'voice': self.args.voice}}
+        transport: dict[str, object] = {'type': 'webrtc', 'sdp': sdp}
+        if not self.args.no_warp:
+            transport['dcid'] = WARP_CHANNEL_ID
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
                     API_URL,
                     headers={'Authorization': f'Bearer {self.args.api_key}'},
-                    json={'session': session, 'transport': {'type': 'webrtc', 'sdp': sdp}},
+                    json={'session': session, 'transport': transport},
                 )
         except httpx.HTTPError as e:
             msg = f'Could not reach the OpenAI API: {e or type(e).__name__}'
@@ -341,6 +352,13 @@ class LiveCall:
         reply: SessionReply = response.json()
         self.console.ok(f'Session created: {reply.get("session", {}).get("id", "?")}')
         return reply['transport']['sdp']
+
+    def _elapsed(self) -> str:
+        return f'{(time.monotonic() - self.offered_at) * 1000:.0f} ms after the offer'
+
+    def _on_events_open(self, _event: webrtc.Event) -> None:
+        self.console.ok('Event channel open')
+        self.console.debug(f'Event channel open {self._elapsed()}')
 
     def _on_connection_state(self, _event: webrtc.Event) -> None:
         if self.pc is None:
@@ -356,6 +374,8 @@ class LiveCall:
         if state in messages:
             level, text = messages[state]
             getattr(self.console, level)(text)
+        if state == 'connected':
+            self.console.debug(f'Connected {self._elapsed()}')
 
     def _on_track(self, event: webrtc.RTCTrackEvent) -> None:
         if self.speakers is None:
@@ -428,7 +448,9 @@ class LiveCall:
         elif kind == 'session.output_transcript.delta':
             console.transcript('assistant', message.get('delta', ''))
         elif kind == 'session.started':
+            # the API starts it: session.start would break WARP
             console.ok('Session started, say something! (Ctrl+C to hang up)')
+            console.debug(f'Session started {self._elapsed()}')
         elif kind == 'session.closed':
             usage = message.get('usage', {})
             reason = message.get('reason', '')
@@ -514,6 +536,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--voice', help='quartz, ripple, vesper, willow, stone, gleam, meridian, bossa, tempo, ...')
     parser.add_argument('--input-device', help='microphone name or index (see --list-devices), default: the system one')
     parser.add_argument('--output-device', help='speakers name or index (see --list-devices), default: the system one')
+    parser.add_argument('--no-warp', action='store_true', help='connect without WARP, with the usual handshakes')
     parser.add_argument('--barge-in', action='store_true', help='keep the mic open while the assistant speaks')
     parser.add_argument('--list-devices', action='store_true', help='list audio devices and exit')
     parser.add_argument('-v', '--verbose', action='store_true', help='log every event from the API')
@@ -535,6 +558,9 @@ async def main() -> None:
     if not args.api_key:
         console.error('No API key: set OPENAI_API_KEY or pass --api-key')
         sys.exit(1)
+
+    if not args.no_warp:
+        webrtc.field_trials.update(WARP_TRIALS)
 
     hang_up = asyncio.Event()
     # on Windows, Ctrl+C raises KeyboardInterrupt instead

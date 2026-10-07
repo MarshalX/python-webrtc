@@ -53,6 +53,10 @@ init = webrtc.RTCDataChannelInit(negotiated=True, id=0)
 channel = pc.create_data_channel('game', init)
 ```
 
+The other side may be a server that picks no channel of its own: it learns the `id` from the signalling, like the
+`dcid` the [GPT-Live example](../examples/openai_live.md) posts with its offer. Such a channel opens without asking the
+remote peer, which saves a round trip (see [WARP](field-trials.md#warp)).
+
 ## Back pressure
 
 `send` queues the message and returns. To send a lot without growing the queue unbounded, watch

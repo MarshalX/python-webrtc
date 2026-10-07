@@ -65,6 +65,8 @@ namespace python_webrtc {
   std::mutex PeerConnectionFactory::_mutex{};
   std::atomic<int> PeerConnectionFactory::_alive{0};
   bool PeerConnectionFactory::_sslInitialized{false};
+  FieldTrials PeerConnectionFactory::_trials{};
+  bool PeerConnectionFactory::_trialsFrozen{false};
 
   namespace {
     // NDEBUG compiles asserts out
@@ -76,7 +78,7 @@ namespace python_webrtc {
     }
   } // namespace
 
-  PeerConnectionFactory::PeerConnectionFactory() : _generation(Forks().load()) {
+  PeerConnectionFactory::PeerConnectionFactory() : _generation(Forks().load()), _fieldTrials(_trials) {
     _workerThread = Started(webrtc::Thread::CreateWithSocketServer(), "PeerConnectionFactory:workerThread");
     _signalingThread = Started(webrtc::Thread::Create(), "PeerConnectionFactory:signalingThread");
 
@@ -89,7 +91,8 @@ namespace python_webrtc {
     _factory = webrtc::CreatePeerConnectionFactory(
         _workerThread.get(), _workerThread.get(), _signalingThread.get(), _audioDeviceModule,
         webrtc::CreateBuiltinAudioEncoderFactory(), webrtc::CreateBuiltinAudioDecoderFactory(),
-        std::make_unique<VideoEncoderFactory>(), std::make_unique<VideoDecoderFactory>(), nullptr, nullptr);
+        std::make_unique<VideoEncoderFactory>(), std::make_unique<VideoDecoderFactory>(), nullptr, nullptr, nullptr,
+        _fieldTrials.CreateCopy());
     if (!_factory) {
       BlockingCallOn(_workerThread, [this]() { _audioDeviceModule = nullptr; });
       throw RTCException(webrtc::RTCErrorType::INTERNAL_ERROR, "Failed to create the peer connection factory");
@@ -139,7 +142,21 @@ namespace python_webrtc {
     }
 #endif
     InitializeSSL();
+    _trialsFrozen = true;
     return {new PeerConnectionFactory(), &PeerConnectionFactory::Destroy};
+  }
+
+  void PeerConnectionFactory::SetFieldTrials(const std::string &trials) {
+    const std::scoped_lock lock(_mutex);
+    if (_trialsFrozen) {
+      throw RTCException(webrtc::RTCErrorType::INVALID_STATE,
+                         "Field trials are fixed once the first RTCPeerConnection or RTCIceTransport is created");
+    }
+    const auto parsed = FieldTrials::Parse(trials);
+    if (!parsed) {
+      throw std::invalid_argument("Invalid field trials: '" + trials + "'");
+    }
+    _trials = *parsed;
   }
 
   std::shared_ptr<PeerConnectionFactory> PeerConnectionFactory::GetOrCreateDefault() {
@@ -220,6 +237,7 @@ namespace python_webrtc {
         .def_static("dispose", &PeerConnectionFactory::Dispose, nogil());
 
     m.def("_alive_factories", []() { return _alive.load(); });
+    m.def("_set_field_trials", &PeerConnectionFactory::SetFieldTrials, nogil(), pybind11::arg("trials"));
   }
 
 } // namespace python_webrtc

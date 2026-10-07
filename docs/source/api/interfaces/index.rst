@@ -4,6 +4,7 @@ Interfaces
 .. toctree::
    :maxdepth: 1
 
+   field_trials
    media_devices
    media_stream
    media_stream_track

@@ -111,6 +111,7 @@ from .exceptions import (
     RTCErrorInit,
     RTCException,
 )
+from .interfaces.field_trials import FieldTrials, field_trials, fieldTrials
 from .interfaces.media_devices import InputDeviceInfo, MediaDeviceInfo, MediaDevices, media_devices, mediaDevices
 from .interfaces.media_stream import MediaStream
 from .interfaces.media_stream_track import MediaStreamTrack
@@ -311,6 +312,7 @@ __all__ = [
     'EndingTypeValue',
     'Event',
     'EventTarget',
+    'FieldTrials',
     'HandlerDecorator',
     'InputDeviceInfo',
     'InvalidAccessError',
@@ -535,6 +537,8 @@ __all__ = [
     'WritableStream',
     'WritableStreamDefaultController',
     'WritableStreamDefaultWriter',
+    'fieldTrials',
+    'field_trials',
     'mediaDevices',
     'media_devices',
     'openh264',
