@@ -27,6 +27,7 @@
 #include <api/video_codecs/video_encoder_factory_template_libaom_av1_adapter.h>
 #include <api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h>
 #include <api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h>
+#include <rtc_base/network.h>
 #include <rtc_base/ssl_adapter.h>
 
 #include <stdexcept>
@@ -65,6 +66,9 @@ namespace python_webrtc {
   std::mutex PeerConnectionFactory::_mutex{};
   std::atomic<int> PeerConnectionFactory::_alive{0};
   bool PeerConnectionFactory::_sslInitialized{false};
+  FieldTrials PeerConnectionFactory::_trials{};
+  bool PeerConnectionFactory::_loopbackAllowed{false};
+  bool PeerConnectionFactory::_started{false};
 
   namespace {
     // NDEBUG compiles asserts out
@@ -76,7 +80,9 @@ namespace python_webrtc {
     }
   } // namespace
 
-  PeerConnectionFactory::PeerConnectionFactory() : _generation(Forks().load()) {
+  PeerConnectionFactory::PeerConnectionFactory()
+      : _generation(Forks().load()), _fieldTrials(_trials),
+        _networkIgnoreMask(_loopbackAllowed ? 0 : webrtc::kDefaultNetworkIgnoreMask) {
     _workerThread = Started(webrtc::Thread::CreateWithSocketServer(), "PeerConnectionFactory:workerThread");
     _signalingThread = Started(webrtc::Thread::Create(), "PeerConnectionFactory:signalingThread");
 
@@ -89,14 +95,15 @@ namespace python_webrtc {
     _factory = webrtc::CreatePeerConnectionFactory(
         _workerThread.get(), _workerThread.get(), _signalingThread.get(), _audioDeviceModule,
         webrtc::CreateBuiltinAudioEncoderFactory(), webrtc::CreateBuiltinAudioDecoderFactory(),
-        std::make_unique<VideoEncoderFactory>(), std::make_unique<VideoDecoderFactory>(), nullptr, nullptr);
+        std::make_unique<VideoEncoderFactory>(), std::make_unique<VideoDecoderFactory>(), nullptr, nullptr, nullptr,
+        _fieldTrials.CreateCopy());
     if (!_factory) {
       BlockingCallOn(_workerThread, [this]() { _audioDeviceModule = nullptr; });
       throw RTCException(webrtc::RTCErrorType::INTERNAL_ERROR, "Failed to create the peer connection factory");
     }
 
     webrtc::PeerConnectionFactoryInterface::Options options;
-    options.network_ignore_mask = 0;
+    options.network_ignore_mask = _networkIgnoreMask;
     _factory->SetOptions(options);
 
     _alive++;
@@ -139,7 +146,31 @@ namespace python_webrtc {
     }
 #endif
     InitializeSSL();
+    _started = true;
     return {new PeerConnectionFactory(), &PeerConnectionFactory::Destroy};
+  }
+
+  void PeerConnectionFactory::SetFieldTrials(const std::string &trials) {
+    const std::scoped_lock lock(_mutex);
+    ThrowIfStarted("Field trials");
+    const auto parsed = FieldTrials::Parse(trials);
+    if (!parsed) {
+      throw std::invalid_argument("Invalid field trials: '" + trials + "'");
+    }
+    _trials = *parsed;
+  }
+
+  void PeerConnectionFactory::AllowLoopback() {
+    const std::scoped_lock lock(_mutex);
+    ThrowIfStarted("Loopback");
+    _loopbackAllowed = true;
+  }
+
+  void PeerConnectionFactory::ThrowIfStarted(const std::string &what) {
+    if (_started) {
+      throw RTCException(webrtc::RTCErrorType::INVALID_STATE,
+                         what + " can't change once the first RTCPeerConnection or RTCIceTransport is created");
+    }
   }
 
   std::shared_ptr<PeerConnectionFactory> PeerConnectionFactory::GetOrCreateDefault() {
@@ -220,6 +251,8 @@ namespace python_webrtc {
         .def_static("dispose", &PeerConnectionFactory::Dispose, nogil());
 
     m.def("_alive_factories", []() { return _alive.load(); });
+    m.def("_set_field_trials", &PeerConnectionFactory::SetFieldTrials, nogil(), pybind11::arg("trials"));
+    m.def("_allow_loopback", &PeerConnectionFactory::AllowLoopback, nogil());
   }
 
 } // namespace python_webrtc

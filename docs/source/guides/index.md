@@ -41,4 +41,11 @@ Reading, writing and transforming the frames of audio and video tracks.
 Enabling H.264 with Cisco's OpenH264 binary, and its licensing.
 :::
 
+:::{grid-item-card} {octicon}`beaker;1em;sd-mr-1` Field trials
+:link: field-trials
+:link-type: doc
+
+Experimental features of the engine, and WARP for faster connections.
+:::
+
 ::::

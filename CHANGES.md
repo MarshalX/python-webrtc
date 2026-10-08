@@ -39,6 +39,7 @@ In numbers: 230 public classes, 50 enums with the string values of the specifica
 * Type event handlers per event, add listener management methods by [@MarshalX](https://github.com/MarshalX) in [#215](https://github.com/MarshalX/python-webrtc/pull/215)
 * Replace `to_async` with `call_native`, drop its timeout by [@MarshalX](https://github.com/MarshalX) in [#206](https://github.com/MarshalX/python-webrtc/pull/206)
 * Add the OpenAI GPT-Live voice chat example by [@MarshalX](https://github.com/MarshalX) in [#198](https://github.com/MarshalX/python-webrtc/pull/198)
+* Add field trials, connect the GPT-Live example with WARP, skip loopback candidates by [@MarshalX](https://github.com/MarshalX)
 * Add the Janus streaming example by [@MarshalX](https://github.com/MarshalX) in [#205](https://github.com/MarshalX/python-webrtc/pull/205)
 * Run original web-platform-tests through a PythonMonkey shim by [@MarshalX](https://github.com/MarshalX) in [#193](https://github.com/MarshalX/python-webrtc/pull/193)
 * Sync tests with web-platform-tests by [@MarshalX](https://github.com/MarshalX) in [#192](https://github.com/MarshalX/python-webrtc/pull/192)

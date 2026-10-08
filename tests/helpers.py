@@ -8,9 +8,12 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
 import ctypes
+import functools
 import inspect
+import multiprocessing
 import os
 import pathlib
 import subprocess
@@ -19,7 +22,7 @@ import textwrap
 from typing import TYPE_CHECKING, Callable, Protocol, TypeVar, cast
 
 import pytest
-from typing_extensions import Never
+from typing_extensions import Never, ParamSpec, override
 
 import webrtc
 import wrtc
@@ -31,6 +34,7 @@ if TYPE_CHECKING:
 CreatePC = Callable[..., webrtc.RTCPeerConnection]
 
 _T = TypeVar('_T')
+_P = ParamSpec('_P')
 
 
 def stats_of_type(report: webrtc.RTCStatsReport, stats_type: str) -> list[webrtc.RTCStats]:
@@ -307,3 +311,99 @@ def run_isolated(script: str, timeout: float = 60) -> str:
     )
     assert result.returncode == 0, f'exit code {result.returncode}:\n{result.stderr[-6000:]}'
     return result.stdout
+
+
+def isolated(test: Callable[_P, _T]) -> Callable[_P, _T]:
+    """Runs a function in a fresh interpreter."""
+
+    @functools.wraps(test)
+    def run(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        if multiprocessing.parent_process() is not None:
+            return test(*args, **kwargs)
+        with concurrent.futures.ProcessPoolExecutor(1, mp_context=multiprocessing.get_context('spawn')) as pool:
+            return pool.submit(run, *args, **kwargs).result()
+
+    return run
+
+
+class _RelaySocket(asyncio.DatagramProtocol):
+    def __init__(self, relay: UdpRelay) -> None:
+        self.relay = relay
+        self.transport: asyncio.DatagramTransport | None = None
+        self.peer: tuple[str, int] | None = None
+        self.other: _RelaySocket | None = None
+
+    @override
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        self.transport = cast('asyncio.DatagramTransport', transport)
+
+    @override
+    def datagram_received(self, data: bytes, addr: object) -> None:
+        if self.peer is None or self.other is None or self.other.transport is None:
+            return
+        self.relay.inspect(data)
+        asyncio.get_running_loop().call_later(self.relay.delay, self.other.transport.sendto, data, self.peer)
+
+
+class UdpRelay:
+    """Relays the packets of two connections through local sockets, which can delay them."""
+
+    def __init__(self, delay: float = 0) -> None:
+        self.delay = delay
+        #: The DTLS handshake messages sent in packets of their own, by type
+        self.handshakes: set[int] = set()
+        self._sockets: list[_RelaySocket] = []
+
+    async def connect(self, caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+        caller_candidates: list[webrtc.RTCIceCandidate] = []
+        callee_candidates: list[webrtc.RTCIceCandidate] = []
+        caller.on('icecandidate', functools.partial(_collect, caller_candidates))
+        callee.on('icecandidate', functools.partial(_collect, callee_candidates))
+        await exchange_offer_answer(caller, callee)
+        for pc in (caller, callee):
+            await wait_until(lambda pc=pc: pc.ice_gathering_state == 'complete', 'ICE gathering')
+
+        loop = asyncio.get_running_loop()
+        relayed = [_relayable(caller_candidates), _relayable(callee_candidates)]
+        for candidate in relayed:
+            address = cast('str', candidate.address)
+            _, socket = await loop.create_datagram_endpoint(lambda: _RelaySocket(self), local_addr=(address, 0))
+            socket.peer = (address, cast('int', candidate.port))
+            self._sockets.append(socket)
+        for_caller, for_callee = self._sockets
+        for_caller.other, for_callee.other = for_callee, for_caller
+        await _add_ice_candidate(callee, _moved(relayed[0], for_caller))
+        await _add_ice_candidate(caller, _moved(relayed[1], for_callee))
+
+    def close(self) -> None:
+        for socket in self._sockets:
+            if socket.transport is not None:
+                socket.transport.close()
+
+    def inspect(self, packet: bytes) -> None:
+        # a DTLS handshake record in clear (RFC 7983)
+        if len(packet) > 13 and packet[0] == 22:
+            self.handshakes.add(packet[13])
+
+
+def _collect(candidates: list[webrtc.RTCIceCandidate], event: webrtc.RTCPeerConnectionIceEvent) -> None:
+    if event.candidate is not None:
+        candidates.append(event.candidate)
+
+
+def _relayable(candidates: list[webrtc.RTCIceCandidate]) -> webrtc.RTCIceCandidate:
+    ipv4 = [
+        c
+        for c in candidates
+        if (c.protocol, c.type) == ('udp', 'host') and c.address is not None and ':' not in c.address
+    ]
+    return next((c for c in ipv4 if c.address == '127.0.0.1'), ipv4[0])
+
+
+def _moved(candidate: webrtc.RTCIceCandidate, socket: _RelaySocket) -> webrtc.RTCIceCandidate:
+    assert socket.transport is not None
+    address, port = socket.transport.get_extra_info('sockname')
+    # candidate:<foundation> <component> <transport> <priority> <address> <port> ...
+    fields = candidate.candidate.split()
+    fields[4:6] = [address, str(port)]
+    return webrtc.RTCIceCandidate(' '.join(fields), candidate.sdp_mid, candidate.sdp_m_line_index)

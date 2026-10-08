@@ -57,6 +57,15 @@ async def on_candidate(event):
 To skip trickling, wait for `ice_gathering_state` to be `'complete'` and send `pc.local_description`, which then has
 every candidate in it.
 
+## Peers on one machine
+
+Like the browsers, connections skip the loopback interface. Where peers on one machine can only reach each other
+through it, like on a Mac without Local Network permission, allow it before the first connection:
+
+```python
+webrtc.allow_loopback()  # or WRTC_ALLOW_LOOPBACK=1
+```
+
 ## States
 
 The state of a connection is in {attr}`~webrtc.RTCPeerConnection.connection_state`, and each change fires

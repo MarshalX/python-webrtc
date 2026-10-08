@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import os
 import threading
 from typing import TYPE_CHECKING
 
@@ -39,6 +40,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line('markers', 'stress: a long stress test, run with --stress')
+    # macOS may block the LAN without Local Network permission
+    os.environ['WRTC_ALLOW_LOOPBACK'] = '1'
+    webrtc.allow_loopback()
     if not config.getoption('--gc-on-emit'):
         return
     # the collector runs on libwebrtc threads, as it may whenever they emit: whatever it releases must not block them

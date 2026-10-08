@@ -29,14 +29,14 @@ namespace python_webrtc {
 
   // Owned by the transport, created and destroyed on the network thread, after the ICE transport that uses it
   struct StandaloneIce {
-    explicit StandaloneIce(webrtc::Thread *networkThread)
-        : env(webrtc::CreateEnvironment()),
+    StandaloneIce(webrtc::Thread *networkThread, const PeerConnectionFactory &factory)
+        : env(webrtc::CreateEnvironment(factory.fieldTrials().CreateCopy())),
           networkManager(std::make_unique<webrtc::BasicNetworkManager>(env, networkThread->socketserver())),
           socketFactory(std::make_unique<webrtc::BasicPacketSocketFactory>(networkThread->socketserver())),
           allocator(std::make_unique<webrtc::BasicPortAllocator>(env, networkManager.get(), socketFactory.get())) {
       allocator->Initialize();
-      // like the connections of the factory, which use every network (see PeerConnectionFactory)
-      allocator->SetNetworkIgnoreMask(0);
+      // like the connections of the factory
+      allocator->SetNetworkIgnoreMask(factory.networkIgnoreMask());
     }
 
     ~StandaloneIce() {
@@ -392,7 +392,7 @@ namespace python_webrtc {
     std::pair<std::string, std::string> parameters(webrtc::CreateRandomString(webrtc::ICE_UFRAG_LENGTH),
                                                    webrtc::CreateRandomString(webrtc::ICE_PWD_LENGTH));
     BlockingCallOn(factory->workerThread(), [&]() {
-      standalone = std::make_shared<StandaloneIce>(factory->workerThread());
+      standalone = std::make_shared<StandaloneIce>(factory->workerThread(), *factory);
       webrtc::IceTransportInit init(standalone->env);
       init.set_port_allocator(standalone->allocator.get());
       standalone->channel = webrtc::P2PTransportChannel::Create("", 1, std::move(init));

@@ -20,7 +20,7 @@ SECTIONS = {
     'models': 'Models',
 }
 # the internals of the package, except the events every interface inherits
-TOP_LEVEL = ['enums', 'exceptions', 'streams', 'utils.events', 'base', 'openh264']
+TOP_LEVEL = ['enums', 'exceptions', 'streams', 'utils.events', 'base', 'openh264', 'loopback']
 
 # modules of several public classes, or whose class name isn't the best title
 TITLES = {
@@ -29,6 +29,7 @@ TITLES = {
     'exceptions': 'Exceptions',
     'streams': 'Streams',
     'openh264': 'OpenH264',
+    'loopback': 'Loopback',
     'utils.events': 'EventTarget',
     'interfaces.media_devices': 'MediaDevices',
     'interfaces.media_stream_track_processor': 'MediaStreamTrackProcessor',
