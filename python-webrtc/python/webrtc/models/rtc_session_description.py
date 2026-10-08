@@ -25,6 +25,7 @@ class RTCSessionDescription(WebRTCObject[wrtc.RTCSessionDescription]):
     :attr:`webrtc.RTCPeerConnection.local_description` and the other description properties return it. The
     methods that set a description take an :obj:`webrtc.RTCSessionDescriptionInit` as well, so creating one
     is rarely needed. The type is checked on creation, but the SDP is only parsed once the description is set.
+    Both are writable; a description already set on a connection doesn't change.
     See :mdn:`RTCSessionDescription`.
 
     Args:
@@ -62,9 +63,13 @@ class RTCSessionDescription(WebRTCObject[wrtc.RTCSessionDescription]):
     def type(self) -> webrtc.RTCSdpType:
         """:obj:`webrtc.RTCSdpType`: The role of the description in the offer/answer exchange.
 
-        See :mdn:`RTCSessionDescription/type`.
+        It can be set with a member or its value. See :mdn:`RTCSessionDescription/type`.
         """
         return self._native_obj.type
+
+    @type.setter
+    def type(self, value: webrtc.RTCSdpType | webrtc.RTCSdpTypeValue) -> None:
+        self._replace(RTCSessionDescriptionInit(value, self.sdp))
 
     @property
     def sdp(self) -> str:
@@ -73,6 +78,14 @@ class RTCSessionDescription(WebRTCObject[wrtc.RTCSessionDescription]):
         See :mdn:`RTCSessionDescription/sdp`.
         """
         return self._native_obj.sdp
+
+    @sdp.setter
+    def sdp(self, value: str) -> None:
+        self._replace(RTCSessionDescriptionInit(self.type, value))
+
+    def _replace(self, init: RTCSessionDescriptionInit) -> None:
+        # the connection shares the native object
+        self._init_native(wrtc.RTCSessionDescription(init._to_native()))
 
     #: Alias for :attr:`to_json`
     toJSON = to_json

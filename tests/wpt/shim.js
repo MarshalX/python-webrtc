@@ -431,8 +431,8 @@
     toJSON() { return callMethod(this, 'to_json'); }
   }
   defineAttributes(RTCSessionDescription, [
-    ['type', 'type'],
-    ['sdp', 'sdp'],
+    ['type', 'type', (v) => pyEnum('RTCSdpType', v)],
+    ['sdp', 'sdp', String],
   ]);
 
   class RTCIceTransport extends Interface {
@@ -721,9 +721,7 @@
   const ICE_SERVER = {
     urls: ['urls', (v) => (typeof v === 'string' ? v : Array.from(v, String))],
     username: ['username', String],
-    credential: ['credential', (v) => (v !== null && typeof v === 'object'
-      ? pyModel('RTCOAuthCredential', {mac_key: String(v.macKey), access_token: String(v.accessToken)}) : String(v))],
-    credentialType: ['credential_type', String],
+    credential: ['credential', String],
   };
 
   function toIceServer(server) {

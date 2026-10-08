@@ -287,11 +287,131 @@ namespace python_webrtc {
     });
   }
 
+  namespace {
+
+    using IceStates = std::vector<webrtc::IceTransportState>;
+
+    template <typename... Wanted>
+    bool anyIn(const IceStates &states, Wanted... wanted) {
+      return std::ranges::any_of(states, [&](auto state) { return ((state == wanted) || ...); });
+    }
+
+    template <typename... Wanted>
+    bool allIn(const IceStates &states, Wanted... wanted) {
+      return std::ranges::all_of(states, [&](auto state) { return ((state == wanted) || ...); });
+    }
+
+    RTCPeerConnection::IceConnectionState iceConnectionStateOf(const IceStates &ice,
+                                                               RTCPeerConnection::IceConnectionState previous) {
+      using Ice = webrtc::IceTransportState;
+      using State = RTCPeerConnection::IceConnectionState;
+      if (anyIn(ice, Ice::kFailed)) {
+        return State::kIceConnectionFailed;
+      }
+      if (anyIn(ice, Ice::kDisconnected)) {
+        return State::kIceConnectionDisconnected;
+      }
+      if (allIn(ice, Ice::kNew, Ice::kClosed)) {
+        return State::kIceConnectionNew;
+      }
+      if (anyIn(ice, Ice::kNew, Ice::kChecking)) {
+        return State::kIceConnectionChecking;
+      }
+      if (allIn(ice, Ice::kCompleted, Ice::kClosed)) {
+        return State::kIceConnectionCompleted;
+      }
+      if (allIn(ice, Ice::kConnected, Ice::kCompleted, Ice::kClosed)) {
+        return State::kIceConnectionConnected;
+      }
+      return previous;
+    }
+
+  } // namespace
+
+  template <typename T, typename State>
+  bool RTCPeerConnection::EmitTransportStateOf(const std::weak_ptr<RTCPeerConnection> &connection,
+                                               const std::weak_ptr<T> &transport, State previous, State state) {
+    auto self = connection.lock();
+    auto wrapper = transport.lock();
+    const bool emitted = self && wrapper;
+    if (emitted) {
+      self->EmitTransportState(wrapper, previous, state);
+    }
+    ReleaseElsewhere(std::move(self));
+    return emitted;
+  }
+
+  template <typename T, typename State>
+  // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): a change, from and to
+  void RTCPeerConnection::EmitTransportState(const std::shared_ptr<T> &transport, State previous, State state) {
+    if (IsClosed()) {
+      // a closed connection fires no events
+      return;
+    }
+    const bool listening = HasListeners();
+    // with the connection only if Python listens to both
+    const bool dispatch = listening && transport->HasListeners();
+    transport->StateChanged(listening || transport->IsTracked(), previous);
+    if (!dispatch) {
+      transport->EmitStateChange(state);
+    }
+    auto iceConnectionState = UpdateIceConnectionState(listening);
+    _heldTransportStates.Emit([this, transport, state, dispatch, iceConnectionState]() {
+      Emit("_transportstatechange", transport, std::optional<State>(state), dispatch, iceConnectionState,
+           std::optional<PeerConnectionState>());
+    });
+  }
+
+  void RTCPeerConnection::EmitIceConnectionState() {
+    if (IsClosed()) {
+      return;
+    }
+    if (auto iceConnectionState = UpdateIceConnectionState(HasListeners())) {
+      _heldTransportStates.Emit([this, iceConnectionState]() {
+        Emit("_transportstatechange", std::shared_ptr<RTCIceTransport>(), std::optional<webrtc::IceTransportState>(),
+             false, iceConnectionState, std::optional<PeerConnectionState>());
+      });
+    }
+  }
+
+  std::optional<RTCPeerConnection::IceConnectionState> RTCPeerConnection::UpdateIceConnectionState(bool listening) {
+    std::vector<std::shared_ptr<RTCDtlsTransport>> dtlsTransports;
+    {
+      const TrackedLock lock(_wrappersMutex);
+      dtlsTransports = _dtlsTransports;
+    }
+    IceStates states;
+    std::vector<std::shared_ptr<RTCIceTransport>> iceTransports;
+    for (const auto &dtls : dtlsTransports) {
+      auto ice = dtls->GetIceTransport();
+      if (std::ranges::find(iceTransports, ice) == iceTransports.end()) {
+        states.push_back(ice->GetCurrentState());
+        iceTransports.push_back(std::move(ice));
+      }
+    }
+
+    const std::scoped_lock lock(_connectionStatesMutex);
+    auto state = iceConnectionStateOf(states, _lastIceConnectionState);
+    if (state == _lastIceConnectionState) {
+      return std::nullopt;
+    }
+    _surfacedIceConnectionState.Changed(listening, _lastIceConnectionState);
+    _lastIceConnectionState = state;
+    return state;
+  }
+
   void RTCPeerConnection::Adopt(const std::shared_ptr<RTCDtlsTransport> &dtls) {
     auto iceTransport = dtls->transport()->ice_transport();
-    dtls->GetIceTransport()->SetParametersGetter([weak = weak_from_this(), iceTransport](bool local) {
+    auto ice = dtls->GetIceTransport();
+    ice->SetParametersGetter([weak = weak_from_this(), iceTransport](bool local) {
       auto self = weak.lock();
       return self ? self->IceParameters(iceTransport.get(), local) : std::nullopt;
+    });
+    ice->SetStateEmitter([weak = weak_from_this(), transport = std::weak_ptr(ice)](auto previous, auto state) {
+      return EmitTransportStateOf(weak, transport, previous, state);
+    });
+    dtls->SetStateEmitter([weak = weak_from_this(), transport = std::weak_ptr(dtls)](auto previous, auto state) {
+      return EmitTransportStateOf(weak, transport, previous, state);
     });
   }
 
@@ -608,7 +728,12 @@ namespace python_webrtc {
     if (!pc) {
       return PeerConnectionState::kClosed;
     }
-    return _surfacedConnectionState.Get(pc->peer_connection_state());
+    PeerConnectionState state{};
+    {
+      const std::scoped_lock lock(_connectionStatesMutex);
+      state = _lastConnectionState;
+    }
+    return _surfacedConnectionState.Get(state);
   }
 
   RTCPeerConnection::SignalingState RTCPeerConnection::GetSignalingState() {
@@ -624,7 +749,12 @@ namespace python_webrtc {
     if (!pc) {
       return IceConnectionState::kIceConnectionClosed;
     }
-    return _surfacedIceConnectionState.Get(pc->standardized_ice_connection_state());
+    IceConnectionState state{};
+    {
+      const std::scoped_lock lock(_connectionStatesMutex);
+      state = _lastIceConnectionState;
+    }
+    return _surfacedIceConnectionState.Get(state);
   }
 
   RTCPeerConnection::IceGatheringState RTCPeerConnection::GetIceGatheringState() {
@@ -643,19 +773,30 @@ namespace python_webrtc {
   }
 
   void RTCPeerConnection::OnIceConnectionChange(IceConnectionState /*unused*/) {
-    // the legacy state, iceConnectionState is the standardized one
+    // the legacy state
   }
 
-  void RTCPeerConnection::OnStandardizedIceConnectionChange(IceConnectionState newState) {
-    _surfacedIceConnectionState.Changed(HasListeners(), _lastIceConnectionState);
-    _lastIceConnectionState = newState;
-    Emit("iceconnectionstatechange", newState);
+  void RTCPeerConnection::OnStandardizedIceConnectionChange(IceConnectionState /*unused*/) {
+    // derived from the transports, see EmitTransportState
   }
 
   void RTCPeerConnection::OnConnectionChange(PeerConnectionState newState) {
-    _surfacedConnectionState.Changed(HasListeners(), _lastConnectionState);
-    _lastConnectionState = newState;
-    Emit("connectionstatechange", newState);
+    if (IsClosed()) {
+      return;
+    }
+    {
+      const std::scoped_lock lock(_connectionStatesMutex);
+      if (newState == _lastConnectionState) {
+        return;
+      }
+      _surfacedConnectionState.Changed(HasListeners(), _lastConnectionState);
+      _lastConnectionState = newState;
+    }
+    // after the transport changes that led to it
+    _heldTransportStates.Emit([this, newState]() {
+      Emit("_transportstatechange", std::shared_ptr<RTCIceTransport>(), std::optional<webrtc::IceTransportState>(),
+           false, std::optional<IceConnectionState>(), std::optional<PeerConnectionState>(newState));
+    });
   }
 
   void RTCPeerConnection::OnRenegotiationNeeded() {

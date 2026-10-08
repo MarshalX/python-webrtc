@@ -27,7 +27,7 @@ What is bound, by specification:
 * [WebCodecs](https://w3c.github.io/webcodecs/): `VideoFrame` and `AudioData`
 * [Streams](https://streams.spec.whatwg.org/): `ReadableStream`, `WritableStream` and `TransformStream`, with piping and async iteration
 
-In numbers: 230 public classes, 50 enums with the string values of the specifications, 18 exceptions named after their `DOMException`, and the camelCase names of the specifications next to the snake_case ones.
+In numbers: 229 public classes, 50 enums with the string values of the specifications, 18 exceptions named after their `DOMException`, and the camelCase names of the specifications next to the snake_case ones.
 
 * Migrate to prebuilt libwebrtc M152, scikit-build-core and single cibuildwheel CI by [@MarshalX](https://github.com/MarshalX) in [#191](https://github.com/MarshalX/python-webrtc/pull/191)
 * Split wheel builds per Python version and cache libwebrtc by [@MarshalX](https://github.com/MarshalX) in [#196](https://github.com/MarshalX/python-webrtc/pull/196)

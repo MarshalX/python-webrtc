@@ -744,6 +744,27 @@ async def test_a_session_releases_every_native_object() -> None:
     assert alive_objects() == baseline
 
 
+@pytest.mark.asyncio
+async def test_operation_pending_at_close_does_not_keep_its_connection_alive() -> None:
+    """Dropping an operation left pending by close releases every native object."""
+    baseline = alive_objects()
+
+    async def drop_pending_operation() -> weakref.ref[webrtc.RTCPeerConnection]:
+        pc = webrtc.RTCPeerConnection()
+        pc.add_transceiver(webrtc.MediaType.audio)
+        pending = asyncio.ensure_future(pc.set_local_description())
+        await asyncio.sleep(0)
+        pc.close()
+        await asyncio.sleep(QUIET_PERIOD)
+        assert not pending.done()
+        return weakref.ref(pc)
+
+    connection = await drop_pending_operation()
+
+    assert alive_objects() == baseline
+    assert connection() is None
+
+
 def test_dispose_while_factories_are_alive() -> None:
     """dispose() refuses while factories are alive; later factories still work."""
     pc = webrtc.RTCPeerConnection()

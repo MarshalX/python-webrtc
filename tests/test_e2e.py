@@ -54,10 +54,7 @@ async def test_peers_connect_and_send_audio(caller: webrtc.RTCPeerConnection, ca
             lambda pc=pc: pc.connection_state == webrtc.RTCPeerConnectionState.connected, 'connection', TIMEOUT
         )
         assert pc.signaling_state == webrtc.RTCSignalingState.stable
-        assert pc.ice_connection_state in {
-            webrtc.RTCIceConnectionState.connected,
-            webrtc.RTCIceConnectionState.completed,
-        }
+        assert pc.ice_connection_state == webrtc.RTCIceConnectionState.connected
 
     receivers = callee.get_receivers()
     assert len(receivers) == 1

@@ -8,6 +8,7 @@
 #include "rtc_peer_connection.h"
 
 #include <algorithm>
+#include <map>
 #include <set>
 #include <type_traits>
 
@@ -48,6 +49,17 @@ namespace python_webrtc {
       const auto *content =
           mid && (description != nullptr) ? description->description()->GetContentByName(*mid) : nullptr;
       return (content != nullptr) && !content->rejected ? content->media_description() : nullptr;
+    }
+
+    std::map<std::string, std::string>
+    remoteTrackIds(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
+      std::map<std::string, std::string> ids;
+      for (const auto &transceiver : pc->GetTransceivers()) {
+        if (auto mid = transceiver->mid()) {
+          ids.emplace(std::move(*mid), transceiver->receiver()->track()->id());
+        }
+      }
+      return ids;
     }
 
     bool isSupported(const webrtc::Codec &codec, const webrtc::RtpCapabilities &capabilities, webrtc::MediaType kind) {
@@ -147,7 +159,7 @@ namespace python_webrtc {
   void RTCPeerConnection::GetStats(std::function<void(std::string)> &onSuccess,
                                    std::function<void(RTCCallbackException)> &onFailure) {
     if (auto pc = StatsConnection(onFailure)) {
-      pc->GetStats(webrtc::make_ref_counted<StatsCollectorCallback>(onSuccess).get());
+      pc->GetStats(webrtc::make_ref_counted<StatsCollectorCallback>(onSuccess, remoteTrackIds(pc)).get());
     }
   }
 
@@ -162,17 +174,9 @@ namespace python_webrtc {
   void RTCPeerConnection::CollectStats(const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver,
                                        std::function<void(std::string)> &onSuccess,
                                        std::function<void(RTCCallbackException)> &onFailure) {
-    auto pc = StatsConnection(onFailure);
-    if (!pc) {
-      return;
+    if (auto pc = StatsConnection(onFailure)) {
+      pc->GetStats(receiver, webrtc::make_ref_counted<StatsCollectorCallback>(onSuccess, remoteTrackIds(pc)));
     }
-    // a stopped transceiver receives no RTP streams anymore
-    std::set<std::string> excluded;
-    auto transceiver = transceiverOf(pc, receiver);
-    if (transceiver && (transceiver->stopping() || transceiver->stopped())) {
-      excluded.insert("inbound-rtp");
-    }
-    pc->GetStats(receiver, webrtc::make_ref_counted<StatsCollectorCallback>(onSuccess, std::move(excluded)));
   }
 
 } // namespace python_webrtc

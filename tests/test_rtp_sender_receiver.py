@@ -86,12 +86,24 @@ async def test_send_parameters_with_other_encodings(pc: webrtc.RTCPeerConnection
 
 
 @pytest.mark.asyncio
-async def test_parameters_expire_with_their_task(pc: webrtc.RTCPeerConnection) -> None:
-    """Parameters are only accepted in the task that got them."""
+async def test_parameters_of_an_earlier_task(pc: webrtc.RTCPeerConnection) -> None:
+    """The last parameters can be set after their task, but only once."""
     sender = add_simulcast_sender(pc)
     parameters = sender.get_parameters()
     await next_task()
+    await sender.set_parameters(parameters)
     with pytest.raises(webrtc.InvalidStateError):
+        await sender.set_parameters(parameters)
+
+
+@pytest.mark.asyncio
+async def test_parameters_replaced_in_a_later_task(pc: webrtc.RTCPeerConnection) -> None:
+    """A later task gets new parameters, which the earlier ones can't be set over."""
+    sender = add_simulcast_sender(pc)
+    parameters = sender.get_parameters()
+    await next_task()
+    assert sender.get_parameters().transaction_id != parameters.transaction_id
+    with pytest.raises(webrtc.InvalidModificationError):
         await sender.set_parameters(parameters)
 
 
@@ -190,13 +202,14 @@ async def test_sender_codecs_leave_out_unknown_remote_codecs(
 
 
 @pytest.mark.asyncio
-async def test_setting_a_description_expires_sender_parameters(pc: webrtc.RTCPeerConnection) -> None:
-    """Setting a description changes what parameters are valid, so earlier ones expire."""
+async def test_parameters_set_after_a_description(pc: webrtc.RTCPeerConnection) -> None:
+    """Parameters got before a description is set can be set after it."""
     sender = pc.add_transceiver(webrtc.MediaType.audio).sender
     parameters = sender.get_parameters()
+    parameters.encodings[0].max_bitrate = 32000
     await pc.set_local_description()
-    with pytest.raises(webrtc.InvalidStateError):
-        await sender.set_parameters(parameters)
+    await sender.set_parameters(parameters)
+    assert sender.get_parameters().encodings[0].max_bitrate == 32000
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,17 @@ namespace python_webrtc {
 
     constexpr std::string_view kMidPrefix = "a=mid:";
 
+    // browsers compare only the first one
+    std::optional<std::string_view> firstFingerprint(std::string_view sdp) {
+      constexpr std::string_view kFingerprint = "\na=fingerprint:";
+      auto start = sdp.find(kFingerprint);
+      if (start == std::string_view::npos) {
+        return std::nullopt;
+      }
+      sdp.remove_prefix(start + 1);
+      return sdp.substr(0, sdp.find_first_of("\r\n"));
+    }
+
   } // namespace
 
   bool isBlockedCandidate(const webrtc::Candidate &candidate) {
@@ -69,6 +80,13 @@ namespace python_webrtc {
       error.emplace(std::move(rtcError), lineNumber(init.sdp, parseError.line));
     }
     return description;
+  }
+
+  // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): the created SDP, then the one to set
+  bool fingerprintChanged(std::string_view created, std::string_view sdp) {
+    // without one, libwebrtc rejects the SDP itself
+    auto fingerprint = firstFingerprint(sdp);
+    return fingerprint && fingerprint != firstFingerprint(created);
   }
 
   std::vector<IceCandidateInit> endOfCandidates(const webrtc::SessionDescriptionInterface *description) {

@@ -79,7 +79,9 @@ namespace python_webrtc {
 
     void OnRTCDtlsTransportStopped();
 
-    // a closed connection fires no events of its transports, which show their current state
+    void OnDropped();
+
+    // closed without an event
     void OnPeerConnectionClosed();
 
     // the role is known once an answer is applied
@@ -105,6 +107,20 @@ namespace python_webrtc {
     using ParametersGetter = std::optional<std::pair<std::string, std::string>>(bool local);
 
     void SetParametersGetter(std::function<ParametersGetter> getter);
+
+    // the connection emitting the state changes, false once it's gone
+    using StateEmitter = bool(webrtc::IceTransportState previous, webrtc::IceTransportState state);
+
+    void SetStateEmitter(std::function<StateEmitter> emitter);
+
+    // not the surfaced one
+    webrtc::IceTransportState GetCurrentState();
+
+    // see Surfaced
+    void StateChanged(bool listening, webrtc::IceTransportState previous);
+
+    // held until Python has the transport
+    void EmitStateChange(webrtc::IceTransportState state);
 
     // A transport of its own, not of a connection (the webrtc-ice extension): Python gathers its candidates,
     // gives it the remote parameters and candidates, and it connects:
@@ -147,6 +163,8 @@ namespace python_webrtc {
 
     void OnGatheringStateChanged(webrtc::IceTransportInternal * /*unused*/);
 
+    void EmitState(webrtc::IceTransportState previous, webrtc::IceTransportState state);
+
     std::optional<std::pair<std::string, std::string>> GetParameters(bool local);
 
     // Libwebrtc hides the address of a peer-reflexive candidate: the remote peer may have signaled it since,
@@ -164,8 +182,9 @@ namespace python_webrtc {
     RTCIceComponent _component = RTCIceComponent::kRtp;
     webrtc::IceTransportState _state = webrtc::IceTransportState::kNew;
     webrtc::IceGatheringState _gatheringState = webrtc::IceGatheringState::kIceGatheringNew;
-    // closing the connection doesn't change the gathering state, which stays as Python saw it
-    bool _gatheringFrozen = false;
+    // the gathering state stays as Python saw it
+    bool _connectionClosed = false;
+    bool _dropped = false;
     webrtc::IceRole _role = webrtc::IceRole::ICEROLE_UNKNOWN;
     bool _roleKnown = false;
     Surfaced<webrtc::IceTransportState> _surfacedState;
@@ -175,6 +194,7 @@ namespace python_webrtc {
     std::vector<IceCandidateInit> _localCandidates;
     std::vector<IceCandidateInit> _remoteCandidates;
     LockedFunction<ParametersGetter> _parametersGetter;
+    LockedFunction<StateEmitter> _stateEmitter;
 
     // a transport of its own
     std::shared_ptr<StandaloneIce> _standalone;

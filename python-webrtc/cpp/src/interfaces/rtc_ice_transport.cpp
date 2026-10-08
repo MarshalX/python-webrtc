@@ -139,7 +139,7 @@ namespace python_webrtc {
                        .state = _state,
                        .previousGatheringState = _gatheringState,
                        .gatheringState = _gatheringState};
-    if (_stopped) {
+    if (_stopped || _connectionClosed || _dropped) {
       return change;
     }
     auto *internal = _transport->internal();
@@ -152,14 +152,10 @@ namespace python_webrtc {
         // has candidates to check them with
         _state = webrtc::IceTransportState::kChecking;
       }
-      if (!_gatheringFrozen) {
-        _gatheringState = internal->gathering_state();
-      }
+      _gatheringState = internal->gathering_state();
     } else {
       _state = webrtc::IceTransportState::kClosed;
-      if (!_gatheringFrozen) {
-        _gatheringState = webrtc::IceGatheringState::kIceGatheringComplete;
-      }
+      _gatheringState = webrtc::IceGatheringState::kIceGatheringComplete;
     }
     change.state = _state;
     change.gatheringState = _gatheringState;
@@ -171,13 +167,29 @@ namespace python_webrtc {
     {
       const std::scoped_lock lock(_mutex);
       previous = _state;
+      // ICE outlives a DTLS session the remote peer ended
+      if (_transport->internal() != nullptr) {
+        return;
+      }
       _state = webrtc::IceTransportState::kClosed;
     }
     if (previous != webrtc::IceTransportState::kClosed) {
       // closed by a description (like the one bundling its media section on another transport), with its event;
       // a closed connection mutes its transports first, which are closed right away
-      _surfacedState.Changed(IsTracked(), previous);
-      Emit("statechange", webrtc::IceTransportState::kClosed);
+      EmitState(previous, webrtc::IceTransportState::kClosed);
+    }
+  }
+
+  void RTCIceTransport::OnDropped() {
+    webrtc::IceTransportState previous{};
+    {
+      const std::scoped_lock lock(_mutex);
+      previous = _state;
+      _state = webrtc::IceTransportState::kClosed;
+      _dropped = true;
+    }
+    if (previous != webrtc::IceTransportState::kClosed) {
+      EmitState(previous, webrtc::IceTransportState::kClosed);
     }
   }
 
@@ -186,7 +198,8 @@ namespace python_webrtc {
     {
       const std::scoped_lock lock(_mutex);
       _gatheringState = _surfacedGatheringState.Get(_gatheringState);
-      _gatheringFrozen = true;
+      _state = webrtc::IceTransportState::kClosed;
+      _connectionClosed = true;
     }
     _surfacedState.Reset();
     _surfacedGatheringState.Reset();
@@ -206,8 +219,16 @@ namespace python_webrtc {
       // the pair it connects with first, then the state
       CheckSelectedCandidatePair();
     }
-    _surfacedState.Changed(IsTracked(), change.previousState);
-    Emit("statechange", change.state);
+    EmitState(change.previousState, change.state);
+  }
+
+  void RTCIceTransport::EmitState(webrtc::IceTransportState previous, webrtc::IceTransportState state) {
+    auto emitter = _stateEmitter.Get();
+    if (emitter && emitter(previous, state)) {
+      return;
+    }
+    _surfacedState.Changed(IsTracked(), previous);
+    Emit("statechange", state);
   }
 
   void RTCIceTransport::OnGatheringStateChanged(webrtc::IceTransportInternal * /*unused*/) {
@@ -364,6 +385,23 @@ namespace python_webrtc {
 
   void RTCIceTransport::SetParametersGetter(std::function<ParametersGetter> getter) {
     _parametersGetter.Set(std::move(getter));
+  }
+
+  void RTCIceTransport::SetStateEmitter(std::function<StateEmitter> emitter) {
+    _stateEmitter.Set(std::move(emitter));
+  }
+
+  webrtc::IceTransportState RTCIceTransport::GetCurrentState() {
+    const std::scoped_lock lock(_mutex);
+    return _state;
+  }
+
+  void RTCIceTransport::StateChanged(bool listening, webrtc::IceTransportState previous) {
+    _surfacedState.Changed(listening, previous);
+  }
+
+  void RTCIceTransport::EmitStateChange(webrtc::IceTransportState state) {
+    Emit("statechange", state);
   }
 
   std::optional<std::pair<std::string, std::string>> RTCIceTransport::GetParameters(bool local) {

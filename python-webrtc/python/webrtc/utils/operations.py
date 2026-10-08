@@ -28,14 +28,17 @@ if TYPE_CHECKING:
 class OperationsChain:
     """Runs the operations of a connection one after another, as the specification requires.
 
-    With none running, an operation starts right away, so its checks fail in the task that called it.
+    With none running, an operation starts right away, so its checks fail in the task that called it. After close, a
+    pending operation never settles, and a new one doesn't wait for it.
 
     Args:
         on_empty (:obj:`callable`): Called when the last operation ends.
+        closed (:obj:`callable`): Whether the connection is closed.
     """
 
-    def __init__(self, on_empty: Callable[[], None]) -> None:
+    def __init__(self, on_empty: Callable[[], None], closed: Callable[[], bool]) -> None:
         self._on_empty = on_empty
+        self._closed = closed
         #: The operation that ends last
         self._last: asyncio.Future[None] | None = None
 
@@ -47,6 +50,10 @@ class OperationsChain:
     @contextlib.asynccontextmanager
     async def operation(self) -> AsyncGenerator[None, None]:
         """Chains an operation after the ones that are running."""
+        if self._closed():
+            # it fails its checks right away
+            yield
+            return
         previous = self._last
         done = asyncio.get_running_loop().create_future()
         self._last = done
@@ -54,13 +61,23 @@ class OperationsChain:
             if previous is not None and not previous.done():
                 # shielded: cancelling this operation must not cancel the end of the previous one
                 await asyncio.shield(previous)
-            yield
+            try:
+                yield
+            except Exception:
+                await self._abort_if_closed()
+                raise
+            await self._abort_if_closed()
         finally:
             if previous is not None and not previous.done():
                 # cancelled while waiting: the next operations still wait for the previous one
                 previous.add_done_callback(lambda _: self._end(done))
             else:
                 self._end(done)
+
+    async def _abort_if_closed(self) -> None:
+        if self._closed():
+            # the specification aborts: it never settles
+            await asyncio.get_running_loop().create_future()
 
     def _end(self, done: asyncio.Future[None]) -> None:
         done.set_result(None)

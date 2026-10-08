@@ -432,17 +432,19 @@ RTCBundlePolicyValue = Literal['balanced', 'max-compat', 'max-bundle']
 
 
 class RTCRtcpMuxPolicy(_StrEnum):
-    """Whether RTCP shares the transport of RTP. Only sharing is supported.
+    """Whether RTCP shares the transport of RTP.
 
     See :mdn:`RTCPeerConnection/RTCPeerConnection`.
     """
 
+    #: RTCP may use its own transport; removed from the specification
+    negotiate = 'negotiate'
     #: RTCP shares the transport of RTP, and a remote description without RTCP multiplexing fails
     require = 'require'
 
 
 #: The string values of :obj:`RTCRtcpMuxPolicy`, which parameters accept in place of its members
-RTCRtcpMuxPolicyValue = Literal['require']
+RTCRtcpMuxPolicyValue = Literal['negotiate', 'require']
 
 
 class RTCRtpHeaderEncryptionPolicy(_StrEnum):

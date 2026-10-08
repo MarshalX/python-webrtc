@@ -10,8 +10,8 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import dataclasses
+import re
 import time
 from typing import TYPE_CHECKING
 
@@ -114,16 +114,47 @@ def test_ice_server_of_ipv6_address(create_pc: CreatePC) -> None:
     create_pc(webrtc.RTCConfiguration(ice_servers=[webrtc.RTCIceServer('stun:[2001:db8::1]:3478')]))
 
 
-def test_oauth_ice_server() -> None:
-    """An OAuth credential is an RTCOAuthCredential, which libwebrtc doesn't support."""
-    server = webrtc.RTCIceServer('turns:turn.example.org', 'user', 'cred', credential_type='oauth')
-    with pytest.raises(webrtc.InvalidAccessError):
-        webrtc.RTCPeerConnection(webrtc.RTCConfiguration(ice_servers=[server]))
-    server.credential = webrtc.RTCOAuthCredential(
-        mac_key=base64.b64encode(b'key').decode(), access_token=base64.b64encode(b'token').decode()
+def test_ice_server_credential_type_is_ignored(create_pc: CreatePC) -> None:
+    """A credentialType is ignored, so an 'oauth' one with a password is a password."""
+    server = webrtc.RTCIceServer.from_json({
+        'urls': 'turns:turn.example.org',
+        'username': 'user',
+        'credential': 'cred',
+        'credentialType': 'oauth',
+    })
+    assert server == webrtc.RTCIceServer('turns:turn.example.org', 'user', 'cred')
+    assert create_pc(webrtc.RTCConfiguration(ice_servers=[server])).get_configuration().ice_servers[0].credential == (
+        'cred'
     )
-    with pytest.raises(webrtc.NotSupportedError):
-        webrtc.RTCPeerConnection(webrtc.RTCConfiguration(ice_servers=[server]))
+
+
+def test_rtcp_mux_policy_negotiate(create_pc: CreatePC) -> None:
+    """The policy may be 'negotiate', which is deprecated, and can't be changed."""
+    with pytest.warns(DeprecationWarning, match='negotiate'):
+        pc = create_pc(webrtc.RTCConfiguration(rtcp_mux_policy='negotiate'))
+    assert pc.get_configuration().rtcp_mux_policy == webrtc.RTCRtcpMuxPolicy.negotiate
+    with pytest.raises(webrtc.InvalidModificationError):
+        pc.set_configuration(webrtc.RTCConfiguration(rtcp_mux_policy=webrtc.RTCRtcpMuxPolicy.require))
+
+
+@pytest.mark.asyncio
+@pytest.mark.filterwarnings('ignore::DeprecationWarning')
+@pytest.mark.parametrize('policy', list(webrtc.RTCRtcpMuxPolicy))
+async def test_offer_without_rtcp_mux(create_pc: CreatePC, policy: webrtc.RTCRtcpMuxPolicy) -> None:
+    """An offer without RTCP multiplexing is only accepted with the 'negotiate' policy."""
+    caller = create_pc()
+    caller.add_transceiver(webrtc.MediaType.audio)
+    offer = await caller.create_offer()
+    offer.sdp = re.sub(r'a=(rtcp-mux|group:BUNDLE .*)\r\n', '', offer.sdp)
+    callee = create_pc(webrtc.RTCConfiguration(rtcp_mux_policy=policy))
+    if policy == webrtc.RTCRtcpMuxPolicy.require:
+        with pytest.raises(webrtc.InvalidAccessError):
+            await callee.set_remote_description(offer)
+    else:
+        await callee.set_remote_description(offer)
+        remote = callee.remote_description
+        assert remote is not None
+        assert 'a=rtcp-mux\r\n' not in remote.sdp
 
 
 def test_configuration_from_json() -> None:
@@ -131,13 +162,13 @@ def test_configuration_from_json() -> None:
     configuration = webrtc.RTCConfiguration.from_json({
         'iceServers': [
             {'urls': 'stun:stun.example.org'},
-            {'urls': 'turns:turn.example.org', 'credential': {'macKey': 'a2V5', 'accessToken': 'dG9rZW4='}},
+            {'urls': ['turns:turn.example.org'], 'username': 'user', 'credential': 'pass'},
         ],
         'iceTransportPolicy': 'relay',
     })
     stun, turn = configuration.ice_servers
     assert stun == webrtc.RTCIceServer('stun:stun.example.org')
-    assert turn.credential == webrtc.RTCOAuthCredential('a2V5', 'dG9rZW4=')
+    assert turn == webrtc.RTCIceServer(['turns:turn.example.org'], 'user', 'pass')
     assert configuration.ice_transport_policy == 'relay'
 
 
@@ -296,11 +327,38 @@ def test_ice_candidate_parsing() -> None:
 
 def test_invalid_ice_candidate() -> None:
     """An invalid candidate string isn't validated, nor parsed, but a candidate needs an m-line."""
-    invalid = webrtc.RTCIceCandidate('a=candidate:1 1 udp 1 1.2.3.4 5 typ host', sdp_m_line_index=0)
+    invalid = webrtc.RTCIceCandidate(' candidate:1 1 udp 1 1.2.3.4 5 typ host', sdp_m_line_index=0)
     assert invalid.foundation is None
     assert invalid.port is None
     with pytest.raises(TypeError):
         webrtc.RTCIceCandidate('candidate:1 1 udp 1 1.2.3.4 5 typ host')
+
+
+@pytest.mark.parametrize('line_break', ['', '\n', '\r\n'])
+def test_ice_candidate_of_an_sdp_line(line_break: str) -> None:
+    """A candidate prefixed with "a=" parses, with one line break at most."""
+    candidate = webrtc.RTCIceCandidate(f'a=candidate:1 1 udp 1 1.2.3.4 5 typ host{line_break}', sdp_mid='0')
+    assert candidate.foundation == '1'
+    assert candidate.port == 5
+
+
+def test_ice_candidate_of_two_lines() -> None:
+    """A candidate of more than one line doesn't parse."""
+    candidate = webrtc.RTCIceCandidate('candidate:1 1 udp 1 1.2.3.4 5 typ host\r\nx\r\n', sdp_mid='0')
+    assert candidate.foundation is None
+
+
+@pytest.mark.asyncio
+async def test_add_ice_candidate_of_an_sdp_line(create_pc: CreatePC) -> None:
+    """A candidate prefixed with "a=" is added."""
+    caller, callee = create_pc(), create_pc()
+    caller.add_transceiver(webrtc.MediaType.audio)
+    await callee.set_remote_description(await caller.create_offer())
+    candidate = 'candidate:1 1 udp 2122260223 192.0.2.1 50000 typ host'
+    await callee.add_ice_candidate(webrtc.RTCIceCandidateInit(f'a={candidate}', sdp_mid='0'))
+    remote = callee.remote_description
+    assert remote is not None
+    assert f'a={candidate}' in remote.sdp
 
 
 def test_ice_candidate_ufrag_characters() -> None:
@@ -362,15 +420,15 @@ async def test_description_errors(pc: webrtc.RTCPeerConnection) -> None:
 
 @pytest.mark.asyncio
 async def test_created_descriptions(pc: webrtc.RTCPeerConnection) -> None:
-    """Only the descriptions the connection created can be set as local ones, unmodified."""
+    """Created descriptions can be set as local ones, but not with another fingerprint."""
     pc.add_transceiver(webrtc.MediaType.audio)
     offer = await pc.create_offer()
     assert isinstance(offer, webrtc.RTCSessionDescriptionInit)
     assert offer.to_json() == {'type': 'offer', 'sdp': offer.sdp}
+    fingerprint = next(line for line in offer.sdp.split('\r\n') if line.startswith('a=fingerprint:'))
+    other = 'a=fingerprint:sha-256 ' + ':'.join(['00'] * 32)
     with pytest.raises(webrtc.InvalidModificationError):
-        await pc.set_local_description(
-            webrtc.RTCSessionDescriptionInit('offer', offer.sdp.replace('a=mid:0', 'a=mid:1'))
-        )
+        await pc.set_local_description(webrtc.RTCSessionDescriptionInit('offer', offer.sdp.replace(fingerprint, other)))
     await pc.set_local_description(offer)
     # not compared by identity: gathered candidates change the description (and its object) between reads
     assert pc.pending_local_description is not None

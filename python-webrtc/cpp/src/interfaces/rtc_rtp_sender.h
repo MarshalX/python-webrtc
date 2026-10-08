@@ -66,12 +66,14 @@ namespace python_webrtc {
     void SetParameters(std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
                        const webrtc::RtpParameters &parameters);
 
-    // The parameters getParameters returned last, which setParameters takes until they expire (Python expires them
-    // once the task that got them ends, as the specification requires)
+    // settable until a setParameters succeeds
     std::optional<webrtc::RtpParameters> GetLastParameters();
 
-    // the last parameters, or only the ones with this transaction id
+    // the next getParameters returns new ones, if the transaction id matches (or none is given)
     void ExpireParameters(const std::optional<std::string> &transactionId);
+
+    // setParameters needs a new getParameters
+    void ClearParameters();
 
     // false if the track can't be used, like one of another kind
     bool ReplaceTrack(std::optional<std::reference_wrapper<MediaStreamTrack>> track);
@@ -109,6 +111,7 @@ namespace python_webrtc {
     std::shared_ptr<RTCDtlsTransport> _transport;
     std::shared_ptr<RTCDTMFSender> _dtmf;
     std::optional<webrtc::RtpParameters> _lastParameters;
+    bool _lastParametersExpired = false;
     TransformSlot _transform;
   };
 

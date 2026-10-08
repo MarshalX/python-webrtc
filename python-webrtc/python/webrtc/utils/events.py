@@ -112,6 +112,15 @@ class _Listeners:
             if not loop.is_closed():
                 TaskQueue.of(loop).post(self.deliver, loop, name, args)
 
+    def dispatch(self, name: str, args: tuple[object, ...]) -> None:
+        """Delivers an event on the running loop now, and posts it to the other loops of its handlers."""
+        running = asyncio.get_running_loop()
+        self.deliver(running, name, args)
+        registrations: dict[str, list[_Registration]] = self.__dict__.get('registrations', {})
+        for loop in {r.loop for r in registrations.get(name, ()) if r.loop is not running}:
+            if not loop.is_closed():
+                TaskQueue.of(loop).post(self.deliver, loop, name, args)
+
     def ensure_primary_loop(self) -> asyncio.AbstractEventLoop | None:
         """Makes the running loop the primary one if there's none yet. Returns the running loop, if any."""
         loop = _running_loop()
@@ -266,7 +275,7 @@ class EventTarget(Generic[_N_contra]):
         """Delivers an event to the handlers on the running loop right away, from an event being delivered."""
         listeners = self._listeners()
         if listeners is not None:
-            listeners.deliver(asyncio.get_running_loop(), name, args)
+            listeners.dispatch(name, args)
 
     def _on_event(self, name: str, *args: object) -> None:
         """Called for every event on the loop of the first handler, before the handlers of the event.

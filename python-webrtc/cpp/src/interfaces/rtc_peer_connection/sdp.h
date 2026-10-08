@@ -12,6 +12,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <api/candidate.h>
@@ -31,6 +32,9 @@ namespace python_webrtc {
 
   std::unique_ptr<webrtc::SessionDescriptionInterface> parseDescription(const RTCSessionDescriptionInit &init,
                                                                         std::optional<RTCCallbackException> &error);
+
+  // the only change to a created description browsers reject
+  bool fingerprintChanged(std::string_view created, std::string_view sdp);
 
   // End-of-candidates candidates of a local description, one per transport (the first media section of each)
   std::vector<IceCandidateInit> endOfCandidates(const webrtc::SessionDescriptionInterface *description);

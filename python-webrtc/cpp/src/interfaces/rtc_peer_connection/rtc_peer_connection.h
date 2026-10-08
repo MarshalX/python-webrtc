@@ -80,7 +80,7 @@ namespace python_webrtc {
     void CreateAnswer(std::function<void(RTCSessionDescription)> &onSuccess,
                       std::function<void(RTCCallbackException)> &onFailure);
 
-    // the last description createOffer or createAnswer made, which are the only ones setLocalDescription takes
+    // for the fingerprint check of setLocalDescription
     void SaveCreatedDescription(const RTCSessionDescriptionInit &description);
 
     void SetLocalDescription(std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
@@ -365,6 +365,21 @@ namespace python_webrtc {
     // the transports of a closed connection fire no events
     void MuteTransports();
 
+    // with the ICE connection state it changes, in one task; network thread
+    template <typename T, typename State>
+    void EmitTransportState(const std::shared_ptr<T> &transport, State previous, State state);
+
+    // false if the connection or the transport is gone
+    template <typename T, typename State>
+    static bool EmitTransportStateOf(const std::weak_ptr<RTCPeerConnection> &connection,
+                                     const std::weak_ptr<T> &transport, State previous, State state);
+
+    // network thread
+    void EmitIceConnectionState();
+
+    // the new state, if it changed
+    std::optional<IceConnectionState> UpdateIceConnectionState(bool listening);
+
     // the roles of the ICE transports are known once an answer is applied, on the signaling thread
     void MarkIceRolesKnown();
 
@@ -410,8 +425,9 @@ namespace python_webrtc {
     Surfaced<PeerConnectionState> _surfacedConnectionState;
     // the states libwebrtc reported last, on the signaling thread
     SignalingState _lastSignalingState = SignalingState::kStable;
-    IceConnectionState _lastIceConnectionState = IceConnectionState::kIceConnectionNew;
     IceGatheringState _lastIceGatheringState = IceGatheringState::kIceGatheringNew;
+    std::mutex _connectionStatesMutex;
+    IceConnectionState _lastIceConnectionState = IceConnectionState::kIceConnectionNew;
     PeerConnectionState _lastConnectionState = PeerConnectionState::kNew;
 
     std::mutex _descriptionsMutex;
@@ -433,6 +449,8 @@ namespace python_webrtc {
     const webrtc::SessionDescriptionInterface *_remoteEndOfCandidatesDescription = nullptr;
 
     HeldEvents _heldGathering;
+    // held while a description is set
+    HeldEvents _heldTransportStates;
 
     std::mutex _remoteStreamsMutex;
     std::map<const void *, std::vector<std::string>> _remoteStreamsBefore;
@@ -444,6 +462,8 @@ namespace python_webrtc {
     Wrappers<RTCRtpReceiver, webrtc::RtpReceiverInterface> _receivers;
     std::shared_ptr<RTCSctpTransport> _sctp;
     std::vector<std::shared_ptr<RTCDtlsTransport>> _dtlsTransports;
+    // in use at the last stable state; signaling thread
+    std::vector<std::weak_ptr<RTCDtlsTransport>> _negotiatedTransports;
     // kept until closed, so their handlers are
     Wrappers<RTCDataChannel, webrtc::DataChannelInterface> _channels;
   };
