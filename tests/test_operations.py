@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Callable, TypeVar
+from typing import TYPE_CHECKING, Callable
 
 import pytest
 
@@ -20,8 +20,6 @@ from webrtc.utils.operations import OperationsChain
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
-
-_T = TypeVar('_T')
 
 
 @pytest.mark.asyncio
@@ -93,27 +91,20 @@ async def pending_at_close(name: str) -> asyncio.Future[object]:
     return task
 
 
-async def cancel(task: asyncio.Future[_T]) -> None:
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize('name', OPERATIONS)
-async def test_operation_pending_at_close_never_completes(name: str) -> None:
-    """An operation pending at close never settles."""
+async def test_operation_pending_at_close_is_cancelled(name: str) -> None:
+    """An operation pending at close neither returns nor raises an error: it's cancelled."""
     task = await pending_at_close(name)
 
-    done, _ = await asyncio.wait({task}, timeout=QUIET_PERIOD)
+    await asyncio.wait({task}, timeout=QUIET_PERIOD)
 
-    assert len(done) == 0
-    await cancel(task)
+    assert task.cancelled()
 
 
 @pytest.mark.asyncio
 async def test_operations_after_close_do_not_wait_for_pending_ones() -> None:
-    """Operations chained before close never settle; ones after it fail right away."""
+    """Operations chained before close are cancelled; ones after it fail right away."""
     pc = webrtc.RTCPeerConnection()
     pending = asyncio.ensure_future(pc.set_local_description())
     queued = asyncio.ensure_future(pc.create_offer())
@@ -122,16 +113,15 @@ async def test_operations_after_close_do_not_wait_for_pending_ones() -> None:
 
     with pytest.raises(webrtc.InvalidStateError):
         await asyncio.wait_for(pc.create_offer(), QUIET_PERIOD)
-    done, _ = await asyncio.wait({pending, queued}, timeout=QUIET_PERIOD)
+    await asyncio.wait({pending, queued}, timeout=QUIET_PERIOD)
 
-    assert len(done) == 0
-    await cancel(pending)
-    await cancel(queued)
+    assert pending.cancelled()
+    assert queued.cancelled()
 
 
 @isolated
 def test_pending_operation_does_not_block_exit() -> None:
-    """asyncio.run() cancels an operation pending at close, and the interpreter exits."""
+    """An operation pending at close doesn't keep asyncio.run() from returning."""
     task = asyncio.run(pending_at_close('set_remote_description'))
 
     assert task.cancelled()

@@ -246,6 +246,14 @@ async def _guard_async(awaitable: Callable[[], Awaitable[object]]) -> Result:
         return {'ok': to_js(await awaitable())}
     except BRIDGED_ERRORS as e:
         return _error(e)
+    except asyncio.CancelledError:
+        if sys.version_info >= (3, 11):
+            task = asyncio.current_task()
+            if task is not None and not task.cancelling():
+                # an operation its connection's close aborted: a promise that never settles
+                never: asyncio.Future[Result] = asyncio.get_running_loop().create_future()
+                return await never
+        raise
 
 
 def _start(coroutine: Coroutine[object, object, Result]) -> asyncio.Future[Result]:

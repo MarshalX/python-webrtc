@@ -124,7 +124,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         datachannel (:obj:`webrtc.RTCDataChannelEvent`): The remote peer created a data channel.
 
     A closed connection emits no events, including the ones queued before :meth:`close`, and its pending operations
-    never return or raise. Leaving an ``async with`` block closes the connection.
+    are cancelled. Leaving an ``async with`` block closes the connection.
 
     Args:
         configuration (:obj:`webrtc.RTCConfiguration`, optional): The configuration of the connection.

@@ -98,4 +98,4 @@ for stats in report.values():
 {meth}`~webrtc.RTCPeerConnection.close` stops the transports and the media at once. A closed connection can't be
 reused, so create a new one to connect again.
 
-Calls pending when the connection closes never return or raise; bound them with {func}`asyncio.wait_for`.
+Calls pending when the connection closes are cancelled: they raise {obj}`asyncio.CancelledError`.

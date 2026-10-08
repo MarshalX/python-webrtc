@@ -29,7 +29,7 @@ class OperationsChain:
     """Runs the operations of a connection one after another, as the specification requires.
 
     With none running, an operation starts right away, so its checks fail in the task that called it. After close, a
-    pending operation never settles, and a new one doesn't wait for it.
+    pending operation is cancelled, and a new one doesn't wait for it.
 
     Args:
         on_empty (:obj:`callable`): Called when the last operation ends.
@@ -64,9 +64,9 @@ class OperationsChain:
             try:
                 yield
             except Exception:
-                await self._abort_if_closed()
+                self._cancel_if_closed()
                 raise
-            await self._abort_if_closed()
+            self._cancel_if_closed()
         finally:
             if previous is not None and not previous.done():
                 # cancelled while waiting: the next operations still wait for the previous one
@@ -74,10 +74,10 @@ class OperationsChain:
             else:
                 self._end(done)
 
-    async def _abort_if_closed(self) -> None:
+    def _cancel_if_closed(self) -> None:
         if self._closed():
-            # the specification aborts: it never settles
-            await asyncio.get_running_loop().create_future()
+            # the specification aborts its steps, it neither resolves nor rejects
+            raise asyncio.CancelledError
 
     def _end(self, done: asyncio.Future[None]) -> None:
         done.set_result(None)
