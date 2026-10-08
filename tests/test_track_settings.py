@@ -15,7 +15,8 @@ import pytest
 from typing_extensions import TypedDict
 
 import webrtc
-from tests.helpers import capture_mode, connect_track, run_isolated, wait_until
+from tests.helpers import capture_mode, connect_track, wait_until
+from tests.isolation import isolated
 
 C = webrtc.MediaTrackConstraints
 
@@ -204,35 +205,32 @@ def test_get_user_media_rejects_what_the_camera_cannot_do() -> None:
         )
 
 
+async def _cameras_of_impossible_sizes() -> list[tuple[int, int, float] | None]:
+    cameras: list[tuple[int, int, float] | None] = []
+    track = (await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=True))).get_tracks()[0]
+    for impossible in (
+        C(width=-1),
+        C(height=webrtc.ConstrainULongRange(ideal=-5)),
+        C(width=10**6, height=webrtc.ConstrainULongRange(ideal=10**6)),
+        C(width=0, height=0),
+    ):
+        await track.apply_constraints(impossible)
+        cameras.append(track._native_obj._camera())
+    track.stop()
+    constraints = webrtc.MediaStreamConstraints(video=C(width=0, height=0))
+    (track,) = (await webrtc.media_devices.get_user_media(constraints)).get_tracks()
+    cameras.append(track._native_obj._camera())
+    return cameras
+
+
+@isolated
 def test_camera_of_impossible_sizes() -> None:
     """A camera of no size, a negative one or a huge one aborted the process."""
-    output = run_isolated(
-        """
-        import asyncio
-        import webrtc
+    cameras = asyncio.run(_cameras_of_impossible_sizes())
 
-        async def main():
-            constraints = webrtc.MediaStreamConstraints(video=True)
-            track = (await webrtc.media_devices.get_user_media(constraints)).get_tracks()[0]
-            C, Range = webrtc.MediaTrackConstraints, webrtc.ConstrainULongRange
-            for negative in (C(width=-1), C(height=Range(ideal=-5))):
-                await track.apply_constraints(negative)
-                print(track._native_obj._camera())
-            await track.apply_constraints(C(width=10**6, height=Range(ideal=10**6)))
-            print(track._native_obj._camera())
-            await track.apply_constraints(C(width=0, height=0))
-            print(track._native_obj._camera())
-            track.stop()
-            constraints = webrtc.MediaStreamConstraints(video=webrtc.MediaTrackConstraints(width=0, height=0))
-            (track,) = (await webrtc.media_devices.get_user_media(constraints)).get_tracks()
-            print(track._native_obj._camera())
-
-        asyncio.run(main())
-        """
-    )
-    assert output.count('(4096, 4096, 30.0)') == 1, output
-    assert output.count('(1, 480, 30.0)') == 1, output
-    assert output.count('(1, 1, 30.0)') == 3, output
+    assert cameras.count((4096, 4096, 30.0)) == 1, cameras
+    assert cameras.count((1, 480, 30.0)) == 1, cameras
+    assert cameras.count((1, 1, 30.0)) == 3, cameras
 
 
 def test_constraints_from_json() -> None:

@@ -27,7 +27,8 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import QUIET_PERIOD, connect, exchange_offer_answer, run_isolated, wait_for_event
+from tests.helpers import QUIET_PERIOD, connect, exchange_offer_answer, wait_for_event
+from tests.isolation import isolated
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
@@ -70,14 +71,14 @@ def peer_connection_cycle() -> None:
 
 
 @pytest.fixture
-def isolated() -> Iterator[None]:
+def collected() -> Iterator[None]:
     """Nothing created by earlier tests may keep the default factory alive."""
     collect()
     yield
     collect()
 
 
-pytestmark = pytest.mark.usefixtures('isolated')
+pytestmark = pytest.mark.usefixtures('collected')
 
 
 def test_peer_connection_cycles_do_not_leak_factories() -> None:
@@ -751,26 +752,23 @@ def test_dispose_while_factories_are_alive() -> None:
         wrtc.PeerConnectionFactory.dispose()
     pc.close()
 
-    output = run_isolated(
-        """
-        import asyncio
-        import wrtc
-        import webrtc
-        from tests.helpers import connect
+    assert _connects_after_dispose()
 
-        async def main():
-            wrtc.PeerConnectionFactory.dispose()
-            caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
-            caller.create_data_channel('dispose')
-            await connect(caller, callee)
-            print(caller.connection_state)
-            caller.close()
-            callee.close()
 
-        asyncio.run(main())
-        """
-    )
-    assert 'connected' in output
+async def _connect() -> bool:
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    caller.create_data_channel('dispose')
+    await connect(caller, callee)
+    connected = caller.connection_state == webrtc.RTCPeerConnectionState.connected
+    caller.close()
+    callee.close()
+    return connected
+
+
+@isolated
+def _connects_after_dispose() -> bool:
+    wrtc.PeerConnectionFactory.dispose()
+    return asyncio.run(_connect())
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,8 @@ import asyncio
 import pytest
 
 import webrtc
-from tests.helpers import isolated, wait_until
+from tests.helpers import wait_until
+from tests.isolation import isolated
 
 
 async def _candidate_addresses() -> set[str]:

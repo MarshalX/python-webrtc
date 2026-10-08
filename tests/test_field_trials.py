@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 import webrtc
-from tests.helpers import ROOT, UdpRelay, connect, isolated, wait_for_event, wait_until
+from tests.helpers import ROOT, UdpRelay, connect, wait_for_event, wait_until
+from tests.isolation import isolated
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection, PipeConnection
