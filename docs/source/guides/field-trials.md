@@ -55,5 +55,5 @@ The server has to know the `id` of the channel, so the signalling sends it along
 [OpenAI's WARP guide](https://developers.openai.com/api/docs/guides/realtime-webrtc-warp) describes. The
 [GPT-Live example](../examples/openai_live.md) connects this way.
 
-With both trials, a data channel between two python-webrtc peers opens 50% sooner, and a GPT-Live session starts 51%
+With both trials, a data channel between two python-webrtc peers opens 50% sooner, and a GPT-Live session starts 62%
 sooner once the API has answered.

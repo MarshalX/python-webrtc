@@ -55,6 +55,13 @@ The readable, writable and transform streams of media processing.
 Enabling and disabling H.264.
 :::
 
+:::{grid-item-card} {octicon}`sync;1em;sd-mr-1` Loopback
+:link: loopback
+:link-type: doc
+
+Candidates on the loopback interface, for peers on one machine.
+:::
+
 ::::
 
 ```{toctree}
@@ -67,5 +74,6 @@ exceptions
 events
 streams
 openh264
+loopback
 base
 ```

@@ -50,10 +50,13 @@ namespace python_webrtc {
 
     webrtc::Thread *workerThread() { return _workerThread.get(); }
 
-    // "Name/Group/" pairs, fixed once the first factory is created
+    // before the first factory only
     static void SetFieldTrials(const std::string &trials);
+    static void AllowLoopback();
 
     [[nodiscard]] const FieldTrials &fieldTrials() const { return _fieldTrials; }
+
+    [[nodiscard]] int networkIgnoreMask() const { return _networkIgnoreMask; }
 
   private:
     std::unique_ptr<webrtc::Thread> _signalingThread;
@@ -62,12 +65,14 @@ namespace python_webrtc {
     // of the process the factory was created in (see forks)
     const int _generation;
     const FieldTrials _fieldTrials;
+    const int _networkIgnoreMask;
 
     static void Destroy(PeerConnectionFactory *factory);
 
     // _mutex held
     static std::shared_ptr<PeerConnectionFactory> CreateLocked();
     static void InitializeSSL();
+    static void ThrowIfStarted(const std::string &what);
 
     static std::weak_ptr<PeerConnectionFactory> _default;
     static std::mutex _mutex;
@@ -75,7 +80,8 @@ namespace python_webrtc {
     static std::atomic<int> _alive;
     static bool _sslInitialized;
     static FieldTrials _trials;
-    static bool _trialsFrozen;
+    static bool _loopbackAllowed;
+    static bool _started;
 
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> _factory;
     webrtc::scoped_refptr<webrtc::AudioDeviceModule> _audioDeviceModule;

@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Field trials, and the SNAP and SPED trials of WARP. Trials are fixed per process, so each test runs in its own."""
+"""Field trials, and WARP's SNAP and SPED."""
 
 from __future__ import annotations
 
@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 
     from typing_extensions import TypeAlias
 
-    # what Pipe() returns, by platform
     Pipe: TypeAlias = Connection | PipeConnection
 
 SNAP = {'WebRTC-Sctp-Snap': 'Enabled'}
@@ -137,7 +136,7 @@ def test_malformed_environment_variable(value: str) -> None:
         text=True,
         timeout=60,
         cwd=ROOT,
-        env={**os.environ, 'WRTC_FIELD_TRIALS': value},
+        env={**os.environ, 'WRTC_FIELD_TRIALS': value, 'PYTHON_COLORS': '0'},
         check=False,
     )
 
@@ -157,7 +156,7 @@ async def _tls_version() -> str | None:
 
 @isolated
 def test_dtls_13_by_default() -> None:
-    # the version number of DTLS 1.3 (RFC 9147)
+    # DTLS 1.3
     assert asyncio.run(_tls_version()) == 'FEFC'
 
 
@@ -189,7 +188,6 @@ async def _gathered(pc: webrtc.RTCPeerConnection) -> str:
 
 
 async def _talk(pipe: Pipe, *, offerer: bool) -> None:
-    """Negotiates through the pipe, then sends whether both channels opened and whether SNAP was negotiated."""
     pc = webrtc.RTCPeerConnection()
     channels = [pc.create_data_channel('negotiated', webrtc.RTCDataChannelInit(negotiated=True, id=4))]
     if offerer:
@@ -211,7 +209,6 @@ async def _talk(pipe: Pipe, *, offerer: bool) -> None:
             await wait_for_event(channel, 'open')
     assert pc.remote_description is not None
     pipe.send(('a=sctp-init:' in pc.remote_description.sdp, [c.ready_state for c in channels]))
-    # stays connected until the other peer is done
     await asyncio.to_thread(pipe.recv)
     pc.close()
 
@@ -227,7 +224,6 @@ def _receive(pipe: Pipe) -> object:
 
 
 def _interop(offerer_trials: dict[str, str], answerer_trials: dict[str, str]) -> list[object]:
-    """Connects two peers with their own trials, each in a process of its own; returns what :func:`_talk` sent."""
     pipes: list[Pipe] = []
     peers: list[multiprocessing.context.SpawnProcess] = []
     for trials, offerer in ((offerer_trials, True), (answerer_trials, False)):
@@ -257,7 +253,6 @@ def _interop(offerer_trials: dict[str, str], answerer_trials: dict[str, str]) ->
 def test_interop(trials: dict[str, str], side: str) -> None:
     offerer, answerer = _interop(trials if side != 'answerer' else {}, trials if side != 'offerer' else {})
 
-    # a peer without a trial does the usual handshake instead, and the channels open either way
     snap = 'WebRTC-Sctp-Snap' in trials
     assert offerer == (snap and side == 'both', ['open', 'open'])
     assert answerer == (snap and side != 'answerer', ['open', 'open'])
@@ -286,5 +281,4 @@ def test_sped_carries_the_handshake_in_stun() -> None:
     without = _handshakes_with({})
 
     assert without != set()
-    # a handshake message rides in a STUN message instead of a packet of its own
     assert _handshakes_with(SPED) < without

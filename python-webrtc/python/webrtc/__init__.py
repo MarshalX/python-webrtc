@@ -137,6 +137,7 @@ from .interfaces.track_generator import (
     MediaStreamTrackGeneratorInit,
     VideoTrackGenerator,
 )
+from .loopback import allow_loopback, allowLoopback
 from .models.audio_data import AudioData, AudioDataCopyToOptions, AudioDataInit
 from .models.blob import Blob, BlobPropertyBag
 from .models.events import (
@@ -537,6 +538,8 @@ __all__ = [
     'WritableStream',
     'WritableStreamDefaultController',
     'WritableStreamDefaultWriter',
+    'allowLoopback',
+    'allow_loopback',
     'fieldTrials',
     'field_trials',
     'mediaDevices',
