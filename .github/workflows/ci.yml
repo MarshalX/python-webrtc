@@ -45,12 +45,19 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: uv build --sdist
       - uses: actions/upload-artifact@v7
+        id: upload
+        continue-on-error: true
         with:
           name: sdist
           path: dist/*.tar.gz
+      - uses: actions/upload-artifact@v7
+        if: steps.upload.outcome == 'failure'
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          overwrite: true
 
   wheels:
-    needs: sdist
     name: wheels (${{ matrix.os }}, ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -62,27 +69,33 @@ jobs:
         python: ${{ fromJSON(github.event_name == 'pull_request' && '["cp39","cp314"]' || '["cp39","cp310","cp311","cp312","cp313","cp314"]') }}
     env:
       WRTC_CACHE_DIR: ${{ github.workspace }}/.wrtc-cache
+      WRTC_ARCHIVE_DIR: ${{ matrix.os == 'windows-latest' && format('{0}/.wrtc-cache/archives', github.workspace) || '' }}
       UV_HTTP_RETRIES: 10
       CIBW_ENVIRONMENT_PASS_LINUX: UV_HTTP_RETRIES
     steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: sdist
-      - name: Locate sdist
-        shell: bash
-        run: echo "SDIST=$(ls *.tar.gz)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
-        if: runner.os != 'Windows'
         with:
           path: .ci-src
-          sparse-checkout: cmake
-      # not on Windows: the unstripped lib restores slower than it unpacks
+      - uses: astral-sh/setup-uv@v7
+      # not downloaded: the artifact service fails now and then
+      - name: Build sdist
+        shell: bash
+        run: |
+          uv build --sdist --out-dir sdist .ci-src
+          echo "SDIST=$(ls sdist/*.tar.gz)" >> "$GITHUB_ENV"
       - uses: actions/cache@v6
         if: runner.os != 'Windows'
         with:
           path: .wrtc-cache
           key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.ci-src/cmake/libwebrtc.cmake', '.ci-src/cmake/libcxx/*.sha256', '.ci-src/cmake/openh264.*') }}
-      - uses: astral-sh/setup-uv@v7
+      # Windows: the unstripped lib restores slower than it unpacks
+      - uses: actions/cache@v6
+        if: runner.os == 'Windows'
+        with:
+          path: |
+            .wrtc-cache/archives
+            .wrtc-cache/openh264-*
+          key: libwebrtc-archive-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.ci-src/cmake/libwebrtc.cmake', '.ci-src/cmake/libcxx/*.sha256', '.ci-src/cmake/openh264.*') }}
       - uses: pypa/cibuildwheel@v4.2.1
         env:
           CIBW_BUILD: ${{ matrix.python }}-*
@@ -90,9 +103,17 @@ jobs:
         with:
           package-dir: ${{ env.SDIST }}
       - uses: actions/upload-artifact@v7
+        id: upload
+        continue-on-error: true
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.python }}
           path: wheelhouse/*.whl
+      - uses: actions/upload-artifact@v7
+        if: steps.upload.outcome == 'failure'
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.python }}
+          path: wheelhouse/*.whl
+          overwrite: true
 
   sanitizers:
     name: sanitizers (ASan + UBSan, ${{ matrix.arch }})
@@ -108,6 +129,12 @@ jobs:
           - { arch: aarch64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v7
+      # github.workspace is the host's path
+      - run: echo "WRTC_CACHE_DIR=$GITHUB_WORKSPACE/.wrtc-cache" >> "$GITHUB_ENV"
+      - uses: actions/cache@v6
+        with:
+          path: .wrtc-cache
+          key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/libwebrtc.cmake', 'cmake/libcxx/*.sha256', 'cmake/openh264.*') }}
       - run: .github/scripts/sanitizers.sh
       # the collector running on libwebrtc threads, whenever they emit (see tests/conftest.py)
       - run: .github/scripts/sanitizers.sh --gc-on-emit
@@ -118,8 +145,14 @@ jobs:
     name: sanitizers (ASan + UBSan, macOS)
     runs-on: macos-15
     timeout-minutes: 60
+    env:
+      WRTC_CACHE_DIR: ${{ github.workspace }}/.wrtc-cache
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: .wrtc-cache
+          key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/libwebrtc.cmake', 'cmake/libcxx/*.sha256', 'cmake/openh264.*') }}
       - uses: astral-sh/setup-uv@v7
       - run: .github/scripts/sanitizers-macos.sh
       - run: .github/scripts/sanitizers-macos.sh --gc-on-emit
