@@ -377,6 +377,9 @@ namespace python_webrtc {
     // network thread
     void EmitIceConnectionState();
 
+    // keeps Python off the network thread, which carries the media; deliveries stay in order
+    void DeliverOnSignalingThread(std::function<void()> deliver);
+
     // the new state, if it changed
     std::optional<IceConnectionState> UpdateIceConnectionState(bool listening);
 

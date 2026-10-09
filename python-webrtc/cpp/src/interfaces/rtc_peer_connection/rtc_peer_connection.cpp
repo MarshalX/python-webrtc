@@ -352,13 +352,15 @@ namespace python_webrtc {
     // with the connection only if Python listens to both
     const bool dispatch = listening && transport->HasListeners();
     transport->StateChanged(listening || transport->IsTracked(), previous);
-    if (!dispatch) {
-      transport->EmitStateChange(state);
-    }
     auto iceConnectionState = UpdateIceConnectionState(listening);
-    _heldTransportStates.Emit([this, transport, state, dispatch, iceConnectionState]() {
-      Emit("_transportstatechange", transport, std::optional<State>(state), dispatch, iceConnectionState,
-           std::optional<PeerConnectionState>());
+    DeliverOnSignalingThread([this, transport, state, dispatch, iceConnectionState]() {
+      if (!dispatch) {
+        transport->EmitStateChange(state);
+      }
+      _heldTransportStates.Emit([this, transport, state, dispatch, iceConnectionState]() {
+        Emit("_transportstatechange", transport, std::optional<State>(state), dispatch, iceConnectionState,
+             std::optional<PeerConnectionState>());
+      });
     });
   }
 
@@ -367,11 +369,23 @@ namespace python_webrtc {
       return;
     }
     if (auto iceConnectionState = UpdateIceConnectionState(HasListeners())) {
-      _heldTransportStates.Emit([this, iceConnectionState]() {
-        Emit("_transportstatechange", std::shared_ptr<RTCIceTransport>(), std::optional<webrtc::IceTransportState>(),
-             false, iceConnectionState, std::optional<PeerConnectionState>());
+      DeliverOnSignalingThread([this, iceConnectionState]() {
+        _heldTransportStates.Emit([this, iceConnectionState]() {
+          Emit("_transportstatechange", std::shared_ptr<RTCIceTransport>(), std::optional<webrtc::IceTransportState>(),
+               false, iceConnectionState, std::optional<PeerConnectionState>());
+        });
       });
     }
+  }
+
+  void RTCPeerConnection::DeliverOnSignalingThread(std::function<void()> deliver) {
+    _factory->signalingThread()->PostTask([weak = weak_from_this(), deliver = std::move(deliver)]() {
+      auto self = weak.lock();
+      if (self) {
+        deliver();
+      }
+      ReleaseElsewhere(std::move(self));
+    });
   }
 
   std::optional<RTCPeerConnection::IceConnectionState> RTCPeerConnection::UpdateIceConnectionState(bool listening) {
@@ -792,10 +806,19 @@ namespace python_webrtc {
       _surfacedConnectionState.Changed(HasListeners(), _lastConnectionState);
       _lastConnectionState = newState;
     }
-    // after the transport changes that led to it
-    _heldTransportStates.Emit([this, newState]() {
-      Emit("_transportstatechange", std::shared_ptr<RTCIceTransport>(), std::optional<webrtc::IceTransportState>(),
-           false, std::optional<IceConnectionState>(), std::optional<PeerConnectionState>(newState));
+    // through the network thread: after the transport changes that led to it, which it posted already
+    _factory->workerThread()->PostTask([weak = weak_from_this(), newState]() {
+      auto self = weak.lock();
+      if (self) {
+        self->DeliverOnSignalingThread([connection = self.get(), newState]() {
+          connection->_heldTransportStates.Emit([connection, newState]() {
+            connection->Emit("_transportstatechange", std::shared_ptr<RTCIceTransport>(),
+                             std::optional<webrtc::IceTransportState>(), false, std::optional<IceConnectionState>(),
+                             std::optional<PeerConnectionState>(newState));
+          });
+        });
+      }
+      ReleaseElsewhere(std::move(self));
     });
   }
 

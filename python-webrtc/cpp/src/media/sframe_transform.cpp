@@ -117,6 +117,11 @@ namespace python_webrtc {
       bridge->Output(std::move(frame));
       return;
     }
+    // padding-only packets reach transforms as empty frames, with nothing to decrypt
+    if (frame->GetData().empty()) {
+      bridge->Output(std::move(frame));
+      return;
+    }
     auto result = _context.Decrypt(frame->GetData());
     if (result.error == SFrameError::kNone) {
       frame->SetData(result.data);
