@@ -59,20 +59,6 @@ def _track(event: webrtc.Event) -> webrtc.MediaStreamTrack:
     return event.track
 
 
-async def _last_of_ten(track: webrtc.MediaStreamTrack) -> webrtc.VideoFrame:
-    reader = webrtc.MediaStreamTrackProcessor(
-        webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=5)
-    ).readable.get_reader()
-    for _ in range(9):
-        frame = (await asyncio.wait_for(reader.read(), 20)).value
-        assert frame is not None
-        frame.close()
-    frame = (await asyncio.wait_for(reader.read(), 20)).value
-    assert isinstance(frame, webrtc.VideoFrame)
-    await reader.cancel()
-    return frame
-
-
 async def _center_pixel(frame: webrtc.VideoFrame) -> bytes:
     options = webrtc.VideoFrameCopyToOptions(format='RGBA')
     rgba = bytearray(frame.allocation_size(options))
@@ -81,9 +67,28 @@ async def _center_pixel(frame: webrtc.VideoFrame) -> bytes:
     return bytes(rgba[center : center + 4])
 
 
+async def _last_of_ten(track: webrtc.MediaStreamTrack) -> tuple[tuple[int, int], bytes]:
+    reader = webrtc.MediaStreamTrackProcessor(
+        webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=5)
+    ).readable.get_reader()
+    # every frame converts, the last one is checked
+    for _ in range(10):
+        frame = (await asyncio.wait_for(reader.read(), 20)).value
+        assert isinstance(frame, webrtc.VideoFrame)
+        size, center = (frame.coded_width, frame.coded_height), await _center_pixel(frame)
+        frame.close()
+    await reader.cancel()
+    return size, center
+
+
 async def _received(
-    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, *, version: str, frame: webrtc.VideoFrame
+    caller: webrtc.RTCPeerConnection,
+    callee: webrtc.RTCPeerConnection,
+    *,
+    version: str,
+    track: webrtc.MediaStreamTrack,
 ) -> _Received:
+    size, center = await _last_of_ten(track)
     outbound = stats_of_type(await caller.get_stats(), 'outbound-rtp')[0]
     stats = await callee.get_stats()
     inbound = stats_of_type(stats, 'inbound-rtp')[0]
@@ -94,8 +99,8 @@ async def _received(
     assert isinstance(codec, webrtc.RTCCodecStats)
     return _Received(
         version=version,
-        size=(frame.coded_width, frame.coded_height),
-        center=await _center_pixel(frame),
+        size=size,
+        center=center,
         codec=codec.mime_type,
         encoder=outbound.encoder_implementation,
         decoder=inbound.decoder_implementation,
@@ -117,9 +122,7 @@ async def _send_red() -> _Received:
     async with writing(write_video, generator, RED, (WIDTH, HEIGHT)):
         track_event = wait_for_event(callee, 'track', 20)
         await connect(caller, callee, 20)
-        frame = await _last_of_ten(_track(await track_event))
-        received = await _received(caller, callee, version=version, frame=frame)
-        frame.close()
+        received = await _received(caller, callee, version=version, track=_track(await track_event))
     generator.track.stop()
     caller.close()
     callee.close()

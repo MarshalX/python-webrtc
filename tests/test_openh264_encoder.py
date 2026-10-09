@@ -141,16 +141,22 @@ def _sent(ffmpeg: str, ffprobe: str) -> _Sent:
 
 
 @functools.cache
-def _result() -> _Sent:
+def _result() -> _Sent | str:
     ffmpeg, ffprobe = shutil.which('ffmpeg'), shutil.which('ffprobe')
     if ffmpeg is None or ffprobe is None:
-        pytest.skip('no ffmpeg and ffprobe')
-    return _sent(ffmpeg, ffprobe)
+        return 'no ffmpeg and ffprobe'
+    try:
+        return _sent(ffmpeg, ffprobe)
+    except pytest.skip.Exception as e:
+        return str(e.msg)
 
 
 @pytest.fixture
 def sent() -> _Sent:
-    return _result()
+    result = _result()
+    if isinstance(result, str):
+        pytest.skip(result)
+    return result
 
 
 def test_ffmpeg_decodes_what_openh264_sends(sent: _Sent) -> None:

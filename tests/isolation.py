@@ -57,24 +57,27 @@ def _run(
     sender.close()
     deadline = time.monotonic() + timeout
     outcome: _Outcome | None = None
+    stuck = True
     try:
-        if receiver.poll(timeout):
-            outcome = receiver.recv()
-    except EOFError:
-        pass
-    process.join(max(0.0, deadline - time.monotonic()))
-    stuck = process.exitcode is None
-    if stuck:
-        process.kill()
-        process.join()
-    receiver.close()
+        try:
+            if receiver.poll(timeout):
+                outcome = receiver.recv()
+        except EOFError:
+            pass
+        process.join(max(0.0, deadline - time.monotonic()))
+        stuck = process.exitcode is None
+    finally:
+        if process.exitcode is None:
+            process.kill()
+            process.join()
+        receiver.close()
 
-    if outcome is not None and outcome[0] == 'skipped':
-        pytest.skip(outcome[1])
     if stuck:
         pytest.fail(f'still running after {timeout} s', pytrace=False)
     if process.exitcode != 0:
         pytest.fail(f'exit code {process.exitcode}, see its output', pytrace=False)
+    if outcome is not None and outcome[0] == 'skipped':
+        pytest.skip(outcome[1])
     return outcome[1] if outcome is not None else None
 
 

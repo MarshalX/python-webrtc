@@ -50,6 +50,12 @@ def _skipping() -> None:
     pytest.skip('skipped in the child')
 
 
+@isolated(timeout=5)
+def _skipping_then_hanging_at_exit() -> None:
+    threading.Thread(target=threading.Event().wait).start()
+    pytest.skip('skipped in the child')
+
+
 def test_returns_from_another_process() -> None:
     process, crashes_dump_stacks, value = _process_and_value()
 
@@ -81,3 +87,8 @@ def test_exit_without_returning_passes() -> None:
 def test_skip_skips() -> None:
     with pytest.raises(pytest.skip.Exception, match='skipped in the child'):
         _skipping()
+
+
+def test_hang_at_exit_after_a_skip_fails() -> None:
+    with pytest.raises(pytest.fail.Exception, match='still running after 5 s'):
+        _skipping_then_hanging_at_exit()

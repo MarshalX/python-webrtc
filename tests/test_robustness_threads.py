@@ -291,8 +291,10 @@ def test_wrapper_released_on_the_worker_while_a_constructor_waits_for_it() -> No
         original(listeners, name, *args)
 
     def create() -> None:
-        webrtc.RTCIceTransport()
+        # released once the constructor is known to return
+        transport = webrtc.RTCIceTransport()
         created.set()
+        del transport
 
     with mock.patch.object(events._Listeners, '__call__', emit):
         gc.disable()
