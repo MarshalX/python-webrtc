@@ -4,36 +4,64 @@
 # ThreadSanitizer with SANITIZE=thread, and runs the Python tests against it. The Linux counterpart is sanitizers.sh.
 #
 #   .github/scripts/sanitizers-macos.sh [pytest arguments]
+#   .github/scripts/sanitizers-macos.sh --build-only
+#   .github/scripts/sanitizers-macos.sh --exec python -m tests.chaos --seed 7   # a command against the existing build
 #
 # The build and a venv without the editable install (whose import hook would load the regular build) are kept
 # in build/asan (build/tsan).
 
 set -euo pipefail
 
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# physical: scripts/debug/cover.py matches the paths CMake records
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 SANITIZE="${SANITIZE:-address,undefined}"
 if [ "$SANITIZE" = thread ]; then
     BUILD="${WRTC_SANITIZERS_BUILD_DIR:-$SRC/build/tsan}"
+    COVERAGE=OFF
 else
     BUILD="${WRTC_SANITIZERS_BUILD_DIR:-$SRC/build/asan}"
+    COVERAGE=ON
+    if [ -n "${CI:-}" ] || [ -n "${WRTC_SANITIZERS_BUILD_DIR:-}" ]; then
+        COVERAGE=OFF
+    fi
 fi
-if [ -z "${PYTHON:-}" ]; then
-    uv python install -q 3.13
-    PYTHON="$(uv python find 3.13)"
-fi
+MODE=test
+case "${1:-}" in
+    --build-only) MODE=build; shift ;;
+    --exec) MODE=exec; shift ;;
+esac
 
-if [ ! -x "$BUILD/venv/bin/python" ]; then
-    uv venv -q "$BUILD/venv" --python "$PYTHON"
-    uv pip install -q --python "$BUILD/venv/bin/python" cmake ninja "pybind11>=3.0" "typing_extensions>=4.10" pytest pytest-asyncio pytest-timeout
-fi
 export PATH="$BUILD/venv/bin:$PATH"
+if [ "$MODE" != exec ]; then
+    if [ -z "${PYTHON:-}" ]; then
+        uv python install -q 3.13
+        PYTHON="$(uv python find 3.13)"
+    fi
 
-cmake -S "$SRC" -B "$BUILD" -G Ninja \
-    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DWRTC_SANITIZE="$SANITIZE" \
-    -DPython_EXECUTABLE="$BUILD/venv/bin/python" \
-    -Dpybind11_DIR="$("$BUILD/venv/bin/python" -m pybind11 --cmakedir)" > /dev/null
-cmake --build "$BUILD"
+    if [ ! -x "$BUILD/venv/bin/python" ]; then
+        uv venv -q "$BUILD/venv" --python "$PYTHON"
+    fi
+    uv pip install -q --python "$BUILD/venv/bin/python" cmake ninja "pybind11>=3.0" "typing_extensions>=4.10" \
+        pytest pytest-asyncio pytest-timeout
+    if [ "$COVERAGE" = ON ]; then
+        uv pip install -q --python "$BUILD/venv/bin/python" "coverage>=7.10"
+    fi
+
+    cmake -S "$SRC" -B "$BUILD" -G Ninja \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DWRTC_SANITIZE="$SANITIZE" \
+        -DWRTC_COVERAGE="$COVERAGE" \
+        -DPython_EXECUTABLE="$BUILD/venv/bin/python" \
+        -Dpybind11_DIR="$("$BUILD/venv/bin/python" -m pybind11 --cmakedir)" > /dev/null
+    cmake --build "$BUILD"
+    if [ "$COVERAGE" = ON ]; then
+        # profiles of the previous build no longer match
+        (cd "$SRC" && "$BUILD/venv/bin/python" -m scripts.debug.cover collect)
+    fi
+fi
+if [ "$MODE" = build ]; then
+    exit 0
+fi
 
 # The interpreter isn't instrumented: the runtime must be loaded before anything else
 if [ "$SANITIZE" = thread ]; then
@@ -51,6 +79,10 @@ fi
 export DYLD_INSERT_LIBRARIES
 export PYTHONPATH="$BUILD/python-webrtc/cpp:$SRC/python-webrtc/python:$SRC"
 export PYTHONDONTWRITEBYTECODE=1
+export LLVM_PROFILE_FILE="${LLVM_PROFILE_FILE:-$SRC/build/coverage/native/suite-%4m.profraw}"
 
 cd "$SRC"
-"$BUILD/venv/bin/python" -m pytest tests --ignore=tests/wpt -p no:cacheprovider --capture=sys "$@"
+if [ "$MODE" = exec ]; then
+    exec "$@"
+fi
+"$BUILD/venv/bin/python" -m pytest --ignore=tests/wpt -p no:cacheprovider --capture=sys "$@"

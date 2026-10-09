@@ -30,6 +30,9 @@ _P = ParamSpec('_P')
 
 _Outcome: TypeAlias = Union[tuple[Literal['returned'], object], tuple[Literal['skipped'], str]]
 
+#: make hunt takes the native stacks of a hang itself, so nothing here may end one first
+HUNTING = os.environ.get('WRTC_HUNT') == '1'
+
 
 def _child(
     connection: Connection, *, function: Callable[..., object], args: tuple[object, ...], kwargs: dict[str, object]
@@ -45,7 +48,7 @@ def _child(
 
 
 def _run(
-    function: Callable[..., object], args: tuple[object, ...], kwargs: dict[str, object], *, timeout: float
+    function: Callable[..., object], args: tuple[object, ...], kwargs: dict[str, object], *, timeout: float | None
 ) -> object:
     receiver, sender = multiprocessing.Pipe(duplex=False)
     process = multiprocessing.context.SpawnProcess(
@@ -55,7 +58,7 @@ def _run(
     with mock.patch.dict(os.environ, {'PYTHONFAULTHANDLER': '1', 'LIBC_FATAL_STDERR_': '1'}):
         process.start()
     sender.close()
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + timeout if timeout is not None else None
     outcome: _Outcome | None = None
     stuck = True
     try:
@@ -64,7 +67,7 @@ def _run(
                 outcome = receiver.recv()
         except EOFError:
             pass
-        process.join(max(0.0, deadline - time.monotonic()))
+        process.join(max(0.0, deadline - time.monotonic()) if deadline is not None else None)
         stuck = process.exitcode is None
     finally:
         if process.exitcode is None:
@@ -99,7 +102,7 @@ def isolated(
         def run(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             if multiprocessing.parent_process() is not None:
                 return test(*args, **kwargs)
-            return cast('_T', _run(run, args, kwargs, timeout=timeout))
+            return cast('_T', _run(run, args, kwargs, timeout=None if HUNTING else timeout))
 
         return run
 

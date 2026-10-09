@@ -53,12 +53,9 @@ Camera, microphone and decoder threads never take the GIL: they hand media to Py
 
 ## Debugging a hang
 
-Get the stacks of every thread first:
-
-```sh
-env -u LD_PRELOAD gdb -p PID -batch -ex "thread apply all bt"   # Linux (gdb breaks under the ASan preload)
-lldb -p PID --batch -o "thread backtrace all"                    # macOS
-```
+Get the stacks of every thread first: `make stacks PID=...` (`O=--signal` adds the Python stacks on the process's
+stderr); `make hunt` does this on every hang, see `scripts/debug/README.md`. By hand on Linux, gdb breaks under the
+ASan preload: `env -u LD_PRELOAD gdb -p PID -batch -ex "thread apply all bt"`.
 
 Use the `make asan` or `make tsan` build, which has symbols. TSan reports locks taken in opposite orders, but not a
 thread waiting for another. A rare race is easier to reproduce by forcing the order (see the tests in
