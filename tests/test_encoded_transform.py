@@ -67,7 +67,18 @@ class Recorder:
         self._waiters.append((count, waiter))
         if len(self.frames) >= count:
             waiter.set_result(None)
-        await asyncio.wait_for(waiter, TIMEOUT)
+        try:
+            await asyncio.wait_for(waiter, TIMEOUT)
+        except asyncio.TimeoutError:
+            msg = f'Timed out waiting for {count} frames: {self.describe()}'
+            raise TimeoutError(msg) from None
+
+    def describe(self) -> str:
+        """What the worker saw, for failure messages."""
+        if self.transformer is None:
+            return 'not started'
+        transformer = self.transformer
+        return f'{len(self.frames)} frames, ended {transformer._ended}, native state {transformer._native_obj.state}'
 
 
 def key_frames(recorder: Recorder) -> int:
@@ -527,10 +538,20 @@ async def test_closing_releases_transforms() -> None:
         caller.add_track(await local_track('audio')).transform = webrtc.RTCRtpScriptTransform(lambda _event: None)
         caller.close()
         callee.close()
-        await asyncio.wait_for(asyncio.gather(sending.done, receiving.done), TIMEOUT)
+        try:
+            await asyncio.wait_for(asyncio.gather(sending.done, receiving.done), TIMEOUT)
+        except asyncio.TimeoutError:
+            ends = f'sender: {sending.describe()}; receiver: {receiving.describe()}'
+            msg = f'Timed out waiting for the workers to end ({ends})'
+            raise TimeoutError(msg) from None
 
     await session()
-    await wait_until(lambda: released_to(baseline), 'the transforms released', TIMEOUT)
+    try:
+        await wait_until(lambda: released_to(baseline), 'the transforms released', TIMEOUT)
+    except TimeoutError:
+        left = {name: count for name, count in wrtc._alive().items() if count > baseline.get(name, 0)}
+        msg = f'Timed out waiting for the transforms released, still alive: {left}'
+        raise TimeoutError(msg) from None
 
 
 @pytest.mark.asyncio

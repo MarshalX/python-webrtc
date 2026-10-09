@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import webrtc
+from tests.helpers import release_stranded_candidates
 from webrtc.utils import events
 
 if TYPE_CHECKING:
@@ -54,6 +55,12 @@ def pytest_configure(config: pytest.Config) -> None:
         emit(self, name, *args)
 
     events._Listeners.__call__ = collecting_emit
+
+
+def pytest_runtest_setup() -> None:
+    # before each test, so its leak checks don't see the connections an earlier test's tasks kept
+    if release_stranded_candidates():
+        gc.collect()
 
 
 @pytest.fixture

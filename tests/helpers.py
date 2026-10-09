@@ -156,6 +156,19 @@ async def next_task() -> None:
 _adding_candidates: set[asyncio.Future[None]] = set()
 
 
+def release_stranded_candidates() -> bool:
+    """Drops the tasks adding candidates whose loop closed before they ended, which never run again.
+
+    A candidate that comes as a test's loop closes starts one, and it keeps its connections.
+
+    Returns:
+        Whether there were any.
+    """
+    stranded = {task for task in _adding_candidates if task.get_loop().is_closed()}
+    _adding_candidates.difference_update(stranded)
+    return bool(stranded)
+
+
 async def _add_ice_candidate(pc: webrtc.RTCPeerConnection, candidate: webrtc.RTCIceCandidate) -> None:
     try:
         await pc.add_ice_candidate(candidate)
