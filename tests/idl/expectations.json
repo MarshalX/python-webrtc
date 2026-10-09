@@ -36,9 +36,6 @@
   "RTCIceCandidatePairEventInit": [
     "missing dictionary"
   ],
-  "RTCIceServer": [
-    "credential_type: extra member"
-  ],
   "RTCIceTransport": [
     "onicecandidatepairadd: missing event",
     "onicecandidatepairnominate: missing event",
@@ -53,6 +50,9 @@
   ],
   "RTCResolutionRestriction": [
     "missing dictionary"
+  ],
+  "RTCRtcpMuxPolicy": [
+    "extra value 'negotiate'"
   ],
   "RTCRtpContributingSource": [
     "captureTimestamp: missing member",
@@ -79,6 +79,10 @@
   ],
   "RTCRtpTransceiver": [
     "stopped: extra member"
+  ],
+  "RTCSessionDescription": [
+    "sdp: should be read-only",
+    "type: should be read-only"
   ],
   "StreamPipeOptions": [
     "signal: missing member"

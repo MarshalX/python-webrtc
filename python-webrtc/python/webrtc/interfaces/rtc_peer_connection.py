@@ -51,7 +51,17 @@ if TYPE_CHECKING:
 
     from typing_extensions import Self
 
+    from webrtc.enums import RTCDtlsTransportState, RTCIceConnectionState, RTCIceTransportState, RTCPeerConnectionState
     from webrtc.models.rtc_certificate import AlgorithmIdentifier
+
+    # transport, state, dispatch, ice connection state, connection state
+    _TransportStateChange = tuple[
+        Union[wrtc.RTCIceTransport, wrtc.RTCDtlsTransport, None],
+        Union[RTCIceTransportState, RTCDtlsTransportState, None],
+        bool,
+        Union[RTCIceConnectionState, None],
+        Union[RTCPeerConnectionState, None],
+    ]
 
 #: A description in the form the methods that set one accept
 _Description = Union[RTCSessionDescription, RTCSessionDescriptionInit]
@@ -84,6 +94,16 @@ _PeerConnectionEvent = Literal[_PeerConnectionStateEvent, 'icecandidate', 'iceca
 _R = TypeVar('_R')
 
 
+def _surface_transport_state(
+    transport: wrtc.RTCIceTransport | wrtc.RTCDtlsTransport | None,
+    state: RTCIceTransportState | RTCDtlsTransportState | None,
+) -> None:
+    if isinstance(transport, wrtc.RTCIceTransport):
+        transport._surfaceState(cast('RTCIceTransportState', state))
+    elif transport is not None:
+        transport._surfaceState(cast('RTCDtlsTransportState', state))
+
+
 class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerConnectionEvent]):
     """A connection to a remote peer, which negotiates and carries media tracks and data channels.
 
@@ -103,8 +123,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         track (:obj:`webrtc.RTCTrackEvent`): A remote track was negotiated.
         datachannel (:obj:`webrtc.RTCDataChannelEvent`): The remote peer created a data channel.
 
-    A closed connection emits no events, including the ones queued before :meth:`close`. Leaving an
-    ``async with`` block closes the connection.
+    A closed connection emits no events, including the ones queued before :meth:`close`, and its pending operations
+    are cancelled. Leaving an ``async with`` block closes the connection.
 
     Args:
         configuration (:obj:`webrtc.RTCConfiguration`, optional): The configuration of the connection.
@@ -113,7 +133,6 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     Raises:
         webrtc.InvalidSyntaxError: If an ICE server URL is invalid.
         webrtc.InvalidAccessError: If a TURN server has no credentials, or a certificate has expired.
-        webrtc.NotSupportedError: If a TURN server has an OAuth credential.
         ValueError: If a member of the configuration is out of range.
         TypeError: If a member of the configuration has a wrong type, or a value its enum doesn't have.
     """
@@ -123,9 +142,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     # the native method that surfaces the state of each state event
     _STATE_EVENTS: ClassVar[dict[str, str]] = {
         'signalingstatechange': '_surfaceSignalingState',
-        'iceconnectionstatechange': '_surfaceIceConnectionState',
         'icegatheringstatechange': '_surfaceIceGatheringState',
-        'connectionstatechange': '_surfaceConnectionState',
     }
     # the method that creates the event object of each event, from its native arguments
     _EVENT_CREATORS: ClassVar[dict[str, str]] = {
@@ -274,8 +291,11 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     def _operation(self) -> AbstractAsyncContextManager[None]:
         """Chains an operation, like setting a description, after the running ones (see :obj:`OperationsChain`)."""
         if self._chain is None:
-            self._chain = OperationsChain(self._chain_emptied)
+            self._chain = OperationsChain(self._chain_emptied, self._is_closed)
         return self._chain.operation()
+
+    def _is_closed(self) -> bool:
+        return self.signaling_state == RTCSignalingState.closed
 
     def _chain_emptied(self) -> None:
         # negotiationneeded fires now, if it's still needed
@@ -302,6 +322,9 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         if name == '_gatheringcomplete':
             transports, state = cast('tuple[list[wrtc.RTCIceTransport], webrtc.RTCIceGatheringState]', args)
             self._complete_gathering(transports, state)
+            return
+        if name == '_transportstatechange':
+            self._change_transport_state(cast('_TransportStateChange', args))
             return
         # the state attributes change along with their events
         surface = self._STATE_EVENTS.get(name)
@@ -336,6 +359,25 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         self._dispatch('icegatheringstatechange', state)
         # the end of candidates is an icecandidate event without a candidate
         self._dispatch('icecandidate')
+
+    def _change_transport_state(self, change: _TransportStateChange) -> None:
+        """Changes a transport's state and the connection's in one task, so every handler sees all of them."""
+        if self._native_obj.signalingState == RTCSignalingState.closed:
+            return
+        transport, state, dispatch, ice_connection_state, connection_state = change
+        _surface_transport_state(transport, state)
+        if ice_connection_state is not None:
+            self._native_obj._surfaceIceConnectionState(ice_connection_state)
+        if connection_state is not None:
+            self._native_obj._surfaceConnectionState(connection_state)
+        # see RTCPeerConnection::EmitTransportState
+        listeners = transport._listeners if transport is not None and dispatch else None
+        if listeners is not None:
+            listeners.target._dispatch('statechange', state)
+        if ice_connection_state is not None:
+            self._dispatch('iceconnectionstatechange', ice_connection_state)
+        if connection_state is not None:
+            self._dispatch('connectionstatechange', connection_state)
 
     @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
@@ -417,7 +459,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         """The success task of setting a description."""
         # the descriptions as the operation left them, candidates gathered since come with their events
         self._native_obj._applyDescriptions()
-        # parameters returned before can't be set anymore
+        # getParameters() returns the negotiated parameters from now on
         for sender in self._native_obj.getSenders():
             sender._expireParameters()
 
@@ -484,13 +526,13 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             description (:obj:`webrtc.RTCSessionDescription`, optional): The description, as returned by
                 :meth:`create_offer` or :meth:`create_answer`, or a ``rollback`` one. An
                 :obj:`webrtc.RTCSessionDescriptionInit` or :obj:`webrtc.RTCLocalSessionDescriptionInit` is accepted
-                too. Without it, or without a type and an SDP, the offer or the answer the signaling state calls for
-                is created and set.
+                too, with its SDP modified if needed. Without it, or without a type and an SDP, the
+                offer or the answer the signaling state calls for is created and set.
 
         Raises:
             webrtc.InvalidStateError: If the type doesn't match the signaling state, or the connection is closed.
-            webrtc.InvalidModificationError: If the SDP isn't the one :meth:`create_offer`
-                or :meth:`create_answer` returned last.
+            webrtc.InvalidModificationError: If the SDP changes the fingerprint :meth:`create_offer` or
+                :meth:`create_answer` made.
             webrtc.RTCError: If the SDP can't be parsed (``sdp_syntax_error``).
             TypeError: If the description has an SDP but no type, or is neither of the accepted types.
         """
@@ -784,7 +826,6 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
                 :attr:`webrtc.RTCConfiguration.always_negotiate_data_channels`.
             webrtc.InvalidSyntaxError: If an ICE server URL is invalid.
             webrtc.InvalidAccessError: If a TURN server has no credentials, or a certificate has expired.
-            webrtc.NotSupportedError: If a TURN server has an OAuth credential.
             ValueError: If a member of the configuration is out of range.
             TypeError: If a member of the configuration has a wrong type, or a value its enum doesn't have.
         """
@@ -988,7 +1029,7 @@ def _description_init(
 ) -> wrtc.RTCSessionDescriptionInit | None:
     """The native RTCSessionDescriptionInit of a description, or :obj:`None` for an implicit one."""
     if isinstance(description, RTCSessionDescription):
-        return description._native_obj.init
+        return wrtc.RTCSessionDescriptionInit(description.type, description.sdp)
     if allow_implicit and isinstance(description, RTCLocalSessionDescriptionInit):
         if description.type is None and description.sdp != '':
             msg = 'the type of a description is required'

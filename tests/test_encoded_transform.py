@@ -133,12 +133,14 @@ async def test_frames_pass_through_transforms(
     marked: list[bool] = []
 
     def check(frame: Frame) -> None:
-        marked.append(len(frame.data) > 0 and frame.data[-1] == MARK)
+        # the padding-only packets of audio arrive as empty frames
+        if len(frame.data) > 0:
+            marked.append(frame.data[-1] == MARK)
         unmark(frame)
 
     receiving.change = check
     _, receiver = await transformed_call(caller, callee, kind, sender_worker=sending, receiver_worker=receiving)
-    await receiving.wait_frames(20)
+    await wait_until(lambda: len(marked) >= 20, 'frames with data', TIMEOUT)
     assert sum(marked) >= 15
 
     frame_class = webrtc.RTCEncodedVideoFrame if kind == 'video' else webrtc.RTCEncodedAudioFrame

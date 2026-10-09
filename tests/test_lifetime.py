@@ -745,6 +745,30 @@ async def test_a_session_releases_every_native_object() -> None:
     assert alive_objects() == baseline
 
 
+@pytest.mark.asyncio
+async def test_operation_pending_at_close_does_not_keep_its_connection_alive() -> None:
+    """A task kept until done, as asyncio recommends, doesn't keep a connection closed during its operation."""
+    baseline = alive_objects()
+    tasks: set[asyncio.Future[None]] = set()
+
+    async def close_during_operation() -> weakref.ref[webrtc.RTCPeerConnection]:
+        pc = webrtc.RTCPeerConnection()
+        pc.add_transceiver(webrtc.MediaType.audio)
+        task = asyncio.ensure_future(pc.set_local_description())
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+        await asyncio.sleep(0)
+        pc.close()
+        await asyncio.sleep(QUIET_PERIOD)
+        return weakref.ref(pc)
+
+    connection = await close_during_operation()
+
+    assert tasks == set()
+    assert alive_objects() == baseline
+    assert connection() is None
+
+
 def test_dispose_while_factories_are_alive() -> None:
     """dispose() refuses while factories are alive; later factories still work."""
     pc = webrtc.RTCPeerConnection()

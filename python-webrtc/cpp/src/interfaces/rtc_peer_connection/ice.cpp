@@ -125,8 +125,8 @@ namespace python_webrtc {
         // Python doesn't have the transports yet, their events wait for it
         wrapper->Hold();
         wrapper->GetIceTransport()->Hold();
-        Adopt(wrapper);
       }
+      Adopt(wrapper);
       if (std::ranges::find(wrappers, wrapper) == wrappers.end()) {
         if (!existed) {
           created.push_back(wrapper->GetIceTransport());
@@ -134,10 +134,35 @@ namespace python_webrtc {
         wrappers.push_back(std::move(wrapper));
       }
     }
+    // unused since the last stable state
+    std::vector<std::weak_ptr<RTCDtlsTransport>> dropped;
+    if (pc->signaling_state() == SignalingState::kStable) {
+      for (const auto &transport : _negotiatedTransports) {
+        auto wrapper = transport.lock();
+        if (wrapper && std::ranges::find(wrappers, wrapper) == wrappers.end()) {
+          dropped.emplace_back(wrapper);
+        }
+      }
+      _negotiatedTransports.assign(wrappers.begin(), wrappers.end());
+    }
     {
       const TrackedLock lock(_wrappersMutex);
       std::swap(_dtlsTransports, wrappers);
     }
+    _factory->workerThread()->PostTask([weak = weak_from_this(), dropped = std::move(dropped)]() {
+      for (const auto &transport : dropped) {
+        // otherwise closing DTLS closes ICE
+        auto dtls = transport.lock();
+        if (dtls && dtls->GetCurrentState() == webrtc::DtlsTransportState::kClosed) {
+          dtls->GetIceTransport()->OnDropped();
+        }
+      }
+      auto self = weak.lock();
+      if (self) {
+        self->EmitIceConnectionState();
+      }
+      ReleaseElsewhere(std::move(self));
+    });
     // wrappers of transports that are gone are released here, out of the lock
     return created;
   }

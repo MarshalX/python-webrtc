@@ -88,6 +88,27 @@ async def test_receiver_stats(
 
 
 @pytest.mark.asyncio
+async def test_stopped_receiver_keeps_its_stats(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """A stopped receiver still reports inbound-rtp before the next negotiation."""
+    await send_audio(caller, callee, audio_stream)
+    [transceiver] = callee.get_transceivers()
+
+    async def receives() -> list[webrtc.RTCStats]:
+        return stats_of_type(await transceiver.receiver.get_stats(), 'inbound-rtp')
+
+    await wait_until(receives, 'inbound-rtp stats')
+
+    transceiver.stop()
+
+    for report in (await transceiver.receiver.get_stats(), await callee.get_stats()):
+        [inbound] = stats_of_type(report, 'inbound-rtp')
+        assert isinstance(inbound, webrtc.RTCInboundRtpStreamStats)
+        assert inbound.track_identifier == transceiver.receiver.track.id
+
+
+@pytest.mark.asyncio
 async def test_stats_of_a_track_the_connection_does_not_send(
     pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream, audio_stream2: webrtc.MediaStream
 ) -> None:

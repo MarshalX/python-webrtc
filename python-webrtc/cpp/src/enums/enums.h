@@ -296,6 +296,7 @@ namespace python_webrtc {
     using Policy = webrtc::PeerConnectionInterface::RtcpMuxPolicy;
     static constexpr auto name = pybind11::detail::const_name("RTCRtcpMuxPolicy");
     static constexpr auto values = std::to_array<std::pair<Policy, const char *>>({
+        {Policy::kRtcpMuxPolicyNegotiate, "negotiate"},
         {Policy::kRtcpMuxPolicyRequire, "require"},
     });
   };

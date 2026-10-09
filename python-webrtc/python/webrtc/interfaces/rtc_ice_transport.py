@@ -160,7 +160,6 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
             webrtc.InvalidStateError: If it's stopped, gathering already, or belongs to a connection.
             webrtc.InvalidSyntaxError: If an ICE server URL is invalid.
             webrtc.InvalidAccessError: If a TURN server has no credentials.
-            webrtc.NotSupportedError: If a TURN server has an OAuth credential.
             TypeError: If the policy isn't a value of :obj:`webrtc.RTCIceTransportPolicy`.
         """
         self._check_open('gather')

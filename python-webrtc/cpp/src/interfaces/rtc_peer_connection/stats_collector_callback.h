@@ -9,38 +9,46 @@
 #define PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_STATS_COLLECTOR_CALLBACK_H_
 
 #include <functional>
-#include <set>
+#include <map>
+#include <memory>
 #include <string>
+#include <utility>
 
 #include <api/stats/rtc_stats_collector_callback.h>
 #include <api/stats/rtc_stats_report.h>
+#include <api/stats/rtcstats_objects.h>
 
 namespace python_webrtc {
 
   // Delivers a stats report as JSON, which Python turns into webrtc.RTCStatsReport
   class StatsCollectorCallback : public webrtc::RTCStatsCollectorCallback {
   public:
-    // Stats of the types in excluded are left out
-    explicit StatsCollectorCallback(std::function<void(std::string)> onDelivered, std::set<std::string> excluded = {})
-        : _onDelivered(std::move(onDelivered)), _excluded(std::move(excluded)) {}
+    // remoteTrackIds by mid: libwebrtc drops trackIdentifier once a transceiver stops
+    explicit StatsCollectorCallback(std::function<void(std::string)> onDelivered,
+                                    std::map<std::string, std::string> remoteTrackIds = {})
+        : _onDelivered(std::move(onDelivered)), _remoteTrackIds(std::move(remoteTrackIds)) {}
 
     void OnStatsDelivered(const webrtc::scoped_refptr<const webrtc::RTCStatsReport> &report) override {
-      if (_excluded.empty()) {
-        _onDelivered(report->ToJson());
-        return;
-      }
-      auto filtered = webrtc::RTCStatsReport::Create(report->timestamp());
-      for (const auto &stats : *report) {
-        if (!_excluded.contains(stats.type())) {
-          filtered->AddStats(stats.copy());
+      webrtc::scoped_refptr<webrtc::RTCStatsReport> completed;
+      for (const auto *inbound : report->GetStatsOfType<webrtc::RTCInboundRtpStreamStats>()) {
+        const auto trackId = inbound->mid ? _remoteTrackIds.find(*inbound->mid) : _remoteTrackIds.end();
+        if (inbound->track_identifier || trackId == _remoteTrackIds.end()) {
+          continue;
         }
+        auto stats = std::make_unique<webrtc::RTCInboundRtpStreamStats>(*inbound);
+        stats->track_identifier = trackId->second;
+        if (!completed) {
+          completed = report->Copy();
+        }
+        completed->Take(stats->id());
+        completed->AddStats(std::move(stats));
       }
-      _onDelivered(filtered->ToJson());
+      _onDelivered(completed ? completed->ToJson() : report->ToJson());
     }
 
   private:
     std::function<void(std::string)> _onDelivered;
-    std::set<std::string> _excluded;
+    std::map<std::string, std::string> _remoteTrackIds;
   };
 
 } // namespace python_webrtc

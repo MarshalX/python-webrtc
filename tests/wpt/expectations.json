@@ -384,7 +384,9 @@
     },
     "webrtc-extensions/RTCOAuthCredential.html": {
       "new RTCPeerConnection(config) - with turns server, credential type and credential from spec should not throw": "FAIL",
-      "setConfiguration(config) - with turns server, credential type and credential from spec should not throw": "FAIL"
+      "new RTCPeerConnection(config) - with turns server, credentialType oauth, and string credential should throw InvalidAccessError": "FAIL",
+      "setConfiguration(config) - with turns server, credential type and credential from spec should not throw": "FAIL",
+      "setConfiguration(config) - with turns server, credentialType oauth, and string credential should throw InvalidAccessError": "FAIL"
     },
     "webrtc-extensions/RTCRtpCorruptionDetection-headerExtensionControl.html": {
       "[harness]": "ERROR"
@@ -505,6 +507,9 @@
     "webrtc/RTCError.html?rest": {
       "[harness]": "TIMEOUT"
     },
+    "webrtc/RTCIceCandidate-constructor.html": {
+      "leading \"a=\" prefix fails to parse": "FAIL"
+    },
     "webrtc/RTCIceTransport-peer-reflexive-remote.html": {
       "getSelectedCandidatePair() hides the address of a peer-reflexive remote candidate": [
         "FAIL",
@@ -556,24 +561,11 @@
     "webrtc/RTCPeerConnection-certificateStats.https.html": {
       "RTCPeerConnection-certificateStats": "FAIL"
     },
-    "webrtc/RTCPeerConnection-connectionState.https.html": {
-      "connection with one data channel should eventually have transports in connected state": "FAIL"
-    },
     "webrtc/RTCPeerConnection-helper-test.html": {
       "A test video track transmits at least 40 Kbits/sec of data at 480x360 size": "FAIL"
     },
     "webrtc/RTCPeerConnection-iceConnectionState-disconnected.https.html": {
       "ICE restart when ICE is disconnected results in checking, then connected": "FAIL"
-    },
-    "webrtc/RTCPeerConnection-iceConnectionState.https.html": {
-      "ICE restart does not result in a transition back to checking": [
-        "FAIL",
-        "PASS"
-      ],
-      "connection with one data channel should eventually have connected connection state": "FAIL",
-      "iceConnectionState changes at the right time, with bundle policy balanced": "FAIL",
-      "iceConnectionState changes at the right time, with bundle policy max-bundle": "FAIL",
-      "iceConnectionState changes at the right time, with bundle policy max-compat": "FAIL"
     },
     "webrtc/RTCPeerConnection-iceGatheringState.html?rest": {
       "[harness]": [
@@ -634,9 +626,6 @@
         "PASS"
       ]
     },
-    "webrtc/RTCPeerConnection-setLocalDescription-parameterless.https.html?rest": {
-      "Parameterless SLD() never settles if closed while pending": "FAIL"
-    },
     "webrtc/RTCPeerConnection-setLocalDescription-rollback.html": {
       "setLocalDescription(rollback) should update internal state with a queued tassk, in the right order": [
         "FAIL",
@@ -648,10 +637,6 @@
     },
     "webrtc/RTCPeerConnection-setRemoteDescription-simulcast.https.html": {
       "createAnswer() attaches to an existing transceiver with a remote simulcast offer": "FAIL"
-    },
-    "webrtc/RTCPeerConnection-setRemoteDescription.html": {
-      "Closing on rollback neither resolves nor rejects": "FAIL",
-      "Closing on setRemoteDescription() neither resolves nor rejects": "FAIL"
     },
     "webrtc/RTCRtpEncodingParameters-codec-opus-stereo.https.html": {
       "Sending and receiving a mono track with opus (stereo decoder upmix)": "FAIL",
@@ -670,12 +655,18 @@
       "RTCRtpSender.getParameters() codecs should match remote SDP (video, with fmtp checks, answerer)": "FAIL",
       "RTCRtpSender.getParameters() codecs should match remote SDP (video, with fmtp checks, offerer)": "FAIL"
     },
+    "webrtc/RTCRtpParameters-transactionId.html?rest": {
+      "setParameters() when the event loop has been relinquished since the last getParameters() should reject with InvalidStateError": "FAIL"
+    },
     "webrtc/RTCRtpReceiver-audio-jitterBufferTarget-stats.https.html": {
       "measure raising and lowering audio jitterBufferTarget": "FAIL"
     },
     "webrtc/RTCRtpReceiver-getContributingSources.https.html": {
       "[audio] getContributingSources() returns an empty list in loopback call": "FAIL",
       "[video] getContributingSources() returns an empty list in loopback call": "FAIL"
+    },
+    "webrtc/RTCRtpReceiver-getStats.https.html?rest": {
+      "receiver.getStats() should work on a stopped transceiver but not have inbound-rtp objects": "FAIL"
     },
     "webrtc/RTCRtpReceiver-getSynchronizationSources.https.html": {
       "[audio-only] RTCRtpSynchronizationSource.audioLevel is a number [0, 1]": "FAIL",
@@ -726,6 +717,16 @@
     },
     "webrtc/RTCSctpTransport-maxChannels.html?rest": {
       "Sctp transport has null maxChannels and 65536 maxMessageSize in have-local-offer after rollback": "FAIL"
+    },
+    "webrtc/historical.html?rest": {
+      "RTCPeerConnection with rtcpMuxPolicy \"negotiate\" should throw TypeError": "FAIL",
+      "setConfiguration with rtcpMuxPolicy \"negotiate\" should throw TypeError": "FAIL"
+    },
+    "webrtc/legacy/munge-dont.html": {
+      "RTCSessionDescription.sdp is read-only": "FAIL",
+      "RTCSessionDescription.type is read-only": "FAIL",
+      "Rejects SDP munging between createAnswer and setLocalDescription": "FAIL",
+      "Rejects SDP munging between createOffer and setLocalDescription": "FAIL"
     },
     "webrtc/legacy/onaddstream.https.html": {
       "Check onaddstream": "FAIL"
@@ -883,6 +884,9 @@
       "[harness]": "ERROR"
     },
     "webrtc/simulcast/setParameters-encodings.https.html": {
+      "Success task for setLocalDescription(answer) clears [[LastReturnedParameters]]": "FAIL",
+      "Success task for setRemoteDescription(answer) clears [[LastReturnedParameters]]": "FAIL",
+      "Success task for setRemoteDescription(offer) clears [[LastReturnedParameters]]": "FAIL",
       "addTrack, then a unicast setParameters, then sRD(simulcast offer) results in simulcast without the settings from setParameters": "FAIL",
       "addTrack, then rollback of sRD(simulcast offer), brings us back to having a single encoding without any previously set parameters": "FAIL",
       "addTrack, then sRD(simulcast offer) interrupted by a unicast setParameters results in simulcast without the settings from setParameters": "FAIL",

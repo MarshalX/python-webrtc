@@ -93,8 +93,8 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
     def get_parameters(self) -> webrtc.RTCRtpSendParameters:
         """Returns the parameters the sender sends with.
 
-        To change them, modify the result and pass it to :meth:`set_parameters` before the current task of the
-        event loop ends. Parameters from an earlier task are rejected. Video encodings without
+        To change them, modify the result and pass it to :meth:`set_parameters`, which takes the last ones returned
+        until it succeeds. A later task of the event loop gets new ones. Video encodings without
         ``scale_resolution_down_by`` get the effective value filled in.
 
         See :mdn:`RTCRtpSender/getParameters`.
@@ -105,7 +105,7 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         parameters = RTCRtpSendParameters._from_native(self._native_obj.getParameters())
         if self._kind == MediaType.video:
             _default_scale_resolution_down_by(parameters.encodings)
-        # they expire when the current task (with the code it resumed) is over, never without a loop
+        # the next task gets new ones, never without a loop
         _ = TaskQueue.post_to_running(self._native_obj._expireParameters, parameters.transaction_id, after_ready=True)
         return parameters
 
@@ -119,13 +119,13 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         See :mdn:`RTCRtpSender/setParameters`.
 
         Args:
-            parameters (:obj:`webrtc.RTCRtpSendParameters`): The parameters :meth:`get_parameters` returned in the
-                current task, with the changes made.
+            parameters (:obj:`webrtc.RTCRtpSendParameters`): The parameters :meth:`get_parameters` returned last,
+                with the changes made.
             set_parameter_options (:obj:`webrtc.RTCSetParameterOptions`, optional): How to change the encodings,
                 like sending a key frame right away.
 
         Raises:
-            webrtc.InvalidStateError: If :meth:`get_parameters` wasn't called in the current task, or the
+            webrtc.InvalidStateError: If :meth:`get_parameters` wasn't called since parameters were last set, or the
                 transceiver of the sender is stopped.
             webrtc.InvalidModificationError: If the ``transaction_id``, the codecs, the header extensions,
                 the RTCP parameters, the number of encodings or their ``rid`` changed, the codec of an encoding
@@ -138,7 +138,7 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
             raise webrtc.InvalidStateError(msg)
         last = self._native_obj._lastParameters()
         if last is None:
-            msg = 'get_parameters() must be called before set_parameters(), in the same task'
+            msg = 'get_parameters() must be called before set_parameters()'
             raise webrtc.InvalidStateError(msg)
         options = set_parameter_options.encoding_options if set_parameter_options is not None else None
         _check_unchanged(parameters, RTCRtpSendParameters._from_native(last), options)
@@ -155,6 +155,7 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         last.encodings = encodings
         last.degradationPreference = parameters.degradation_preference
         await call_native(self._native_obj.setParameters, last)
+        self._native_obj._clearParameters()
 
     async def replace_track(self, with_track: webrtc.MediaStreamTrack | None) -> None:
         """Replaces the track the sender sends, without renegotiating.

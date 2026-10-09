@@ -129,6 +129,10 @@ def _base_fields(tokens: list[str]) -> _CandidateFields:
 
 
 def _parse_fields(value: str, *, strict: bool) -> _CandidateFields:
+    # browsers parse an SDP line too
+    value = value.removeprefix('a=').removesuffix('\n').removesuffix('\r')
+    if '\n' in value or '\r' in value:
+        raise _InvalidCandidateError
     if not value.startswith('candidate:'):
         raise _InvalidCandidateError
     tokens = value[len('candidate:') :].split(' ')
@@ -270,8 +274,8 @@ class RTCIceCandidate:
     See :mdn:`RTCIceCandidate`.
 
     Args:
-        candidate (:obj:`str`, optional): The candidate-attribute from SDP, like ``'candidate:1 1 udp ...'``.
-            An empty string marks the end of candidates.
+        candidate (:obj:`str`, optional): The candidate-attribute from SDP, like ``'candidate:1 1 udp ...'``,
+            optionally prefixed with ``a=``. An empty string marks the end of candidates.
         sdp_mid (:obj:`str`, optional): The ``mid`` of the media section the candidate belongs to.
         sdp_m_line_index (:obj:`int`, optional): The index of the media section of the candidate.
         username_fragment (:obj:`str`, optional): The ICE username fragment the candidate belongs to.

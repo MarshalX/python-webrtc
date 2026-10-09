@@ -8,6 +8,7 @@
 #ifndef PYTHON_WEBRTC_INTERFACES_RTC_DTLS_TRANSPORT_H_
 #define PYTHON_WEBRTC_INTERFACES_RTC_DTLS_TRANSPORT_H_
 
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -19,6 +20,7 @@
 #include "../enums/enums.h"
 #include "../utils/instance_holder.h"
 #include "../utils/listeners.h"
+#include "../utils/locked_function.h"
 #include "../utils/surfaced.h"
 #include "peer_connection_factory.h"
 #include "rtc_ice_transport.h"
@@ -58,6 +60,17 @@ namespace python_webrtc {
     // see Surfaced
     void SurfaceState(webrtc::DtlsTransportState state);
 
+    // see RTCIceTransport::StateEmitter
+    using StateEmitter = bool(webrtc::DtlsTransportState previous, webrtc::DtlsTransportState state);
+
+    void SetStateEmitter(std::function<StateEmitter> emitter);
+
+    webrtc::DtlsTransportState GetCurrentState();
+
+    void StateChanged(bool listening, webrtc::DtlsTransportState previous);
+
+    void EmitStateChange(webrtc::DtlsTransportState state);
+
   private:
     // on the network thread
     void Stop();
@@ -77,6 +90,7 @@ namespace python_webrtc {
     webrtc::DtlsTransportState _state;
     Surfaced<webrtc::DtlsTransportState> _surfacedState;
     std::vector<webrtc::Buffer> _certificates;
+    LockedFunction<StateEmitter> _stateEmitter;
   };
 
 } // namespace python_webrtc

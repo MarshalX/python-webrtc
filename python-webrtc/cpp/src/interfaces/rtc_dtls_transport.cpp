@@ -110,8 +110,11 @@ namespace python_webrtc {
         error.set_error_detail(webrtc::RTCErrorDetailType::DTLS_FAILURE);
         Emit("error", RTCCallbackException(std::move(error)));
       }
-      _surfacedState.Changed(IsTracked(), previous);
-      Emit("statechange", information.state());
+      auto emitter = _stateEmitter.Get();
+      if (!emitter || !emitter(previous, information.state())) {
+        _surfacedState.Changed(IsTracked(), previous);
+        Emit("statechange", information.state());
+      }
     }
 
     if (information.state() == webrtc::DtlsTransportState::kClosed) {
@@ -166,6 +169,23 @@ namespace python_webrtc {
 
   void RTCDtlsTransport::SurfaceState(webrtc::DtlsTransportState state) {
     _surfacedState.Surface(state);
+  }
+
+  void RTCDtlsTransport::SetStateEmitter(std::function<StateEmitter> emitter) {
+    _stateEmitter.Set(std::move(emitter));
+  }
+
+  webrtc::DtlsTransportState RTCDtlsTransport::GetCurrentState() {
+    const std::scoped_lock lock(_mutex);
+    return _state;
+  }
+
+  void RTCDtlsTransport::StateChanged(bool listening, webrtc::DtlsTransportState previous) {
+    _surfacedState.Changed(listening, previous);
+  }
+
+  void RTCDtlsTransport::EmitStateChange(webrtc::DtlsTransportState state) {
+    Emit("statechange", state);
   }
 
 } // namespace python_webrtc

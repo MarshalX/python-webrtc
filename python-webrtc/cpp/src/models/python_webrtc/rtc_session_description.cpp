@@ -25,8 +25,7 @@ namespace python_webrtc {
     pybind11::class_<RTCSessionDescription, std::shared_ptr<RTCSessionDescription>>(m, "RTCSessionDescription")
         .def(pybind11::init<const RTCSessionDescriptionInit &>(), pybind11::arg("descriptionInitDict"))
         .def_property_readonly("type", &RTCSessionDescription::getType)
-        .def_property_readonly("sdp", &RTCSessionDescription::getSdp)
-        .def_property_readonly("init", &RTCSessionDescription::init);
+        .def_property_readonly("sdp", &RTCSessionDescription::getSdp);
   }
 
   RTCSessionDescription RTCSessionDescription::Wrap(webrtc::SessionDescriptionInterface *description) {

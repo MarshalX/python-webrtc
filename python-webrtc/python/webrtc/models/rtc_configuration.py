@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
 import webrtc
 import wrtc
 from webrtc.enums import RTCBundlePolicy, RTCIceTransportPolicy, RTCRtcpMuxPolicy, RTCRtpHeaderEncryptionPolicy
-from webrtc.exceptions import InvalidAccessError, InvalidSyntaxError, NotSupportedError
+from webrtc.exceptions import InvalidAccessError, InvalidSyntaxError
 from webrtc.models.dictionary import Dictionary
 from webrtc.models.rtc_certificate import RTCCertificate
 from webrtc.utils.names import Alias, alias
@@ -79,27 +80,6 @@ def _check_url(url: str) -> str:
 
 
 @dataclass
-class RTCOAuthCredential(Dictionary):
-    """An OAuth credential of a TURN server (RFC 7635).
-
-    It's accepted for completeness only. A TURN server with an OAuth credential raises
-    :obj:`webrtc.NotSupportedError` when the configuration is applied.
-
-    Args:
-        mac_key (:obj:`str`): The base64-encoded MAC key.
-        access_token (:obj:`str`): The base64-encoded access token.
-    """
-
-    mac_key: str
-    access_token: str
-
-    #: Alias for :attr:`mac_key`
-    macKey: ClassVar[Alias[str]] = alias('mac_key')
-    #: Alias for :attr:`access_token`
-    accessToken: ClassVar[Alias[str]] = alias('access_token')
-
-
-@dataclass
 class RTCIceServer(Dictionary):
     """A STUN or TURN server to gather ICE candidates with.
 
@@ -111,18 +91,12 @@ class RTCIceServer(Dictionary):
         urls (:obj:`str` or :obj:`list` of :obj:`str`): One URL or several, like ``'stun:stun.example.org'``
             or ``'turn:turn.example.org:3478?transport=tcp'``. At least one is required.
         username (:obj:`str`, optional): The username of a TURN server.
-        credential (:obj:`str` or :obj:`webrtc.RTCOAuthCredential`, optional): The password of a TURN server,
-            or its OAuth credential.
-        credential_type (:obj:`str`, optional): ``'password'`` (the default) or ``'oauth'``, which isn't
-            supported and raises :obj:`webrtc.NotSupportedError` for a TURN server.
+        credential (:obj:`str`, optional): The password of a TURN server.
     """
 
     urls: str | list[str]
     username: str | None = None
-    credential: str | RTCOAuthCredential | None = None
-    credential_type: str = 'password'
-
-    _dictionaries: ClassVar = {'credential': RTCOAuthCredential}
+    credential: str | None = None
 
     @classmethod
     def _to_native_list(cls, servers: Iterable[RTCIceServer]) -> list[wrtc.IceServerInit]:
@@ -137,16 +111,7 @@ class RTCIceServer(Dictionary):
 
         # every URL is parsed before the credentials are checked
         schemes = [_check_url(url) for url in urls]
-        if self.credential_type not in {'password', 'oauth'}:
-            msg = f"credential_type must be 'password' or 'oauth', not {self.credential_type!r}"
-            raise ValueError(msg)
         if any(scheme in {'turn', 'turns'} for scheme in schemes):
-            if self.credential_type == 'oauth':
-                if not isinstance(self.credential, RTCOAuthCredential):
-                    msg = 'an OAuth TURN server needs an RTCOAuthCredential'
-                    raise InvalidAccessError(msg)
-                msg = 'OAuth credentials of TURN servers are not supported'
-                raise NotSupportedError(msg)
             if self.username is None or self.credential is None or self.credential == '':
                 msg = 'a TURN server needs a username and a credential'
                 raise InvalidAccessError(msg)
@@ -157,17 +122,8 @@ class RTCIceServer(Dictionary):
         native = wrtc.IceServerInit()
         native.urls = urls
         native.username = self.username
-        native.credential = self._password()
+        native.credential = self.credential
         return native
-
-    def _password(self) -> str | None:
-        if isinstance(self.credential, RTCOAuthCredential):
-            msg = 'the credential of a server other than an OAuth TURN one is a str'
-            raise TypeError(msg)
-        return self.credential
-
-    #: Alias for :attr:`credential_type`
-    credentialType: ClassVar[Alias[str]] = alias('credential_type')
 
 
 @dataclass
@@ -206,7 +162,8 @@ class RTCConfiguration(Dictionary):
             be used (``all``, the default) or only relay ones.
         bundle_policy (:obj:`webrtc.RTCBundlePolicy`, optional): How media is grouped into transports when the
             remote peer doesn't support bundling. It's ``balanced`` by default and can't be changed.
-        rtcp_mux_policy (:obj:`webrtc.RTCRtcpMuxPolicy`, optional): RTCP multiplexing, which is always required.
+        rtcp_mux_policy (:obj:`webrtc.RTCRtcpMuxPolicy`, optional): Whether RTCP multiplexing is required (the
+            default). It can't be changed.
         ice_candidate_pool_size (:obj:`int`, optional): How many candidates (0 to 255) to gather ahead of
             setting the local description. It's 0 by default and can't be changed once the local description
             is set.
@@ -252,6 +209,8 @@ class RTCConfiguration(Dictionary):
         native.iceTransportPolicy = self.ice_transport_policy
         native.bundlePolicy = self.bundle_policy
         native.rtcpMuxPolicy = self.rtcp_mux_policy
+        if self.rtcp_mux_policy == RTCRtcpMuxPolicy.negotiate:
+            warnings.warn("rtcp_mux_policy 'negotiate' is deprecated", DeprecationWarning, stacklevel=3)
 
         pool_size = self.ice_candidate_pool_size
         if not isinstance(pool_size, int) or not 0 <= pool_size <= _MAX_CANDIDATE_POOL_SIZE:

@@ -24,10 +24,11 @@ namespace python_webrtc {
   public:
     HeldOperationEvents(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
                         std::vector<std::shared_ptr<RTCIceTransport>> iceTransports,
-                        const std::shared_ptr<RTCPeerConnection> &connection) {
-      if (connection) {
+                        const std::shared_ptr<RTCPeerConnection> &connection, bool holdGathering)
+        : _connection(connection), _gatheringHeld(holdGathering) {
+      connection->_heldTransportStates.Hold();
+      if (holdGathering) {
         connection->_heldGathering.Hold();
-        _connection = connection;
       }
       for (auto &iceTransport : iceTransports) {
         if (!iceTransport->IsHeld()) {
@@ -61,7 +62,10 @@ namespace python_webrtc {
       }
       _iceTransports.clear();
       if (auto connection = _connection.lock()) {
-        connection->_heldGathering.Release();
+        connection->_heldTransportStates.Release();
+        if (_gatheringHeld) {
+          connection->_heldGathering.Release();
+        }
       }
       _connection.reset();
     }
@@ -70,8 +74,9 @@ namespace python_webrtc {
     std::mutex _mutex;
     std::vector<std::shared_ptr<MediaStreamTrack>> _tracks;
     std::vector<std::shared_ptr<RTCIceTransport>> _iceTransports;
-    // whose gathering is held
+    // whose transport states and local gathering are held
     std::weak_ptr<RTCPeerConnection> _connection;
+    bool _gatheringHeld;
   };
 
   namespace {
@@ -141,7 +146,7 @@ namespace python_webrtc {
                                 DescriptionKind kind) {
     const bool remote = kind == DescriptionKind::kRemote;
     // a local description starts gathering, the candidates come after it
-    auto held = std::make_shared<HeldOperationEvents>(pc, IceTransports(), remote ? nullptr : shared_from_this());
+    auto held = std::make_shared<HeldOperationEvents>(pc, IceTransports(), shared_from_this(), !remote);
     if (remote) {
       SnapshotRemoteStreams(pc);
     }
@@ -208,8 +213,7 @@ namespace python_webrtc {
 
     if (init->type != webrtc::SdpType::kRollback) {
       const std::scoped_lock lock(_createdMutex);
-      auto &last = init->type == webrtc::SdpType::kOffer ? _lastOffer : _lastAnswer;
-      if (init->sdp != last) {
+      if (fingerprintChanged(init->type == webrtc::SdpType::kOffer ? _lastOffer : _lastAnswer, init->sdp)) {
         onFailure(RTCCallbackException(
             webrtc::RTCErrorType::INVALID_MODIFICATION,
             "Failed to execute 'setLocalDescription' on 'RTCPeerConnection': The SDP does not match the previously "

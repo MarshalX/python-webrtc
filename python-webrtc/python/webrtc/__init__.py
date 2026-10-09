@@ -191,7 +191,6 @@ from .models.rtc_configuration import (
     RTCConfiguration,
     RTCIceGatherOptions,
     RTCIceServer,
-    RTCOAuthCredential,
 )
 from .models.rtc_encoded_frame import (
     RTCEncodedAudioFrame,
@@ -423,7 +422,6 @@ __all__ = [
     'RTCLocalIceCandidateInit',
     'RTCLocalSessionDescriptionInit',
     'RTCMediaSourceStats',
-    'RTCOAuthCredential',
     'RTCOfferAnswerOptions',
     'RTCOfferOptions',
     'RTCOutboundRtpStreamStats',

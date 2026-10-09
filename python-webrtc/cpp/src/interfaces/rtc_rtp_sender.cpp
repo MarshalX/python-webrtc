@@ -57,6 +57,20 @@ namespace python_webrtc {
       std::function<void(RTCCallbackException)> _onFailure;
     };
 
+    // only what setParameters may change, as in Chromium
+    void applySettable(const webrtc::RtpEncodingParameters &requested, webrtc::RtpEncodingParameters &current) {
+      current.active = requested.active;
+      current.request_key_frame = requested.request_key_frame;
+      current.max_bitrate_bps = requested.max_bitrate_bps;
+      current.max_framerate = requested.max_framerate;
+      current.scale_resolution_down_by = requested.scale_resolution_down_by;
+      current.scalability_mode = requested.scalability_mode;
+      current.bitrate_priority = requested.bitrate_priority;
+      current.network_priority = requested.network_priority;
+      current.adaptive_ptime = requested.adaptive_ptime;
+      current.codec = requested.codec;
+    }
+
   } // namespace
 
   RTCRtpSender::RTCRtpSender(std::shared_ptr<PeerConnectionFactory> factory,
@@ -85,7 +99,8 @@ namespace python_webrtc {
         .def("_transceiverStopped", &RTCRtpSender::IsTransceiverStopped, nogil())
         .def("_lastParameters", &RTCRtpSender::GetLastParameters, nogil())
         .def("_expireParameters", &RTCRtpSender::ExpireParameters, nogil(),
-             pybind11::arg("transactionId") = std::nullopt);
+             pybind11::arg("transactionId") = std::nullopt)
+        .def("_clearParameters", &RTCRtpSender::ClearParameters, nogil());
   }
 
   InstanceHolder<RTCRtpSender, webrtc::RtpSenderInterface> &RTCRtpSender::holder() {
@@ -170,7 +185,7 @@ namespace python_webrtc {
     {
       // the same parameters until they expire
       const std::scoped_lock lock(_mutex);
-      if (_lastParameters) {
+      if (_lastParameters && !_lastParametersExpired) {
         return *_lastParameters;
       }
     }
@@ -184,6 +199,7 @@ namespace python_webrtc {
     }
     const std::scoped_lock lock(_mutex);
     _lastParameters = parameters;
+    _lastParametersExpired = false;
     return parameters;
   }
 
@@ -195,8 +211,13 @@ namespace python_webrtc {
   void RTCRtpSender::ExpireParameters(const std::optional<std::string> &transactionId) {
     const std::scoped_lock lock(_mutex);
     if (_lastParameters && (!transactionId || _lastParameters->transaction_id == *transactionId)) {
-      _lastParameters.reset();
+      _lastParametersExpired = true;
     }
+  }
+
+  void RTCRtpSender::ClearParameters() {
+    const std::scoped_lock lock(_mutex);
+    _lastParameters.reset();
   }
 
   void RTCRtpSender::SetParameters(std::function<void()> &onSuccess,
@@ -206,7 +227,7 @@ namespace python_webrtc {
       const std::scoped_lock lock(_mutex);
       if (!_lastParameters) {
         onFailure(RTCCallbackException(webrtc::RTCErrorType::INVALID_STATE,
-                                       "getParameters() must be called before setParameters(), in the same task"));
+                                       "getParameters() must be called before setParameters()"));
         return;
       }
       if (_lastParameters->transaction_id != parameters.transaction_id) {
@@ -215,22 +236,23 @@ namespace python_webrtc {
         return;
       }
     }
-    // the parameters can be set again until they expire, while libwebrtc takes a transaction id only once
-    auto fresh = _sender->GetParameters();
+    // libwebrtc takes the transaction id of its own last parameters, once
+    auto current = _sender->GetParameters();
     // libwebrtc aborts the process on encodings that don't match its layers (like after renegotiation)
-    bool sameLayers = fresh.encodings.size() == parameters.encodings.size();
-    for (size_t i = 0; sameLayers && i < fresh.encodings.size(); ++i) {
-      sameLayers = fresh.encodings[i].rid == parameters.encodings[i].rid;
+    bool sameLayers = current.encodings.size() == parameters.encodings.size();
+    for (size_t i = 0; sameLayers && i < current.encodings.size(); ++i) {
+      sameLayers = current.encodings[i].rid == parameters.encodings[i].rid;
     }
     if (!sameLayers) {
       onFailure(RTCCallbackException(webrtc::RTCErrorType::INVALID_MODIFICATION,
                                      "The encodings of the sender changed since getParameters()"));
       return;
     }
-    auto current = parameters;
-    current.transaction_id = fresh.transaction_id;
-    // read-only: getParameters() shows the negotiated codecs this side can send, libwebrtc takes its own list
-    current.codecs = fresh.codecs;
+    // the rest, like SSRCs, may have changed since getParameters
+    for (size_t i = 0; i < current.encodings.size(); ++i) {
+      applySettable(parameters.encodings[i], current.encodings[i]);
+    }
+    current.degradation_preference = parameters.degradation_preference;
     _sender->SetParametersAsync(current, [completion = std::make_unique<SetParametersCompletion>(onSuccess, onFailure)](
                                              webrtc::RTCError error) { (*completion)(std::move(error)); });
   }
