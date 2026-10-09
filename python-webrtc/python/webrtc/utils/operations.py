@@ -80,6 +80,10 @@ class OperationsChain:
             raise asyncio.CancelledError
 
     def _end(self, done: asyncio.Future[None]) -> None:
+        if done.get_loop().is_closed():
+            # nothing waits anymore
+            return
+
         done.set_result(None)
         if self._last is done:
             self._on_empty()
