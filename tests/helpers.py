@@ -8,21 +8,18 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import contextlib
 import ctypes
 import functools
 import inspect
-import multiprocessing
 import os
 import pathlib
 import subprocess
 import sys
-import textwrap
 from typing import TYPE_CHECKING, Callable, Protocol, TypeVar, cast
 
 import pytest
-from typing_extensions import Never, ParamSpec, override
+from typing_extensions import Never, override
 
 import webrtc
 import wrtc
@@ -34,7 +31,6 @@ if TYPE_CHECKING:
 CreatePC = Callable[..., webrtc.RTCPeerConnection]
 
 _T = TypeVar('_T')
-_P = ParamSpec('_P')
 
 
 def stats_of_type(report: webrtc.RTCStatsReport, stats_type: str) -> list[webrtc.RTCStats]:
@@ -294,36 +290,6 @@ def rss_bytes() -> int:
 
 #: The root of the project, which has the tests package (pytest may run from elsewhere, like cibuildwheel)
 ROOT = pathlib.Path(pathlib.Path(pathlib.Path(__file__).resolve()).parent).parent
-
-
-def run_isolated(script: str, timeout: float = 60) -> str:
-    """Runs a script in its own process, so a crash or a deadlock fails the test only; returns its output."""
-    # a crash tells where: the Python stacks of every thread, and glibc's fatal errors, written to a tty otherwise
-    env = {**os.environ, 'PYTHONFAULTHANDLER': '1', 'LIBC_FATAL_STDERR_': '1'}
-    result = subprocess.run(
-        [sys.executable, '-c', textwrap.dedent(script)],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        cwd=ROOT,
-        env=env,
-        check=False,
-    )
-    assert result.returncode == 0, f'exit code {result.returncode}:\n{result.stderr[-6000:]}'
-    return result.stdout
-
-
-def isolated(test: Callable[_P, _T]) -> Callable[_P, _T]:
-    """Runs a function in a fresh interpreter."""
-
-    @functools.wraps(test)
-    def run(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-        if multiprocessing.parent_process() is not None:
-            return test(*args, **kwargs)
-        with concurrent.futures.ProcessPoolExecutor(1, mp_context=multiprocessing.get_context('spawn')) as pool:
-            return pool.submit(run, *args, **kwargs).result()
-
-    return run
 
 
 class _RelaySocket(asyncio.DatagramProtocol):

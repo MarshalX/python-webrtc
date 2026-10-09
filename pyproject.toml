@@ -151,6 +151,8 @@ ignore = [
 "python-webrtc/python/webrtc/{streams.py,utils/events.py}" = ["BLE001"]
 # native leak counters and queues have no public API; chaos replays a seeded random
 "tests/**" = ["S101", "D1", "PLR2004", "S404", "S603", "SLF001", "S311"]
+"tests/test_package.py" = ["S102"]  # runs the facade's code with its imports shuffled
+"tests/test_robustness_exit_handlers.py" = ["PLC0415"]  # imports the library once an exit handler is registered
 "examples/**" = ["T201"]
 "benchmarks/**" = ["T201", "S404", "S603"]
 "cmake/**" = ["T201", "S404", "S603"]

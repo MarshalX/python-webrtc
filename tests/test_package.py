@@ -9,35 +9,37 @@
 
 from __future__ import annotations
 
-from tests.helpers import run_isolated
+import ast
+import importlib.util
+import pathlib
+import random
+import sys
+
+from tests.isolation import isolated
 
 
+@isolated
 def test_facade_import_order_does_not_matter() -> None:
     """The facade works with its imports shuffled."""
-    run_isolated("""
-        import ast
-        import importlib.util
-        import random
-        import sys
+    spec = importlib.util.find_spec('webrtc')
+    assert spec is not None
+    assert spec.origin is not None
+    tree = ast.parse(pathlib.Path(spec.origin).read_text(encoding='utf-8'))
+    submodules = [node for node in tree.body if isinstance(node, ast.ImportFrom) and node.level > 0]
+    rest = [node for node in tree.body if node not in submodules]
+    first = [node for node in rest if isinstance(node, (ast.Expr, ast.ImportFrom, ast.Import))]
+    last = [node for node in rest if node not in first]
 
-        spec = importlib.util.find_spec('webrtc')
-        with open(spec.origin, encoding='utf-8') as file:
-            tree = ast.parse(file.read())
-        submodules = [node for node in tree.body if isinstance(node, ast.ImportFrom) and node.level > 0]
-        rest = [node for node in tree.body if node not in submodules]
-        first = [node for node in rest if isinstance(node, (ast.Expr, ast.ImportFrom, ast.Import))]
-        last = [node for node in rest if node not in first]
-
-        for seed in range(20):
-            for name in [name for name in sys.modules if name == 'webrtc' or name.startswith('webrtc.')]:
-                del sys.modules[name]
-            random.Random(seed).shuffle(submodules)
-            module = importlib.util.module_from_spec(spec)
-            sys.modules['webrtc'] = module
-            code = compile(ast.Module(first + submodules + last, type_ignores=[]), spec.origin, 'exec')
-            try:
-                exec(code, module.__dict__)
-            except ImportError as e:
-                raise SystemExit(f'seed {seed}: {e}') from e
-            assert all(hasattr(module, name) for name in module.__all__)
-    """)
+    for seed in range(20):
+        for name in [name for name in sys.modules if name == 'webrtc' or name.startswith('webrtc.')]:
+            del sys.modules[name]
+        random.Random(seed).shuffle(submodules)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules['webrtc'] = module
+        code = compile(ast.Module([*first, *submodules, *last], type_ignores=[]), spec.origin, 'exec')
+        try:
+            exec(code, module.__dict__)
+        except ImportError as e:
+            msg = f'seed {seed}'
+            raise AssertionError(msg) from e
+        assert all(hasattr(module, name) for name in vars(module)['__all__'])

@@ -9,167 +9,158 @@
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import functools
 import json
+import pathlib
 import shutil
-import sys
-
-import pytest
-
-from tests.helpers import run_isolated
-
-pytestmark = pytest.mark.skipif(sys.platform != 'darwin', reason='macOS only')
-
-WIDTH, HEIGHT = 320, 240
-
-# sends ffmpeg's testsrc2 as H.264 of one profile, taps what is sent, and compares what arrives with its source
-SCRIPT = """
-import asyncio
-import json
-import math
 import subprocess
 import sys
 import tempfile
 
-import webrtc
-from tests.helpers import connect, stats_of_type, wait_for_event
+import pytest
 
-FFMPEG, FFPROBE, PROFILE = json.loads(sys.argv[1])
-WIDTH, HEIGHT, RATE = 320, 240, 30
-SOURCE_FRAMES = 300
-SIZE = WIDTH * HEIGHT * 3 // 2
-LUMA = WIDTH * HEIGHT
+import webrtc
+from tests.h264 import HEIGHT, LUMA, WIDTH, Recorder, h264_codecs
+from tests.helpers import connect, stats_of_type, wait_for_event, writing
+from tests.isolation import isolated
+
+pytestmark = pytest.mark.skipif(sys.platform != 'darwin', reason='macOS only')
+
 RECEIVED = 90
 SAMPLES = range(10, RECEIVED, 10)
 
 
-def psnr(a, b):
-    mse = sum((x - y) ** 2 for x, y in zip(a, b)) / len(a)
-    return math.inf if mse == 0 else 10 * math.log10(255 * 255 / mse)
+@dataclasses.dataclass
+class _Arrived:
+    sizes: set[str]
+    lumas: list[tuple[int | None, bytes]]
 
 
-async def main():
-    source = subprocess.run(
-        [FFMPEG, '-v', 'error', '-f', 'lavfi', '-i', f'testsrc2=size={WIDTH}x{HEIGHT}:rate={RATE}',
-         '-frames:v', str(SOURCE_FRAMES), '-pix_fmt', 'yuv420p', '-f', 'rawvideo', '-'],
-        capture_output=True, check=True,
-    ).stdout
-    frame_of = lambda n: source[(n % SOURCE_FRAMES) * SIZE : (n % SOURCE_FRAMES + 1) * SIZE]
-
-    loop = asyncio.get_running_loop()
-    written = 0
-    # (bytes, key frame), and the source frames written by the time each RTP timestamp was encoded
-    encoded, written_by = [], {}
-
-    async def tap(event):
-        reader = event.transformer.readable.get_reader()
-        writer = event.transformer.writable.get_writer()
-        while not (result := await reader.read()).done:
-            frame = result.value
-            encoded.append((bytes(frame.data), frame.type == webrtc.EncodedVideoChunkType.key))
-            written_by[frame.get_metadata().rtp_timestamp] = written
-            _ = writer.write(frame)
-
-    async def write(stop):
-        nonlocal written
-        writer = generator.writable.get_writer()
-        start = loop.time()
-        while not stop.is_set():
-            init = webrtc.VideoFrameBufferInit(
-                format='I420', coded_width=WIDTH, coded_height=HEIGHT, timestamp=written * 1_000_000 // RATE
-            )
-            await writer.write(webrtc.VideoFrame(frame_of(written), init))
-            written += 1
-            await asyncio.sleep(max(0.0, start + written / RATE - loop.time()))
-
-    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
-    generator = webrtc.VideoTrackGenerator()
-    sender = caller.add_track(generator.track)
-    transceiver = next(t for t in caller.get_transceivers() if t.sender == sender)
-    transceiver.set_codec_preferences([
-        c for c in webrtc.RTCRtpSender.get_capabilities('video').codecs
-        if c.mime_type == 'video/H264' and f'profile-level-id={PROFILE}' in (c.sdp_fmtp_line or '')
-    ])
-    sender.transform = webrtc.RTCRtpScriptTransform(tap)
-    track_event = wait_for_event(callee, 'track', 20)
-
-    stop = asyncio.Event()
-    writing = asyncio.ensure_future(write(stop))
-    await connect(caller, callee, 20)
-    track = (await track_event).track
-
+async def _arrived(track: webrtc.MediaStreamTrack) -> _Arrived:
     reader = webrtc.MediaStreamTrackProcessor(
         webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=RECEIVED)
     ).readable.get_reader()
-    sizes, lumas = set(), {}
+    arrived = _Arrived(set(), [])
+    options = webrtc.VideoFrameCopyToOptions(format='I420')
     for i in range(RECEIVED):
         frame = (await asyncio.wait_for(reader.read(), 20)).value
-        sizes.add(f'{frame.coded_width}x{frame.coded_height}')
+        assert isinstance(frame, webrtc.VideoFrame)
+        arrived.sizes.add(f'{frame.coded_width}x{frame.coded_height}')
         if i in SAMPLES:
-            options = webrtc.VideoFrameCopyToOptions(format='I420')
             data = bytearray(frame.allocation_size(options))
             await frame.copy_to(data, options)
-            lumas[i] = (frame.metadata().rtp_timestamp, bytes(data[:LUMA]))
+            arrived.lumas.append((frame.metadata().rtp_timestamp, bytes(data[:LUMA])))
         frame.close()
     await reader.cancel()
+    return arrived
 
-    options = webrtc.RTCSetParameterOptions(encoding_options=[webrtc.RTCEncodingOptions(key_frame=True)])
-    await sender.set_parameters(sender.get_parameters(), options)
-    requested_at = len(encoded)
-    while len(encoded) < requested_at + 15:
-        await asyncio.sleep(0.01)
-    first_key = next((i - requested_at for i, (_, key) in enumerate(encoded) if i >= requested_at and key), None)
 
-    outbound = next(s for s in stats_of_type(await caller.get_stats(), 'outbound-rtp') if s.kind == 'video')
+@dataclasses.dataclass
+class _Implementations:
+    codec: str | None
+    encoder: str | None
+    decoder: str | None
+
+
+@dataclasses.dataclass
+class _Sent:
+    implementations: _Implementations
+    profile: object
+    range: object
+    sizes: list[str]
+    first_is_key: bool
+    psnr: list[float]
+    first_key_after_request: int | None
+
+
+async def _implementations(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> _Implementations:
+    outbound = next(
+        s
+        for s in stats_of_type(await caller.get_stats(), 'outbound-rtp')
+        if isinstance(s, webrtc.RTCOutboundRtpStreamStats) and s.kind == 'video'
+    )
     stats = await callee.get_stats()
-    inbound = next(s for s in stats_of_type(stats, 'inbound-rtp') if s.kind == 'video')
+    inbound = next(
+        s
+        for s in stats_of_type(stats, 'inbound-rtp')
+        if isinstance(s, webrtc.RTCInboundRtpStreamStats) and s.kind == 'video'
+    )
+    assert inbound.codec_id is not None
+    codec = stats[inbound.codec_id]
+    assert isinstance(codec, webrtc.RTCCodecStats)
+    return _Implementations(codec.sdp_fmtp_line, outbound.encoder_implementation, inbound.decoder_implementation)
 
-    stop.set()
-    await writing
+
+def _track(event: webrtc.Event) -> webrtc.MediaStreamTrack:
+    assert isinstance(event, webrtc.RTCTrackEvent)
+    return event.track
+
+
+def _videotoolbox_sender(caller: webrtc.RTCPeerConnection, recorder: Recorder, profile: str) -> webrtc.RTCRtpSender:
+    sender = caller.add_track(recorder.generator.track)
+    transceiver = next(t for t in caller.get_transceivers() if t.sender == sender)
+    fmtp = f'profile-level-id={profile}'
+    transceiver.set_codec_preferences([
+        c for c in h264_codecs() if c.sdp_fmtp_line is not None and fmtp in c.sdp_fmtp_line
+    ])
+    sender.transform = webrtc.RTCRtpScriptTransform(recorder.tap)
+    return sender
+
+
+def _psnrs(recorder: Recorder, arrived: _Arrived) -> list[float]:
+    # the source of a received frame is one of the last ones written before it was encoded
+    written_by = {e.rtp_timestamp: e.written for e in recorder.encoded}
+    return [min(recorder.best_psnr(luma, written_by[timestamp]), 99.0) for timestamp, luma in arrived.lumas]
+
+
+def _probe(ffprobe: str, stream: bytes) -> dict[str, object]:
+    with tempfile.TemporaryDirectory() as directory:
+        path = pathlib.Path(directory) / 'sent.h264'
+        path.write_bytes(stream)
+        shown = ['-show_entries', 'stream=profile,color_range', '-of', 'json']
+        probed = subprocess.run([ffprobe, '-v', 'error', *shown, path], capture_output=True, text=True, check=True)
+    probe: dict[str, object] = json.loads(probed.stdout)['streams'][0]
+    return probe
+
+
+async def _send(ffmpeg: str, ffprobe: str, profile: str) -> _Sent:
+    recorder = Recorder(ffmpeg)
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    sender = _videotoolbox_sender(caller, recorder, profile)
+    track_event = wait_for_event(callee, 'track', 20)
+    async with writing(recorder.write):
+        await connect(caller, callee, 20)
+        arrived = await _arrived(_track(await track_event))
+        first_key = await recorder.key_frame_on_request(sender)
+        implementations = await _implementations(caller, callee)
     caller.close()
     callee.close()
 
-    with tempfile.TemporaryDirectory() as directory:
-        path = f'{directory}/sent.h264'
-        with open(path, 'wb') as file:
-            file.write(b''.join(data for data, _ in encoded))
-        probe = json.loads(subprocess.run(
-            [FFPROBE, '-v', 'error', '-show_entries', 'stream=profile,color_range', '-of', 'json', path],
-            capture_output=True, text=True, check=True,
-        ).stdout)['streams'][0]
-
-    # the source of a received frame is one of the last ones written before it was encoded
-    values = []
-    for rtp_timestamp, luma in lumas.values():
-        latest = written_by[rtp_timestamp]
-        values.append(max(psnr(luma, frame_of(n)[:LUMA]) for n in range(max(0, latest - 8), latest + 1)))
-
-    print(json.dumps({
-        'codec': stats[inbound.codec_id].sdp_fmtp_line,
-        'encoder': outbound.encoder_implementation,
-        'decoder': inbound.decoder_implementation,
-        'profile': probe.get('profile'),
-        'range': probe.get('color_range'),
-        'sizes': sorted(sizes),
-        'first_is_key': encoded[0][1],
-        'psnr': [min(v, 99.0) for v in values],
-        'first_key_after_request': first_key,
-    }))
+    probe = _probe(ffprobe, b''.join(e.data for e in recorder.encoded))
+    return _Sent(
+        implementations=implementations,
+        profile=probe.get('profile'),
+        range=probe.get('color_range'),
+        sizes=sorted(arrived.sizes),
+        first_is_key=recorder.encoded[0].key,
+        psnr=_psnrs(recorder, arrived),
+        first_key_after_request=first_key,
+    )
 
 
-asyncio.run(main())
-"""
+@isolated(timeout=120)
+def _sent(ffmpeg: str, ffprobe: str, profile: str) -> _Sent:
+    return asyncio.run(_send(ffmpeg, ffprobe, profile))
 
 
 @functools.cache
-def result(profile: str) -> dict[str, object]:
-    """Runs the script once per profile."""
+def result(profile: str) -> _Sent:
     ffmpeg, ffprobe = shutil.which('ffmpeg'), shutil.which('ffprobe')
     if ffmpeg is None or ffprobe is None:
-        return {'skip': 'no ffmpeg and ffprobe'}
-    output = run_isolated(SCRIPT.replace('sys.argv[1]', repr(json.dumps([ffmpeg, ffprobe, profile]))), timeout=120)
-    parsed: dict[str, object] = json.loads(output.strip().splitlines()[-1])
-    return parsed
+        pytest.skip('no ffmpeg and ffprobe')
+    return _sent(ffmpeg, ffprobe, profile)
 
 
 PROFILES = [
@@ -183,29 +174,22 @@ PROFILES = [
 def test_loopback(profile: str, name: str) -> None:
     """Both ends use VideoToolbox, the stream is in the negotiated profile and arrives close to its source."""
     sent = result(profile)
-    if 'skip' in sent:
-        pytest.skip(str(sent['skip']))
 
-    assert f'profile-level-id={profile}' in str(sent['codec'])
-    assert sent['encoder'] == 'VideoToolbox'
-    assert sent['decoder'] == 'VideoToolbox'
-    assert sent['profile'] == name
+    assert f'profile-level-id={profile}' in str(sent.implementations.codec)
+    assert sent.implementations.encoder == 'VideoToolbox'
+    assert sent.implementations.decoder == 'VideoToolbox'
+    assert sent.profile == name
     # video range, as the frames are: a full-range flag makes players stretch them
-    assert sent['range'] != 'pc'
-    assert sent['sizes'] == [f'{WIDTH}x{HEIGHT}']
-    assert sent['first_is_key'] is True
-    psnr = sent['psnr']
-    assert isinstance(psnr, list)
+    assert sent.range != 'pc'
+    assert sent.sizes == [f'{WIDTH}x{HEIGHT}']
+    assert sent.first_is_key
     # encoding loses some, a broken stream or a wrong frame loses far more
-    assert min(psnr) > 30, psnr
+    assert min(sent.psnr) > 30, sent.psnr
 
 
 @pytest.mark.parametrize('profile', ['42e01f', '640c1f'])
 def test_key_frame_on_request(profile: str) -> None:
-    sent = result(profile)
-    if 'skip' in sent:
-        pytest.skip(str(sent['skip']))
+    first = result(profile).first_key_after_request
 
-    first = sent['first_key_after_request']
-    assert isinstance(first, int)
+    assert first is not None
     assert first < 10

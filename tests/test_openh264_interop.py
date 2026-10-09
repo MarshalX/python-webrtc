@@ -9,149 +9,178 @@
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import functools
-import json
 import shutil
 import subprocess
 import sys
 
 import pytest
 
-from tests.helpers import run_isolated
-
-WIDTH, HEIGHT, RATE = 320, 240, 30
-
-# receives one WHIP stream, decodes it, and compares the luma of some frames with ffmpeg's rendering of the source
-SCRIPT = """
-import asyncio
-import json
-import math
-import subprocess
-import sys
-
 import webrtc
+from tests.h264 import HEIGHT, LUMA, RATE, WIDTH, psnr
 from tests.helpers import stats_of_type, wait_for_ice_gathering_complete
+from tests.isolation import isolated
 
-FFMPEG, ENCODER = json.loads(sys.argv[1])
-WIDTH, HEIGHT, RATE = 320, 240, 30
 SOURCE = f'testsrc2=size={WIDTH}x{HEIGHT}:rate={RATE}'
 FRAMES = 90
 SAMPLES = range(10, FRAMES, 10)
-LUMA = WIDTH * HEIGHT
 
 
-def patch_offer(sdp):
+def _patch_offer(sdp: str) -> str:
     # ffmpeg groups its rtx ssrc without an a=ssrc line for it, which libwebrtc rejects
-    lines = sdp.split('\\r\\n')
-    for line in list(lines):
+    lines = sdp.split('\r\n')
+    for line in lines.copy():
         if line.startswith('a=ssrc-group:FID '):
             primary, rtx = line.split()[1:3]
-            cname = next(l for l in lines if l.startswith(f'a=ssrc:{primary} cname:'))
-            if not any(l.startswith(f'a=ssrc:{rtx} ') for l in lines):
+            cname = next(other for other in lines if other.startswith(f'a=ssrc:{primary} cname:'))
+            if not any(other.startswith(f'a=ssrc:{rtx} ') for other in lines):
                 lines.insert(lines.index(cname) + 1, cname.replace(primary, rtx, 1))
-    return '\\r\\n'.join(lines)
+    return '\r\n'.join(lines)
 
 
-def loopback_only(sdp):
+def _loopback_only(sdp: str) -> str:
     # ffmpeg's WHIP client tries a single candidate
-    return '\\r\\n'.join(
-        l for l in sdp.split('\\r\\n') if not l.startswith('a=candidate') or (' udp ' in l and ' 127.0.0.1 ' in l)
+    return '\r\n'.join(
+        line
+        for line in sdp.split('\r\n')
+        if not line.startswith('a=candidate') or (' udp ' in line and ' 127.0.0.1 ' in line)
     )
 
 
-def psnr(a, b):
-    mse = sum((x - y) ** 2 for x, y in zip(a, b)) / len(a)
-    return math.inf if mse == 0 else 10 * math.log10(255 * 255 / mse)
+class _WhipEndpoint:
+    def __init__(self, pc: webrtc.RTCPeerConnection) -> None:
+        self.pc = pc
 
+    async def _answer(self, offer: str) -> bytes:
+        await self.pc.set_remote_description(webrtc.RTCSessionDescriptionInit(type='offer', sdp=_patch_offer(offer)))
+        await self.pc.set_local_description(await self.pc.create_answer())
+        await wait_for_ice_gathering_complete(self.pc)
+        assert self.pc.local_description is not None
+        return _loopback_only(self.pc.local_description.sdp).encode()
 
-async def main():
-    try:
-        await webrtc.openh264.install()
-    except RuntimeError as e:
-        print(json.dumps({'skip': str(e)}))
-        return
-
-    pc = webrtc.RTCPeerConnection()
-    received = asyncio.get_running_loop().create_future()
-
-    @pc.on('track')
-    def on_track(event):
-        received.set_result(event.track)
-
-    async def handle(reader, writer):
-        head = (await reader.readuntil(b'\\r\\n\\r\\n')).decode()
-        length = next((int(l.split(':')[1]) for l in head.split('\\r\\n') if l.lower().startswith('content-length')), 0)
+    async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        head = (await reader.readuntil(b'\r\n\r\n')).decode()
+        fields = [line.split(':', 1) for line in head.split('\r\n')[1:] if ':' in line]
+        length = next((int(value) for name, value in fields if name.lower() == 'content-length'), 0)
         body = (await reader.readexactly(length)).decode()
         if head.startswith('POST'):
-            await pc.set_remote_description(webrtc.RTCSessionDescriptionInit(type='offer', sdp=patch_offer(body)))
-            await pc.set_local_description(await pc.create_answer())
-            await wait_for_ice_gathering_complete(pc)
-            answer = loopback_only(pc.local_description.sdp).encode()
+            answer = await self._answer(body)
             writer.write(
-                b'HTTP/1.1 201 Created\\r\\nContent-Type: application/sdp\\r\\nLocation: /whip/1\\r\\n'
-                + f'Content-Length: {len(answer)}\\r\\n\\r\\n'.encode() + answer
+                b'HTTP/1.1 201 Created\r\nContent-Type: application/sdp\r\nLocation: /whip/1\r\n'
+                + f'Content-Length: {len(answer)}\r\n\r\n'.encode()
+                + answer
             )
         else:
-            writer.write(b'HTTP/1.1 200 OK\\r\\nContent-Length: 0\\r\\n\\r\\n')
+            writer.write(b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n')
         await writer.drain()
         writer.close()
 
-    server = await asyncio.start_server(handle, '127.0.0.1', 0)
-    port = server.sockets[0].getsockname()[1]
-    ffmpeg = await asyncio.create_subprocess_exec(
-        FFMPEG, '-v', 'error', '-re', '-f', 'lavfi', '-i', SOURCE, '-t', '10', *ENCODER, '-g', str(RATE),
-        '-bf', '0', '-pix_fmt', 'yuv420p', '-f', 'whip', f'http://127.0.0.1:{port}/whip',
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-    )
 
-    track = await asyncio.wait_for(received, 20)
+@dataclasses.dataclass
+class _Arrived:
+    sizes: set[str]
+    rtp_timestamps: list[int | None]
+    lumas: dict[int, bytes]
+
+
+async def _arrived(track: webrtc.MediaStreamTrack) -> _Arrived:
     reader = webrtc.MediaStreamTrackProcessor(
         webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=FRAMES)
     ).readable.get_reader()
-    sizes, timestamps, lumas = set(), [], {}
+    arrived = _Arrived(set(), [], {})
+    options = webrtc.VideoFrameCopyToOptions(format='I420')
     for i in range(FRAMES):
         frame = (await asyncio.wait_for(reader.read(), 20)).value
-        sizes.add(f'{frame.coded_width}x{frame.coded_height}')
-        timestamps.append(frame.metadata().rtp_timestamp)
+        assert isinstance(frame, webrtc.VideoFrame)
+        arrived.sizes.add(f'{frame.coded_width}x{frame.coded_height}')
+        arrived.rtp_timestamps.append(frame.metadata().rtp_timestamp)
         if i in SAMPLES or i == 0:
-            options = webrtc.VideoFrameCopyToOptions(format='I420')
             data = bytearray(frame.allocation_size(options))
             await frame.copy_to(data, options)
-            lumas[i] = bytes(data[:LUMA])
+            arrived.lumas[i] = bytes(data[:LUMA])
         frame.close()
     await reader.cancel()
+    return arrived
 
-    stats = await pc.get_stats()
-    inbound = next(s for s in stats_of_type(stats, 'inbound-rtp') if s.kind == 'video')
-    codec = stats[inbound.codec_id]
-    ffmpeg.kill()
-    await ffmpeg.wait()
-    pc.close()
-    server.close()
 
+def _psnrs(ffmpeg: str, arrived: _Arrived) -> list[float]:
     # the source frame of each decoded one, from its RTP timestamp; where the first one starts is searched
     reference = subprocess.run(
-        [FFMPEG, '-v', 'error', '-f', 'lavfi', '-i', SOURCE, '-t', '12', '-pix_fmt', 'yuv420p', '-f', 'rawvideo', '-'],
+        [ffmpeg, '-v', 'error', '-f', 'lavfi', '-i', SOURCE, '-t', '12', '-pix_fmt', 'yuv420p', '-f', 'rawvideo', '-'],
         capture_output=True,
         check=True,
     ).stdout
-    source = lambda n: reference[n * LUMA * 3 // 2 : n * LUMA * 3 // 2 + LUMA]
-    start = max(range(2 * RATE), key=lambda n: psnr(lumas[0], source(n)))
+
+    def source(n: int) -> bytes:
+        return reference[n * LUMA * 3 // 2 : n * LUMA * 3 // 2 + LUMA]
+
+    start = max(range(2 * RATE), key=lambda n: psnr(arrived.lumas[0], source(n)))
     step = 90000 // RATE
-    values = [psnr(lumas[i], source(start + (timestamps[i] - timestamps[0]) // step)) for i in SAMPLES]
-
-    print(json.dumps({
-        'codec': codec.mime_type,
-        'fmtp': codec.sdp_fmtp_line,
-        'decoder': inbound.decoder_implementation,
-        'decoded': inbound.frames_decoded,
-        'sizes': sorted(sizes),
-        'psnr': [min(v, 99.0) for v in values],
-    }))
+    first = arrived.rtp_timestamps[0]
+    assert first is not None
+    values: list[float] = []
+    for i in SAMPLES:
+        timestamp = arrived.rtp_timestamps[i]
+        assert timestamp is not None
+        values.append(min(psnr(arrived.lumas[i], source(start + (timestamp - first) // step)), 99.0))
+    return values
 
 
-asyncio.run(main())
-"""
+@dataclasses.dataclass
+class _Received:
+    codec: str
+    fmtp: str | None
+    decoder: str | None
+    sizes: list[str]
+    psnr: list[float]
+
+
+async def _decoder(pc: webrtc.RTCPeerConnection) -> tuple[webrtc.RTCCodecStats, str | None]:
+    stats = await pc.get_stats()
+    inbound = next(
+        s
+        for s in stats_of_type(stats, 'inbound-rtp')
+        if isinstance(s, webrtc.RTCInboundRtpStreamStats) and s.kind == 'video'
+    )
+    assert inbound.codec_id is not None
+    codec = stats[inbound.codec_id]
+    assert isinstance(codec, webrtc.RTCCodecStats)
+    return codec, inbound.decoder_implementation
+
+
+async def _receive(ffmpeg: str, encoder: list[str]) -> _Received:
+    try:
+        await webrtc.openh264.install()
+    except RuntimeError as e:
+        pytest.skip(str(e))
+
+    pc = webrtc.RTCPeerConnection()
+    received: asyncio.Future[webrtc.MediaStreamTrack] = asyncio.get_running_loop().create_future()
+    pc.on('track', lambda event: received.set_result(event.track))
+    server = await asyncio.start_server(_WhipEndpoint(pc).handle, '127.0.0.1', 0)
+    port: int = server.sockets[0].getsockname()[1]
+    sending = await asyncio.create_subprocess_exec(
+        *(ffmpeg, '-v', 'error', '-re', '-f', 'lavfi', '-i', SOURCE, '-t', '10', *encoder, '-g', str(RATE)),
+        *('-bf', '0', '-pix_fmt', 'yuv420p', '-f', 'whip', f'http://127.0.0.1:{port}/whip'),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+
+    arrived = await _arrived(await asyncio.wait_for(received, 20))
+    codec, decoder = await _decoder(pc)
+    sending.kill()
+    await sending.wait()
+    pc.close()
+    server.close()
+    return _Received(codec.mime_type, codec.sdp_fmtp_line, decoder, sorted(arrived.sizes), _psnrs(ffmpeg, arrived))
+
+
+@isolated(timeout=120)
+def _received(ffmpeg: str, encoder: list[str]) -> _Received:
+    return asyncio.run(_receive(ffmpeg, encoder))
 
 
 @functools.cache
@@ -183,21 +212,15 @@ CASES = [
 @pytest.mark.parametrize(('encoder', 'profile'), CASES)
 def test_decodes_h264_of_ffmpeg(encoder: list[str], profile: str) -> None:
     """A stream of another encoder in a profile arrives negotiated, decoded, close to its source."""
-    if encoder[1] not in ffmpeg_encoders():
+    ffmpeg = shutil.which('ffmpeg')
+    if ffmpeg is None or encoder[1] not in ffmpeg_encoders():
         pytest.skip(f'no ffmpeg with WHIP and {encoder[1]}')
 
-    output = run_isolated(
-        SCRIPT.replace('sys.argv[1]', repr(json.dumps([shutil.which('ffmpeg'), encoder]))), timeout=120
-    )
-    result: dict[str, object] = json.loads(output.strip().splitlines()[-1])
-    if 'skip' in result:
-        pytest.skip(str(result['skip']))
+    result = _received(ffmpeg, encoder)
 
-    assert result['codec'] == 'video/H264'
-    assert f'profile-level-id={profile}' in str(result['fmtp'])
-    assert result['decoder'] == ('VideoToolbox' if sys.platform == 'darwin' else 'OpenH264')
-    assert result['sizes'] == [f'{WIDTH}x{HEIGHT}']
-    psnr = result['psnr']
-    assert isinstance(psnr, list)
+    assert result.codec == 'video/H264'
+    assert f'profile-level-id={profile}' in str(result.fmtp)
+    assert result.decoder == ('VideoToolbox' if sys.platform == 'darwin' else 'OpenH264')
+    assert result.sizes == [f'{WIDTH}x{HEIGHT}']
     # encoding loses some, a wrong decode or a misplaced frame loses far more
-    assert min(psnr) > 35, psnr
+    assert min(result.psnr) > 35, result.psnr

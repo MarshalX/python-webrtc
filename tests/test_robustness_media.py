@@ -9,13 +9,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Callable
 
 import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import run_isolated
+from tests.helpers import connect
+from tests.isolation import isolated
 
 WIDTH, HEIGHT = 16, 16
 I420_SIZE = WIDTH * HEIGHT * 3 // 2
@@ -111,45 +113,41 @@ def test_audio_data_sample_rate_is_positive_and_finite(rate: float) -> None:
         )
 
 
+async def _sends_audio(rate: float, channels: int) -> bool:
+    generator = webrtc.MediaStreamTrackGenerator('audio')
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    caller.add_track(generator)
+    await connect(caller, callee)
+    writer = generator.writable.get_writer()
+    # 10 ms, a few at most: the rate alone is rejected, a 2**40 Hz buffer would be 22 GB
+    frames = max(1, min(int(rate) // 100, 4800))
+    try:
+        for i in range(10):
+            init = webrtc.AudioDataInit(
+                format='s16',
+                sample_rate=rate,
+                number_of_frames=frames,
+                number_of_channels=channels,
+                timestamp=i * 10000,
+                data=bytes(frames * channels * 2),
+            )
+            await writer.write(webrtc.AudioData(init))
+            await asyncio.sleep(0.01)
+    except webrtc.NotSupportedError:
+        return False
+    finally:
+        caller.close()
+        callee.close()
+    return True
+
+
+@isolated
 def test_generator_rejects_audio_libwebrtc_cannot_send() -> None:
     """Audio beyond libwebrtc's frames or resampler is rejected, it aborted the process."""
-    output = run_isolated(
-        """
-        import asyncio
-        import webrtc
-        from tests.helpers import connect
+    rejected = [(1000, 1), (150, 1), (0.5, 1), (2**40, 1), (1000000, 1), (48000, 24), (384000, 16)]
+    sent = [(8000, 1), (48000, 16), (384000, 2), (44100, 2)]
 
-        async def write(rate, channels):
-            generator = webrtc.MediaStreamTrackGenerator('audio')
-            caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
-            caller.add_track(generator)
-            await connect(caller, callee)
-            writer = generator.writable.get_writer()
-            # 10 ms, a few at most: the rate alone is rejected, a 2**40 Hz buffer would be 22 GB
-            frames = max(1, min(int(rate) // 100, 4800))
-            try:
-                for i in range(10):
-                    data = webrtc.AudioData(webrtc.AudioDataInit(
-                        format='s16', sample_rate=rate, number_of_frames=frames, number_of_channels=channels,
-                        timestamp=i * 10000, data=bytes(frames * channels * 2)))
-                    await writer.write(data)
-                    await asyncio.sleep(0.01)
-                result = 'written'
-            except webrtc.NotSupportedError:
-                result = 'rejected'
-            caller.close()
-            callee.close()
-            return result
+    async def send_each() -> dict[tuple[float, int], bool]:
+        return {(rate, channels): await _sends_audio(rate, channels) for rate, channels in rejected + sent}
 
-        async def main():
-            for rate, channels in ((1000, 1), (150, 1), (0.5, 1), (2**40, 1), (1000000, 1), (48000, 24),
-                                   (384000, 16)):
-                print(rate, channels, await write(rate, channels))
-            for rate, channels in ((8000, 1), (48000, 16), (384000, 2), (44100, 2)):
-                print(rate, channels, await write(rate, channels))
-
-        asyncio.run(main())
-        """
-    )
-    results = [line.split()[-1] for line in output.splitlines() if line.endswith(('written', 'rejected'))]
-    assert results == ['rejected'] * 7 + ['written'] * 4, output
+    assert asyncio.run(send_each()) == {**dict.fromkeys(rejected, False), **dict.fromkeys(sent, True)}
