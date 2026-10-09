@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING, Callable
 import pytest
 
 import webrtc
-from tests.helpers import QUIET_PERIOD, isolated
+from tests.helpers import QUIET_PERIOD
+from tests.isolation import isolated
 from webrtc.utils.operations import OperationsChain
 
 if TYPE_CHECKING:
@@ -49,6 +50,25 @@ async def test_cancelled_waiting_operation_leaves_the_running_one() -> None:
         await waiting
     assert order == ['first', 'third']
     assert not chain.busy
+
+
+def test_operations_stranded_by_a_closed_loop_end_quietly() -> None:
+    """Operations waiting in the chain when their loop closes end without errors once collected."""
+    chain = OperationsChain(lambda: None, lambda: False)
+    loop = asyncio.new_event_loop()
+
+    async def operation() -> None:
+        async with chain.operation():
+            await loop.create_future()
+
+    operations = [operation() for _ in range(3)]
+    tasks = [loop.create_task(coroutine) for coroutine in operations]
+    loop.run_until_complete(asyncio.sleep(0))
+    loop.close()
+    for coroutine in operations:
+        # as collecting it does
+        coroutine.close()
+    assert not any(task.done() for task in tasks)
 
 
 async def remote_offer() -> webrtc.RTCSessionDescriptionInit:
