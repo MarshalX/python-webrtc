@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING, Callable
 import pytest
 
 import webrtc
-from tests.helpers import QUIET_PERIOD, isolated
+from tests.helpers import QUIET_PERIOD
+from tests.isolation import isolated
 from webrtc.utils.operations import OperationsChain
 
 if TYPE_CHECKING:
