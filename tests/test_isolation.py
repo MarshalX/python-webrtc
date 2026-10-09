@@ -16,7 +16,9 @@ import threading
 
 import pytest
 
-from tests.isolation import isolated
+from tests.isolation import HUNTING, isolated
+
+needs_timeouts = pytest.mark.skipif(HUNTING, reason='make hunt lifts the timeouts')
 
 
 @isolated
@@ -75,6 +77,7 @@ def test_crash_fails() -> None:
         _crashing()
 
 
+@needs_timeouts
 def test_hang_at_exit_fails() -> None:
     with pytest.raises(pytest.fail.Exception, match='still running after 5 s'):
         _hanging_at_exit()
@@ -89,6 +92,7 @@ def test_skip_skips() -> None:
         _skipping()
 
 
+@needs_timeouts
 def test_hang_at_exit_after_a_skip_fails() -> None:
     with pytest.raises(pytest.fail.Exception, match='still running after 5 s'):
         _skipping_then_hanging_at_exit()

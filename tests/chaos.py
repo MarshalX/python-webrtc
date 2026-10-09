@@ -24,11 +24,11 @@ import random
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING, ClassVar, Literal, TypeVar
+from typing import TYPE_CHECKING, ClassVar, Literal, NoReturn, TypeVar
 
 import webrtc
 import wrtc
-from tests.helpers import connect, copy_frame
+from tests.helpers import connect, copy_frame, register_stack_dump
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -508,9 +508,10 @@ class Chaos(ConnectionSteps, MediaSteps, TransformSteps, LoopSteps):
         *steps(LoopSteps),
     ])
 
-    def __init__(self, seed: int, *, transforms: bool = False) -> None:
+    def __init__(self, seed: int, *, transforms: bool = False, wait_when_stuck: bool = False) -> None:
         super().__init__(seed)
         self.steps = self.TRANSFORM_STEPS if transforms else self.STEPS
+        self.wait_when_stuck = wait_when_stuck
 
     async def run(self, count: int) -> None:
         # handlers raise on purpose
@@ -525,8 +526,7 @@ class Chaos(ConnectionSteps, MediaSteps, TransformSteps, LoopSteps):
             if isinstance(task, threading.Thread):
                 task.join(STEP_TIMEOUT)
                 if task.is_alive():
-                    log.info('a reader thread is stuck')
-                    sys.exit(3)
+                    self._stuck('a reader thread')
 
     async def step(self, index: int, name: str) -> None:
         log.info('%d %s', index, name)
@@ -537,11 +537,18 @@ class Chaos(ConnectionSteps, MediaSteps, TransformSteps, LoopSteps):
         # a step timing out, or connect_two's wait (a builtin TimeoutError before 3.11)
         except (asyncio.TimeoutError, TimeoutError):
             if time.monotonic() - started >= STEP_TIMEOUT:
-                log.info('step %d %s is stuck', index, name)
-                sys.exit(3)
+                self._stuck(f'step {index} {name}')
         # misuse is expected, crashes and deadlocks aren't
         except MISUSE as e:
             log.info('  %s: %s', type(e).__name__, str(e)[:80])
+
+    def _stuck(self, what: str) -> NoReturn:
+        log.info('%s is stuck', what)
+        if not self.wait_when_stuck:
+            sys.exit(3)
+        # until the runner has taken the stacks and aborts
+        while True:
+            time.sleep(60)
 
 
 def main() -> None:
@@ -549,10 +556,16 @@ def main() -> None:
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--steps', type=int, default=300)
     parser.add_argument('--transforms', action='store_true', help='the steps of transforms only, and media for them')
+    parser.add_argument(
+        '--wait-when-stuck',
+        action='store_true',
+        help='on a deadlock, wait to be inspected (make hunt) instead of exiting',
+    )
     args = parser.parse_args()
+    register_stack_dump()
     logging.basicConfig(stream=sys.stdout, format='%(message)s', level=logging.INFO)
     log.info('seed %d, %d steps', args.seed, args.steps)
-    asyncio.run(Chaos(args.seed, transforms=args.transforms).run(args.steps))
+    asyncio.run(Chaos(args.seed, transforms=args.transforms, wait_when_stuck=args.wait_when_stuck).run(args.steps))
     # the last references may be released on helper threads
     deadline = time.monotonic() + 1
     while wrtc._alive_factories() != 0 and time.monotonic() < deadline:

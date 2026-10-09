@@ -10,10 +10,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import ctypes
+import faulthandler
 import functools
 import inspect
 import os
 import pathlib
+import signal
 import subprocess
 import sys
 from typing import TYPE_CHECKING, Callable, Protocol, TypeVar, cast
@@ -150,6 +152,13 @@ async def next_task() -> None:
     timer = loop.create_future()
     loop.call_later(0, timer.set_result, None)
     await timer
+
+
+def register_stack_dump() -> None:
+    """Python stacks of all threads on SIGUSR1, for debugging hangs (make stacks, make hunt)."""
+    if sys.platform != 'win32':
+        # the descriptor: under pytest, sys.stderr is a capture object without one
+        faulthandler.register(signal.SIGUSR1, file=2, all_threads=True)
 
 
 # tasks adding candidates, kept until done (the loop only keeps a weak reference to a task)

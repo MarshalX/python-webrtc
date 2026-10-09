@@ -60,6 +60,7 @@ dev = [
     "pybind11>=3.0",
     "ruff>=0.16.9",
     "pybind11-stubgen>=2.5",
+    "coverage>=7.10",
 ]
 wpt = [
     "pytest-xdist>=3.8.0",
@@ -118,6 +119,13 @@ timeout = 120
 timeout_method = "thread"
 faulthandler_timeout = 60
 
+[tool.coverage.run]
+source_pkgs = ["webrtc"]
+branch = true
+parallel = true
+# warnings on stderr break tests that read it
+disable_warnings = ["module-not-imported", "no-data-collected"]
+
 [tool.ruff]
 required-version = ">=0.16.9"
 line-length = 120
@@ -125,7 +133,7 @@ target-version = "py39"
 preview = true
 include = [
     "python-webrtc/python/webrtc/**/*.py", "tests/**/*.py", "examples/**/*.py", "benchmarks/**/*.py", "cmake/**/*.py",
-    "docs/**/*.py",
+    "docs/**/*.py", "scripts/**/*.py",
 ]
 extend-exclude = ["*.pyi"]
 
@@ -156,6 +164,7 @@ ignore = [
 "examples/**" = ["T201"]
 "benchmarks/**" = ["T201", "S404", "S603"]
 "cmake/**" = ["T201", "S404", "S603"]
+"scripts/**" = ["T201", "D1", "S404", "S603", "S607"]  # debuggers and system tools are found on PATH
 "docs/**" = ["INP001", "T201"]
 "docs/source/conf.py" = ["A001", "FBT001", "PLR0917"]  # the names and signatures Sphinx expects
 
@@ -187,14 +196,14 @@ max-public-methods = 20
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
-known-first-party = ["webrtc", "wrtc", "tests", "benchmarks"]
+known-first-party = ["webrtc", "wrtc", "tests", "benchmarks", "scripts"]
 
 [tool.pyrefly]
 required-version = ">=1.3.2"
 preset = "all"
 project-includes = [
     "python-webrtc/python/webrtc/**/*.py", "tests/**/*.py", "examples/**/*.py", "benchmarks/**/*.py", "cmake/**/*.py",
-    "stubs/**/*.pyi",
+    "scripts/**/*.py", "stubs/**/*.pyi",
 ]
 # tests/fuzz runs with its directory on PYTHONPATH (.github/scripts/fuzz.sh)
 search-path = ["python-webrtc/python", "stubs", ".", "tests/fuzz"]
@@ -225,4 +234,7 @@ matches = "benchmarks/**"
 errors = { unused-call-result = false }
 [[tool.pyrefly.sub-config]]
 matches = "cmake/**"
+errors = { unused-call-result = false }
+[[tool.pyrefly.sub-config]]
+matches = "scripts/**"
 errors = { unused-call-result = false }

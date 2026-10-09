@@ -1,4 +1,4 @@
-.PHONY: dev test asan tsan fuzz lint typecheck format format-check tidy stub wheels doc clean
+.PHONY: dev test asan tsan fuzz hunt hunt-report coverage coverage-report stacks lint typecheck format format-check tidy stub wheels doc clean
 
 # pinned to the clang-tidy of .github/scripts/tidy.sh
 CLANG_FORMAT := uvx clang-format==22.1.8
@@ -25,6 +25,24 @@ fuzz:
 	docker run --rm -it --platform linux/amd64 -v "$(CURDIR):/src" -v "$(CURDIR)/build/fuzz:/tmp/wrtc-fuzz" \
 		-e WRTC_CACHE_DIR=/tmp/wrtc-fuzz/cache -w /src \
 		quay.io/pypa/manylinux_2_28_x86_64 .github/scripts/fuzz.sh $(T) $(O)
+
+# the unattended bug hunt of scripts/debug/hunt.py, results in build/hunt/REPORT.md: make hunt H=8 [O='--until 07:30']
+hunt:
+	CMAKE_BUILD_PARALLEL_LEVEL=4 uv run --no-sync python -m scripts.debug.hunt --hours $(or $(H),8) $(O)
+
+hunt-report:
+	@cat build/hunt/REPORT.md
+
+# make coverage [O='-k stats'], results in build/coverage
+coverage:
+	CMAKE_BUILD_PARALLEL_LEVEL=4 uv run --no-sync python -m scripts.debug.cover run $(O)
+
+coverage-report:
+	uv run --no-sync python -m scripts.debug.cover report
+
+# native stacks of a process and its children: make stacks PID=1234 [O=--signal]
+stacks:
+	uv run --no-sync python -m scripts.debug.stacks $(PID) $(O)
 
 lint: format-check
 	uvx ruff check

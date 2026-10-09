@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import webrtc
-from tests.helpers import release_stranded_candidates
+from tests.helpers import register_stack_dump, release_stranded_candidates
 from webrtc.utils import events
 
 if TYPE_CHECKING:
@@ -40,6 +40,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    register_stack_dump()
     config.addinivalue_line('markers', 'stress: a long stress test, run with --stress')
     # macOS may block the LAN without Local Network permission
     os.environ['WRTC_ALLOW_LOOPBACK'] = '1'

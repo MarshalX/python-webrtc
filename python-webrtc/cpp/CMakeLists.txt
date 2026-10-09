@@ -42,6 +42,12 @@ if(WRTC_SANITIZE)
   endif()
 endif()
 
+option(WRTC_COVERAGE "Build the extension with coverage counters" OFF)
+if(WRTC_COVERAGE)
+  target_compile_options(${MODULE} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(${MODULE} PRIVATE -fprofile-instr-generate)
+endif()
+
 install(TARGETS ${MODULE} LIBRARY DESTINATION . RUNTIME DESTINATION .)
 install(FILES "${PROJECT_SOURCE_DIR}/stubs/wrtc/__init__.pyi" DESTINATION . RENAME wrtc.pyi)
 if(DEFINED SKBUILD_METADATA_DIR)
