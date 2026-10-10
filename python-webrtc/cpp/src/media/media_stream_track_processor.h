@@ -25,21 +25,21 @@
 #include <pybind11/pybind11.h>
 
 #include "../interfaces/media_stream_track.h"
-#include "../utils/alive_count.h"
-#include "../utils/listeners.h"
+#include "../utils/mailbox.h"
+#include "../utils/native_object.h"
 #include "video_frame_buffer.h"
-#include "wakeup.h"
 
 namespace python_webrtc {
 
   // Queues the media of a track for Python (webrtc.MediaStreamTrackProcessor), which is woken with "_ready"
-  class MediaStreamTrackProcessor : public Listeners,
-                                    public Wakeable,
+  class MediaStreamTrackProcessor : public NativeObject<MediaStreamTrackProcessor>,
+                                    public Emitter<MediaStreamTrackProcessor>,
                                     public TrackEndObserver,
                                     public webrtc::VideoSinkInterface<webrtc::VideoFrame>,
-                                    public webrtc::AudioTrackSinkInterface,
-                                    public std::enable_shared_from_this<MediaStreamTrackProcessor> {
+                                    public webrtc::AudioTrackSinkInterface {
   public:
+    static constexpr const char *kName = "MediaStreamTrackProcessor";
+
     static std::shared_ptr<MediaStreamTrackProcessor> Create(const std::shared_ptr<MediaStreamTrack> &track,
                                                              size_t maxBufferSize);
 
@@ -75,15 +75,13 @@ namespace python_webrtc {
     void OnData(const void *audioData, int bitsPerSample, int sampleRate, size_t channels, size_t frames,
                 std::optional<int64_t> absoluteCaptureTimestampMs) override;
 
-    // Wakeable
-    void OnWakeup() override;
-
     // TrackEndObserver
     void OnTrackEnded() override;
 
   private:
-    MediaStreamTrackProcessor(std::shared_ptr<PeerConnectionFactory> factory,
-                              webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track, size_t maxBufferSize);
+    friend class NativeObject<MediaStreamTrackProcessor>;
+
+    MediaStreamTrackProcessor(std::shared_ptr<MediaStreamTrack> track, size_t maxBufferSize);
 
     void Attach();
 
@@ -110,11 +108,10 @@ namespace python_webrtc {
 
     void Push(Item item);
 
-    // wakes Python, unless a wakeup is pending
-    void WakeLocked();
+    bool ArmWakeLocked();
 
-    AliveCount<MediaStreamTrackProcessor> _counted;
-    // the threads of the factory run the proxy of the track
+    // the wrapper keeps the track, and the threads of the factory run its proxy
+    std::shared_ptr<MediaStreamTrack> _trackWrapper;
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> _track;
     const bool _video;

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import copy
 import dataclasses
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, ClassVar, Literal, cast
 
 from typing_extensions import override
@@ -28,6 +27,7 @@ from webrtc.interfaces.media_stream_track import (
     MICROPHONE_DEVICE_ID,
     _camera_mode,
     _converted,
+    _keep_constraints,
     _unsatisfied,
 )
 from webrtc.models.events import DeviceChangeEvent
@@ -42,6 +42,7 @@ from webrtc.utils.names import Alias, alias
 
 if TYPE_CHECKING:
     import webrtc
+    from webrtc.utils.loops import LoopState
 
 
 class MediaDeviceInfo:
@@ -209,17 +210,22 @@ class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent
             devices are fixed.
     """
 
+    __slots__ = ('__weakref__', '_devices', '_handlers', '_supported')
+
     def __init__(self) -> None:
-        # the listeners of the events, which a native object holds for other targets
-        self._native = SimpleNamespace(_listeners=None)
+        self._handlers = None
         # the devices never change
         self._devices = _devices()
         self._supported = [field.name for field in dataclasses.fields(MediaTrackSupportedConstraints)]
 
-    @property
     @override
-    def _native_obj(self) -> SimpleNamespace:
-        return self._native
+    def _attach(self) -> bool:
+        # no native object: nothing to bind
+        return False
+
+    @override
+    def _state(self) -> LoopState | None:
+        return None
 
     async def enumerate_devices(self) -> list[webrtc.MediaDeviceInfo]:
         """Lists the synthetic microphone and camera. Labels are included and no permission prompt is shown.
@@ -279,10 +285,10 @@ class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent
         stream = MediaStream._wrap(wrtc.getUserMedia(audio is not None, video is not None, width, height, frame_rate))
         for track in stream.get_audio_tracks():
             track._native_obj._setLabel(microphone.label)
-            track._native_obj._constraints = audio
+            _keep_constraints(track._native_obj, audio)
         for track in stream.get_video_tracks():
             track._native_obj._setLabel(camera.label)
-            track._native_obj._constraints = video
+            _keep_constraints(track._native_obj, video)
         return stream
 
     #: Alias for :meth:`enumerate_devices`

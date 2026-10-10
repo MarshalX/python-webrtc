@@ -18,11 +18,11 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import QUIET_PERIOD, connect, copy_frame, wait_until
-from tests.test_lifetime import alive_factories, alive_objects, collect
+from tests.helpers import QUIET_PERIOD, collect, connect, copy_frame, settled_alive, wait_until
+from tests.test_lifetime import alive_factories, alive_objects
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
 
 TIMEOUT = 15
 KEY = bytes(range(16))
@@ -144,69 +144,102 @@ async def settled(baseline: dict[str, int]) -> dict[str, int]:
             return alive
 
 
-@pytest.mark.asyncio
-async def test_transforms_of_connections_dropped_without_close() -> None:
-    """Dropping connections ends the streams of their transforms, and releases everything."""
+def released_with_the_loop(refs: Sequence[weakref.ref[object]], baseline: dict[str, int], factories: int) -> bool:
+    """Whether everything died with the loop."""
+
+    def released(alive: dict[str, int], alive_factories: int) -> bool:
+        within = all(count <= baseline.get(name, 0) for name, count in alive.items())
+        return within and alive_factories <= factories and all(ref() is None for ref in refs)
+
+    return released(*settled_alive(released))
+
+
+def test_transforms_of_connections_dropped_without_close() -> None:
+    """Dropped connections live until the loop closes."""
     baseline, factories = alive_objects(), alive_factories()
 
-    async def session() -> tuple[list[Worker], list[weakref.ref[object]]]:
+    async def session() -> list[weakref.ref[object]]:
         caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
         workers = await script_call(caller, callee)
         transforms = [part.transform for part in (*caller.get_senders(), *callee.get_receivers())]
-        return workers, [weakref.ref(item) for item in (caller, callee, *transforms)]
+        refs: list[weakref.ref[object]] = [weakref.ref(item) for item in (caller, callee, *transforms)]
+        del caller, callee, transforms
+        collect()
+        await asyncio.sleep(QUIET_PERIOD)
+        # both connections have handlers (connect()'s candidates, the callee's track)
+        assert all(ref() is not None for ref in refs)
+        assert all(not w.ended.done() for w in workers)
+        return refs
 
-    workers, refs = await session()
-    collect()
-    await asyncio.wait_for(asyncio.gather(*(w.ended for w in workers)), TIMEOUT)
-    del workers
-    assert await settled(baseline) == baseline
-    assert [ref for ref in refs if ref() is not None] == []
-    assert alive_factories() == factories
+    refs = asyncio.run(session())
+    assert released_with_the_loop(refs, baseline, factories)
 
 
-@pytest.mark.asyncio
-async def test_sframe_transforms_of_connections_dropped_without_close() -> None:
+def handle_errors(decryptors: list[webrtc.RTCRtpSFrameDecryptor]) -> list[webrtc.SFrameTransformErrorEvent]:
+    errors: list[webrtc.SFrameTransformErrorEvent] = []
+    for decryptor in decryptors:
+        decryptor.on('error', errors.append)
+    return errors
+
+
+async def stop_errors(refs: list[weakref.ref[object]]) -> None:
+    """Stops per-frame errors, each a collection under --gc-on-emit."""
+    for ref in refs:
+        decryptor = ref()
+        if isinstance(decryptor, webrtc.RTCRtpSFrameDecryptor):
+            await decryptor.add_decryption_key(KEY, 1)
+
+
+def test_sframe_transforms_of_connections_dropped_without_close() -> None:
+    """Dropped connections keep decryptors until the loop closes."""
     baseline, factories = alive_objects(), alive_factories()
 
-    async def session() -> weakref.ref[object]:
+    async def session() -> list[weakref.ref[object]]:
         caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
         decryptors = await sframe_call(caller, callee, decryption_key=OTHER_KEY)
-        errors: list[webrtc.SFrameTransformErrorEvent] = []
-        for decryptor in decryptors:
-            decryptor.on('error', errors.append)
-        await wait_until(lambda: len(errors) > 5, 'errors', TIMEOUT)
-        # the right key stops the errors, which every frame makes: --gc-on-emit collects for each one
-        for decryptor in decryptors:
-            await decryptor.add_decryption_key(KEY, 1)
-        return weakref.ref(decryptors[0])
+        errors = handle_errors(decryptors)
+        refs: list[weakref.ref[object]] = [weakref.ref(item) for item in (caller, callee, *decryptors)]
+        del caller, callee, decryptors
+        collect()
+        errors.clear()
+        await wait_until(lambda: len(errors) > 5, 'errors after the drop', TIMEOUT)
+        assert all(ref() is not None for ref in refs)
+        await stop_errors(refs)
+        return refs
 
-    ref = await session()
-    assert await settled(baseline) == baseline
-    assert ref() is None
-    assert alive_factories() == factories
+    refs = asyncio.run(session())
+    assert released_with_the_loop(refs, baseline, factories)
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize('dropped', [False, True])
-async def test_worker_referencing_its_connection_with_a_pending_read(*, dropped: bool) -> None:
-    """A worker waiting for a frame, referencing its connection, ends on close (or once its sender is gone)."""
-    baseline = alive_objects()
+def test_worker_referencing_its_connection_with_a_pending_read(*, dropped: bool) -> None:
+    """Waiting worker ends on close() or loop close."""
+    baseline, factories = alive_objects(), alive_factories()
 
-    async def session() -> list[Worker]:
+    async def session() -> list[weakref.ref[object]]:
         caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
         workers = await script_call(caller, callee, owner=None if dropped else (caller, callee))
-        if not dropped:
-            caller.close()
-            callee.close()
-        return workers
+        refs: list[weakref.ref[object]] = [weakref.ref(worker) for worker in workers]
+        if dropped:
+            del caller, callee
+            collect()
+            await asyncio.sleep(QUIET_PERIOD)
+            assert all(not w.ended.done() for w in workers)
+            return refs
+        caller.close()
+        callee.close()
+        await asyncio.wait_for(asyncio.gather(*(w.ended for w in workers)), TIMEOUT)
+        return refs
 
-    workers = await session()
-    collect()
-    await asyncio.wait_for(asyncio.gather(*(w.ended for w in workers)), TIMEOUT)
-    refs = [weakref.ref(worker) for worker in workers]
-    del workers
-    assert await settled(baseline) == baseline
-    assert [ref for ref in refs if ref() is not None] == []
+    async def scenario() -> list[weakref.ref[object]]:
+        refs = await session()
+        if not dropped:
+            assert await settled(baseline) == baseline
+            assert [ref for ref in refs if ref() is not None] == []
+        return refs
+
+    refs = asyncio.run(scenario())
+    assert released_with_the_loop(refs, baseline, factories)
 
 
 def use_frame(frame: Frame) -> None:
@@ -462,32 +495,20 @@ async def referencing_script(caller: webrtc.RTCPeerConnection, callee: webrtc.RT
     for part in (*caller.get_senders(), *callee.get_receivers()):
         transform = part.transform
         assert isinstance(transform, webrtc.RTCRtpScriptTransform)
-        transform._transformer._options = (caller, callee, part)
-        transform._transformer.on('keyframerequest', lambda _event: (caller, callee))
+        transformer = transform._transformer
+        assert transformer is not None
+        transformer._options = (caller, callee, part)
+        transformer.on('keyframerequest', lambda _event: (caller, callee))
     await wait_until(lambda: all(w.count > 10 for w in workers), 'frames', TIMEOUT)
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize('kind', ['sframe', 'script'])
-@pytest.mark.parametrize(
-    'closed',
-    [
-        True,
-        pytest.param(
-            False,
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason='known leak: an open connection keeps its transforms, whose handlers referencing it are a cycle '
-                'through C++ (released once it closes, as a transform is never associated again)',
-            ),
-        ),
-    ],
-)
-async def test_handlers_referencing_their_connection(kind: str, *, closed: bool) -> None:
-    """Handlers and options of a transform referencing its connection (a cycle through C++) don't keep it alive."""
+@pytest.mark.parametrize('closed', [True, False])
+def test_handlers_referencing_their_connection(kind: str, *, closed: bool) -> None:
+    """Transform references keep the connection until close."""
     baseline, factories = alive_objects(), alive_factories()
 
-    async def session() -> list[weakref.ref[webrtc.RTCPeerConnection]]:
+    async def session() -> list[weakref.ref[object]]:
         caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
         await (referencing_sframe if kind == 'sframe' else referencing_script)(caller, callee)
         if closed:
@@ -495,11 +516,21 @@ async def test_handlers_referencing_their_connection(kind: str, *, closed: bool)
             callee.close()
         return [weakref.ref(caller), weakref.ref(callee)]
 
-    refs = await session()
+    async def scenario() -> list[weakref.ref[object]]:
+        refs = await session()
+        if closed:
+            assert await settled(baseline) == baseline
+            assert [ref for ref in refs if ref() is not None] == []
+        else:
+            collect()
+            await asyncio.sleep(QUIET_PERIOD)
+            # handlers and associated transforms keep them while open
+            assert all(ref() is not None for ref in refs)
+        return refs
+
+    refs = asyncio.run(scenario())
     try:
-        assert await settled(baseline) == baseline
-        assert [ref for ref in refs if ref() is not None] == []
-        assert alive_factories() == factories
+        assert released_with_the_loop(refs, baseline, factories)
     finally:
         for ref in refs:
             pc = ref()
@@ -535,8 +566,10 @@ async def test_handlers_registered_once_detached_are_not_kept() -> None:
         handlers = [Handler(callee, receivers) for _ in range(4)]
         decryptors[1].on('error', handlers[0])
         decryptors[1].once('error', handlers[1])
-        transform._transformer.on('keyframerequest', handlers[2])
-        transform._transformer.once('keyframerequest', handlers[3])
+        transformer = transform._transformer
+        assert transformer is not None
+        transformer.on('keyframerequest', handlers[2])
+        transformer.once('keyframerequest', handlers[3])
         decryptors[1].off('error', handlers[0])
         assert receivers[1].transform is not None
         return [weakref.ref(item) for item in (caller, callee, *handlers)]

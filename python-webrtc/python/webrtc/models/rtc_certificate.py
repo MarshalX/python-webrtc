@@ -180,7 +180,11 @@ class RTCCertificate(WebRTCObject[wrtc.RTCCertificate]):
     See :mdn:`RTCCertificate`.
     """
 
+    __slots__ = ()
+
     _class = wrtc.RTCCertificate
+    # a value, compared by its native object
+    _canonical: ClassVar[bool] = False
 
     @classmethod
     async def _generate(cls, algorithm: AlgorithmIdentifier) -> RTCCertificate:

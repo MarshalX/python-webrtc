@@ -10,9 +10,8 @@
 #include "../codecs/videotoolbox.h"
 #include "../exceptions.h"
 #include "../media/playout_audio_device.h"
-#include "../media/wakeup.h"
+#include "../utils/dispatcher.h"
 #include "../utils/gil.h"
-#include "../utils/instance_holder.h"
 #include "../utils/libwebrtc_thread.h"
 
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
@@ -64,7 +63,6 @@ namespace python_webrtc {
 
   std::weak_ptr<PeerConnectionFactory> PeerConnectionFactory::_default{};
   std::mutex PeerConnectionFactory::_mutex{};
-  std::atomic<int> PeerConnectionFactory::_alive{0};
   bool PeerConnectionFactory::_sslInitialized{false};
   FieldTrials PeerConnectionFactory::_trials{};
   bool PeerConnectionFactory::_loopbackAllowed{false};
@@ -81,16 +79,14 @@ namespace python_webrtc {
   } // namespace
 
   PeerConnectionFactory::PeerConnectionFactory()
-      : _generation(Forks().load()), _fieldTrials(_trials),
-        _networkIgnoreMask(_loopbackAllowed ? 0 : webrtc::kDefaultNetworkIgnoreMask) {
+      : _fieldTrials(_trials), _networkIgnoreMask(_loopbackAllowed ? 0 : webrtc::kDefaultNetworkIgnoreMask) {
     _workerThread = Started(webrtc::Thread::CreateWithSocketServer(), "PeerConnectionFactory:workerThread");
     _signalingThread = Started(webrtc::Thread::Create(), "PeerConnectionFactory:signalingThread");
+    // sanitizer builds check that these threads never enter Python
+    _workerThread->PostTask(&TagNativeThread);
+    _signalingThread->PostTask(&TagNativeThread);
 
-    BlockingCallOn(_workerThread, [this]() {
-      OnLibwebrtcThread() = true;
-      _audioDeviceModule = webrtc::make_ref_counted<PlayoutAudioDevice>();
-    });
-    BlockingCallOn(_signalingThread, []() { OnLibwebrtcThread() = true; });
+    BlockingCallOn(_workerThread, [this]() { _audioDeviceModule = webrtc::make_ref_counted<PlayoutAudioDevice>(); });
 
     _factory = webrtc::CreatePeerConnectionFactory(
         _workerThread.get(), _workerThread.get(), _signalingThread.get(), _audioDeviceModule,
@@ -105,14 +101,9 @@ namespace python_webrtc {
     webrtc::PeerConnectionFactoryInterface::Options options;
     options.network_ignore_mask = _networkIgnoreMask;
     _factory->SetOptions(options);
-
-    _alive++;
   }
 
   PeerConnectionFactory::~PeerConnectionFactory() {
-    // stopping the threads waits for their tasks, which may be waiting for the GIL
-    const BlockingDestructor release("PeerConnectionFactory");
-
     _factory = nullptr;
 
     BlockingCallOn(_workerThread, [this]() { this->_audioDeviceModule = nullptr; });
@@ -122,13 +113,6 @@ namespace python_webrtc {
 
     _workerThread = nullptr;
     _signalingThread = nullptr;
-
-    _alive--;
-  }
-
-  void RunOnSignalingThread(PeerConnectionFactory &factory, const std::function<void()> &function) {
-    const gil_release_if_held release;
-    BlockingCallOn(factory.signalingThread(), [&]() { function(); });
   }
 
   std::shared_ptr<PeerConnectionFactory> PeerConnectionFactory::Create() {
@@ -147,7 +131,7 @@ namespace python_webrtc {
 #endif
     InitializeSSL();
     _started = true;
-    return {new PeerConnectionFactory(), &PeerConnectionFactory::Destroy};
+    return NativeObject::Create();
   }
 
   void PeerConnectionFactory::SetFieldTrials(const std::string &trials) {
@@ -183,20 +167,6 @@ namespace python_webrtc {
     return factory;
   }
 
-  void PeerConnectionFactory::Destroy(PeerConnectionFactory *factory) {
-    // leaked while the interpreter finalizes or in a forked child: its threads may hang or be gone
-    if (!PythonAlive() || factory->_generation != Forks().load()) {
-      return;
-    }
-    // the last owner may be released by a task on one of the factory threads, which can't stop itself
-    if (factory->_workerThread->IsCurrent() || factory->_signalingThread->IsCurrent()) {
-      ReleaseThread::Post([factory]() { delete factory; });
-      return;
-    }
-
-    delete factory;
-  }
-
   void PeerConnectionFactory::InitializeSSL() {
     if (!_sslInitialized) {
       if (!webrtc::InitializeSSL()) {
@@ -208,7 +178,7 @@ namespace python_webrtc {
 
   void PeerConnectionFactory::Dispose() {
     const std::scoped_lock lock(_mutex);
-    if (_alive > 0) {
+    if (Alive() > 0) {
       throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "Failed to dispose: peer connection factories are alive");
     }
     if (_sslInitialized) {
@@ -228,29 +198,27 @@ namespace python_webrtc {
     pthread_atfork(
         []() {
           _mutex.lock();
-          Wakeup::LockForFork();
-          ReleaseThread::LockForFork();
+          Dispatcher::LockForFork();
         },
         []() {
-          ReleaseThread::UnlockAfterFork();
-          Wakeup::UnlockAfterFork();
+          Dispatcher::UnlockAfterFork();
           _mutex.unlock();
         },
         []() {
           Forks()++;
           _default.reset();
-          ReleaseThread::UnlockAfterFork();
-          Wakeup::UnlockAfterFork();
+          Dispatcher::UnlockAfterFork();
           _mutex.unlock();
         });
 #endif
 
     pybind11::class_<PeerConnectionFactory, std::shared_ptr<PeerConnectionFactory>>(m, "PeerConnectionFactory")
+        .def_property_readonly("_id", &PeerConnectionFactory::Id)
         .def(pybind11::init(nogil_factory(&PeerConnectionFactory::Create)))
         .def_static("getOrCreateDefault", &PeerConnectionFactory::GetOrCreateDefault, nogil())
         .def_static("dispose", &PeerConnectionFactory::Dispose, nogil());
 
-    m.def("_alive_factories", []() { return _alive.load(); });
+    m.def("_alive_factories", &PeerConnectionFactory::Alive);
     m.def("_set_field_trials", &PeerConnectionFactory::SetFieldTrials, nogil(), pybind11::arg("trials"));
     m.def("_allow_loopback", &PeerConnectionFactory::AllowLoopback, nogil());
   }

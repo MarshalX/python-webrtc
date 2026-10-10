@@ -59,9 +59,10 @@ stuck seed waits for `make stacks` or a debugger instead of exiting.
 
 ### Jobs
 
-A job is a row of `JOBS` in `hunt.py`: its command, weight, and limits. `sanitizer` runs it in a build of
-`.github/scripts/sanitizers-macos.sh --exec`, `ecores` on the efficiency cores (`taskpolicy -b`), which widens race
-windows. Both are macOS only; on Linux the other jobs run.
+A job is a row of `JOBS` in `hunt.py`: its command, weight, and limits. `build` runs it in a build of
+`.github/scripts/sanitizers-macos.sh --exec` (ASan, TSan, or the free-threaded one of `make ft`), `ecores` on the
+efficiency cores (`taskpolicy -b`), which widens race windows. Both are macOS only; on Linux the other jobs run.
+Efficiency cores reproduce races, they aren't a gate: the hunt turns pytest's timeouts off there.
 
 ## Coverage
 

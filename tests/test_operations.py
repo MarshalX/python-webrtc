@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import asyncio
+import gc
+import threading
 from typing import TYPE_CHECKING, Callable
 
 import pytest
@@ -69,6 +71,72 @@ def test_operations_stranded_by_a_closed_loop_end_quietly() -> None:
         # as collecting it does
         coroutine.close()
     assert not any(task.done() for task in tasks)
+
+
+def test_operation_waiting_for_one_of_another_loop_resumes() -> None:
+    """Operations chain across loops on other threads."""
+    chain = OperationsChain(lambda: None, lambda: False)
+    started = threading.Event()
+    release = threading.Event()
+
+    async def first() -> None:
+        async with chain.operation():
+            started.set()
+            await asyncio.get_running_loop().run_in_executor(None, release.wait)
+
+    other = threading.Thread(target=asyncio.run, args=(first(),))
+    other.start()
+    assert started.wait(5)
+
+    async def second() -> None:
+        async def operation() -> None:
+            async with chain.operation():
+                pass
+
+        waiting = asyncio.ensure_future(operation())
+        await asyncio.sleep(0)
+        release.set()
+        await asyncio.wait_for(waiting, 5)
+
+    asyncio.run(second())
+    other.join(5)
+    assert not chain.busy
+
+
+def test_operation_waiting_in_a_closed_loop_lets_the_chain_go_on(caplog: pytest.LogCaptureFixture) -> None:
+    """An operation whose loop closes while it waits neither wakes that loop nor holds up the chain.
+
+    Its task stays alive: its code never runs again, as on 3.9, where a collected task doesn't run it either.
+    """
+    chain = OperationsChain(lambda: None, lambda: False)
+    started = threading.Event()
+    release = threading.Event()
+
+    async def first() -> None:
+        async with chain.operation():
+            started.set()
+            await asyncio.get_running_loop().run_in_executor(None, release.wait)
+
+    other = threading.Thread(target=asyncio.run, args=(first(),))
+    other.start()
+    assert started.wait(5)
+
+    async def operation() -> None:
+        async with chain.operation():
+            pass
+
+    loop = asyncio.new_event_loop()
+    waiting = loop.create_task(operation())
+    loop.run_until_complete(asyncio.sleep(0))
+    loop.close()
+    release.set()
+    other.join(5)
+    assert not chain.busy
+    # collected later, its code may end the operation again (3.10+)
+    del waiting
+    _ = gc.collect()
+    assert not chain.busy
+    assert [record.message for record in caplog.records if record.name == 'concurrent.futures'] == []
 
 
 async def remote_offer() -> webrtc.RTCSessionDescriptionInit:

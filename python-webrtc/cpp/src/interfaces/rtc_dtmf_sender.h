@@ -19,17 +19,21 @@
 
 #include <pybind11/pybind11.h>
 
-#include "../utils/alive_guard.h"
-#include "../utils/instance_holder.h"
-#include "../utils/listeners.h"
 #include "../utils/locked_function.h"
+#include "../utils/mailbox.h"
+#include "../utils/native_object.h"
+#include "../utils/registry.h"
 #include "peer_connection_factory.h"
 
 namespace python_webrtc {
 
   // Sends DTMF tones on an audio sender (webrtc.RTCDTMFSender)
-  class RTCDTMFSender : public webrtc::DtmfSenderObserverInterface, public Listeners, public SingleObserverSlot {
+  class RTCDTMFSender : public webrtc::DtmfSenderObserverInterface,
+                        public NativeObject<RTCDTMFSender>,
+                        public Emitter<RTCDTMFSender> {
   public:
+    static constexpr const char *kName = "RTCDTMFSender";
+
     RTCDTMFSender(std::shared_ptr<PeerConnectionFactory> factory,
                   webrtc::scoped_refptr<webrtc::DtmfSenderInterface> dtmf);
 
@@ -40,7 +44,7 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
-    static InstanceHolder<RTCDTMFSender, webrtc::DtmfSenderInterface> &holder();
+    static Registry<RTCDTMFSender, webrtc::DtmfSenderInterface> &registry();
 
     // the transceiver of the sender, which tells whether tones can be sent; set by the sender
     void SetTransceiver(std::function<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>()> transceiver);
@@ -55,8 +59,10 @@ namespace python_webrtc {
     // the tones not played yet, as Python sees them: set by insertDTMF(), shortened along with tonechange events
     std::string GetToneBuffer();
 
-    // the buffer a delivered tonechange event left, if no insertDTMF() came after the tone
-    void SurfaceBuffer(const std::string &buffer, uint64_t insertion);
+    // the buffer a delivered tonechange event left, if no insertDTMF() came after the tone; ended by the empty tone
+    void SurfaceBuffer(const std::string &buffer, uint64_t insertion, bool ended);
+
+    bool GetPlaying();
 
     bool GetCanInsertDtmf();
 
@@ -68,9 +74,7 @@ namespace python_webrtc {
     std::mutex _bufferMutex;
     std::optional<std::string> _surfacedBuffer;
     uint64_t _insertions = 0;
-
-    // see AliveGuard
-    AliveGuard _alive;
+    bool _playing = false;
   };
 
 } // namespace python_webrtc

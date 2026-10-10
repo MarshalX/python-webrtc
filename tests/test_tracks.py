@@ -11,11 +11,20 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import weakref
 
 import pytest
 
 import webrtc
-from tests.helpers import connect, exchange_offer, exchange_offer_answer, wait_for_event, wait_until_unmuted
+from tests.helpers import (
+    QUIET_PERIOD,
+    collect,
+    connect,
+    exchange_offer,
+    exchange_offer_answer,
+    wait_for_event,
+    wait_until_unmuted,
+)
 
 
 @pytest.mark.asyncio
@@ -52,24 +61,32 @@ async def test_stopped_transceiver_ends_the_track_with_its_event(pc: webrtc.RTCP
 
 
 @pytest.mark.asyncio
-async def test_ended_track_releases_its_handlers(
+async def test_ended_track_is_not_kept_by_its_handlers(
     pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
 ) -> None:
-    """An ended track fires no more events, so it keeps no handlers, once its ended event is delivered."""
+    """Ended track fires no events and isn't kept alive."""
+    calls: list[str] = []
     remote = pc.add_transceiver(webrtc.MediaType.audio)
     remote_track = remote.receiver.track
-    remote_track.on('mute', lambda _: None)
+    remote_track.on('mute', lambda event: calls.append(event.type))
     ended = wait_for_event(remote_track, 'ended')
     remote.stop()
     await ended
-    assert remote_track.listeners('mute') == []
+    assert remote_track.listeners('mute') != []
+    ref = weakref.ref(remote_track)
+    del remote_track
+    # the task step the event woke still holds the event, and so the track
+    await asyncio.sleep(0)
+    collect()
+    assert ref() is None
 
     local_track = audio_stream.get_tracks()[0]
-    local_track.on('mute', lambda _: None)
+    local_track.on('mute', lambda event: calls.append(event.type))
     local_track.stop()
-    assert local_track.listeners('mute') == []
-    local_track.on('ended', lambda _: None)
-    assert local_track.listeners('ended') == []
+    local_track.on('ended', lambda event: calls.append(event.type))
+    assert local_track.listeners('ended') != []
+    await asyncio.sleep(QUIET_PERIOD)
+    assert calls == []
 
 
 @pytest.mark.asyncio

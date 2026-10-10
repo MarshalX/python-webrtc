@@ -16,12 +16,14 @@
 
 #include <pybind11/pybind11.h>
 
-#include "../utils/alive_count.h"
+#include "../utils/native_object.h"
 
 namespace python_webrtc {
 
-  class EncodedFrame {
+  class EncodedFrame : public NativeObject<EncodedFrame> {
   public:
+    static constexpr const char *kName = "RTCEncodedFrame";
+
     EncodedFrame(std::unique_ptr<webrtc::TransformableFrameInterface> frame, uint64_t source);
 
     static void Init(pybind11::module &m);
@@ -37,7 +39,6 @@ namespace python_webrtc {
     std::unique_ptr<webrtc::TransformableFrameInterface> Take();
 
   private:
-    AliveCount<EncodedFrame> _counted;
     const bool _video;
     const uint64_t _source;
 

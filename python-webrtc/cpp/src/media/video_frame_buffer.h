@@ -20,7 +20,7 @@
 
 #include <pybind11/pybind11.h>
 
-#include "../utils/alive_count.h"
+#include "../utils/native_object.h"
 
 namespace python_webrtc {
 
@@ -52,8 +52,10 @@ namespace python_webrtc {
   };
 
   // The planes of a VideoFrame, kept by reference from libwebrtc or copied from Python; immutable, so clones share it
-  class VideoFrameBuffer {
+  class VideoFrameBuffer : public NativeObject<VideoFrameBuffer> {
   public:
+    static constexpr const char *kName = "VideoFrameBuffer";
+
     // (offset, stride) of a plane in the data of the application
     using SourceLayout = std::tuple<size_t, size_t>;
     // (leftBytes, top, rowBytes, rows, destinationOffset, destinationStride) of a plane to copy
@@ -89,8 +91,14 @@ namespace python_webrtc {
     [[nodiscard]] webrtc::scoped_refptr<webrtc::VideoFrameBuffer> ToWebrtc() const;
 
   private:
+    friend class NativeObject<VideoFrameBuffer>;
+
     VideoFrameBuffer(const PixelFormat &format, int width, int height)
         : _format(&format), _width(width), _height(height) {}
+
+    VideoFrameBuffer(const VideoFrameBuffer &other, const PixelFormat &format)
+        : _format(&format), _width(other._width), _height(other._height), _data(other._data), _stride(other._stride),
+          _webrtc(other._webrtc), _owned(other._owned) {}
 
     // The planes with 8 bits per sample: the planes themselves, or a copy of them shifted down
     struct EightBit {
@@ -110,7 +118,6 @@ namespace python_webrtc {
     // what the planes point into
     webrtc::scoped_refptr<webrtc::VideoFrameBuffer> _webrtc;
     std::shared_ptr<std::vector<uint8_t>> _owned;
-    AliveCount<VideoFrameBuffer> _counted;
   };
 
 } // namespace python_webrtc

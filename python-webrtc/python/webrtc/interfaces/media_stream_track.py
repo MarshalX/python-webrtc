@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import math
 from typing import TYPE_CHECKING, Literal, TypeVar, Union, cast
 
@@ -18,6 +19,7 @@ from typing_extensions import override
 
 import wrtc
 from webrtc.base import WebRTCObject
+from webrtc.enums import MediaStreamTrackState
 from webrtc.exceptions import OverconstrainedError
 from webrtc.models.events import Event
 from webrtc.models.media_track_constraints import (
@@ -300,6 +302,17 @@ def _camera_mode(
     return width, height, frame_rate
 
 
+def _keep_constraints(native: wrtc.MediaStreamTrack, constraints: MediaTrackConstraints | None) -> None:
+    """Stores the constraints on the native track as JSON."""
+    native._constraints = json.dumps(constraints.to_json()) if constraints is not None else None
+
+
+def _kept_constraints(native: wrtc.MediaStreamTrack) -> MediaTrackConstraints | None:
+    """The constraints stored on the native track."""
+    text = native._constraints
+    return MediaTrackConstraints.from_json(json.loads(text)) if text is not None else None
+
+
 class MediaStreamTrack(
     WebRTCObject[wrtc.MediaStreamTrack], UniformEventTarget[Literal['mute', 'unmute', 'ended'], Event]
 ):
@@ -313,8 +326,10 @@ class MediaStreamTrack(
         ended (:obj:`webrtc.Event`): The track ended for a reason other than :meth:`stop`, for example because
             the remote peer stopped sending it.
 
-    An ended track fires no more events, so its handlers are released then.
+    A live track with handlers stays alive until it ends or its event loop closes.
     """
+
+    __slots__ = ()
 
     _class = wrtc.MediaStreamTrack
 
@@ -326,6 +341,17 @@ class MediaStreamTrack(
             self._native_obj._surfaceMuted(muted)
         elif name == 'ended':
             self._native_obj._surfaceEnded()
+
+    @override
+    def _open(self) -> bool:
+        # webrtc-pc close() ends remote tracks with their event, unbinding them
+        return True
+
+    @override
+    def _activity(self) -> str | None:
+        if self.ready_state != MediaStreamTrackState.live or len(self.event_names()) == 0:
+            return None
+        return 'live with handlers'
 
     @property
     def enabled(self) -> bool:
@@ -464,7 +490,7 @@ class MediaStreamTrack(
         Returns:
             :obj:`webrtc.MediaTrackConstraints`: The constraints, none by default.
         """
-        constraints = self._native_obj._constraints
+        constraints = _kept_constraints(self._native_obj)
         return constraints if constraints is not None else MediaTrackConstraints()
 
     def apply_constraints(self, constraints: MediaTrackConstraints | None = None) -> asyncio.Future[None]:
@@ -507,7 +533,7 @@ class MediaStreamTrack(
             width, height, frame_rate = _camera_mode(constraints, capabilities, settings, current=camera)
             if (width, height, frame_rate) != camera:
                 _ = self._native_obj._reconfigureCamera(int(width), int(height), float(frame_rate))
-        self._native_obj._constraints = constraints
+        _keep_constraints(self._native_obj, constraints)
 
     def clone(self) -> webrtc.MediaStreamTrack:
         """Returns a new track with a new :attr:`id`, sharing the source of this one.
@@ -520,9 +546,7 @@ class MediaStreamTrack(
         Returns:
             :obj:`webrtc.MediaStreamTrack`: The clone.
         """
-        native = self._native_obj.clone()
-        native._constraints = copy.deepcopy(self._native_obj._constraints)
-        return self._wrap(native)
+        return self._wrap(self._native_obj.clone())
 
     def stop(self) -> None:
         """Stops the track and detaches it from its source. :attr:`ready_state` becomes ``ended`` with no event.
@@ -530,7 +554,8 @@ class MediaStreamTrack(
         Its sender sends silence or a black frame a second; clones keep their media.
         See :mdn:`MediaStreamTrack/stop`.
         """
-        self._native_obj.stop()
+        with self._changing():
+            self._native_obj.stop()
 
     #: Alias for :attr:`ready_state`
     readyState = ready_state

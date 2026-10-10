@@ -13,12 +13,10 @@
 #include "interfaces/interfaces.h"
 #include "media/media.h"
 #include "models/models.h"
-#include "utils/gil.h"
-#include "utils/held_events.h"
-#include "utils/python_callback.h"
-
-#include <thread>
-#include <utility>
+#include "testing.h"
+#include "utils/dispatcher.h"
+#include "utils/libwebrtc_thread.h"
+#include "utils/mailbox.h"
 
 namespace py = pybind11;
 
@@ -28,41 +26,31 @@ namespace {
     py::print("pong");
   }
 
-  struct Unconvertible {};
-
-  // for tests
-  void callbackUnconvertible(py::function callback) {
-    auto call = python_webrtc::PythonCallback<Unconvertible>(std::move(callback));
-    const python_webrtc::gil_release release;
-    std::thread([call]() { call(Unconvertible{}); }).join();
-  }
-
-  // for tests
-  void heldEventsWithGil() {
-    (void)python_webrtc::HeldEvents().IsHeld();
-  }
-
 } // namespace
 
-PYBIND11_MODULE(wrtc, m) {
+PYBIND11_MODULE(wrtc, m, pybind11::mod_gil_not_used()) {
   m.def("ping", &ping);
-  m.def("_callback_unconvertible", &callbackUnconvertible);
-  m.def("_held_events_with_gil", &heldEventsWithGil);
-  py::module_::import("atexit").attr("register")(py::cpp_function([]() {
-    python_webrtc::StopEnteringPython();
-    python_webrtc::PendingOperations::FailAll();
-  }));
+  py::module_::import("atexit").attr("register")(py::cpp_function(&python_webrtc::Dispatcher::StopAtExit));
   // the memory of ASan (its quarantine) and TSan (its shadow) makes resident memory say nothing about leaks
 #ifdef WRTC_SANITIZED
   m.attr("_sanitized") = true;
 #else
   m.attr("_sanitized") = false;
 #endif
+  // ThreadSanitizer ends a forked child that starts a thread: tests forking with the Dispatcher running skip
+#ifdef WRTC_THREAD_SANITIZED
+  m.attr("_thread_sanitized") = true;
+#else
+  m.attr("_thread_sanitized") = false;
+#endif
 
   python_webrtc::Exceptions::Init(m);
+  python_webrtc::Dispatcher::Init(m);
+  python_webrtc::Mailbox::Init(m);
   python_webrtc::Models::Init(m);
   python_webrtc::Interfaces::Init(m);
   python_webrtc::Functions::Init(m);
   python_webrtc::Media::Init(m);
   python_webrtc::OpenH264::Init(m);
+  python_webrtc::Testing::Init(m);
 }

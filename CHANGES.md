@@ -10,7 +10,7 @@
 
 **🔐 WebRTC Encoded Transform: the encoded frames of senders and receivers in Python with `RTCRtpScriptTransform`, and end-to-end encryption with SFrame**
 
-**⚡ libwebrtc M152, pre-built wheels for Linux (x86_64 and aarch64), macOS and Windows, CPython 3.9 – 3.14**
+**⚡ libwebrtc M152, pre-built wheels for Linux (x86_64 and aarch64), macOS and Windows, CPython 3.9 – 3.15, free-threaded 3.14t and 3.15t too**
 
 **🧪 The public API follows the WebIDL of the specifications and runs the original web-platform-tests**
 
@@ -32,6 +32,7 @@ In numbers: 229 public classes, 50 enums with the string values of the specifica
 * Migrate to prebuilt libwebrtc M152, scikit-build-core and single cibuildwheel CI by [@MarshalX](https://github.com/MarshalX) in [#191](https://github.com/MarshalX/python-webrtc/pull/191)
 * Split wheel builds per Python version and cache libwebrtc by [@MarshalX](https://github.com/MarshalX) in [#196](https://github.com/MarshalX/python-webrtc/pull/196)
 * Add Linux aarch64 wheels by [@MarshalX](https://github.com/MarshalX) in [#207](https://github.com/MarshalX/python-webrtc/pull/207)
+* Support free-threaded Python: the extension runs without the GIL, with `cp314t` and `cp315t` wheels by [@MarshalX](https://github.com/MarshalX)
 * Implement WebRTC spec APIs and event ordering for WPT by [@MarshalX](https://github.com/MarshalX) in [#195](https://github.com/MarshalX/python-webrtc/pull/195)
 * Add MediaStreamTrackProcessor, track generators and WebCodecs frames by [@MarshalX](https://github.com/MarshalX) in [#197](https://github.com/MarshalX/python-webrtc/pull/197)
 * Align WebIDL dictionaries with the spec as typed models by [@MarshalX](https://github.com/MarshalX) in [#212](https://github.com/MarshalX/python-webrtc/pull/212)
@@ -54,5 +55,8 @@ In numbers: 229 public classes, 50 enums with the string values of the specifica
 * Fix deadlocks, leaks and crashes found by sanitizers and chaos tests by [@MarshalX](https://github.com/MarshalX) in [#200](https://github.com/MarshalX/python-webrtc/pull/200)
 * Fix `set_parameters` hanging when libwebrtc drops the callback by [@MarshalX](https://github.com/MarshalX) in [#208](https://github.com/MarshalX/python-webrtc/pull/208)
 * Fix sender and receiver leaks by releasing handlers of ended tracks by [@MarshalX](https://github.com/MarshalX) in [#216](https://github.com/MarshalX/python-webrtc/pull/216)
+* Keep unreferenced connections, channels and live tracks alive while they have handlers or pending work, until they close or their event loop closes by [@MarshalX](https://github.com/MarshalX)
+* Fire `ended` on the remote tracks of a connection when it's closed, and keep a failed `RTCIceTransport` alive for an ICE restart by [@MarshalX](https://github.com/MarshalX)
+* Deliver events and the results of native calls through a mailbox per event loop, so native threads never run Python; a native object has one wrapper, which takes no attributes, by [@MarshalX](https://github.com/MarshalX)
 * Fix a cancelled operation of a connection breaking the operations queued before and after it by [@MarshalX](https://github.com/MarshalX)
 * Fix the docs build with the current `sphinx-favicon` by [@MarshalX](https://github.com/MarshalX), closes [#186](https://github.com/MarshalX/python-webrtc/issues/186)

@@ -23,9 +23,11 @@
 #include "../enums/enums.h"
 #include "../models/python_webrtc/rtc_configuration.h"
 #include "../models/python_webrtc/rtc_ice_candidate.h"
-#include "../utils/instance_holder.h"
-#include "../utils/listeners.h"
+#include "../utils/held_events.h"
 #include "../utils/locked_function.h"
+#include "../utils/mailbox.h"
+#include "../utils/native_object.h"
+#include "../utils/registry.h"
 #include "../utils/surfaced.h"
 #include "peer_connection_factory.h"
 
@@ -34,19 +36,21 @@ namespace python_webrtc {
   // What gathers the candidates of a transport Python creates (see RTCIceTransport::CreateStandalone)
   struct StandaloneIce;
 
-  class RTCIceTransport : public Listeners {
+  class RTCIceTransport : public NativeObject<RTCIceTransport>, public Emitter<RTCIceTransport> {
   public:
+    static constexpr const char *kName = "RTCIceTransport";
+
     explicit RTCIceTransport(std::shared_ptr<PeerConnectionFactory> factory,
                              webrtc::scoped_refptr<webrtc::IceTransportInterface> transport);
 
-    ~RTCIceTransport() override;
+    ~RTCIceTransport();
 
     RTCIceTransport(const RTCIceTransport &) = delete;
     RTCIceTransport &operator=(const RTCIceTransport &) = delete;
 
     static void Init(pybind11::module &m);
 
-    static InstanceHolder<RTCIceTransport, webrtc::IceTransportInterface> &holder();
+    static Registry<RTCIceTransport, webrtc::IceTransportInterface> &registry();
 
     RTCIceComponent GetComponent();
 
@@ -117,10 +121,16 @@ namespace python_webrtc {
     webrtc::IceTransportState GetCurrentState();
 
     // see Surfaced
-    void StateChanged(bool listening, webrtc::IceTransportState previous);
+    void StateChanged(bool bound, webrtc::IceTransportState previous);
 
-    // held until Python has the transport
     void EmitStateChange(webrtc::IceTransportState state);
+
+    // events wait out a running description operation (see HeldOperationEvents)
+    void Hold() { _held.Hold(); }
+
+    void Release() { _held.Release(); }
+
+    bool IsHeld() { return _held.IsHeld(); }
 
     // A transport of its own, not of a connection (the webrtc-ice extension): Python gathers its candidates,
     // gives it the remote parameters and candidates, and it connects:
@@ -156,6 +166,11 @@ namespace python_webrtc {
       webrtc::IceGatheringState gatheringState;
     };
 
+    template <typename... Args>
+    void Emit(const char *name, const Args &...args) {
+      _held.Emit([this, name, args...]() { Emitter::Emit(name, args...); });
+    }
+
     // reads the states of the transport, on the network thread
     StateChange TakeSnapshot();
 
@@ -171,11 +186,12 @@ namespace python_webrtc {
     // which is found by port and protocol
     std::optional<IceCandidateInit> FindSignaledCandidate(const webrtc::Candidate &candidate);
 
-    std::shared_ptr<PeerConnectionFactory> _factory;
+    bool Stopped();
 
-    // Accessed on the network thread only. State change callbacks can't be unsubscribed from,
-    // so they check this flag and become no-ops once the wrapper is gone.
-    std::shared_ptr<bool> _alive = std::make_shared<bool>(true);
+    std::shared_ptr<PeerConnectionFactory> _factory;
+    HeldEvents _held;
+
+    // accessed on the network thread only
     webrtc::IceTransportInternal *_subscribed = nullptr;
 
     std::mutex _mutex;

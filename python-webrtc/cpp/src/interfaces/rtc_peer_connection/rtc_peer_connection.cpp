@@ -6,7 +6,6 @@
 //
 
 #include "rtc_peer_connection.h"
-#include "../../utils/python_callback.h"
 
 #include <algorithm>
 #include <limits>
@@ -43,39 +42,36 @@ namespace python_webrtc {
   }
 
   RTCPeerConnection::~RTCPeerConnection() {
-    // destroying the peer connection blocks on the signaling thread, which may be waiting for the GIL
-    const BlockingDestructor release("RTCPeerConnection");
-
     // closing stops the connection from calling this observer
     Close();
 
-    // released here, without the GIL, as it blocks on the signaling thread
+    // released here, as it blocks on the signaling thread
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> closed;
     {
       const TrackedLock lock(_connectionMutex);
       closed = std::move(_closedConnection);
     }
     closed = nullptr;
-    DropListeners();
   }
 
   void RTCPeerConnection::Init(pybind11::module &m) {
-    Listeners::BindClass<RTCPeerConnection>(m, "RTCPeerConnection")
+    DefineBinding(
+        pybind11::class_<RTCPeerConnection, Binding, std::shared_ptr<RTCPeerConnection>>(m, "RTCPeerConnection"))
+        .def_property_readonly("_id", &RTCPeerConnection::Id)
         .def(pybind11::init(nogil_factory(+[](const std::optional<ConfigurationInit> &configuration) {
-               return std::shared_ptr<RTCPeerConnection>(new RTCPeerConnection(configuration),
-                                                         DeleteOffLibwebrtcThread());
+               return RTCPeerConnection::Create(configuration);
              })),
              pybind11::arg("configuration"))
-        .def("createOffer", WithCallbacks(&RTCPeerConnection::CreateOffer), pybind11::arg("onSuccess"),
-             pybind11::arg("onFailure"), pybind11::arg("iceRestart"))
-        .def("createAnswer", WithCallbacks(&RTCPeerConnection::CreateAnswer), pybind11::arg("onSuccess"),
-             pybind11::arg("onFailure"))
-        .def("setLocalDescription", WithCallbacks(&RTCPeerConnection::SetLocalDescription), pybind11::arg("onSuccess"),
-             pybind11::arg("onFailure"), pybind11::arg("description"))
-        .def("setRemoteDescription", WithCallbacks(&RTCPeerConnection::SetRemoteDescription),
-             pybind11::arg("onSuccess"), pybind11::arg("onFailure"), pybind11::arg("description"))
-        .def("addIceCandidate", WithCallbacks(&RTCPeerConnection::AddIceCandidate), pybind11::arg("onSuccess"),
-             pybind11::arg("onFailure"), pybind11::arg("candidate"), pybind11::arg("sdpMid"),
+        .def("createOffer", &RTCPeerConnection::CreateOffer, nogil(), pybind11::arg("mailbox"), pybind11::arg("token"),
+             pybind11::arg("iceRestart"))
+        .def("createAnswer", &RTCPeerConnection::CreateAnswer, nogil(), pybind11::arg("mailbox"),
+             pybind11::arg("token"))
+        .def("setLocalDescription", &RTCPeerConnection::SetLocalDescription, nogil(), pybind11::arg("mailbox"),
+             pybind11::arg("token"), pybind11::arg("description"))
+        .def("setRemoteDescription", &RTCPeerConnection::SetRemoteDescription, nogil(), pybind11::arg("mailbox"),
+             pybind11::arg("token"), pybind11::arg("description"))
+        .def("addIceCandidate", &RTCPeerConnection::AddIceCandidate, nogil(), pybind11::arg("mailbox"),
+             pybind11::arg("token"), pybind11::arg("candidate"), pybind11::arg("sdpMid"),
              pybind11::arg("sdpMLineIndex"), pybind11::arg("usernameFragment"))
         .def("addTrack",
              pybind11::overload_cast<MediaStreamTrack &, std::optional<std::reference_wrapper<MediaStream>>>(
@@ -102,8 +98,7 @@ namespace python_webrtc {
         .def("createDataChannel", &RTCPeerConnection::CreateDataChannel, nogil(), pybind11::arg("label"),
              pybind11::arg("ordered"), pybind11::arg("maxPacketLifeTime"), pybind11::arg("maxRetransmits"),
              pybind11::arg("protocol"), pybind11::arg("negotiated"), pybind11::arg("id"), pybind11::arg("priority"))
-        .def("getStats", WithCallbacks(&RTCPeerConnection::GetStats), pybind11::arg("onSuccess"),
-             pybind11::arg("onFailure"))
+        .def("getStats", &RTCPeerConnection::GetStats, nogil(), pybind11::arg("mailbox"), pybind11::arg("token"))
         .def("restartIce", &RTCPeerConnection::RestartIce, nogil())
         .def("getConfiguration", &RTCPeerConnection::GetConfiguration, nogil())
         .def("setConfiguration", &RTCPeerConnection::SetConfiguration, nogil(), pybind11::arg("configuration"))
@@ -133,12 +128,6 @@ namespace python_webrtc {
              pybind11::arg("snapshot") = std::nullopt);
   }
 
-  void RTCPeerConnection::ReleaseElsewhere(std::shared_ptr<RTCPeerConnection> &&connection) {
-    if (connection) {
-      ReleaseThread::Post([connection = std::move(connection)]() mutable { connection = nullptr; });
-    }
-  }
-
   std::optional<std::shared_ptr<RTCPeerConnection>> RTCPeerConnection::ConnectionOf(RTCRtpSender &sender) {
     if (auto connection = sender.GetConnection()) {
       return connection;
@@ -162,9 +151,8 @@ namespace python_webrtc {
 
   template <typename T, typename U>
   std::shared_ptr<T> RTCPeerConnection::Wrap(Wrappers<T, U> &wrappers, webrtc::scoped_refptr<U> object) {
-    if (!OnLibwebrtcThread()) {
+    if (!_factory->IsCurrent()) {
       // on the signaling thread, which wraps objects too: the lock isn't held while waiting for it
-      const gil_release_if_held release;
       return BlockingCallOn(_factory->signalingThread(), [&]() { return Wrap(wrappers, std::move(object)); });
     }
     std::shared_ptr<T> wrapper;
@@ -175,7 +163,7 @@ namespace python_webrtc {
         return it->second;
       }
 
-      wrapper = T::holder().GetOrCreate(_factory, object);
+      wrapper = T::registry().GetOrCreate(_factory, object);
       wrappers[object.get()] = wrapper;
     }
     Adopt(wrapper);
@@ -185,9 +173,8 @@ namespace python_webrtc {
   template <typename T, typename U>
   std::vector<std::shared_ptr<T>> RTCPeerConnection::Sync(Wrappers<T, U> &wrappers,
                                                           const std::vector<webrtc::scoped_refptr<U>> &objects) {
-    if (!OnLibwebrtcThread()) {
+    if (!_factory->IsCurrent()) {
       // see Wrap
-      const gil_release_if_held release;
       return BlockingCallOn(_factory->signalingThread(), [&]() { return Sync(wrappers, objects); });
     }
     std::vector<std::shared_ptr<T>> result;
@@ -196,7 +183,7 @@ namespace python_webrtc {
       const TrackedLock lock(_wrappersMutex);
       for (const auto &object : objects) {
         auto it = wrappers.find(object.get());
-        auto wrapper = it != wrappers.end() ? it->second : T::holder().GetOrCreate(_factory, object);
+        auto wrapper = it != wrappers.end() ? it->second : T::registry().GetOrCreate(_factory, object);
         current[object.get()] = wrapper;
         result.push_back(std::move(wrapper));
       }
@@ -213,7 +200,7 @@ namespace python_webrtc {
   std::vector<std::shared_ptr<T>> RTCPeerConnection::Unkept(const std::vector<webrtc::scoped_refptr<U>> &objects) {
     std::vector<std::shared_ptr<T>> result;
     for (const auto &object : objects) {
-      auto wrapper = T::holder().GetOrCreate(_factory, object);
+      auto wrapper = T::registry().GetOrCreate(_factory, object);
       Adopt(wrapper);
       result.push_back(std::move(wrapper));
     }
@@ -245,6 +232,7 @@ namespace python_webrtc {
 
   void RTCPeerConnection::Adopt(const std::shared_ptr<RTCRtpReceiver> &receiver) {
     receiver->SetConnection(weak_from_this());
+    receiver->GetTrack()->Inherit(*this);
   }
 
   void RTCPeerConnection::Adopt(const std::shared_ptr<RTCRtpTransceiver> &transceiver) {
@@ -254,6 +242,7 @@ namespace python_webrtc {
   }
 
   void RTCPeerConnection::Adopt(const std::shared_ptr<RTCDataChannel> &channel) {
+    channel->Inherit(*this);
     channel->SetMaxMessageSizeGetter([weak = weak_from_this()]() -> std::optional<double> {
       auto self = weak.lock();
       auto sctp = self ? self->GetSctp() : std::nullopt;
@@ -281,6 +270,7 @@ namespace python_webrtc {
   }
 
   void RTCPeerConnection::Adopt(const std::shared_ptr<RTCSctpTransport> &sctp) {
+    sctp->Inherit(*this);
     sctp->SetMaxMessageSizeGetter([weak = weak_from_this()]() -> std::optional<double> {
       auto self = weak.lock();
       return self ? self->MaxMessageSize() : std::nullopt;
@@ -337,7 +327,6 @@ namespace python_webrtc {
     if (emitted) {
       self->EmitTransportState(wrapper, previous, state);
     }
-    ReleaseElsewhere(std::move(self));
     return emitted;
   }
 
@@ -348,11 +337,10 @@ namespace python_webrtc {
       // a closed connection fires no events
       return;
     }
-    const bool listening = HasListeners();
-    // with the connection only if Python listens to both
-    const bool dispatch = listening && transport->HasListeners();
-    transport->StateChanged(listening || transport->IsTracked(), previous);
-    auto iceConnectionState = UpdateIceConnectionState(listening);
+    const bool bound = IsBound();
+    const bool dispatch = bound && transport->IsBound();
+    transport->StateChanged(bound || transport->IsBound(), previous);
+    auto iceConnectionState = UpdateIceConnectionState(bound);
     DeliverOnSignalingThread([this, transport, state, dispatch, iceConnectionState]() {
       if (!dispatch) {
         transport->EmitStateChange(state);
@@ -368,7 +356,7 @@ namespace python_webrtc {
     if (IsClosed()) {
       return;
     }
-    if (auto iceConnectionState = UpdateIceConnectionState(HasListeners())) {
+    if (auto iceConnectionState = UpdateIceConnectionState(IsBound())) {
       DeliverOnSignalingThread([this, iceConnectionState]() {
         _heldTransportStates.Emit([this, iceConnectionState]() {
           Emit("_transportstatechange", std::shared_ptr<RTCIceTransport>(), std::optional<webrtc::IceTransportState>(),
@@ -380,15 +368,13 @@ namespace python_webrtc {
 
   void RTCPeerConnection::DeliverOnSignalingThread(std::function<void()> deliver) {
     _factory->signalingThread()->PostTask([weak = weak_from_this(), deliver = std::move(deliver)]() {
-      auto self = weak.lock();
-      if (self) {
+      if (auto self = weak.lock()) {
         deliver();
       }
-      ReleaseElsewhere(std::move(self));
     });
   }
 
-  std::optional<RTCPeerConnection::IceConnectionState> RTCPeerConnection::UpdateIceConnectionState(bool listening) {
+  std::optional<RTCPeerConnection::IceConnectionState> RTCPeerConnection::UpdateIceConnectionState(bool bound) {
     std::vector<std::shared_ptr<RTCDtlsTransport>> dtlsTransports;
     {
       const TrackedLock lock(_wrappersMutex);
@@ -409,7 +395,7 @@ namespace python_webrtc {
     if (state == _lastIceConnectionState) {
       return std::nullopt;
     }
-    _surfacedIceConnectionState.Changed(listening, _lastIceConnectionState);
+    _surfacedIceConnectionState.Changed(bound, _lastIceConnectionState);
     _lastIceConnectionState = state;
     return state;
   }
@@ -417,6 +403,8 @@ namespace python_webrtc {
   void RTCPeerConnection::Adopt(const std::shared_ptr<RTCDtlsTransport> &dtls) {
     auto iceTransport = dtls->transport()->ice_transport();
     auto ice = dtls->GetIceTransport();
+    dtls->Inherit(*this);
+    ice->Inherit(*this);
     ice->SetParametersGetter([weak = weak_from_this(), iceTransport](bool local) {
       auto self = weak.lock();
       return self ? self->IceParameters(iceTransport.get(), local) : std::nullopt;
@@ -576,9 +564,8 @@ namespace python_webrtc {
   }
 
   std::optional<std::shared_ptr<RTCSctpTransport>> RTCPeerConnection::GetSctp() {
-    if (!OnLibwebrtcThread()) {
+    if (!_factory->IsCurrent()) {
       // see Wrap
-      const gil_release_if_held release;
       return BlockingCallOn(_factory->signalingThread(), [this]() { return GetSctp(); });
     }
     auto pc = connection();
@@ -588,7 +575,7 @@ namespace python_webrtc {
     }
 
     // unlocked: the constructor blocks
-    auto wrapper = RTCSctpTransport::holder().GetOrCreate(_factory, transport);
+    auto wrapper = RTCSctpTransport::registry().GetOrCreate(_factory, transport);
     std::shared_ptr<RTCSctpTransport> previous;
     const TrackedLock lock(_wrappersMutex);
     if (_sctp != wrapper) {
@@ -685,15 +672,15 @@ namespace python_webrtc {
   }
 
   void RTCPeerConnection::Close() {
-    // closing changes states, but a closed connection fires no events, nor do its channels and transports
-    Mute();
+    // a closed connection and its channels and transports fire no events; its remote tracks end with theirs
+    Unbind();
     {
       const TrackedLock lock(_wrappersMutex);
       for (auto &channel : _channels) {
         channel.second->OnPeerConnectionClosed();
       }
     }
-    MuteTransports();
+    UnbindTransports();
 
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
     {
@@ -708,10 +695,10 @@ namespace python_webrtc {
       pc->Close();
       for (const auto &transceiver : pc->GetTransceivers()) {
         Wrap(_transceivers, transceiver)->GetReceiver()->GetTrack()->OnPeerConnectionClosed();
-        if (auto sender = RTCRtpSender::holder().Find(transceiver->sender().get())) {
+        if (auto sender = RTCRtpSender::registry().Find(transceiver->sender().get())) {
           sender->ReleaseTransform();
         }
-        if (auto receiver = RTCRtpReceiver::holder().Find(transceiver->receiver().get())) {
+        if (auto receiver = RTCRtpReceiver::registry().Find(transceiver->receiver().get())) {
           receiver->ReleaseTransform();
         }
       }
@@ -747,7 +734,7 @@ namespace python_webrtc {
       const std::scoped_lock lock(_connectionStatesMutex);
       state = _lastConnectionState;
     }
-    return _surfacedConnectionState.Get(state);
+    return _surfacedConnectionState.Shown(IsBound(), state);
   }
 
   RTCPeerConnection::SignalingState RTCPeerConnection::GetSignalingState() {
@@ -755,7 +742,7 @@ namespace python_webrtc {
     if (!pc) {
       return SignalingState::kClosed;
     }
-    return _surfacedSignalingState.Get(pc->signaling_state());
+    return _surfacedSignalingState.Shown(IsBound(), pc->signaling_state());
   }
 
   RTCPeerConnection::IceConnectionState RTCPeerConnection::GetIceConnectionState() {
@@ -768,7 +755,7 @@ namespace python_webrtc {
       const std::scoped_lock lock(_connectionStatesMutex);
       state = _lastIceConnectionState;
     }
-    return _surfacedIceConnectionState.Get(state);
+    return _surfacedIceConnectionState.Shown(IsBound(), state);
   }
 
   RTCPeerConnection::IceGatheringState RTCPeerConnection::GetIceGatheringState() {
@@ -776,11 +763,11 @@ namespace python_webrtc {
     if (!pc) {
       return IceGatheringState::kIceGatheringComplete;
     }
-    return _surfacedIceGatheringState.Get(pc->ice_gathering_state());
+    return _surfacedIceGatheringState.Shown(IsBound(), pc->ice_gathering_state());
   }
 
   void RTCPeerConnection::OnSignalingChange(SignalingState newState) {
-    _surfacedSignalingState.Changed(HasListeners(), _lastSignalingState);
+    _surfacedSignalingState.Changed(IsBound(), _lastSignalingState);
     _lastSignalingState = newState;
     // the descriptions change along with the event
     Emit("signalingstatechange", newState, SnapshotDescriptions());
@@ -803,13 +790,12 @@ namespace python_webrtc {
       if (newState == _lastConnectionState) {
         return;
       }
-      _surfacedConnectionState.Changed(HasListeners(), _lastConnectionState);
+      _surfacedConnectionState.Changed(IsBound(), _lastConnectionState);
       _lastConnectionState = newState;
     }
     // through the network thread: after the transport changes that led to it, which it posted already
     _factory->workerThread()->PostTask([weak = weak_from_this(), newState]() {
-      auto self = weak.lock();
-      if (self) {
+      if (auto self = weak.lock()) {
         self->DeliverOnSignalingThread([connection = self.get(), newState]() {
           connection->_heldTransportStates.Emit([connection, newState]() {
             connection->Emit("_transportstatechange", std::shared_ptr<RTCIceTransport>(),
@@ -818,7 +804,6 @@ namespace python_webrtc {
           });
         });
       }
-      ReleaseElsewhere(std::move(self));
     });
   }
 
@@ -831,12 +816,9 @@ namespace python_webrtc {
   }
 
   void RTCPeerConnection::OnDataChannel(webrtc::scoped_refptr<webrtc::DataChannelInterface> dataChannel) {
-    // the channel holds its events until Python has delivered this one, if it's going to
+    // the events of the channel queue behind this one (see Adopt)
     auto channel = Wrap(_channels, dataChannel);
     channel->OnAnnounced();
-    if (!HasListeners()) {
-      channel->Release();
-    }
     Emit("datachannel", channel);
   }
 
@@ -869,7 +851,7 @@ namespace python_webrtc {
 
   void RTCPeerConnection::OnRemoveTrack(webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver) {
     // the remote track isn't negotiated anymore, which mutes it
-    if (auto wrapper = RTCRtpReceiver::holder().Find(receiver.get())) {
+    if (auto wrapper = RTCRtpReceiver::registry().Find(receiver.get())) {
       wrapper->GetTrack()->SetMuted(true);
     }
   }
@@ -879,7 +861,9 @@ namespace python_webrtc {
     auto receiver = Wrap(_receivers, transceiver->receiver());
     std::vector<std::shared_ptr<MediaStream>> streams;
     for (const auto &stream : transceiver->receiver()->streams()) {
-      streams.push_back(MediaStream::holder().GetOrCreate(_factory, stream));
+      auto remote = MediaStream::registry().GetOrCreate(_factory, stream);
+      remote->Inherit(*this);
+      streams.push_back(std::move(remote));
     }
     Emit("track", wrapper, receiver, streams);
   }

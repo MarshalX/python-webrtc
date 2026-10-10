@@ -17,13 +17,14 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Generic, Literal, Union, cast
 
-from typing_extensions import Buffer, TypeVar
+from typing_extensions import Buffer, TypeVar, override
 
 import webrtc
 import wrtc
 from webrtc.base import WebRTCObject
 from webrtc.enums import SFrameCipherSuite, SFrameTransformErrorEventType, SFrameType
 from webrtc.exceptions import InvalidRangeError, NotSupportedError
+from webrtc.interfaces.rtc_rtp_script_transform import _ASSOCIATED
 from webrtc.models.events import SFrameTransformErrorEvent, SFrameTransformErrorEventInit
 from webrtc.models.rtc_encoded_frame import RTCEncodedAudioFrame, RTCEncodedVideoFrame
 from webrtc.models.sframe_transform_options import RTCRtpSFrameEncryptorOptions, SFrameTransformOptions
@@ -99,6 +100,8 @@ def _error_event(name: str, *args: object) -> SFrameTransformErrorEvent:
 
 
 class _SFrameEncryptorManager:
+    __slots__ = ()
+
     if TYPE_CHECKING:
 
         @property
@@ -128,6 +131,8 @@ class _SFrameEncryptorManager:
 
 
 class _SFrameDecryptorManager:
+    __slots__ = ()
+
     if TYPE_CHECKING:
 
         @property
@@ -192,12 +197,21 @@ class RTCRtpSFrameEncryptor(_SFrameEncryptorManager, WebRTCObject[wrtc.SFrameTra
         sender.transform = encryptor
     """
 
+    __slots__ = ()
+
+    _class = wrtc.SFrameTransform
+
     def __init__(self, options: RTCRtpSFrameEncryptorOptions) -> None:
         native = _native(options, encrypting=True)
         if SFrameType(getattr(options, 'type', SFrameType.per_frame)) == SFrameType.per_packet:
             msg = 'per-packet SFrame needs the SFrame packetization of RTP, which is not supported'
             raise NotSupportedError(msg)
         super().__init__(native)
+
+    @classmethod
+    @override
+    def _default_wrapper_class(cls, native: wrtc.SFrameTransform, /) -> type[WebRTCObject[wrtc.SFrameTransform]]:
+        return cls if native.encrypting else RTCRtpSFrameDecryptor
 
 
 class RTCRtpSFrameDecryptor(
@@ -220,9 +234,24 @@ class RTCRtpSFrameDecryptor(
         error (:obj:`webrtc.SFrameTransformErrorEvent`): A frame didn't decrypt.
     """
 
+    __slots__ = ()
+
+    _class = wrtc.SFrameTransform
+
     def __init__(self, options: SFrameTransformOptions) -> None:
         super().__init__(_native(options, encrypting=False))
-        self._attach()
+        _ = self._attach()
+
+    @override
+    def _open(self) -> bool:
+        # a detached transform fires no more, even queued events
+        return super()._open() and self._native_obj.state == _ASSOCIATED
+
+    @override
+    def _activity(self) -> str | None:
+        if not self._open() or len(self.event_names()) == 0:
+            return None
+        return 'associated with handlers'
 
 
 class _SFrameStreamTransformer(Generic[_C]):
@@ -262,6 +291,10 @@ class _SFrameStream(WebRTCObject[wrtc.SFrameTransform], Generic[_C]):
     it's piped between. Use ``bytes`` for buffers, as in ``SFrameEncryptorStream[bytes]``, or :obj:`SFrameChunk`
     for both.
     """
+
+    __slots__ = ('_transform',)
+
+    _class = wrtc.SFrameTransform
 
     def __init__(self, native: wrtc.SFrameTransform, *, encrypting: bool) -> None:
         super().__init__(native)
@@ -310,6 +343,8 @@ class SFrameEncryptorStream(_SFrameEncryptorManager, _SFrameStream[_C]):
             await transformer.readable.pipe_through(encryptor).pipe_to(transformer.writable)
     """
 
+    __slots__ = ()
+
     def __init__(self, options: SFrameTransformOptions) -> None:
         super().__init__(_native(options, encrypting=True), encrypting=True)
 
@@ -334,6 +369,8 @@ class SFrameDecryptorStream(
         error (:obj:`webrtc.SFrameTransformErrorEvent`): A chunk didn't decrypt.
     """
 
+    __slots__ = ()
+
     def __init__(self, options: SFrameTransformOptions) -> None:
         super().__init__(_native(options, encrypting=False), encrypting=False)
-        self._attach()
+        _ = self._attach()

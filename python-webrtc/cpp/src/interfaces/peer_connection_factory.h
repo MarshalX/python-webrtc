@@ -8,7 +8,6 @@
 #ifndef PYTHON_WEBRTC_INTERFACES_PEER_CONNECTION_FACTORY_H_
 #define PYTHON_WEBRTC_INTERFACES_PEER_CONNECTION_FACTORY_H_
 
-#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -22,12 +21,15 @@
 #include <pybind11/stl.h>
 
 #include "../utils/field_trials.h"
+#include "../utils/native_object.h"
 
 namespace python_webrtc {
 
   // Owned by every wrapper created with it, it's destroyed together with the last of them.
-  class PeerConnectionFactory {
+  class PeerConnectionFactory : public NativeObject<PeerConnectionFactory> {
   public:
+    static constexpr const char *kName = "PeerConnectionFactory";
+
     explicit PeerConnectionFactory();
 
     ~PeerConnectionFactory();
@@ -50,6 +52,8 @@ namespace python_webrtc {
 
     webrtc::Thread *workerThread() { return _workerThread.get(); }
 
+    [[nodiscard]] bool IsCurrent() const { return _signalingThread->IsCurrent() || _workerThread->IsCurrent(); }
+
     // before the first factory only
     static void SetFieldTrials(const std::string &trials);
     static void AllowLoopback();
@@ -62,12 +66,8 @@ namespace python_webrtc {
     std::unique_ptr<webrtc::Thread> _signalingThread;
     std::unique_ptr<webrtc::Thread> _workerThread;
 
-    // of the process the factory was created in (see forks)
-    const int _generation;
     const FieldTrials _fieldTrials;
     const int _networkIgnoreMask;
-
-    static void Destroy(PeerConnectionFactory *factory);
 
     // _mutex held
     static std::shared_ptr<PeerConnectionFactory> CreateLocked();
@@ -76,8 +76,6 @@ namespace python_webrtc {
 
     static std::weak_ptr<PeerConnectionFactory> _default;
     static std::mutex _mutex;
-    // factories constructed and not destroyed yet, lets tests check that none leaks
-    static std::atomic<int> _alive;
     static bool _sslInitialized;
     static FieldTrials _trials;
     static bool _loopbackAllowed;

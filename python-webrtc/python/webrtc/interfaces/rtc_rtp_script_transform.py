@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import weakref
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Literal, NamedTuple, Union
@@ -44,10 +43,8 @@ EncodedFrame = Union[RTCEncodedVideoFrame, RTCEncodedAudioFrame]
 # a rid of RFC 8851: alphanumeric, at most 255 characters
 _RID = re.compile(r'[A-Za-z0-9]{1,255}')
 
-# the transforms of the native ones: once disassociated, a native transform lets go of its transformer
-_transforms: weakref.WeakValueDictionary[int, RTCRtpScriptTransform] = weakref.WeakValueDictionary()
-
-_DISASSOCIATED = 2
+# native association states, shared with SFrame transforms
+_ASSOCIATED, _DISASSOCIATED = 1, 2
 _KEY_FRAME_INVALID_STATE, _KEY_FRAME_NOT_FOUND = 1, 2
 
 
@@ -93,10 +90,10 @@ class _FrameSource:
         self._controller = controller
 
     def pull(self, _controller: ReadableStreamDefaultController[EncodedFrame]) -> None:
-        # a wakeup sent with no open loop was dropped
-        if self._transformer._attach_running_loop():
+        # a wakeup sent while unbound was dropped
+        if self._transformer._attach():
             self._transformer._native_obj._ackWakeup()
-        self._transformer._deliver()
+        self._transformer._read()
 
 
 class _FrameSink:
@@ -121,7 +118,22 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
         keyframerequest (:obj:`webrtc.KeyFrameRequestEvent`): The remote peer asked for a key frame.
     """
 
+    __slots__ = (
+        '__weakref__',
+        '_ended',
+        '_handlers',
+        '_key_frame_requests',
+        '_last_enqueued',
+        '_last_received',
+        '_options',
+        '_readable',
+        '_source',
+        '_transform',
+        '_writable',
+    )
+
     def __init__(self, transform: RTCRtpScriptTransform, options: object) -> None:
+        self._handlers = None
         self._transform = transform
         self._options = options
         self._source = _FrameSource(self)
@@ -139,13 +151,30 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
     def _native_obj(self) -> wrtc.RTCRtpScriptTransform:
         return self._transform._native_obj
 
+    @property
+    @override
+    def _connection(self) -> webrtc.RTCPeerConnection | None:
+        return self._transform._connection
+
+    @override
+    def _open(self) -> bool:
+        # a detached transform fires no more
+        return super()._open() and self._native_obj.state == _ASSOCIATED
+
+    @override
+    def _activity(self) -> str | None:
+        if not self._open() or len(self.event_names()) == 0:
+            return None
+        return 'associated with handlers'
+
     @override
     def _on_event(self, name: str, *_args: object) -> None:
         if name == '_ready':
             self._native_obj._ackWakeup()
-            self._deliver()
+            self._read()
 
-    def _deliver(self) -> None:
+    def _read(self) -> None:
+        """Fulfills pending reads from queued frames; ends the streams once removed."""
         native = self._native_obj
         controller = self._source._controller
         if controller is None:
@@ -313,7 +342,11 @@ class RTCRtpScriptTransform(WebRTCObject[wrtc.RTCRtpScriptTransform]):
         sender.transform = webrtc.RTCRtpScriptTransform(worker)
     """
 
+    __slots__ = ('_transformer',)
+
     _class = wrtc.RTCRtpScriptTransform
+    #: None in a wrapper recreated after the application's one died
+    _transformer: RTCRtpScriptTransformer | None
 
     def __init__(
         self,
@@ -334,25 +367,23 @@ class RTCRtpScriptTransform(WebRTCObject[wrtc.RTCRtpScriptTransform]):
         _check_transfer(transfer)
         loop = asyncio.get_running_loop()
         super().__init__()
-        self._transformer = RTCRtpScriptTransformer(self, options)
-        self._transformer._attach()
-        # the native object, and so its id, lives as long as this one
-        _transforms[id(self._native_obj)] = self
-        _ = loop.call_soon(self._fire, worker, loop)
+        transformer = self._transformer = RTCRtpScriptTransformer(self, options)
+        _ = transformer._attach()
+        _ = loop.call_soon(self._fire, worker, transformer, loop)
 
-    def _fire(self, worker: Worker, loop: asyncio.AbstractEventLoop) -> None:
-        event = RTCTransformEvent('rtctransform', self._transformer)
+    @override
+    def _init_native(self, native_obj: wrtc.RTCRtpScriptTransform | None) -> None:
+        super()._init_native(native_obj)
+        self._transformer = None
+
+    @override
+    def _target(self) -> RTCRtpScriptTransformer | None:
+        return self._transformer
+
+    @staticmethod
+    def _fire(worker: Worker, transformer: RTCRtpScriptTransformer, loop: asyncio.AbstractEventLoop) -> None:
+        event = RTCTransformEvent('rtctransform', transformer)
         call_handler(loop, worker, event, message='Exception in the worker of an RTCRtpScriptTransform')
-
-    @classmethod
-    def _of_native(cls, native: wrtc._RtpTransform | None) -> RTCRtpScriptTransform | None:
-        """The transform of a native one, or a new wrapper once that's gone."""
-        if not isinstance(native, wrtc.RTCRtpScriptTransform):
-            return None
-        transform = _transforms.get(id(native))
-        if transform is not None and transform._native_obj is native:
-            return transform
-        return cls._wrap(native)
 
 
 def _check_transfer(transfer: Iterable[object] | None) -> None:

@@ -65,8 +65,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-latest]
-        # PRs: oldest and newest only
-        python: ${{ fromJSON(github.event_name == 'pull_request' && '["cp39","cp314"]' || '["cp39","cp310","cp311","cp312","cp313","cp314"]') }}
+        # PRs: oldest and newest only, with and without the GIL
+        python: ${{ fromJSON(github.event_name == 'pull_request' && '["cp39","cp315","cp315t"]' || '["cp39","cp310","cp311","cp312","cp313","cp314","cp314t","cp315","cp315t"]') }}
     env:
       WRTC_CACHE_DIR: ${{ github.workspace }}/.wrtc-cache
       WRTC_ARCHIVE_DIR: ${{ matrix.os == 'windows-latest' && format('{0}/.wrtc-cache/archives', github.workspace) || '' }}

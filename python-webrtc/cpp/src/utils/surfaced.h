@@ -14,14 +14,14 @@
 namespace python_webrtc {
 
   // An attribute that changes when Python delivers its event (Surface), rather than when libwebrtc reports it;
-  // without listeners there are no events, and the current value is seen.
+  // unbound, there are no events, and the current value is seen.
   template <typename T>
   class Surfaced {
   public:
     // a change reported by libwebrtc, before its event is emitted
-    void Changed(bool listening, T previous) {
+    void Changed(bool bound, T previous) {
       const std::scoped_lock lock(_mutex);
-      if (!listening) {
+      if (!bound) {
         _value.reset();
       } else if (!_value) {
         _value = previous;
@@ -41,6 +41,15 @@ namespace python_webrtc {
 
     T Get(T current) {
       const std::scoped_lock lock(_mutex);
+      return _value ? *_value : current;
+    }
+
+    T Shown(bool bound, T current) {
+      const std::scoped_lock lock(_mutex);
+      if (!bound) {
+        _value.reset();
+        return current;
+      }
       return _value ? *_value : current;
     }
 

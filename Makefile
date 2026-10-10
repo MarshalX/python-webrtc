@@ -1,4 +1,4 @@
-.PHONY: dev test asan tsan fuzz hunt hunt-report coverage coverage-report stacks lint typecheck format format-check tidy stub wheels doc clean
+.PHONY: dev test asan tsan ft fuzz hunt hunt-report coverage coverage-report stacks lint typecheck format format-check tidy stub wheels doc clean
 
 # pinned to the clang-tidy of .github/scripts/tidy.sh
 CLANG_FORMAT := uvx clang-format==22.1.8
@@ -19,6 +19,11 @@ asan:
 
 tsan:
 	SANITIZE=thread .github/scripts/sanitizers-macos.sh $(O)
+
+# the tests against a plain build with another interpreter, kept in build/ft: make ft [PY=3.15t] [B=build/ft] [O=...]
+ft:
+	SANITIZE=none PYTHON="$$(uv python find $(or $(PY),3.15t))" WRTC_SANITIZERS_BUILD_DIR="$(or $(B),build/ft)" \
+		.github/scripts/sanitizers-macos.sh $(O)
 
 # a target of tests/fuzz with Atheris in the Linux image, the build kept in build/fuzz: make fuzz T=video_frame O=-max_total_time=600
 fuzz:

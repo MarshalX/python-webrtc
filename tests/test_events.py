@@ -10,12 +10,21 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import contextlib
+import gc
+import threading
+import weakref
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 
 import webrtc
-from tests.helpers import QUIET_PERIOD, connect, next_task, wait_for_event
-from webrtc.utils.task_queue import TaskQueue
+from tests.helpers import QUIET_PERIOD, called, collect, connect, wait_for_event, wait_until
+from webrtc.utils.loops import LoopState
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 @pytest.mark.asyncio
@@ -287,23 +296,122 @@ def test_objects_used_from_another_loop_see_their_events() -> None:
 
 
 @pytest.mark.asyncio
-async def test_event_delivered_after_the_collector_cleared_its_listeners() -> None:
-    """An event posted before the collector cleared the listeners (in a cycle with their target) is dropped."""
-    loop = asyncio.get_running_loop()
-    reported: list[dict[str, object]] = []
-    loop.set_exception_handler(lambda _loop, context: reported.append(context))
+async def test_event_after_its_wrapper_died_still_changes_the_state(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """Events update a recreated wrapper."""
+    channel = caller.create_data_channel('views')
+    opened = wait_for_event(channel, 'open')
+    await connect(caller, callee)
+    await opened
+    native = channel._native_obj
+    ref = weakref.ref(channel)
+    del channel
+    collect()
+    assert ref() is None
+
+    callee.close()
+    await wait_until(
+        lambda: webrtc.RTCDataChannel._wrap(native).ready_state == webrtc.RTCDataChannelState.closed,
+        'the close event to reach the channel',
+    )
+
+
+@contextlib.contextmanager
+def _loop_in_a_thread() -> Generator[asyncio.AbstractEventLoop, None, None]:
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
     try:
-        decryptor = webrtc.RTCRtpSFrameDecryptor(webrtc.SFrameTransformOptions('AES_128_GCM_SHA256_128'))
-        decryptor.on('error', lambda _event: None)
-        listeners = decryptor._listeners()
-        assert listeners is not None
-        TaskQueue.of(loop).post(listeners.deliver, loop, 'error', (1, None, b''))
-        # what tp_clear does to the listeners
-        listeners.__dict__.clear()
-        await next_task()
-        assert reported == []
+        yield loop
     finally:
-        loop.set_exception_handler(None)
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(5)
+        loop.close()
+
+
+def _register_from(
+    loop: asyncio.AbstractEventLoop,
+    target: webrtc.RTCDataChannel,
+    name: Literal['open', 'close'],
+    *,
+    seen: list[asyncio.AbstractEventLoop],
+) -> None:
+    """Records the loop a handler runs on, from another thread."""
+    registered: concurrent.futures.Future[None] = concurrent.futures.Future()
+
+    def record(_event: webrtc.Event) -> None:
+        seen.append(asyncio.get_running_loop())
+
+    def register() -> None:
+        target.on(name, record)
+        registered.set_result(None)
+
+    loop.call_soon_threadsafe(register)
+    registered.result(5)
+
+
+def test_handlers_on_two_loops() -> None:
+    """Handlers run on their own loops."""
+    seen: list[asyncio.AbstractEventLoop] = []
+
+    async def main() -> asyncio.AbstractEventLoop:
+        caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        channel = caller.create_data_channel('loops')
+        opened = wait_for_event(channel, 'open')
+        channel.on('close', lambda _event: seen.append(asyncio.get_running_loop()))
+        _register_from(other, channel, 'close', seen=seen)
+        await connect(caller, callee)
+        await opened
+        callee.close()
+        await wait_until(lambda: len(seen) == 2, 'the close event on both loops')
+        caller.close()
+        return asyncio.get_running_loop()
+
+    with _loop_in_a_thread() as other:
+        main_loop = asyncio.run(main())
+    assert sorted(seen, key=id) == sorted([main_loop, other], key=id)
+
+
+def test_handler_registered_from_another_loop_than_the_binding_loop() -> None:
+    """Forwards to a handler on another loop."""
+    seen: list[asyncio.AbstractEventLoop] = []
+
+    async def main() -> None:
+        caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        channel = caller.create_data_channel('elsewhere')
+        _register_from(other, channel, 'open', seen=seen)
+        await connect(caller, callee)
+        await wait_until(lambda: len(seen) == 1, 'the open event on the other loop')
+        caller.close()
+        callee.close()
+
+    with _loop_in_a_thread() as other:
+        asyncio.run(main())
+    assert seen == [other]
+
+
+@pytest.mark.asyncio
+async def test_off_from_a_handler(pc: webrtc.RTCPeerConnection) -> None:
+    """Removing all handlers mid-dispatch stops delivery."""
+    calls: list[str] = []
+
+    def first(_event: webrtc.Event) -> None:
+        calls.append('first')
+        pc.off()
+
+    def second(_event: webrtc.Event) -> None:
+        calls.append('second')
+
+    pc.on('negotiationneeded', first)
+    pc.on('negotiationneeded', second)
+    pc.on('signalingstatechange', lambda event: calls.append(event.type))
+    pc.add_transceiver(webrtc.MediaType.audio)
+    await wait_until(lambda: len(calls) > 0, 'the first handler')
+    await pc.set_local_description()
+    await asyncio.sleep(QUIET_PERIOD)
+    assert calls == ['first']
+    assert pc.event_names() == set()
 
 
 @pytest.mark.asyncio
@@ -348,3 +456,51 @@ async def test_handler_removed_during_dispatch_is_skipped(pc: webrtc.RTCPeerConn
     _ = await negotiation
     await asyncio.sleep(QUIET_PERIOD)
     assert calls == ['first']
+
+
+class _CollectingHandler:
+    """A handler whose comparison runs gc under the handlers lock."""
+
+    def __call__(self, _event: webrtc.Event) -> None:
+        pass
+
+    def __eq__(self, other: object) -> bool:
+        gc.collect()
+        return self is other
+
+    __hash__ = object.__hash__
+
+
+def _from_a_closed_loop(_event: webrtc.Event) -> None:
+    pass
+
+
+def test_handlers_updated_while_the_collector_releases_a_loop() -> None:
+    """GC release under on()/off() loses no update."""
+    pc = webrtc.RTCPeerConnection()
+    loop = asyncio.new_event_loop()
+    # this loop's state exists, so registering sweeps nothing
+    _ = LoopState.of(loop)
+
+    def register() -> None:
+        pc.on('connectionstatechange', _from_a_closed_loop)
+
+    def update() -> None:
+        handler = _CollectingHandler()
+        # comparing with the closed loop's handler releases that loop mid-registration
+        pc.on('connectionstatechange', handler)
+        assert pc.listeners('connectionstatechange') == [handler]
+        pc.off('connectionstatechange', handler)
+        assert pc.listeners('connectionstatechange') == []
+
+    try:
+        # the closed loop's state stays until a sweep
+        asyncio.run(called(register))
+        gc.disable()
+        try:
+            loop.run_until_complete(called(update))
+        finally:
+            gc.enable()
+    finally:
+        loop.close()
+        pc.close()

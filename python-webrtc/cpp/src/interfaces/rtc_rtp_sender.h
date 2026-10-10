@@ -21,6 +21,9 @@
 #include "../enums/enums.h"
 #include "../exceptions.h"
 #include "../media/frame_transformer_bridge.h"
+#include "../utils/mailbox.h"
+#include "../utils/native_object.h"
+#include "../utils/registry.h"
 #include "media_stream_track.h"
 #include "peer_connection_factory.h"
 #include "rtc_dtls_transport.h"
@@ -30,19 +33,16 @@ namespace python_webrtc {
 
   class RTCPeerConnection;
 
-  class RTCRtpSender : public std::enable_shared_from_this<RTCRtpSender> {
+  class RTCRtpSender : public NativeObject<RTCRtpSender> {
   public:
+    static constexpr const char *kName = "RTCRtpSender";
+
     explicit RTCRtpSender(std::shared_ptr<PeerConnectionFactory> factory,
                           webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender);
 
-    ~RTCRtpSender();
-
-    RTCRtpSender(const RTCRtpSender &) = delete;
-    RTCRtpSender &operator=(const RTCRtpSender &) = delete;
-
     static void Init(pybind11::module &m);
 
-    static InstanceHolder<RTCRtpSender, webrtc::RtpSenderInterface> &holder();
+    static Registry<RTCRtpSender, webrtc::RtpSenderInterface> &registry();
 
     webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender() { return _sender; }
 
@@ -63,8 +63,7 @@ namespace python_webrtc {
 
     webrtc::RtpParameters GetParameters();
 
-    void SetParameters(std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
-                       const webrtc::RtpParameters &parameters);
+    void SetParameters(std::shared_ptr<Mailbox> mailbox, uint64_t token, const webrtc::RtpParameters &parameters);
 
     // settable until a setParameters succeeds
     std::optional<webrtc::RtpParameters> GetLastParameters();
@@ -82,7 +81,7 @@ namespace python_webrtc {
 
     std::vector<std::string> GetStreamIds();
 
-    void GetStats(std::function<void(std::string)> &onSuccess, std::function<void(RTCCallbackException)> &onFailure);
+    void GetStats(std::shared_ptr<Mailbox> mailbox, uint64_t token);
 
     // whether its transceiver is stopping or stopped (or gone), where the sender can't be changed anymore
     bool IsTransceiverStopped();

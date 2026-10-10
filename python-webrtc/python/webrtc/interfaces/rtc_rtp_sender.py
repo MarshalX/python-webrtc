@@ -9,7 +9,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import asyncio
+import contextlib
+import functools
+from typing import TYPE_CHECKING, Union, cast
 
 import webrtc
 import wrtc
@@ -18,12 +21,17 @@ from webrtc.enums import MediaType
 from webrtc.exceptions import InvalidStateError
 from webrtc.models.rtc_stats import RTCStatsReport
 from webrtc.models.rtp_parameters import RTCRtpCapabilities, RTCRtpSendParameters
-from webrtc.utils.native_calls import call_native
+from webrtc.utils import lifetime
+from webrtc.utils.events import EventTarget
+from webrtc.utils.loops import LoopState, call_native
 from webrtc.utils.operations import later
-from webrtc.utils.task_queue import TaskQueue
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from typing_extensions import Never
+
+    _Transform = Union[webrtc.RTCRtpScriptTransform, webrtc.RTCRtpSFrameEncryptor, webrtc.RTCRtpSFrameDecryptor]
 
 
 class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
@@ -33,6 +41,8 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
 
     See :mdn:`RTCRtpSender`.
     """
+
+    __slots__ = ()
 
     _class = wrtc.RTCRtpSender
 
@@ -53,7 +63,7 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         It's :obj:`None` until there's one.
         See :mdn:`RTCRtpSender/transport`.
         """
-        return webrtc.RTCDtlsTransport._wrap_optional(self._native_obj.transport)
+        return webrtc.RTCDtlsTransport._wrap_optional(self._native_obj.transport, connection=self._connection)
 
     @property
     def dtmf(self) -> webrtc.RTCDTMFSender | None:
@@ -61,7 +71,7 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
 
         See :mdn:`RTCRtpSender/dtmf`.
         """
-        return webrtc.RTCDTMFSender._wrap_optional(self._native_obj.dtmf)
+        return webrtc.RTCDTMFSender._wrap_optional(self._native_obj.dtmf, connection=self._connection)
 
     @property
     def transform(self) -> webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameEncryptor | None:
@@ -78,12 +88,14 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         """
         native = self._native_obj.transform
         if isinstance(native, wrtc.SFrameTransform):
-            return webrtc.RTCRtpSFrameEncryptor._wrap(native)
-        return webrtc.RTCRtpScriptTransform._of_native(native)
+            return webrtc.RTCRtpSFrameEncryptor._wrap(native, connection=self._connection)
+        if isinstance(native, wrtc.RTCRtpScriptTransform):
+            return webrtc.RTCRtpScriptTransform._wrap(native, connection=self._connection)
+        return None
 
     @transform.setter
     def transform(self, transform: webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameEncryptor | None) -> None:
-        self._native_obj.transform = _native_transform(transform, webrtc.RTCRtpSFrameEncryptor)
+        _set_transform(self._native_obj, transform, sframe=webrtc.RTCRtpSFrameEncryptor, connection=self._connection)
 
     @property
     def _kind(self) -> webrtc.MediaType:
@@ -106,7 +118,12 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         if self._kind == MediaType.video:
             _default_scale_resolution_down_by(parameters.encodings)
         # the next task gets new ones, never without a loop
-        _ = TaskQueue.post_to_running(self._native_obj._expireParameters, parameters.transaction_id, after_ready=True)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return parameters
+        expire = functools.partial(self._native_obj._expireParameters, parameters.transaction_id)
+        LoopState.of(loop).post(expire, after_ready=True)
         return parameters
 
     async def set_parameters(
@@ -234,7 +251,7 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         Raises:
             webrtc.InvalidStateError: If the connection is closed.
         """
-        return RTCStatsReport._from_native(await call_native(self._native_obj.getStats))
+        return RTCStatsReport._from_native(cast('str', await call_native(self._native_obj.getStats)))
 
     #: Alias for :attr:`get_stats`
     getStats = get_stats
@@ -263,6 +280,37 @@ def _native_transform(
         )
         raise TypeError(msg)
     return transform._native_obj
+
+
+def _target_of(transform: object) -> EventTarget[Never] | None:
+    """The event target of a transform: a script transform's transformer, else itself."""
+    if isinstance(transform, webrtc.RTCRtpScriptTransform):
+        return transform._transformer
+    return transform if isinstance(transform, EventTarget) else None
+
+
+def _set_transform(
+    part: wrtc.RTCRtpSender | wrtc.RTCRtpReceiver,
+    transform: _Transform | None,
+    *,
+    sframe: type[webrtc.RTCRtpSFrameEncryptor | webrtc.RTCRtpSFrameDecryptor],
+    connection: webrtc.RTCPeerConnection | None,
+) -> None:
+    """Sets a sender or receiver transform, updating the roots of the old and new one."""
+    previous = part.transform
+    unset = None
+    if isinstance(previous, (wrtc.RTCRtpScriptTransform, wrtc.SFrameTransform)):
+        unset = _target_of(lifetime.find(previous))
+    native = _native_transform(transform, sframe)
+    if transform is not None and transform._connection is None:
+        transform._connection = connection
+    target = _target_of(transform)
+    with contextlib.ExitStack() as changing:
+        if target is not None:
+            changing.enter_context(target._changing())
+        if unset is not None:
+            changing.enter_context(unset._changing())
+        part.transform = native
 
 
 def _check_unchanged(

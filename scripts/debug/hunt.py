@@ -45,11 +45,35 @@ if TYPE_CHECKING:
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SANITIZERS = '.github/scripts/sanitizers-macos.sh'
-ASAN = 'address,undefined'
-TSAN = 'thread'
+
+
+@dataclass(frozen=True)
+class Build:
+    """A sanitizers-macos.sh build to run a job in."""
+
+    sanitize: str
+    #: WRTC_SANITIZERS_BUILD_DIR; None for the script's default
+    directory: str | None = None
+    #: uv interpreter name (e.g. 3.15t); None for the script's default
+    python: str | None = None
+
+    @property
+    def env(self) -> dict[str, str]:
+        variables = {'SANITIZE': self.sanitize}
+        if self.directory is not None:
+            variables['WRTC_SANITIZERS_BUILD_DIR'] = self.directory
+        return variables
+
+
+ASAN = Build('address,undefined')
+TSAN = Build('thread')
+#: plain free-threaded build (make ft)
+FT = Build('none', 'build/ft', '3.15t')
 
 CHAOS = ('python', '-m', 'tests.chaos', '--steps', '1000', '--wait-when-stuck')
 CHAOS_TRANSFORMS = (*CHAOS, '--transforms')
+# one loop per thread over shared objects, without the GIL
+CHAOS_FT = (*CHAOS, '--workers', '4')
 # pytest's own timeouts would end the process before the stacks are taken
 PYTEST = (
     'python', '-m', 'pytest', 'tests', '--ignore=tests/wpt', '-p', 'no:cacheprovider', '-s', '-v', '-x',
@@ -63,6 +87,7 @@ JOB_ENV = {
     'PYTHONUNBUFFERED': '1',
     'PYTHONFAULTHANDLER': '1',
     'WRTC_ALLOW_LOOPBACK': '1',
+    'WRTC_CHECK_ROOTS': '1',
     'WRTC_HUNT': '1',
 }
 
@@ -105,8 +130,8 @@ class Job:
     weight: int
     argv: tuple[str, ...]
     seeded: bool = False
-    #: The SANITIZE build of sanitizers-macos.sh to run in
-    sanitizer: str | None = None
+    #: None for the editable install
+    build: Build | None = None
     #: On the efficiency cores (taskpolicy -b), whose timings reproduced rare races
     ecores: bool = False
     silence_s: int = 60
@@ -115,17 +140,18 @@ class Job:
 
     @property
     def runs_here(self) -> bool:
-        """Whether the platform has what the job needs: the sanitizer builds and taskpolicy are macOS only."""
-        return sys.platform == 'darwin' or (self.sanitizer is None and not self.ecores)
+        """Whether the job can run here; sanitizer builds and taskpolicy are macOS only."""
+        return sys.platform == 'darwin' or (self.build is None and not self.ecores)
 
 
 JOBS = (
     Job('chaos', 3, CHAOS, seeded=True),
     Job('chaos-transforms', 3, CHAOS_TRANSFORMS, seeded=True),
     Job('chaos-transforms-ecores', 2, CHAOS_TRANSFORMS, seeded=True, ecores=True, silence_s=90, wall_s=1200),
-    Job('chaos-asan', 3, CHAOS, seeded=True, sanitizer=ASAN, silence_s=120, wall_s=1800, rss_gb=5),
-    Job('chaos-tsan', 2, CHAOS_TRANSFORMS, seeded=True, sanitizer=TSAN, silence_s=300, wall_s=3600, rss_gb=5),
-    Job('suite-asan-gc-ecores', 2, PYTEST_GC, sanitizer=ASAN, ecores=True, silence_s=300, wall_s=3600, rss_gb=5),
+    Job('chaos-asan', 3, CHAOS, seeded=True, build=ASAN, silence_s=120, wall_s=1800, rss_gb=5),
+    Job('chaos-tsan', 2, CHAOS_TRANSFORMS, seeded=True, build=TSAN, silence_s=300, wall_s=3600, rss_gb=5),
+    Job('chaos-ft', 2, CHAOS_FT, seeded=True, build=FT, silence_s=120, wall_s=1800, rss_gb=4),
+    Job('suite-asan-gc-ecores', 2, PYTEST_GC, build=ASAN, ecores=True, silence_s=300, wall_s=3600, rss_gb=5),
     # under the timeout(900) of the stress tests, which still applies
     Job('stress', 1, PYTEST_STRESS, silence_s=840, wall_s=5400, rss_gb=4),
     Job('suite', 1, PYTEST, silence_s=300, wall_s=1800),
@@ -278,7 +304,7 @@ def _argv(job: Job, seed: int | None) -> list[str]:
 
 
 def _wrapped(job: Job, argv: list[str], python: list[str]) -> list[str]:
-    run = [SANITIZERS, '--exec', *argv] if job.sanitizer is not None else [*python, *argv[1:]]
+    run = [SANITIZERS, '--exec', *argv] if job.build is not None else [*python, *argv[1:]]
     return ['taskpolicy', '-b', *run] if job.ecores else run
 
 
@@ -288,13 +314,16 @@ def command(job: Job, seed: int | None) -> list[str]:
 
 def repro(job: Job, seed: int | None) -> str:
     run = shlex.join(_wrapped(job, _argv(job, seed), ['uv', 'run', '--no-sync', 'python']))
-    return f'SANITIZE={shlex.quote(job.sanitizer)} {run}' if job.sanitizer is not None else run
+    if job.build is None:
+        return run
+    variables = ' '.join(f'{name}={shlex.quote(value)}' for name, value in job.build.env.items())
+    return f'{variables} {run}'
 
 
 def _env(job: Job) -> dict[str, str]:
     env = dict(JOB_ENV)
-    if job.sanitizer is not None:
-        env['SANITIZE'] = job.sanitizer
+    if job.build is not None:
+        env.update(job.build.env)
     return env
 
 
@@ -739,11 +768,20 @@ def _build_step(argv: list[str], env: dict[str, str], log: BinaryIO) -> int:
             process.wait()
 
 
+def _build_env(build: Build) -> dict[str, str]:
+    env = dict(build.env)
+    if build.python is not None:
+        env['PYTHON'] = _output(['uv', 'python', 'find', build.python]).strip()
+        if env['PYTHON'] == '':
+            sys.exit(f'hunt: uv finds no Python {build.python}')
+    return env
+
+
 def build(jobs: Sequence[Job], results: Results) -> None:
-    """Builds what the jobs run, once: the editable install, and the sanitizer builds they need."""
+    """Builds the editable install and the sanitizer builds the jobs need, once."""
     steps: list[tuple[list[str], dict[str, str]]] = [([sys.executable, '-c', 'import webrtc'], {})]
-    sanitizers = sorted({job.sanitizer for job in jobs if job.sanitizer is not None})
-    steps += [([SANITIZERS, '--build-only'], {'SANITIZE': sanitizer}) for sanitizer in sanitizers]
+    builds = sorted({job.build for job in jobs if job.build is not None}, key=lambda build: build.env.items())
+    steps += [([SANITIZERS, '--build-only'], _build_env(build)) for build in builds]
     build_log = results.paths.build_log
     with build_log.open('ab') as log:
         for argv, env in steps:

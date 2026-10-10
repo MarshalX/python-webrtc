@@ -29,13 +29,14 @@ namespace python_webrtc {
 
   } // namespace
 
-  FrameTransformerBridge::FrameTransformerBridge(FrameSource source)
-      : _source(std::move(source)), _id(NextBridgeId()) {}
+  FrameTransformerBridge::FrameTransformerBridge(FrameSource source) : _source(std::move(source)), _id(NextBridgeId()) {
+    _counter.alive++;
+  }
 
   FrameTransformerBridge::~FrameTransformerBridge() {
-    // libwebrtc may release the bridge on its threads: the transform is then deleted elsewhere
-    const LibwebrtcThreadScope scope;
+    // on a libwebrtc thread: a transform it holds the last reference of is destroyed on the Dispatcher
     _transform.reset();
+    _counter.alive--;
   }
 
   void FrameTransformerBridge::SetTransform(std::shared_ptr<RtpTransform> transform) {
@@ -46,8 +47,7 @@ namespace python_webrtc {
   }
 
   void FrameTransformerBridge::Transform(std::unique_ptr<webrtc::TransformableFrameInterface> frame) {
-    // a transform replaced meanwhile is deleted elsewhere (see DeleteOffLibwebrtcThread)
-    const LibwebrtcThreadScope scope;
+    TagNativeThread();
     std::shared_ptr<RtpTransform> transform;
     {
       const std::scoped_lock lock(_mutex);

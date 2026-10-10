@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import argparse
 import base64
-import datetime
+import datetime as dt
 import functools
 import hashlib
 import json
@@ -153,8 +153,8 @@ def resolve_llvm(deps: str, name: str) -> str:
         tree, committed = subprocess.check_output(
             [tool('git'), '-C', repo, 'log', '-1', '--format=%T %cI', 'FETCH_HEAD'], text=True
         ).split()
-    date = datetime.datetime.fromisoformat(committed).astimezone(datetime.timezone.utc)
-    since, until = ((date + datetime.timedelta(days=d)).strftime('%Y-%m-%dT%H:%M:%SZ') for d in (-1, 1))
+    date = dt.datetime.fromisoformat(committed).astimezone(dt.timezone.utc)
+    since, until = ((date + dt.timedelta(days=d)).strftime('%Y-%m-%dT%H:%M:%SZ') for d in (-1, 1))
     commits: list[Commit] = json.loads(gh(f'{REPO}/commits?path={name}&since={since}&until={until}&per_page=100'))
     for commit in commits:
         if tree_sha(commit['sha'], name) == tree:

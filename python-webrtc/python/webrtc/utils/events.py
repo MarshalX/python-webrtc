@@ -7,21 +7,28 @@
 
 """Event handling of WebRTC objects.
 
-The native WebRTC engine emits events on its own threads, which only schedule them. Handlers run on the asyncio event
-loop they were registered from.
+Events are delivered in order on the loop an object is bound to; handlers run on the loop they were registered from.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import functools
 import inspect
+import threading
 import typing
 from typing import TYPE_CHECKING, Callable, Generic, NamedTuple, Protocol, TypeVar, cast, overload
 
 from typing_extensions import Literal, Never, get_args, get_origin
 
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    import wrtc
+
 import webrtc
-from webrtc.utils.task_queue import TaskQueue
+from webrtc.utils.loops import LoopState, checking_roots, record_mismatch, states_elsewhere
 
 #: A handler, which is a function or a coroutine function called with the :obj:`webrtc.Event` of an event
 Handler = Callable[['webrtc.Event'], object]
@@ -43,10 +50,6 @@ class HandlerDecorator(Protocol[_E_contra]):
         ...
 
 
-#: The tasks of the coroutine handlers, referenced until they're done
-_handler_tasks: set[asyncio.Future[object]] = set()
-
-
 def call_handler(loop: asyncio.AbstractEventLoop, handler: Callable[[_E], object], event: _E, *, message: str) -> None:
     """Calls a handler; exceptions, async ones too, go to the loop's exception handler."""
 
@@ -54,7 +57,7 @@ def call_handler(loop: asyncio.AbstractEventLoop, handler: Callable[[_E], object
         loop.call_exception_handler({'message': message, 'exception': exception, 'event': event})
 
     def done(task: asyncio.Future[object]) -> None:
-        _handler_tasks.discard(task)
+        tasks.discard(task)
         if not task.cancelled() and (exception := task.exception()) is not None:
             report(exception)
 
@@ -65,7 +68,9 @@ def call_handler(loop: asyncio.AbstractEventLoop, handler: Callable[[_E], object
         return
     if inspect.isawaitable(result):
         task = asyncio.ensure_future(result, loop=loop)
-        _handler_tasks.add(task)
+        # strong ref until done, or the task could be collected
+        tasks = LoopState.of(loop).tasks
+        tasks.add(task)
         task.add_done_callback(done)
 
 
@@ -76,112 +81,131 @@ def _running_loop() -> asyncio.AbstractEventLoop | None:
         return None
 
 
+# guards lazy creation of an object's handler table
+_handlers_lock = threading.Lock()
+
+
 class _Registration(NamedTuple):
     handler: Handler
     loop: asyncio.AbstractEventLoop
     once: bool
 
 
-class _Listeners:
-    """Handlers of one native object, called by it with the name and the native arguments of an event."""
+class _Handlers:
+    """An object's handlers by event name, each with its registering loop."""
 
-    def __init__(self, target: EventTarget[Never]) -> None:
-        self.target = target
-        self.registrations: dict[str, list[_Registration]] = {}
-        # the loop of the first handler, which delivers every event, even without handlers for it,
-        # as events also update what the object shows (see EventTarget._on_event)
-        self.primary_loop: asyncio.AbstractEventLoop | None = None
+    __slots__ = ('_lock', '_registrations')
 
-    def __call__(self, name: str, *args: object) -> None:
-        # a libwebrtc thread, with the GIL held: only schedule
-        registrations: dict[str, list[_Registration]] | None = self.__dict__.get('registrations')
-        if registrations is None:
-            # the garbage collector cleared this object (in a cycle with its target) before the native one let go
-            return
-        primary_loop = self.primary_loop
-        if primary_loop is not None and primary_loop.is_closed():
-            # used from another loop since (like another asyncio.run): a handler's open loop takes over, on copies
-            primary_loop = self.primary_loop = next(
-                (r.loop for regs in list(registrations.values()) for r in list(regs) if not r.loop.is_closed()), None
-            )
-        loops: list[asyncio.AbstractEventLoop] = [primary_loop] if primary_loop is not None else []
-        for registration in registrations.get(name, ()):
-            if registration.loop not in loops:
-                loops.append(registration.loop)
-        for loop in loops:
-            if not loop.is_closed():
-                TaskQueue.of(loop).post(self.deliver, loop, name, args)
+    def __init__(self) -> None:
+        self._registrations: dict[str, list[_Registration]] = {}
+        # re-entrant: gc may release a loop under it, which removes handlers
+        self._lock = threading.RLock()
 
-    def dispatch(self, name: str, args: tuple[object, ...]) -> None:
-        """Delivers an event on the running loop now, and posts it to the other loops of its handlers."""
-        running = asyncio.get_running_loop()
-        self.deliver(running, name, args)
-        registrations: dict[str, list[_Registration]] = self.__dict__.get('registrations', {})
-        for loop in {r.loop for r in registrations.get(name, ()) if r.loop is not running}:
-            if not loop.is_closed():
-                TaskQueue.of(loop).post(self.deliver, loop, name, args)
-
-    def ensure_primary_loop(self) -> asyncio.AbstractEventLoop | None:
-        """Makes the running loop the primary one if there's none yet. Returns the running loop, if any."""
-        loop = _running_loop()
-        if loop is not None and (self.primary_loop is None or self.primary_loop.is_closed()):
-            self.primary_loop = loop
-        return loop
-
-    def deliver(self, loop: asyncio.AbstractEventLoop, name: str, args: tuple[object, ...]) -> None:
-        if 'registrations' not in self.__dict__:
-            # the garbage collector cleared this object since the event was posted
-            return
-        if loop is self.primary_loop:
-            self.target._on_event(name, *args)
-        registrations = [r for r in self.registrations.get(name, ()) if r.loop is loop]
-        if len(registrations) == 0:
-            return
-        event = self.target._create_event(name, *args)
-        if event is None:
-            return
-        event.target = self.target
-        self._call(loop, name, event, registrations=registrations)
-
-    def _call(
-        self, loop: asyncio.AbstractEventLoop, name: str, event: webrtc.Event, *, registrations: list[_Registration]
-    ) -> None:
-        for registration in registrations:
-            # skip ones removed during this dispatch
-            if not any(r is registration for r in self.registrations.get(name, ())):
-                continue
-            if registration.once:
-                self.remove(name, registration.handler)
-            call_handler(loop, registration.handler, event, message=f'Exception in {name!r} event handler')
-
-    def add(self, name: str, handler: Handler, *, once: bool) -> None:
-        loop = self.ensure_primary_loop()
-        if loop is None:
-            msg = 'event handlers must be registered from a running asyncio event loop'
-            raise RuntimeError(msg)
-
-        registrations = self.registrations.setdefault(name, [])
-        if any(r.handler == handler for r in registrations):
-            return  # like addEventListener, a handler is registered once
-        registrations.append(_Registration(handler, loop, once))
+    def add(self, name: str, handler: Handler, loop: asyncio.AbstractEventLoop, *, once: bool) -> None:
+        with self._lock:
+            registrations = self._registrations.setdefault(name, [])
+            if any(r.handler == handler for r in registrations):
+                return  # registered once, per addEventListener
+            registrations.append(_Registration(handler, loop, once))
+            # re-stored: a loop released under the lock may have dropped the emptied list
+            self._registrations[name] = registrations
 
     def remove(self, name: str | None, handler: AnyHandler | None) -> None:
-        # replaced, not mutated: libwebrtc threads read it
-        names = list(self.registrations) if name is None else [name]
-        registrations = dict(self.registrations)
-        for each in names:
-            kept = [r for r in registrations.get(each, ()) if handler is not None and r.handler != handler]
-            if len(kept) > 0:
-                registrations[each] = kept
-            else:
-                _ = registrations.pop(each, None)
-        self.registrations = registrations
+        """Removes a handler of an event, every handler of it, or every handler of every event."""
+        with self._lock:
+            for each in list(self._registrations) if name is None else [name]:
+                self._keep(each, lambda r: handler is not None and r.handler != handler)
+
+    def remove_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Removes the handlers registered from a loop."""
+        with self._lock:
+            for name in list(self._registrations):
+                self._keep(name, lambda r: r.loop is not loop)
+
+    def _keep(self, name: str, keep: Callable[[_Registration], bool]) -> None:
+        """Drops unkept registrations in place, so a nested removal sees it."""
+        registrations = self._registrations.get(name)
+        if registrations is None:
+            return
+        for registration in list(registrations):
+            if not keep(registration):
+                _discard(registrations, registration)
+        if len(registrations) == 0:
+            _ = self._registrations.pop(name, None)
+
+    def has(self, name: str, registration: _Registration) -> bool:
+        with self._lock:
+            return any(r is registration for r in self._registrations.get(name, ()))
+
+    def for_loop(self, name: str, loop: asyncio.AbstractEventLoop) -> list[_Registration]:
+        """An event's handlers registered from a loop, in order."""
+        with self._lock:
+            return [r for r in self._registrations.get(name, ()) if r.loop is loop]
+
+    def loops(self, name: str) -> list[asyncio.AbstractEventLoop]:
+        """The loops with a handler of an event."""
+        with self._lock:
+            return list(dict.fromkeys(r.loop for r in self._registrations.get(name, ())))
+
+    def of(self, name: str) -> list[AnyHandler]:
+        with self._lock:
+            return [r.handler for r in self._registrations.get(name, ())]
+
+    def names(self) -> set[str]:
+        with self._lock:
+            return {name for name, registrations in self._registrations.items() if len(registrations) > 0}
 
 
-class _NativeEventTarget(Protocol):
-    """A native object that emits events, through the listeners it holds."""
+def _discard(registrations: list[_Registration], registration: _Registration) -> None:
+    """Removes a registration by identity without allocating, so gc can't interleave."""
+    for i in range(len(registrations)):
+        if registrations[i] is registration:
+            del registrations[i]
+            return
 
-    _listeners: _Listeners | None
+
+def _handler_names(registrations: list[_Registration]) -> str:
+    return ', '.join(getattr(r.handler, '__qualname__', repr(r.handler)) for r in registrations)
+
+
+def _roots_of(loop: asyncio.AbstractEventLoop | None) -> LoopState | None:
+    """The loop's state if the loop is open."""
+    return LoopState.of(loop) if loop is not None and not loop.is_closed() else None
+
+
+def _check_handled(
+    target: EventTarget[Never], name: str, registrations: list[_Registration], *, roots: LoopState, generation: int
+) -> None:
+    """Asserts an object about to run handlers is rooted or active."""
+    if not target._rootable:
+        # its events come from the code holding it, e.g. SFrame stream writes
+        return
+    with roots._lock:
+        rooted = target in roots.active
+    if rooted or target._activity() is not None:
+        return
+    with roots._lock:
+        # raced a change on another thread; the next check sees it settled
+        if roots.changes > 0 or roots.generation != generation:
+            return
+    msg = (
+        f'{type(target).__name__} is neither rooted nor active while {name!r} is handled by '
+        f'{_handler_names(registrations)}'
+    )
+    record_mismatch(msg)
+    raise AssertionError(msg)
+
+
+class _Bound(Protocol):
+    """A native object with events, bound to a loop's mailbox."""
+
+    def _bind(self, mailbox: wrtc.Mailbox) -> bool: ...
+
+    @property
+    def _bound(self) -> bool: ...
+
+    @property
+    def _mailbox(self) -> int | None: ...
 
 
 class EventTarget(Generic[_N_contra]):
@@ -191,6 +215,8 @@ class EventTarget(Generic[_N_contra]):
     called on that loop with one event object. They can be functions or coroutine functions, and a coroutine is run as a
     task. An exception in a handler goes to the exception handler of the loop, and doesn't stop the other handlers. A
     handler registered twice for an event is called once.
+
+    An object with handlers stays alive while it can still fire them; handlers go when their loop closes.
 
     See :mdn:`EventTarget`.
 
@@ -204,11 +230,18 @@ class EventTarget(Generic[_N_contra]):
         pc.on('track', lambda event: print(event.track))
     """
 
+    __slots__ = ()
+
     #: Event names, from the ``Literal`` parameter
     _events: tuple[str, ...] = ()
+    #: whether the class overrides :meth:`_activity`
+    _rootable: bool = False
+    #: a slot of the classes mixing this in
+    _handlers: _Handlers | None
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
+        cls._rootable = cls._activity is not EventTarget._activity
         for base in cast('tuple[object, ...]', cls.__dict__.get('__orig_bases__', ())):
             names = _literal_names(get_args(base)[0]) if _is_target_base(base) else ()
             if len(names) > 0:
@@ -217,38 +250,79 @@ class EventTarget(Generic[_N_contra]):
     if TYPE_CHECKING:
 
         @property
-        def _native_obj(self) -> _NativeEventTarget: ...
+        def _native_obj(self) -> _Bound: ...
 
-    def _listeners(self) -> _Listeners | None:
-        return self._native_obj._listeners
+    @property
+    def _connection(self) -> webrtc.RTCPeerConnection | None:
+        """The parent connection, if any."""
+        return None
 
-    def _created_listeners(self) -> _Listeners:
-        native = self._native_obj
-        listeners = native._listeners
-        if listeners is None:
-            listeners = _Listeners(self)
-            # before the native object gets it: it delivers the events it held right away
-            _ = listeners.ensure_primary_loop()
-            native._listeners = listeners
-        return listeners
+    def _state(self) -> LoopState | None:
+        """The bound loop's state while it's open."""
+        return LoopState.find(self._native_obj._mailbox)
 
-    def _attach(self) -> None:
-        """Delivers the events of the object to the running loop from now on, even without handlers.
+    def _loop(self) -> asyncio.AbstractEventLoop | None:
+        """The bound loop, if any."""
+        state = self._state()
+        return state.loop if state is not None else None
 
-        Events also update what the object shows (like its state, see :meth:`_on_event`). Does nothing outside of
-        a loop.
-        """
-        _ = self._attach_running_loop()
-
-    def _attach_running_loop(self) -> bool:
-        """Like :meth:`_attach`, and whether it took over from no loop or a closed one."""
+    def _attach(self) -> bool:
+        """Binds the object and its connection to the running loop; the first binding wins until released."""
         loop = _running_loop()
         if loop is None:
             return False
-        listeners = self._native_obj._listeners
-        previous = None if listeners is None else listeners.primary_loop
-        _ = self._created_listeners().ensure_primary_loop()
-        return previous is not loop and (previous is None or previous.is_closed())
+        connection = self._connection
+        if connection is not None:
+            _ = connection._attach()
+        bound = self._native_obj._bind(LoopState.of(loop).mailbox)
+        if bound:
+            self._update(loop)
+        return bound
+
+    @staticmethod
+    def _activity() -> str | None:
+        """Why the object is kept alive while unreferenced, or None."""
+        return None
+
+    def _open(self) -> bool:
+        """Whether the parent connection, if any, isn't closed."""
+        connection = self._connection
+        return connection is None or not connection._is_closed()
+
+    def _update(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
+        """Re-evaluates the object's root; ``loop`` covers a native object that dropped its binding."""
+        if loop is None:
+            loop = self._loop()
+        if loop is None:
+            loop = _running_loop()
+        state = _roots_of(loop)
+        if state is not None:
+            state.update(self)
+
+    @contextlib.contextmanager
+    def _changing(self) -> Generator[None, None, None]:
+        """Wraps a call that changes the object's activity, then updates its root."""
+        # read before the call: the native object may drop its binding
+        loop = self._loop()
+        # root checks on other threads wait until the call is over
+        states = states_elsewhere()
+        for state in states:
+            state.changing(1)
+        try:
+            yield
+        finally:
+            self._update(loop)
+            for state in states:
+                state.changing(-1)
+
+    def _released(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Drops a released loop's handlers and updates the root."""
+        handlers = self._handlers
+        if handlers is not None:
+            handlers.remove_loop(loop)
+        state = self._state()
+        if state is not None:
+            state.update(self)
 
     def _check_event(self, name: str) -> None:
         if name not in self._events:
@@ -267,18 +341,81 @@ class EventTarget(Generic[_N_contra]):
         return self._add_handler(name, handler, once=once)
 
     def _add_handler(self, name: str, handler: AnyHandler, *, once: bool) -> AnyHandler:
-        # the handler takes the event of its name, which only the native object knows
-        self._created_listeners().add(name, cast('Handler', handler), once=once)
+        loop = _running_loop()
+        if loop is None:
+            msg = 'event handlers must be registered from a running asyncio event loop'
+            raise RuntimeError(msg)
+        with self._changing():
+            _ = self._attach()
+            self._handler_table().add(name, cast('Handler', handler), loop, once=once)
+        # the handler's loop removes it on release; the bound loop checks roots
+        for state in (LoopState.of(loop), self._state()):
+            if state is not None:
+                state.remember(self)
         return handler
+
+    def _handler_table(self) -> _Handlers:
+        """The handler table, created on first use."""
+        handlers = self._handlers
+        if handlers is None:
+            with _handlers_lock:
+                handlers = self._handlers
+                if handlers is None:
+                    handlers = self._handlers = _Handlers()
+        return handlers
 
     def _dispatch(self, name: str, *args: object) -> None:
         """Delivers an event to the handlers on the running loop right away, from an event being delivered."""
-        listeners = self._listeners()
-        if listeners is not None:
-            listeners.dispatch(name, args)
+        state = LoopState.of(asyncio.get_running_loop())
+        binding = self._state()
+        primary = binding is None or binding is state
+        self._deliver(state, name, args, primary=primary)
+        if primary:
+            state.update(self)
+
+    def _deliver(self, state: LoopState, name: str, args: tuple[object, ...], *, primary: bool = True) -> None:
+        """Delivers an event on a loop; the bound (primary) loop also updates state and forwards to other loops."""
+        if primary:
+            self._on_event(name, *args)
+        handlers = self._handlers
+        if handlers is None:
+            return
+        loop = state.loop
+        registrations = handlers.for_loop(name, loop)
+        # read before _open(), so the check can detect a racing change
+        generation = state.generation
+        event = self._create_event(name, *args) if len(registrations) > 0 and self._open() else None
+        if event is not None:
+            if primary and checking_roots():
+                _check_handled(self, name, registrations, roots=state, generation=generation)
+            self._call(loop, name, event, registrations=registrations)
+        if primary:
+            self._forward(handlers, name, args, delivering=loop)
+
+    def _forward(
+        self, handlers: _Handlers, name: str, args: tuple[object, ...], *, delivering: asyncio.AbstractEventLoop
+    ) -> None:
+        """Posts an event to the other loops with handlers for it."""
+        for other in handlers.loops(name):
+            if other is not delivering and not other.is_closed():
+                elsewhere = LoopState.of(other)
+                elsewhere.post(functools.partial(self._deliver, elsewhere, name, args, primary=False))
+
+    def _call(
+        self, loop: asyncio.AbstractEventLoop, name: str, event: webrtc.Event, *, registrations: list[_Registration]
+    ) -> None:
+        event.target = self
+        handlers = self._handlers
+        for registration in registrations:
+            if handlers is None or not handlers.has(name, registration):
+                continue
+            if registration.once:
+                handlers.remove(name, registration.handler)
+                self._update()
+            call_handler(loop, registration.handler, event, message=f'Exception in {name!r} event handler')
 
     def _on_event(self, name: str, *args: object) -> None:
-        """Called for every event on the loop of the first handler, before the handlers of the event.
+        """Called for every event on the bound loop, before its handlers.
 
         Names starting with ``_`` (like ``'_sent'``) are internal events of the native object. They only reach this
         method and never reach handlers.
@@ -303,9 +440,10 @@ class EventTarget(Generic[_N_contra]):
         """
         if name is not None:
             self._check_event(name)
-        listeners = self._listeners()
-        if listeners is not None:
-            listeners.remove(name, handler)
+        handlers = self._handlers
+        if handlers is not None:
+            with self._changing():
+                handlers.remove(name, handler)
 
     def remove_listener(self, name: _N_contra, handler: AnyHandler) -> None:
         """Removes a handler of an event. Removing one that isn't registered does nothing.
@@ -345,10 +483,8 @@ class EventTarget(Generic[_N_contra]):
             ValueError: If the object has no such event.
         """
         self._check_event(name)
-        listeners = self._listeners()
-        if listeners is None:
-            return []
-        return [r.handler for r in listeners.registrations.get(name, ())]
+        handlers = self._handlers
+        return handlers.of(name) if handlers is not None else []
 
     def event_names(self) -> set[str]:
         """Returns the names of the events that have handlers.
@@ -356,10 +492,8 @@ class EventTarget(Generic[_N_contra]):
         Returns:
             :obj:`set` of :obj:`str`: The names.
         """
-        listeners = self._listeners()
-        if listeners is None:
-            return set()
-        return {name for name, registrations in listeners.registrations.items() if len(registrations) > 0}
+        handlers = self._handlers
+        return handlers.names() if handlers is not None else set()
 
 
 # distinct objects before Python 3.10
@@ -384,6 +518,8 @@ def _is_target_base(base: object) -> bool:
 
 class UniformEventTarget(EventTarget[_N_contra], Generic[_N_contra, _E]):
     """An :obj:`EventTarget` whose events all have the same event class, which typed handlers take."""
+
+    __slots__ = ()
 
     @overload
     def on(self, name: _N_contra, handler: None = None) -> HandlerDecorator[_E]: ...
