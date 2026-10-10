@@ -22,6 +22,8 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
     remote offers, and listed by :meth:`webrtc.RTCPeerConnection.get_transceivers`. See :mdn:`RTCRtpTransceiver`.
     """
 
+    __slots__ = ()
+
     _class = wrtc.RTCRtpTransceiver
 
     @property
@@ -38,7 +40,7 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
 
         See :mdn:`RTCRtpTransceiver/receiver`.
         """
-        return webrtc.RTCRtpReceiver._wrap(self._native_obj.receiver)
+        return webrtc.RTCRtpReceiver._wrap(self._native_obj.receiver, connection=self._connection)
 
     @property
     def sender(self) -> webrtc.RTCRtpSender:
@@ -46,7 +48,7 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
 
         See :mdn:`RTCRtpTransceiver/sender`.
         """
-        return webrtc.RTCRtpSender._wrap(self._native_obj.sender)
+        return webrtc.RTCRtpSender._wrap(self._native_obj.sender, connection=self._connection)
 
     @property
     def stopped(self) -> bool:

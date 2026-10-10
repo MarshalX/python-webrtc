@@ -11,12 +11,14 @@ Every step is logged before it runs, so the output of a crash names the sequence
 
     python -m tests.chaos --seed 7 --steps 500
     python -m tests.chaos --seed 7 --steps 500 --transforms
+    python -m tests.chaos --seed 7 --steps 500 --workers 4
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import concurrent.futures
 import contextlib
 import gc
 import logging
@@ -27,8 +29,8 @@ import time
 from typing import TYPE_CHECKING, ClassVar, Literal, NoReturn, TypeVar
 
 import webrtc
-import wrtc
-from tests.helpers import connect, copy_frame, register_stack_dump
+from tests.helpers import connect, copy_frame, register_stack_dump, settled_alive
+from webrtc.utils import loops
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -49,6 +51,8 @@ class State:
 
     def __init__(self, seed: int) -> None:
         self.random = random.Random(seed)
+        # guards the pools below, shared by --workers
+        self.lock = threading.Lock()
         self.connections: list[webrtc.RTCPeerConnection] = []
         self.channels: list[webrtc.RTCDataChannel] = []
         self.tracks: list[webrtc.MediaStreamTrack] = []
@@ -65,11 +69,13 @@ class State:
         self.encoded: list[webrtc.RTCEncodedVideoFrame | webrtc.RTCEncodedAudioFrame] = []
 
     def pick(self, pool: list[T]) -> T | None:
-        return self.random.choice(pool) if len(pool) > 0 else None
+        with self.lock:
+            return self.random.choice(pool) if len(pool) > 0 else None
 
     def drop(self, pool: list[T]) -> None:
-        if len(pool) > 0:
-            pool.pop(self.random.randrange(len(pool)))
+        with self.lock:
+            if len(pool) > 0:
+                pool.pop(self.random.randrange(len(pool)))
 
     def handler(self) -> Callable[[webrtc.Event], str | None]:
         """A handler doing something to a random object: closing, raising, referencing (a cycle), collecting."""
@@ -113,9 +119,10 @@ class ConnectionSteps(State):
         self.drop(self.connections)
 
     async def connect_two(self) -> None:
-        if len(self.connections) >= 2:
-            a, b = self.random.sample(self.connections, 2)
-            await connect(a, b, timeout=5)
+        with self.lock:
+            pair = self.random.sample(self.connections, 2) if len(self.connections) >= 2 else None
+        if pair is not None:
+            await connect(pair[0], pair[1], timeout=5)
 
     async def add_track(self) -> None:
         pc, track = self.pick(self.connections), self.pick(self.tracks)
@@ -234,21 +241,22 @@ class MediaSteps(State):
             self.processors.append((processor, processor.readable.get_reader()))
 
     async def read(self) -> None:
-        if len(self.processors) > 0:
-            _, reader = self.random.choice(self.processors)
-            try:
-                result = await asyncio.wait_for(reader.read(), 0.2)
-            except asyncio.TimeoutError:
-                return
-            if not result.done:
-                # the processor's readable is typed ReadableStream[object]
-                assert isinstance(result.value, (webrtc.VideoFrame, webrtc.AudioData))
-                result.value.close()
+        processor = self.pick(self.processors)
+        if processor is None:
+            return
+        try:
+            result = await asyncio.wait_for(processor[1].read(), 0.2)
+        except asyncio.TimeoutError:
+            return
+        if not result.done:
+            # the processor's readable is typed ReadableStream[object]
+            assert isinstance(result.value, (webrtc.VideoFrame, webrtc.AudioData))
+            result.value.close()
 
     async def cancel_processor(self) -> None:
-        if len(self.processors) > 0:
-            _, reader = self.random.choice(self.processors)
-            await reader.cancel()
+        processor = self.pick(self.processors)
+        if processor is not None:
+            await processor[1].cancel()
 
     async def drop_processor(self) -> None:
         self.drop(self.processors)
@@ -264,9 +272,10 @@ class MediaSteps(State):
             self.tracks.append(generator)
 
     async def write(self) -> None:
-        if len(self.generators) == 0:
+        generator = self.pick(self.generators)
+        if generator is None:
             return
-        writer, kind = self.random.choice(self.generators)
+        writer, kind = generator
         if kind == 'video':
             width, height = self.random.choice([(2, 2), (33, 17), (320, 240)])
             chunk = webrtc.VideoFrame(
@@ -289,9 +298,9 @@ class MediaSteps(State):
         await writer.write(chunk)
 
     async def close_generator(self) -> None:
-        if len(self.generators) > 0:
-            writer, _ = self.random.choice(self.generators)
-            await writer.close()
+        generator = self.pick(self.generators)
+        if generator is not None:
+            await generator[0].close()
 
     async def drop_generator(self) -> None:
         self.drop(self.generators)
@@ -333,7 +342,8 @@ class MediaSteps(State):
             )
 
     async def stream(self) -> None:
-        tracks = self.random.sample(self.tracks, min(len(self.tracks), 2))
+        with self.lock:
+            tracks = self.random.sample(self.tracks, min(len(self.tracks), 2))
         stream = webrtc.MediaStream(tracks)
         if len(tracks) > 0 and self.random.random() < 0.5:
             stream.remove_track(tracks[0])
@@ -508,16 +518,26 @@ class Chaos(ConnectionSteps, MediaSteps, TransformSteps, LoopSteps):
         *steps(LoopSteps),
     ])
 
-    def __init__(self, seed: int, *, transforms: bool = False, wait_when_stuck: bool = False) -> None:
+    def __init__(self, seed: int, *, transforms: bool = False, wait_when_stuck: bool = False, workers: int = 1) -> None:
         super().__init__(seed)
         self.steps = self.TRANSFORM_STEPS if transforms else self.STEPS
         self.wait_when_stuck = wait_when_stuck
+        self.workers = workers
+        self._finished = 0
 
-    async def run(self, count: int) -> None:
+    async def run(self, count: int, worker: int = 0) -> None:
+        """Runs count steps; the last worker to finish cleans up."""
         # handlers raise on purpose
         asyncio.get_running_loop().set_exception_handler(lambda _loop, _context: None)
         for index in range(count):
-            await self.step(index, self.random.choice(self.steps))
+            await self.step(index, self.random.choice(self.steps), worker)
+        with self.lock:
+            self._finished += 1
+            last = self._finished == self.workers
+        if last:
+            self._finish()
+
+    def _finish(self) -> None:
         for pc in self.connections:
             pc.close()
         for track in self.tracks:
@@ -528,8 +548,8 @@ class Chaos(ConnectionSteps, MediaSteps, TransformSteps, LoopSteps):
                 if task.is_alive():
                     self._stuck('a reader thread')
 
-    async def step(self, index: int, name: str) -> None:
-        log.info('%d %s', index, name)
+    async def step(self, index: int, name: str, worker: int = 0) -> None:
+        log.info('%s%d %s', f'worker {worker} ' if self.workers > 1 else '', index, name)
         started = time.monotonic()
         try:
             run: Callable[[], Coroutine[object, object, None]] = getattr(self, name)
@@ -541,6 +561,9 @@ class Chaos(ConnectionSteps, MediaSteps, TransformSteps, LoopSteps):
         # misuse is expected, crashes and deadlocks aren't
         except MISUSE as e:
             log.info('  %s: %s', type(e).__name__, str(e)[:80])
+        # an operation on a connection another step closed is aborted, neither resolved nor rejected
+        except asyncio.CancelledError:
+            log.info('  CancelledError: closed meanwhile')
 
     def _stuck(self, what: str) -> NoReturn:
         log.info('%s is stuck', what)
@@ -551,11 +574,33 @@ class Chaos(ConnectionSteps, MediaSteps, TransformSteps, LoopSteps):
             time.sleep(60)
 
 
+def _run(args: argparse.Namespace) -> None:
+    """Runs the steps here, or on --workers threads with a loop each."""
+    chaos = Chaos(args.seed, transforms=args.transforms, wait_when_stuck=args.wait_when_stuck, workers=args.workers)
+    if args.workers == 1:
+        asyncio.run(chaos.run(args.steps))
+        return
+
+    def work(worker: int, count: int) -> None:
+        asyncio.run(chaos.run(count, worker))
+
+    workers: int = args.workers
+    share, extra = divmod(int(args.steps), workers)
+    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+        runs = [pool.submit(work, worker, share + (1 if worker < extra else 0)) for worker in range(workers)]
+        # a failed or exited worker (stuck step) ends the run too
+        for run in runs:
+            run.result()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--steps', type=int, default=300)
     parser.add_argument('--transforms', action='store_true', help='the steps of transforms only, and media for them')
+    parser.add_argument(
+        '--workers', type=int, default=1, help='threads with an event loop each, running steps over the same objects'
+    )
     parser.add_argument(
         '--wait-when-stuck',
         action='store_true',
@@ -565,14 +610,19 @@ def main() -> None:
     register_stack_dump()
     logging.basicConfig(stream=sys.stdout, format='%(message)s', level=logging.INFO)
     log.info('seed %d, %d steps', args.seed, args.steps)
-    asyncio.run(Chaos(args.seed, transforms=args.transforms, wait_when_stuck=args.wait_when_stuck).run(args.steps))
+    if args.workers > 1:
+        log.info('%d workers', args.workers)
+    _run(args)
     # the last references may be released on helper threads
-    deadline = time.monotonic() + 1
-    while wrtc._alive_factories() != 0 and time.monotonic() < deadline:
-        gc.collect()
-        time.sleep(0.05)
-    alive = {name: count for name, count in wrtc._alive().items() if count != 0}
-    log.info('done, %d factories alive, native objects alive: %s', wrtc._alive_factories(), alive)
+    alive, factories = settled_alive(lambda alive, factories: factories == 0 and not any(alive.values()))
+    alive = {name: count for name, count in alive.items() if count != 0}
+    log.info('done, %d factories alive, native objects alive: %s', factories, alive)
+    # a closed loop releases everything; make hunt files this as a leak
+    if factories != 0 or len(alive) > 0:
+        sys.exit(1)
+    if len(loops.mismatches) > 0:
+        log.info('the roots checks failed:\n%s', '\n'.join(loops.mismatches))
+        sys.exit(1)
 
 
 if __name__ == '__main__':

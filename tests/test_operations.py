@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import TYPE_CHECKING, Callable
 
 import pytest
@@ -69,6 +70,36 @@ def test_operations_stranded_by_a_closed_loop_end_quietly() -> None:
         # as collecting it does
         coroutine.close()
     assert not any(task.done() for task in tasks)
+
+
+def test_operation_waiting_for_one_of_another_loop_resumes() -> None:
+    """Operations chain across loops on other threads."""
+    chain = OperationsChain(lambda: None, lambda: False)
+    started = threading.Event()
+    release = threading.Event()
+
+    async def first() -> None:
+        async with chain.operation():
+            started.set()
+            await asyncio.get_running_loop().run_in_executor(None, release.wait)
+
+    other = threading.Thread(target=asyncio.run, args=(first(),))
+    other.start()
+    assert started.wait(5)
+
+    async def second() -> None:
+        async def operation() -> None:
+            async with chain.operation():
+                pass
+
+        waiting = asyncio.ensure_future(operation())
+        await asyncio.sleep(0)
+        release.set()
+        await asyncio.wait_for(waiting, 5)
+
+    asyncio.run(second())
+    other.join(5)
+    assert not chain.busy
 
 
 async def remote_offer() -> webrtc.RTCSessionDescriptionInit:

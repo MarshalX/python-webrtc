@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.9"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -2503,7 +2503,7 @@ requires-dist = [{ name = "typing-extensions", specifier = ">=4.10" }]
 [package.metadata.requires-dev]
 dev = [
     { name = "coverage", specifier = ">=7.10" },
-    { name = "pybind11", specifier = ">=3.0" },
+    { name = "pybind11", specifier = ">=3.1" },
     { name = "pybind11-stubgen", specifier = ">=2.5" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },

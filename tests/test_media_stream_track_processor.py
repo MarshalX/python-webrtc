@@ -89,14 +89,14 @@ async def test_audio_data_of_a_microphone(audio_stream: webrtc.MediaStream) -> N
 async def test_wakeup_sent_before_the_listeners_is_not_lost(
     audio_stream: webrtc.MediaStream, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Media comes as soon as the sink is attached, before the listeners are: the wakeup it sends is dropped."""
+    """Media before binding is still read."""
     attach = webrtc.MediaStreamTrackProcessor._attach
 
-    def attach_once_media_came(processor: webrtc.MediaStreamTrackProcessor) -> None:
+    def attach_once_media_came(processor: webrtc.MediaStreamTrackProcessor) -> bool:
         deadline = time.monotonic() + 5
         while processor._native_obj.totalFrames == 0 and time.monotonic() < deadline:
             time.sleep(0.01)
-        attach(processor)
+        return attach(processor)
 
     monkeypatch.setattr(webrtc.MediaStreamTrackProcessor, '_attach', attach_once_media_came)
     init = webrtc.MediaStreamTrackProcessorInit(audio_stream.get_tracks()[0], max_buffer_size=1)

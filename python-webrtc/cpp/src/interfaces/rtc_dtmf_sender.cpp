@@ -18,41 +18,38 @@ namespace python_webrtc {
   RTCDTMFSender::RTCDTMFSender(std::shared_ptr<PeerConnectionFactory> factory,
                                webrtc::scoped_refptr<webrtc::DtmfSenderInterface> dtmf)
       : _factory(std::move(factory)), _dtmf(std::move(dtmf)) {
-    // see AliveGuard
-    _factory->signalingThread()->PostTask(_alive.Guard([this]() {
+    _factory->signalingThread()->PostTask(Guard([this]() {
       _dtmf->RegisterObserver(this);
-      holder().SetObserver(_dtmf.get(), this);
+      registry().SetObserver(_dtmf.get(), this);
     }));
   }
 
   RTCDTMFSender::~RTCDTMFSender() {
-    const BlockingDestructor release("RTCDTMFSender");
-
     // callbacks run on the signaling thread, so after this none of them can be running or start again
     BlockingCallOn(_factory->signalingThread(), [this]() {
       // a newer wrapper of the sender may have taken its single observer slot
-      if (holder().TakeObserver(_dtmf.get(), this)) {
+      if (registry().TakeObserver(_dtmf.get(), this)) {
         _dtmf->UnregisterObserver();
       }
     });
-    DropListeners();
   }
 
   void RTCDTMFSender::Init(pybind11::module &m) {
-    Listeners::BindClass<RTCDTMFSender>(m, "RTCDTMFSender")
+    DefineBinding(pybind11::class_<RTCDTMFSender, Binding, std::shared_ptr<RTCDTMFSender>>(m, "RTCDTMFSender"))
+        .def_property_readonly("_id", &RTCDTMFSender::Id)
         .def_property_readonly("toneBuffer", nogil_fn(&RTCDTMFSender::GetToneBuffer))
         .def_property_readonly("canInsertDTMF", nogil_fn(&RTCDTMFSender::GetCanInsertDtmf))
         .def("_checkCanSend", &RTCDTMFSender::CheckCanSend, nogil())
         .def("insertDTMF", &RTCDTMFSender::InsertDtmf, nogil(), pybind11::arg("tones"), pybind11::arg("duration"),
              pybind11::arg("interToneGap"))
-        .def("_surfaceBuffer", &RTCDTMFSender::SurfaceBuffer, nogil(), pybind11::arg("buffer"),
-             pybind11::arg("insertion"));
+        .def("_surfaceBuffer", &RTCDTMFSender::SurfaceBuffer, nogil(), pybind11::arg("tone"), pybind11::arg("buffer"),
+             pybind11::arg("insertion"))
+        .def_property_readonly("_playing", nogil_fn(&RTCDTMFSender::GetPlaying));
   }
 
-  InstanceHolder<RTCDTMFSender, webrtc::DtmfSenderInterface> &RTCDTMFSender::holder() {
-    // never destroyed: wrappers may outlive static destructors
-    static auto *holder = new InstanceHolder<RTCDTMFSender, webrtc::DtmfSenderInterface>();
-    return *holder;
+  Registry<RTCDTMFSender, webrtc::DtmfSenderInterface> &RTCDTMFSender::registry() {
+    static ForkLocal<Registry<RTCDTMFSender, webrtc::DtmfSenderInterface>> registry;
+    return registry.Get();
   }
 
   void
@@ -105,24 +102,34 @@ namespace python_webrtc {
     }
     const std::scoped_lock lock(_bufferMutex);
     _surfacedBuffer = tones;
+    // a cancel (no tones) ends with an empty tonechange too
+    _playing = true;
   }
 
   std::string RTCDTMFSender::GetToneBuffer() {
     {
       const std::scoped_lock lock(_bufferMutex);
-      if (HasListeners() && _surfacedBuffer) {
+      if (IsBound() && _surfacedBuffer) {
         return *_surfacedBuffer;
       }
     }
     return _dtmf->tones();
   }
 
-  void RTCDTMFSender::SurfaceBuffer(const std::string &buffer, uint64_t insertion) {
+  void RTCDTMFSender::SurfaceBuffer(const std::string &tone, const std::string &buffer, uint64_t insertion) {
     const std::scoped_lock lock(_bufferMutex);
     // a tone played before the last insertDTMF() doesn't change what it set
     if (insertion == _insertions) {
       _surfacedBuffer = buffer;
+      if (tone.empty()) {
+        _playing = false;
+      }
     }
+  }
+
+  bool RTCDTMFSender::GetPlaying() {
+    const std::scoped_lock lock(_bufferMutex);
+    return _playing;
   }
 
   bool RTCDTMFSender::GetCanInsertDtmf() {

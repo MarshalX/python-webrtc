@@ -20,8 +20,7 @@ namespace python_webrtc {
                                      webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track)
       : _factory(std::move(factory)), _track(std::move(track)),
         _source(SourceControl::Find(_track.get(), _track->id())) {
-    // see AliveGuard
-    _factory->signalingThread()->PostTask(_alive.Guard([this]() {
+    _factory->signalingThread()->PostTask(Guard([this]() {
       _track->RegisterObserver(this);
       _observing = true;
       AttachMonitor();
@@ -29,8 +28,6 @@ namespace python_webrtc {
   }
 
   MediaStreamTrack::~MediaStreamTrack() {
-    const BlockingDestructor release("MediaStreamTrack");
-
     // after this the track can't notify us anymore: it notifies on the same thread
     BlockingCallOn(_factory->signalingThread(), [this]() {
       DetachMonitor();
@@ -41,9 +38,6 @@ namespace python_webrtc {
     });
 
     _track = nullptr;
-    // released as the listeners are (see DropListeners)
-    ReleasePythonObject(_constraints);
-    DropListeners();
   }
 
   void MediaStreamTrack::AttachMonitor() {
@@ -68,7 +62,9 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrack::Init(pybind11::module &m) {
-    Listeners::BindClass<MediaStreamTrack>(m, "MediaStreamTrack")
+    DefineBinding(pybind11::class_<MediaStreamTrack, Binding, std::shared_ptr<MediaStreamTrack>>(m, "MediaStreamTrack"))
+        .def_property_readonly("_id", &MediaStreamTrack::Id)
+        .def_property_readonly("_remote", nogil_fn(&MediaStreamTrack::IsRemote))
         .def_property("enabled", nogil_fn(&MediaStreamTrack::GetEnabled), nogil_fn(&MediaStreamTrack::SetEnabled))
         .def_property_readonly("id", nogil_fn(&MediaStreamTrack::GetId))
         .def_property_readonly("label", nogil_fn(&MediaStreamTrack::GetLabel))
@@ -85,7 +81,8 @@ namespace python_webrtc {
         .def("_camera", &MediaStreamTrack::GetCamera, nogil())
         .def("_reconfigureCamera", &MediaStreamTrack::ReconfigureCamera, nogil(), pybind11::arg("width"),
              pybind11::arg("height"), pybind11::arg("frameRate"))
-        .def_property("_constraints", &MediaStreamTrack::GetConstraints, &MediaStreamTrack::SetConstraints)
+        .def_property("_constraints", nogil_fn(&MediaStreamTrack::GetConstraints),
+                      nogil_fn(&MediaStreamTrack::SetConstraints))
         .def_property("contentHint", nogil_fn(&MediaStreamTrack::GetContentHint),
                       nogil_fn(&MediaStreamTrack::SetContentHint));
   }
@@ -94,7 +91,7 @@ namespace python_webrtc {
     _stopped = true;
     _surfacedEnded.Reset();
     BlockingCallOn(_factory->signalingThread(), [this]() { StopOnSignalingThread(); });
-    CloseListeners();
+    Unbind();
   }
 
   void MediaStreamTrack::StopOnSignalingThread() {
@@ -139,26 +136,31 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrack::OnChanged() {
-    if (_track->state() == webrtc::MediaStreamTrackInterface::TrackState::kEnded && !_ended) {
-      // ended by the remote peer or by renegotiation, rather than by stop()
-      const bool emit = !_stopped;
-      if (emit) {
-        // the track is live until its ended event (see Surfaced)
-        _surfacedEnded.Changed(IsTracked(), false);
-      }
-      StopOnSignalingThread();
-      if (emit) {
-        _heldEnded.Emit([this]() { Emit("ended"); });
-      }
+    if (_track->state() == webrtc::MediaStreamTrackInterface::TrackState::kEnded) {
+      EndOnSignalingThread();
+    }
+  }
+
+  void MediaStreamTrack::EndOnSignalingThread() {
+    if (_ended) {
+      return;
+    }
+    // ended by the remote peer, by renegotiation or by the connection's close, rather than by stop()
+    const bool emit = !_stopped;
+    if (emit) {
+      // the track is live until its ended event (see Surfaced)
+      _surfacedEnded.Changed(IsBound(), false);
+    }
+    StopOnSignalingThread();
+    if (emit) {
+      _heldEnded.Emit([this]() { Emit("ended"); });
     }
   }
 
   void MediaStreamTrack::OnPeerConnectionClosed() {
-    // a closed connection fires no events of its tracks, so their handlers go
-    CloseListeners();
+    // webrtc-pc close(): disappear is false, so the track ends with its event
     _surfacedMuted.Reset();
-    _surfacedEnded.Reset();
-    Stop();
+    BlockingCallOn(_factory->signalingThread(), [this]() { EndOnSignalingThread(); });
   }
 
   void MediaStreamTrack::MarkRemote() {
@@ -173,8 +175,11 @@ namespace python_webrtc {
       _id = webrtc::CreateRandomUuid();
       _label = _track->kind() == webrtc::MediaStreamTrackInterface::kAudioKind ? "remote audio" : "remote video";
     }
-    // its events (like ended) are kept until Python has the track
-    Hold();
+  }
+
+  bool MediaStreamTrack::IsRemote() {
+    const std::scoped_lock lock(_idMutex);
+    return _id.has_value();
   }
 
   void MediaStreamTrack::SetMuted(bool muted) {
@@ -184,8 +189,8 @@ namespace python_webrtc {
     }
     const bool previous = _muted.exchange(muted);
     if (previous != muted) {
-      // a held remote track keeps showing the previous value until its event is delivered
-      _surfacedMuted.Changed(IsTracked(), previous);
+      // a bound track keeps showing the previous value until its event is delivered
+      _surfacedMuted.Changed(IsBound(), previous);
       Emit(muted ? "mute" : "unmute", muted);
     }
   }
@@ -204,7 +209,7 @@ namespace python_webrtc {
 
   void MediaStreamTrack::SurfaceEnded() {
     _surfacedEnded.Reset();
-    CloseListeners();
+    Unbind();
   }
 
   bool MediaStreamTrack::GetEnabled() {
@@ -251,14 +256,14 @@ namespace python_webrtc {
 
   webrtc::MediaStreamTrackInterface::TrackState MediaStreamTrack::GetReadyState() {
     const bool ended = _ended || _track->state() == webrtc::MediaStreamTrackInterface::TrackState::kEnded;
-    // without listeners (outside of an event loop), no event is going to surface it
-    const bool surfaced = HasListeners() ? _surfacedEnded.Get(ended) : ended;
+    // unbound (outside of an event loop), no event is going to surface it
+    const bool surfaced = _surfacedEnded.Shown(IsBound(), ended);
     return surfaced ? webrtc::MediaStreamTrackInterface::TrackState::kEnded
                     : webrtc::MediaStreamTrackInterface::TrackState::kLive;
   }
 
   bool MediaStreamTrack::GetMuted() {
-    return _surfacedMuted.Get(_muted);
+    return _surfacedMuted.Shown(IsBound(), _muted);
   }
 
   pybind11::dict MediaStreamTrack::GetSettings() {
@@ -332,12 +337,14 @@ namespace python_webrtc {
     return true;
   }
 
-  pybind11::object MediaStreamTrack::GetConstraints() {
-    return _constraints ? _constraints : pybind11::none();
+  std::optional<std::string> MediaStreamTrack::GetConstraints() {
+    const std::scoped_lock lock(_constraintsMutex);
+    return _constraints;
   }
 
-  void MediaStreamTrack::SetConstraints(pybind11::object constraints) {
-    _constraints = constraints.is_none() ? pybind11::object() : std::move(constraints);
+  void MediaStreamTrack::SetConstraints(std::optional<std::string> constraints) {
+    const std::scoped_lock lock(_constraintsMutex);
+    _constraints = std::move(constraints);
   }
 
   std::string MediaStreamTrack::GetContentHint() {
@@ -396,11 +403,12 @@ namespace python_webrtc {
       // the clone has the same device
       SourceControl::Register(clonedTrack.get(), clonedTrack->id(), _source);
     }
-    auto clonedMediaStreamTrack = holder().GetOrCreate(_factory, clonedTrack);
+    auto clonedMediaStreamTrack = registry().GetOrCreate(_factory, clonedTrack);
     clonedMediaStreamTrack->SetLabel(GetLabel());
     // as browsers do, though the spec starts a clone enabled
     clonedMediaStreamTrack->SetEnabled(GetEnabled());
     clonedMediaStreamTrack->SetContentHint(GetContentHint());
+    clonedMediaStreamTrack->SetConstraints(GetConstraints());
     if (_ended) {
       clonedMediaStreamTrack->Stop();
     }
@@ -417,10 +425,9 @@ namespace python_webrtc {
         dynamic_cast<webrtc::VideoTrackInterface *>(_track.get()));
   }
 
-  InstanceHolder<MediaStreamTrack, webrtc::MediaStreamTrackInterface> &MediaStreamTrack::holder() {
-    // never destroyed: wrappers may outlive static destructors
-    static auto *holder = new InstanceHolder<MediaStreamTrack, webrtc::MediaStreamTrackInterface>();
-    return *holder;
+  Registry<MediaStreamTrack, webrtc::MediaStreamTrackInterface> &MediaStreamTrack::registry() {
+    static ForkLocal<Registry<MediaStreamTrack, webrtc::MediaStreamTrackInterface>> registry;
+    return registry.Get();
   }
 
 } // namespace python_webrtc

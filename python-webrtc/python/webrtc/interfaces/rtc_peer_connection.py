@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
+import threading
 from typing import TYPE_CHECKING, Callable, ClassVar, Literal, TypeVar, Union, cast, overload
 
 from typing_extensions import override
@@ -40,14 +42,14 @@ from webrtc.models.rtc_session_description import RTCSessionDescription
 from webrtc.models.rtc_session_description_init import RTCLocalSessionDescriptionInit, RTCSessionDescriptionInit
 from webrtc.models.rtc_stats import RTCStatsReport
 from webrtc.models.rtp_parameters import RTCRtpCodec
+from webrtc.utils import lifetime
 from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
-from webrtc.utils.native_calls import call_native
+from webrtc.utils.loops import call_native
 from webrtc.utils.operations import OperationsChain, later
 from webrtc.utils.strings import usv_string
-from webrtc.utils.task_queue import TaskQueue
 
 if TYPE_CHECKING:
-    from contextlib import AbstractAsyncContextManager
+    from collections.abc import AsyncGenerator
 
     from typing_extensions import Self
 
@@ -62,6 +64,9 @@ if TYPE_CHECKING:
         Union[RTCIceConnectionState, None],
         Union[RTCPeerConnectionState, None],
     ]
+
+# guards lazy creation of a connection's operations chain
+_chains_lock = threading.Lock()
 
 #: A description in the form the methods that set one accept
 _Description = Union[RTCSessionDescription, RTCSessionDescriptionInit]
@@ -123,8 +128,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         track (:obj:`webrtc.RTCTrackEvent`): A remote track was negotiated.
         datachannel (:obj:`webrtc.RTCDataChannelEvent`): The remote peer created a data channel.
 
-    A closed connection emits no events, including the ones queued before :meth:`close`, and its pending operations
-    are cancelled. Leaving an ``async with`` block closes the connection.
+    A connection with handlers or a pending operation stays alive until it or its event loop closes.
 
     Args:
         configuration (:obj:`webrtc.RTCConfiguration`, optional): The configuration of the connection.
@@ -153,10 +157,12 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         'track': '_track_event',
     }
 
-    #: The operations chain, created on first use (a wrapper of a native connection doesn't run __init__)
-    _chain: OperationsChain | None = None
+    __slots__ = ('_chain', '_deferred_negotiation_id')
+
+    #: created on first use
+    _chain: OperationsChain | None
     #: The id of a negotiationneeded event that waits for the operations chain to empty
-    _deferred_negotiation_id: int | None = None
+    _deferred_negotiation_id: int | None
 
     @overload
     def on(self, name: _PeerConnectionStateEvent, handler: None = None) -> HandlerDecorator[Event]: ...
@@ -274,34 +280,51 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
 
     def __init__(self, configuration: webrtc.RTCConfiguration | None = None) -> None:
         super().__init__(wrtc.RTCPeerConnection(configuration._to_native() if configuration is not None else None))
-        self._attach()
+        _ = self._attach()
 
-    @classmethod
     @override
-    def _wrap(cls, item: wrtc.RTCPeerConnection) -> Self:
-        # the wrapper that owns the listeners (and so the operations chain), when there is one
-        listeners = item._listeners
-        if listeners is not None and isinstance(listeners.target, cls):
-            return listeners.target
-        # not attached, so the connection object of the application gets the listeners once it registers a handler
-        connection = cls.__new__(cls)
-        connection._init_native(item)
-        return connection
+    def _init_native(self, native_obj: wrtc.RTCPeerConnection | None) -> None:
+        super()._init_native(native_obj)
+        self._chain = None
+        self._deferred_negotiation_id = None
 
-    def _operation(self) -> AbstractAsyncContextManager[None]:
+    @contextlib.asynccontextmanager
+    async def _operation(self) -> AsyncGenerator[None, None]:
         """Chains an operation, like setting a description, after the running ones (see :obj:`OperationsChain`)."""
         if self._chain is None:
-            self._chain = OperationsChain(self._chain_emptied, self._is_closed)
-        return self._chain.operation()
+            with _chains_lock:
+                if self._chain is None:
+                    self._chain = OperationsChain(self._chain_emptied, self._is_closed, self._changing)
+        async with self._chain.operation():
+            # a pending operation keeps the connection alive
+            _ = self._attach()
+            self._update()
+            yield
 
     def _is_closed(self) -> bool:
         return self.signaling_state == RTCSignalingState.closed
 
     def _chain_emptied(self) -> None:
-        # negotiationneeded fires now, if it's still needed
-        if self._deferred_negotiation_id is not None:
+        # no loop when a collected operation ends
+        try:
+            loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if self._deferred_negotiation_id is not None and loop is not None:
             event_id, self._deferred_negotiation_id = self._deferred_negotiation_id, None
-            _ = asyncio.get_running_loop().call_soon(self._dispatch, 'negotiationneeded', event_id)
+            _ = loop.call_soon(self._dispatch, 'negotiationneeded', event_id)
+        self._update()
+
+    @override
+    def _activity(self) -> str | None:
+        # active children keep the connection via their own roots
+        if self._is_closed():
+            return None
+        if len(self.event_names()) > 0:
+            return 'handlers'
+        if self._chain is not None and self._chain.busy:
+            return 'pending operation'
+        return None
 
     def _check_state(self, operation: str, *allowed: RTCSignalingState) -> None:
         """Checks the connection isn't closed, and is in one of the allowed states if they're given.
@@ -338,18 +361,13 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         elif name in {'icecandidate', 'icegatheringstatechange'}:
             # the local description gains candidates (and loses pending ones) along with these events
             self._native_obj._refreshDescriptions()
-        elif name == 'datachannel':
-            (channel,) = cast('tuple[wrtc.RTCDataChannel]', args)
-            _ = webrtc.RTCDataChannel._wrap(channel)
-            # the events of the channel follow the handlers of this one
-            _ = TaskQueue.post_to_running(channel._release)
 
     def _complete_gathering(self, transports: list[wrtc.RTCIceTransport], state: webrtc.RTCIceGatheringState) -> None:
         """Completes gathering on the ICE transports and the connection, and ends the candidates, in one task.
 
         This way every handler sees all of them complete.
         """
-        ice_transports = webrtc.RTCIceTransport._wrap_many(transports)
+        ice_transports = webrtc.RTCIceTransport._wrap_many(transports, connection=self)
         for ice_transport in ice_transports:
             ice_transport._native_obj._surfaceGatheringState(RTCIceGathererState(state))
         self._native_obj._surfaceIceGatheringState(state)
@@ -371,19 +389,23 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         if connection_state is not None:
             self._native_obj._surfaceConnectionState(connection_state)
         # see RTCPeerConnection::EmitTransportState
-        listeners = transport._listeners if transport is not None and dispatch else None
-        if listeners is not None:
-            listeners.target._dispatch('statechange', state)
+        wrapper = lifetime.find(transport) if transport is not None else None
+        if isinstance(wrapper, (webrtc.RTCIceTransport, webrtc.RTCDtlsTransport)):
+            if dispatch:
+                wrapper._dispatch('statechange', state)
+            wrapper._update()
         if ice_connection_state is not None:
             self._dispatch('iceconnectionstatechange', ice_connection_state)
         if connection_state is not None:
             self._dispatch('connectionstatechange', connection_state)
 
     @override
-    def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
+    def _open(self) -> bool:
         # events queued before close() aren't delivered after it
-        if self._native_obj.signalingState == RTCSignalingState.closed:
-            return None
+        return not self._is_closed()
+
+    @override
+    def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
         creator_name = self._EVENT_CREATORS.get(name)
         if creator_name is None:
             return super()._create_event(name, *args)
@@ -418,22 +440,21 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             ),
         )
 
-    @staticmethod
-    def _data_channel_event(channel: wrtc.RTCDataChannel) -> webrtc.Event:
-        return RTCDataChannelEvent('datachannel', RTCDataChannelEventInit(webrtc.RTCDataChannel._wrap(channel)))
+    def _data_channel_event(self, channel: wrtc.RTCDataChannel) -> webrtc.Event:
+        remote = webrtc.RTCDataChannel._wrap(channel, connection=self)
+        return RTCDataChannelEvent('datachannel', RTCDataChannelEventInit(remote))
 
-    @staticmethod
     def _track_event(
-        transceiver: wrtc.RTCRtpTransceiver, receiver: wrtc.RTCRtpReceiver, streams: list[wrtc.MediaStream]
+        self, transceiver: wrtc.RTCRtpTransceiver, receiver: wrtc.RTCRtpReceiver, streams: list[wrtc.MediaStream]
     ) -> webrtc.Event:
-        wrapped_receiver = webrtc.RTCRtpReceiver._wrap(receiver)
+        wrapped_receiver = webrtc.RTCRtpReceiver._wrap(receiver, connection=self)
         return RTCTrackEvent(
             'track',
             RTCTrackEventInit(
                 wrapped_receiver,
                 wrapped_receiver.track,
-                webrtc.RTCRtpTransceiver._wrap(transceiver),
-                webrtc.MediaStream._wrap_many(streams),
+                webrtc.RTCRtpTransceiver._wrap(transceiver, connection=self),
+                webrtc.MediaStream._wrap_many(streams, connection=self),
             ),
         )
 
@@ -486,7 +507,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             self._apply_legacy_offer_option(MediaType.audio, receive=options.offer_to_receive_audio)
             self._apply_legacy_offer_option(MediaType.video, receive=options.offer_to_receive_video)
             await later()
-            return _init_of(await call_native(self._native_obj.createOffer, options.ice_restart))
+            offer = await call_native(self._native_obj.createOffer, options.ice_restart)
+            return _init_of(cast('wrtc.RTCSessionDescription', offer))
 
     async def create_answer(self, options: webrtc.RTCAnswerOptions | None = None) -> webrtc.RTCSessionDescriptionInit:
         """Creates an answer to the offer set as the remote description.
@@ -513,7 +535,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
                 'create an answer', RTCSignalingState.have_remote_offer, RTCSignalingState.have_local_pranswer
             )
             await later()
-            return _init_of(await call_native(self._native_obj.createAnswer))
+            return _init_of(cast('wrtc.RTCSessionDescription', await call_native(self._native_obj.createAnswer)))
 
     async def set_local_description(
         self, description: _Description | RTCLocalSessionDescriptionInit | None = None
@@ -590,7 +612,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         native_streams = [stream._native_obj for stream in streams] if len(streams) > 0 else None
         sender = self._native_obj.addTrack(track._native_obj, native_streams)
 
-        return webrtc.RTCRtpSender._wrap(sender)
+        return webrtc.RTCRtpSender._wrap(sender, connection=self)
 
     def add_transceiver(
         self,
@@ -630,7 +652,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         else:
             transceiver = self._native_obj.addTransceiver(track_or_kind, native_init)
 
-        return webrtc.RTCRtpTransceiver._wrap(transceiver)
+        return webrtc.RTCRtpTransceiver._wrap(transceiver, connection=self)
 
     def get_transceivers(self) -> list[webrtc.RTCRtpTransceiver]:
         """Returns the transceivers of the connection, in the order they were added.
@@ -640,7 +662,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         Returns:
             :obj:`list` of :obj:`webrtc.RTCRtpTransceiver`: The transceivers.
         """
-        return webrtc.RTCRtpTransceiver._wrap_many(self._native_obj.getTransceivers())
+        return webrtc.RTCRtpTransceiver._wrap_many(self._native_obj.getTransceivers(), connection=self)
 
     def get_senders(self) -> list[webrtc.RTCRtpSender]:
         """Returns the senders of the transceivers of the connection, one per transceiver.
@@ -650,7 +672,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         Returns:
             :obj:`list` of :obj:`webrtc.RTCRtpSender`: The senders, including the ones without a track.
         """
-        return webrtc.RTCRtpSender._wrap_many(self._native_obj.getSenders())
+        return webrtc.RTCRtpSender._wrap_many(self._native_obj.getSenders(), connection=self)
 
     def get_receivers(self) -> list[webrtc.RTCRtpReceiver]:
         """Returns the receivers of the transceivers of the connection, one per transceiver.
@@ -660,7 +682,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         Returns:
             :obj:`list` of :obj:`webrtc.RTCRtpReceiver`: The receivers.
         """
-        return webrtc.RTCRtpReceiver._wrap_many(self._native_obj.getReceivers())
+        return webrtc.RTCRtpReceiver._wrap_many(self._native_obj.getReceivers(), connection=self)
 
     def remove_track(self, sender: webrtc.RTCRtpSender) -> None:
         """Stops sending the track of a sender, from the next negotiation. The sender stays in :meth:`get_senders`.
@@ -746,11 +768,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             init.id if init.negotiated else None,
             init.priority,
         )
-        channel = webrtc.RTCDataChannel._wrap(native)
-        # handlers registered in this iteration of the loop get the first events
-        if not TaskQueue.post_to_running(native._release):
-            native._release()
-        return channel
+        return webrtc.RTCDataChannel._wrap(native, connection=self)
 
     async def get_stats(self, selector: webrtc.MediaStreamTrack | None = None) -> webrtc.RTCStatsReport:
         """Collects the stats of the connection, or of the sender or the receiver of a track.
@@ -775,7 +793,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
                 msg = f'{len(matches)} senders and receivers have the track, not exactly one'
                 raise webrtc.InvalidAccessError(msg)
             return await matches[0].get_stats()
-        return RTCStatsReport._from_native(await call_native(self._native_obj.getStats), self.get_receivers())
+        report = cast('str', await call_native(self._native_obj.getStats))
+        return RTCStatsReport._from_native(report, self.get_receivers())
 
     @staticmethod
     async def generate_certificate(keygen_algorithm: AlgorithmIdentifier) -> webrtc.RTCCertificate:
@@ -844,10 +863,10 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     def close(self) -> None:
         """Closes the connection for good, stopping its transceivers and data channels.
 
-        Remote tracks end, the states become ``closed`` without events, and no event is emitted afterwards.
-        Does nothing if it's already closed. See :mdn:`RTCPeerConnection/close`.
+        No events follow except remote tracks' ``ended``. See :mdn:`RTCPeerConnection/close`.
         """
-        self._native_obj.close()
+        with self._changing():
+            self._native_obj.close()
 
     async def __aenter__(self) -> Self:
         return self
@@ -862,7 +881,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         It's :obj:`None` until the data channels are negotiated.
         See :mdn:`RTCPeerConnection/sctp`.
         """
-        return webrtc.RTCSctpTransport._wrap_optional(self._native_obj.sctp)
+        return webrtc.RTCSctpTransport._wrap_optional(self._native_obj.sctp, connection=self)
 
     @property
     def local_description(self) -> webrtc.RTCSessionDescription | None:

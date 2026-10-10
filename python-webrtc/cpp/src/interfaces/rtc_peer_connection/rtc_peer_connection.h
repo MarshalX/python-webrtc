@@ -24,15 +24,14 @@
 #include <api/peer_connection_interface.h>
 #include <api/scoped_refptr.h>
 
-#include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 
 #include "../../exceptions.h"
 #include "../../models/python_webrtc/rtc_configuration.h"
 #include "../../models/python_webrtc/rtc_session_description.h"
-#include "../../utils/alive_count.h"
 #include "../../utils/held_events.h"
-#include "../../utils/listeners.h"
+#include "../../utils/mailbox.h"
+#include "../../utils/native_object.h"
 #include "../../utils/surfaced.h"
 
 #include "../media_stream.h"
@@ -53,9 +52,11 @@ namespace python_webrtc {
   // An operation that completes after close() fails, rather than never settling as in a browser, which would
   // leave a Python caller waiting forever.
   class RTCPeerConnection : public webrtc::PeerConnectionObserver,
-                            public Listeners,
-                            public std::enable_shared_from_this<RTCPeerConnection> {
+                            public NativeObject<RTCPeerConnection>,
+                            public Emitter<RTCPeerConnection> {
   public:
+    static constexpr const char *kName = "RTCPeerConnection";
+
     using SignalingState = webrtc::PeerConnectionInterface::SignalingState;
     using IceConnectionState = webrtc::PeerConnectionInterface::IceConnectionState;
     using IceGatheringState = webrtc::PeerConnectionInterface::IceGatheringState;
@@ -70,28 +71,21 @@ namespace python_webrtc {
     RTCPeerConnection(const RTCPeerConnection &) = delete;
     RTCPeerConnection &operator=(const RTCPeerConnection &) = delete;
 
-    // A reference taken in a callback of libwebrtc, released on a thread of its own: the connection can't be
-    // destroyed on the signaling thread in the middle of its own callback
-    static void ReleaseElsewhere(std::shared_ptr<RTCPeerConnection> &&connection);
+    void CreateOffer(std::shared_ptr<Mailbox> mailbox, uint64_t token, bool iceRestart);
 
-    void CreateOffer(std::function<void(RTCSessionDescription)> &onSuccess,
-                     std::function<void(RTCCallbackException)> &onFailure, bool iceRestart);
-
-    void CreateAnswer(std::function<void(RTCSessionDescription)> &onSuccess,
-                      std::function<void(RTCCallbackException)> &onFailure);
+    void CreateAnswer(std::shared_ptr<Mailbox> mailbox, uint64_t token);
 
     // for the fingerprint check of setLocalDescription
     void SaveCreatedDescription(const RTCSessionDescriptionInit &description);
 
-    void SetLocalDescription(std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
+    void SetLocalDescription(std::shared_ptr<Mailbox> mailbox, uint64_t token,
                              const std::optional<RTCSessionDescriptionInit> &init);
 
-    void SetRemoteDescription(std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
-                              const RTCSessionDescriptionInit &init);
+    void SetRemoteDescription(std::shared_ptr<Mailbox> mailbox, uint64_t token, const RTCSessionDescriptionInit &init);
 
-    void AddIceCandidate(std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
-                         const std::string &candidate, const std::optional<std::string> &sdpMid,
-                         std::optional<int> sdpMLineIndex, const std::optional<std::string> &usernameFragment);
+    void AddIceCandidate(std::shared_ptr<Mailbox> mailbox, uint64_t token, const std::string &candidate,
+                         const std::optional<std::string> &sdpMid, std::optional<int> sdpMLineIndex,
+                         const std::optional<std::string> &usernameFragment);
 
     std::shared_ptr<RTCRtpSender> AddTrack(MediaStreamTrack &mediaStreamTrack,
                                            std::optional<std::reference_wrapper<MediaStream>> mediaStream);
@@ -121,7 +115,7 @@ namespace python_webrtc {
 
     std::optional<std::shared_ptr<RTCSctpTransport>> GetSctp();
 
-    void GetStats(std::function<void(std::string)> &onSuccess, std::function<void(RTCCallbackException)> &onFailure);
+    void GetStats(std::shared_ptr<Mailbox> mailbox, uint64_t token);
 
     void RestartIce();
 
@@ -196,13 +190,9 @@ namespace python_webrtc {
     std::vector<webrtc::RtpExtension>
     NegotiatedHeaderExtensions(const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver);
 
-    void CollectStats(const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender,
-                      std::function<void(std::string)> &onSuccess,
-                      std::function<void(RTCCallbackException)> &onFailure);
+    void CollectStats(const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender, Completion completion);
 
-    void CollectStats(const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver,
-                      std::function<void(std::string)> &onSuccess,
-                      std::function<void(RTCCallbackException)> &onFailure);
+    void CollectStats(const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver, Completion completion);
 
     // PeerConnectionObserver implementation, on the signaling thread.
     void OnSignalingChange(SignalingState newState) override;
@@ -278,8 +268,7 @@ namespace python_webrtc {
 
     // The connection to collect the stats of, even closed, with its stats cache cleared: libwebrtc reuses a report
     // for 50 ms, the stats are the current ones. None fails the request.
-    webrtc::scoped_refptr<webrtc::PeerConnectionInterface>
-    StatsConnection(const std::function<void(RTCCallbackException)> &onFailure);
+    webrtc::scoped_refptr<webrtc::PeerConnectionInterface> StatsConnection(Completion &completion);
 
     // the wrapper of a libwebrtc object of this connection, which the connection keeps while it's open
     template <typename T, typename U>
@@ -327,14 +316,13 @@ namespace python_webrtc {
     // (libwebrtc makes only final answers itself, and offers in have-local-pranswer)
     void SetImplicitAnswer(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, webrtc::SdpType type,
                            std::function<void(webrtc::RTCError)> complete,
-                           const std::function<void(RTCCallbackException)> &onFailure);
+                           const std::shared_ptr<Completion> &completion);
 
     // What completes setLocalDescription (kLocal) or setRemoteDescription (kRemote); created right before the
     // operation starts, as it holds its events
-    std::function<void(webrtc::RTCError)> Completion(std::function<void()> &onSuccess,
-                                                     std::function<void(RTCCallbackException)> &onFailure,
-                                                     const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
-                                                     DescriptionKind kind);
+    std::function<void(webrtc::RTCError)>
+    DescriptionCompletion(std::shared_ptr<Completion> completion,
+                          const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, DescriptionKind kind);
 
     std::shared_ptr<RTCSessionDescription> GetDescription(DescriptionKind kind);
 
@@ -363,7 +351,7 @@ namespace python_webrtc {
     std::vector<std::shared_ptr<RTCIceTransport>> WrapTransports();
 
     // the transports of a closed connection fire no events
-    void MuteTransports();
+    void UnbindTransports();
 
     // with the ICE connection state it changes, in one task; network thread
     template <typename T, typename State>
@@ -381,7 +369,7 @@ namespace python_webrtc {
     void DeliverOnSignalingThread(std::function<void()> deliver);
 
     // the new state, if it changed
-    std::optional<IceConnectionState> UpdateIceConnectionState(bool listening);
+    std::optional<IceConnectionState> UpdateIceConnectionState(bool bound);
 
     // the roles of the ICE transports are known once an answer is applied, on the signaling thread
     void MarkIceRolesKnown();
@@ -408,7 +396,6 @@ namespace python_webrtc {
     void FireRemoteStreamChanges();
 
     // wrappers' destructors use the threads of the factory: declared first, to be destroyed last
-    AliveCount<RTCPeerConnection> _counted;
     std::shared_ptr<PeerConnectionFactory> _factory;
 
     std::mutex _connectionMutex;
@@ -467,7 +454,7 @@ namespace python_webrtc {
     std::vector<std::shared_ptr<RTCDtlsTransport>> _dtlsTransports;
     // in use at the last stable state; signaling thread
     std::vector<std::weak_ptr<RTCDtlsTransport>> _negotiatedTransports;
-    // kept until closed, so their handlers are
+    // kept until closed
     Wrappers<RTCDataChannel, webrtc::DataChannelInterface> _channels;
   };
 

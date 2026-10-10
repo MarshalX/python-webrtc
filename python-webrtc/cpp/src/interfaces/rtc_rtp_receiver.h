@@ -21,7 +21,9 @@
 
 #include "../exceptions.h"
 #include "../media/frame_transformer_bridge.h"
-#include "../utils/alive_guard.h"
+#include "../utils/mailbox.h"
+#include "../utils/native_object.h"
+#include "../utils/registry.h"
 #include "media_stream_track.h"
 #include "peer_connection_factory.h"
 #include "rtc_dtls_transport.h"
@@ -30,10 +32,10 @@ namespace python_webrtc {
 
   class RTCPeerConnection;
 
-  class RTCRtpReceiver : public webrtc::RtpReceiverObserverInterface,
-                         public SingleObserverSlot,
-                         public std::enable_shared_from_this<RTCRtpReceiver> {
+  class RTCRtpReceiver : public webrtc::RtpReceiverObserverInterface, public NativeObject<RTCRtpReceiver> {
   public:
+    static constexpr const char *kName = "RTCRtpReceiver";
+
     // (is a synchronization source, source, timestamp in ms since the Unix epoch, RTP timestamp,
     // audio level in -dBov)
     using Source = std::tuple<bool, uint32_t, double, uint32_t, std::optional<int>>;
@@ -48,7 +50,7 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
-    static InstanceHolder<RTCRtpReceiver, webrtc::RtpReceiverInterface> &holder();
+    static Registry<RTCRtpReceiver, webrtc::RtpReceiverInterface> &registry();
 
     webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver() { return _receiver; }
 
@@ -71,7 +73,7 @@ namespace python_webrtc {
 
     void SetJitterBufferTarget(std::optional<double> target);
 
-    void GetStats(std::function<void(std::string)> &onSuccess, std::function<void(RTCCallbackException)> &onFailure);
+    void GetStats(std::shared_ptr<Mailbox> mailbox, uint64_t token);
 
     // the sources of the packets of the last 10 seconds, the most recent first
     std::vector<Source> GetSources();
@@ -100,9 +102,6 @@ namespace python_webrtc {
     std::shared_ptr<RTCDtlsTransport> _transport;
     std::optional<double> _jitterBufferTarget;
     TransformSlot _transform;
-
-    // see AliveGuard
-    AliveGuard _alive;
   };
 
 } // namespace python_webrtc

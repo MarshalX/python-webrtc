@@ -18,25 +18,28 @@ import subprocess
 import sys
 import textwrap
 import threading
-import time
 import weakref
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import QUIET_PERIOD, connect, exchange_offer_answer, wait_for_event
+from tests.helpers import (
+    QUIET_PERIOD,
+    collect,
+    connect,
+    exchange_offer_answer,
+    settled_alive,
+    wait_for_event,
+    wait_until,
+)
 from tests.isolation import isolated
+from webrtc.utils import lifetime, loops
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
-
-
-def collect() -> None:
-    gc.collect()
-    gc.collect()
 
 
 async def received_track_event(event: Awaitable[webrtc.Event]) -> webrtc.RTCTrackEvent:
@@ -47,17 +50,7 @@ async def received_track_event(event: Awaitable[webrtc.Event]) -> webrtc.RTCTrac
 
 def alive_factories() -> int:
     """Factories constructed and not destroyed yet, once the count settles."""
-    # the last reference to one may be released on a helper thread (see CreateSessionDescriptionObserver)
-    collect()
-    count = wrtc._alive_factories()
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        time.sleep(0.05)
-        current = wrtc._alive_factories()
-        if current == count:
-            break
-        count = current
-    return count
+    return settled_alive()[1]
 
 
 def peer_connection_cycle() -> None:
@@ -301,6 +294,35 @@ async def test_transports_outlive_closed_connection(
     assert ice_transport.state == webrtc.RTCIceTransportState.closed
 
 
+@isolated(timeout=60)
+def test_states_show_the_engine_once_their_loop_is_gone() -> None:
+    """Loop closed with queued changes shows engine state."""
+
+    async def scenario() -> tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection, webrtc.RTCDataChannel]:
+        caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        channel = caller.create_data_channel('states')
+        opened = wait_for_event(channel, 'open')
+        announced = wait_for_event(callee, 'datachannel')
+        await connect(caller, callee)
+        await opened
+        remote = cast('webrtc.RTCDataChannelEvent', await announced).channel
+        wrtc._testing.park('dispatcher.wake')
+        # a parked wake makes the close's state changes queue behind it
+        wrtc._testing.post(wrtc.Mailbox(), 'event', 1)
+        assert wrtc._testing.parked('dispatcher.wake', 5)
+        remote.close()
+        return caller, callee, channel
+
+    try:
+        caller, callee, channel = asyncio.run(scenario())
+    finally:
+        wrtc._testing.release('dispatcher.wake')
+    # the closing records were dropped with the loop
+    asyncio.run(wait_until(lambda: channel.ready_state == webrtc.RTCDataChannelState.closed, 'the channel to close'))
+    caller.close()
+    callee.close()
+
+
 def read_transports(pc: webrtc.RTCPeerConnection) -> None:
     for transceiver in pc.get_transceivers():
         for transport in (transceiver.sender.transport, transceiver.receiver.transport):
@@ -343,30 +365,60 @@ def test_getters_while_connection_is_closed_and_dropped(audio_stream: webrtc.Med
         collect()
 
 
-@pytest.mark.asyncio
-async def test_handlers_referencing_their_connection_do_not_keep_it_alive() -> None:
-    """The garbage collector sees the handlers while Python alone owns the connection."""
+def connection_with_a_handler_referencing_it(delivered: asyncio.Future[None]) -> weakref.ref[webrtc.RTCPeerConnection]:
+    pc = webrtc.RTCPeerConnection()
+
+    @pc.on('negotiationneeded')
+    def on_negotiation(_event: webrtc.Event) -> None:
+        pc.get_transceivers()
+        if not delivered.done():
+            delivered.set_result(None)
+
+    pc.add_transceiver(webrtc.MediaType.audio)
+    return weakref.ref(pc)
+
+
+@pytest.mark.parametrize('closed', [True, False])
+def test_handlers_referencing_their_connection_keep_it_until_close_or_loop_release(*, closed: bool) -> None:
+    """Self-referencing handler keeps the connection until close."""
     baseline = alive_factories()
-    delivered = asyncio.get_running_loop().create_future()
 
-    def create() -> weakref.ref[webrtc.RTCPeerConnection]:
-        pc = webrtc.RTCPeerConnection()
+    async def scenario() -> weakref.ref[webrtc.RTCPeerConnection]:
+        delivered = asyncio.get_running_loop().create_future()
+        ref = connection_with_a_handler_referencing_it(delivered)
+        await asyncio.wait_for(delivered, 5)
+        collect()
+        pc = ref()
+        assert pc is not None
+        if closed:
+            pc.close()
+            del pc
+            collect()
+            assert ref() is None
+        return ref
 
-        @pc.on('negotiationneeded')
-        def on_negotiation(_event: webrtc.Event) -> None:
-            pc.get_transceivers()
-            if not delivered.done():
-                delivered.set_result(None)
-
-        pc.add_transceiver(webrtc.MediaType.audio)
-        return weakref.ref(pc)
-
-    ref = create()
-    await asyncio.wait_for(delivered, 5)
+    ref = asyncio.run(scenario())
     collect()
 
     assert ref() is None
     assert alive_factories() == baseline
+
+
+def test_connection_bound_by_its_child_is_unrooted_by_a_close_from_another_thread() -> None:
+    """Close from another thread unroots on the bound loop."""
+    pc = webrtc.RTCPeerConnection()
+    assert pc._native_obj._mailbox is None
+
+    async def root_a_child() -> None:
+        state = loops.LoopState.of(asyncio.get_running_loop())
+        channel = pc.create_data_channel('rooted')
+        channel.on('open', lambda _event: channel)
+        assert pc._native_obj._mailbox == state.mailbox.id
+        assert channel in state.active
+        await asyncio.get_running_loop().run_in_executor(None, pc.close)
+        assert state.active == {}
+
+    asyncio.run(root_a_child())
 
 
 @pytest.mark.asyncio
@@ -484,63 +536,84 @@ async def test_stream_tracks_read_while_they_change(
     assert not reader.is_alive()
 
 
-def test_collected_on_libwebrtc_thread() -> None:
-    """The garbage collector running on a libwebrtc thread (to emit an event) releases a connection elsewhere."""
-    script = textwrap.dedent(
-        """
-        import asyncio
-        import gc
-        import threading
-        import webrtc
-        from webrtc.utils import events
+def _collect_on_dispatcher_wakes() -> None:
+    gc.disable()
+    collections: list[threading.Thread] = []
 
-        async def main():
-            gc.disable()
-            # garbage: a connection in a cycle with its handlers, left for the collector
-            pc = webrtc.RTCPeerConnection()
-            pc.add_transceiver(webrtc.MediaType.audio)
-            pc.on('connectionstatechange', lambda event, pc=pc: None)
-            del pc
+    def wake(mailbox_id: int) -> None:
+        if threading.current_thread() is not threading.main_thread():
+            gc.collect()
+            collections.append(threading.current_thread())
+        loops._wake(mailbox_id)
 
-            emit = events._Listeners.__call__
-            def collecting(self, name, *args):
-                if threading.current_thread() is not threading.main_thread():
-                    gc.collect()
-                emit(self, name, *args)
-            events._Listeners.__call__ = collecting
+    async def main() -> weakref.ref[webrtc.RTCPeerConnection]:
+        # a closed connection in a cycle with its handler
+        pc = webrtc.RTCPeerConnection()
+        pc.add_transceiver(webrtc.MediaType.audio)
+        pc.on('connectionstatechange', lambda _event, _pc=pc: None)
+        pc.close()
+        ref = weakref.ref(pc)
+        del pc
 
-            transport = webrtc.RTCIceTransport()
-            done = asyncio.get_running_loop().create_future()
-            transport.on('icecandidate', lambda event: event.candidate or done.done() or done.set_result(None))
-            transport.gather()
-            await asyncio.wait_for(done, 10)
-            transport.stop()
-            print('collected')
+        wrtc._set_wake(wake)
+        transport = webrtc.RTCIceTransport()
+        done = asyncio.get_running_loop().create_future()
 
-        asyncio.run(main())
-        """
-    )
-    root = pathlib.Path(pathlib.Path(pathlib.Path(__file__).resolve()).parent).parent
-    result = subprocess.run(
-        [sys.executable, '-c', script], capture_output=True, text=True, timeout=60, cwd=root, check=False
-    )
-    assert 'collected' in result.stdout, result.stderr[-2000:]
+        def on_candidate(event: webrtc.RTCPeerConnectionIceEvent) -> None:
+            if event.candidate is None and not done.done():
+                done.set_result(None)
+
+        transport.on('icecandidate', on_candidate)
+        transport.gather()
+        await asyncio.wait_for(done, 10)
+        transport.stop()
+        return ref
+
+    ref = asyncio.run(main())
+    wrtc._set_wake(loops._wake)
+    assert ref() is None
+    assert len(collections) > 0
+    assert threading.main_thread() not in collections
 
 
-@pytest.mark.asyncio
-async def test_generators_are_collected() -> None:
-    """An audio generator is its own track: its handlers mustn't keep it alive."""
+@isolated(timeout=60)
+def test_collected_on_the_dispatcher_thread() -> None:
+    """GC on the Dispatcher releases a connection."""
+    _collect_on_dispatcher_wakes()
+
+
+def generators_with_ended_handlers() -> tuple[weakref.ref[object], ...]:
+    audio = webrtc.MediaStreamTrackGenerator('audio')
+    video = webrtc.VideoTrackGenerator()
+    audio.on('ended', lambda _: audio.kind)
+    video.track.on('ended', lambda _: video.track)
+    return weakref.ref(audio), weakref.ref(video), weakref.ref(video.track)
+
+
+def stop_tracks(refs: list[weakref.ref[object]]) -> None:
+    for ref in refs:
+        track = ref()
+        if isinstance(track, webrtc.MediaStreamTrack):
+            track.stop()
+
+
+@pytest.mark.parametrize('stopped', [True, False])
+def test_generators_are_collected_once_stopped_or_their_loop_closes(*, stopped: bool) -> None:
+    """Live track with ended handler kept until stop."""
     baseline = alive_factories()
 
-    def create() -> tuple[weakref.ref[object], ...]:
-        audio = webrtc.MediaStreamTrackGenerator('audio')
-        video = webrtc.VideoTrackGenerator()
-        audio.on('ended', lambda _: audio.kind)
-        video.track.on('ended', lambda _: video.track)
-        return weakref.ref(audio), weakref.ref(video), weakref.ref(video.track)
+    async def scenario() -> list[weakref.ref[object]]:
+        refs = [ref for _ in range(10) for ref in generators_with_ended_handlers()]
+        await asyncio.sleep(QUIET_PERIOD)
+        collect()
+        assert all(ref() is not None for ref in refs)
+        if stopped:
+            stop_tracks(refs)
+            collect()
+            assert [ref for ref in refs if ref() is not None] == []
+        return refs
 
-    refs = [ref for _ in range(10) for ref in create()]
-    await asyncio.sleep(QUIET_PERIOD)
+    refs = asyncio.run(scenario())
     collect()
 
     assert [ref for ref in refs if ref() is not None] == []
@@ -570,7 +643,9 @@ async def processor_with_handler_on_its_track() -> webrtc.MediaStreamTrackProces
 
 async def stream_with_handler_on_its_track() -> webrtc.MediaStream:
     stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))
-    stream.get_tracks()[0].on('ended', lambda _: stream.id)
+    track = stream.get_tracks()[0]
+    track.on('ended', lambda _: stream.id)
+    track.stop()
     return stream
 
 
@@ -588,7 +663,7 @@ def processor_of_generator_with_handler() -> webrtc.MediaStreamTrackProcessor:
     [processor_with_handler_on_its_track, stream_with_handler_on_its_track, processor_of_generator_with_handler],
 )
 async def test_handlers_of_owned_tracks_do_not_keep_owners_alive(create: Callable[[], object]) -> None:
-    """Handlers of a track referencing its processor or stream don't keep them alive."""
+    """Ended track handlers keep nothing alive."""
     baseline = alive_factories()
     refs: list[weakref.ref[object]] = []
     for _ in range(5):
@@ -599,6 +674,30 @@ async def test_handlers_of_owned_tracks_do_not_keep_owners_alive(create: Callabl
     collect()
 
     assert [ref for ref in refs if ref() is not None] == []
+    assert alive_factories() == baseline
+
+
+async def stream_with_a_handler_on_its_live_track() -> weakref.ref[webrtc.MediaStream]:
+    stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))
+    stream.get_tracks()[0].on('ended', lambda _: stream.id)
+    return weakref.ref(stream)
+
+
+def test_handler_of_a_live_track_keeps_its_stream_until_its_loop_closes() -> None:
+    """Live track handler keeps its stream alive."""
+    baseline = alive_factories()
+
+    async def scenario() -> weakref.ref[webrtc.MediaStream]:
+        ref = await stream_with_a_handler_on_its_live_track()
+        await asyncio.sleep(QUIET_PERIOD)
+        collect()
+        assert ref() is not None
+        return ref
+
+    ref = asyncio.run(scenario())
+    collect()
+
+    assert ref() is None
     assert alive_factories() == baseline
 
 
@@ -692,17 +791,7 @@ async def test_handlers_of_a_live_track_keep_its_sender_alive() -> None:
 
 def alive_objects() -> dict[str, int]:
     """The native objects alive by type, once releases on helper threads are done."""
-    collect()
-    alive = wrtc._alive()
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        time.sleep(0.05)
-        collect()
-        current = wrtc._alive()
-        if current == alive:
-            break
-        alive = current
-    return alive
+    return settled_alive()[0]
 
 
 @pytest.mark.asyncio
@@ -797,7 +886,7 @@ def _connects_after_dispose() -> bool:
 
 @pytest.mark.asyncio
 async def test_releases_share_one_thread(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
-    """Releases from libwebrtc threads share one thread."""
+    """Releases all happen on the Dispatcher."""
     candidates: list[webrtc.RTCIceCandidate] = []
 
     @caller.on('icecandidate')
@@ -809,7 +898,7 @@ async def test_releases_share_one_thread(caller: webrtc.RTCPeerConnection, calle
     await connect(caller, callee)
     for _ in range(20):
         await callee.add_ice_candidate(candidates[0])
-    assert wrtc._release_threads() <= 1
+    assert wrtc._testing.dispatcher_threads() <= 1
 
 
 def test_repr(pc: webrtc.RTCPeerConnection) -> None:
@@ -838,3 +927,168 @@ async def test_closed_channel_is_collected_while_connection_is_open() -> None:
     finally:
         caller.close()
         callee.close()
+
+
+def test_wrappers_are_canonical() -> None:
+    """One wrapper per native object, across gc."""
+    pc = webrtc.RTCPeerConnection()
+    transceiver = pc.add_transceiver(webrtc.MediaType.audio)
+    assert pc.get_transceivers()[0] is transceiver
+    assert pc.get_senders()[0] is transceiver.sender
+    assert transceiver.receiver.track is transceiver.receiver.track
+    collect()
+    assert pc.get_transceivers()[0] is transceiver
+    assert pc.get_receivers()[0] is transceiver.receiver
+    assert webrtc.RTCPeerConnection._wrap(pc._native_obj) is pc
+    pc.close()
+
+
+def test_constructed_objects_are_their_wrappers(audio_stream: webrtc.MediaStream) -> None:
+    """Getters return the constructed object."""
+    pc = webrtc.RTCPeerConnection()
+    generator = webrtc.MediaStreamTrackGenerator('audio')
+    track = audio_stream.get_tracks()[0]
+    assert pc.add_track(generator).track is generator
+    assert pc.add_track(track).track is track
+    stream = webrtc.MediaStream([track])
+    assert stream.get_tracks()[0] is track
+    pc.close()
+
+
+@pytest.mark.asyncio
+async def test_events_carry_the_objects_of_the_getters(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """Track event objects match the getters."""
+    caller.add_track(audio_stream.get_tracks()[0], audio_stream)
+    received = wait_for_event(callee, 'track')
+    await exchange_offer_answer(caller, callee)
+    event = await received_track_event(received)
+    assert event.transceiver is callee.get_transceivers()[0]
+    assert event.receiver is event.transceiver.receiver
+    assert event.track is event.receiver.track
+    assert event.streams[0].get_tracks()[0] is event.track
+    transform = webrtc.RTCRtpScriptTransform(lambda _event: None)
+    event.receiver.transform = transform
+    assert event.receiver.transform is transform
+    decryptor = webrtc.RTCRtpSFrameDecryptor(webrtc.SFrameTransformOptions('AES_128_GCM_SHA256_128'))
+    event.receiver.transform = decryptor
+    assert event.receiver.transform is decryptor
+
+
+@pytest.mark.asyncio
+async def test_candidates_are_the_same_objects_each_time() -> None:
+    """Candidates match the event objects."""
+    transport = webrtc.RTCIceTransport()
+    gathered: list[webrtc.RTCIceCandidate] = []
+
+    def on_candidate(event: webrtc.RTCPeerConnectionIceEvent) -> None:
+        if event.candidate is not None:
+            gathered.append(event.candidate)
+
+    def end_of_candidates(event: webrtc.Event) -> bool:
+        assert isinstance(event, webrtc.RTCPeerConnectionIceEvent)
+        return event.candidate is None
+
+    transport.on('icecandidate', on_candidate)
+    done = wait_for_event(transport, 'icecandidate', predicate=end_of_candidates)
+    transport.gather()
+    await done
+    candidates = transport.get_local_candidates()
+    assert len(candidates) == len(gathered) > 0
+    assert all(candidate is event_candidate for candidate, event_candidate in zip(candidates, gathered))
+    transport.stop()
+
+
+@pytest.mark.asyncio
+async def test_replace_track_runs_in_the_chain_of_its_connection(
+    pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """replace_track() waits for chained operations."""
+    sender = pc.add_track(audio_stream.get_tracks()[0])
+    connection = wrtc.RTCPeerConnection._connectionOf(sender._native_obj)
+    assert connection is not None
+    assert webrtc.RTCPeerConnection._wrap(connection) is pc
+    pending = asyncio.ensure_future(pc.set_local_description())
+    await asyncio.sleep(0)
+    await sender.replace_track(None)
+    assert pending.done()
+
+
+def test_the_wrapper_of_a_native_object_gets_the_class_of_its_kind() -> None:
+    """Unwrapped native objects get the registered class."""
+    options = webrtc.SFrameTransformOptions('AES_128_GCM_SHA256_128')
+    decryptor = webrtc.RTCRtpSFrameDecryptor(options)
+    assert lifetime.wrapper_of(decryptor._native_obj) is decryptor
+    assert isinstance(lifetime.wrapper_of(wrtc.SFrameTransform(1, encrypting=False)), webrtc.RTCRtpSFrameDecryptor)
+    assert isinstance(lifetime.wrapper_of(wrtc.SFrameTransform(1, encrypting=True)), webrtc.RTCRtpSFrameEncryptor)
+    assert isinstance(lifetime.wrapper_of(wrtc.TrackGenerator('audio').track), webrtc.MediaStreamTrack)
+
+
+async def _connected_objects() -> list[object]:
+    """Connection-side objects."""
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))
+    sender = caller.add_track(stream.get_tracks()[0], stream)
+    channel = caller.create_data_channel('slots')
+    await connect(caller, callee)
+    sctp = caller.sctp
+    assert sctp is not None
+    return [
+        caller,
+        callee,
+        channel,
+        sctp,
+        sctp.transport,
+        sctp.transport.ice_transport,
+        sender.dtmf,
+        sender,
+        *callee.get_receivers(),
+        *caller.get_transceivers(),
+        *stream.get_tracks(),
+        stream,
+    ]
+
+
+async def _media_objects() -> list[object]:
+    """Standalone objects."""
+    generator = webrtc.MediaStreamTrackGenerator('video')
+    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(generator))
+    transformers: list[webrtc.RTCRtpScriptTransformer] = []
+    transform = webrtc.RTCRtpScriptTransform(lambda event: transformers.append(event.transformer))
+    await wait_until(lambda: len(transformers) == 1, 'the transformer')
+    options = webrtc.SFrameTransformOptions('AES_128_GCM_SHA256_128')
+    return [
+        generator,
+        processor,
+        transform,
+        transformers[0],
+        webrtc.RTCRtpSFrameEncryptor(webrtc.RTCRtpSFrameEncryptorOptions('AES_128_GCM_SHA256_128')),
+        webrtc.RTCRtpSFrameDecryptor(options),
+        webrtc.SFrameEncryptorStream(options),
+        webrtc.SFrameDecryptorStream(options),
+        await webrtc.RTCPeerConnection.generate_certificate('ECDSA'),
+        webrtc.RTCSessionDescription('offer'),
+        webrtc.media_devices,
+        webrtc.RTCIceTransport(),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_wrappers_take_no_attributes() -> None:
+    """Wrappers declare slots."""
+    objects = [*await _connected_objects(), *await _media_objects()]
+    bases = (webrtc.WebRTCObject, webrtc.EventTarget)
+    public = {
+        cls for name in webrtc.__all__ if isinstance(cls := getattr(webrtc, name), type) and issubclass(cls, bases)
+    }
+    assert {type(obj) for obj in objects} >= public - {*bases, webrtc.UniformEventTarget}
+    name = 'unknown'
+    for obj in objects:
+        with pytest.raises(AttributeError):
+            setattr(obj, name, 1)
+    for obj in objects:
+        if isinstance(obj, webrtc.RTCPeerConnection):
+            obj.close()
+        elif isinstance(obj, webrtc.MediaStreamTrack):
+            obj.stop()

@@ -9,7 +9,6 @@
 #define PYTHON_WEBRTC_MEDIA_SFRAME_TRANSFORM_H_
 
 #include <cstdint>
-#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -20,20 +19,16 @@
 
 #include <pybind11/pybind11.h>
 
-#include "../utils/alive_count.h"
-#include "../utils/listeners.h"
+#include "../utils/mailbox.h"
+#include "../utils/native_object.h"
 #include "frame_transformer_bridge.h"
 #include "sframe.h"
-#include "wakeup.h"
 
 namespace python_webrtc {
 
-  class SFrameTransform : public RtpTransform,
-                          public Listeners,
-                          public Wakeable,
-                          public std::enable_shared_from_this<SFrameTransform> {
+  class SFrameTransform : public RtpTransform, public NativeObject<SFrameTransform>, public Emitter<SFrameTransform> {
   public:
-    static constexpr size_t kMaxQueuedErrors = 120;
+    static constexpr const char *kName = "SFrameTransform";
 
     static std::shared_ptr<SFrameTransform> Create(int cipherSuite, bool encrypting);
 
@@ -50,9 +45,9 @@ namespace python_webrtc {
 
     void Disassociate() override;
 
-    void OnWakeup() override;
-
     [[nodiscard]] bool IsEncrypting() const { return _encrypting; }
+
+    int GetState();
 
     SFrameContext &Context() { return _context; }
 
@@ -62,25 +57,15 @@ namespace python_webrtc {
     std::tuple<pybind11::object, int, std::optional<uint64_t>> Decrypt(const pybind11::buffer &data);
 
   private:
+    friend class NativeObject<SFrameTransform>;
+
     SFrameTransform(SFrameCipherSuite suite, bool encrypting);
 
-    void WakeLocked();
-
-    struct Error {
-      SFrameError error = SFrameError::kNone;
-      std::optional<uint64_t> keyId;
-      std::unique_ptr<webrtc::TransformableFrameInterface> frame;
-      uint64_t source = 0;
-    };
-
-    AliveCount<SFrameTransform> _counted;
     const bool _encrypting;
     SFrameContext _context;
 
     std::mutex _mutex;
     webrtc::scoped_refptr<FrameTransformerBridge> _bridge;
-    std::deque<Error> _errors;
-    bool _wakePending = false;
     bool _disassociated = false;
   };
 

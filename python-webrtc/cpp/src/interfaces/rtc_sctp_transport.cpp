@@ -18,7 +18,7 @@ namespace python_webrtc {
     BlockingCallOn(_factory->workerThread(), [this, &dtlsTransport]() {
       dtlsTransport = _transport->dtls_transport();
       _transport->RegisterObserver(this);
-      holder().SetObserver(_transport.get(), this);
+      registry().SetObserver(_transport.get(), this);
       _observing = true;
       _lastState = _transport->Information().state();
 
@@ -27,22 +27,20 @@ namespace python_webrtc {
       }
     });
 
-    _dtlsTransport = RTCDtlsTransport::holder().GetOrCreate(_factory, dtlsTransport);
+    _dtlsTransport = RTCDtlsTransport::registry().GetOrCreate(_factory, dtlsTransport);
   }
 
   RTCSctpTransport::~RTCSctpTransport() {
-    const BlockingDestructor release("RTCSctpTransport");
-
     // callbacks run on the network thread, so after this none of them can be running or start again
     BlockingCallOn(_factory->workerThread(), [this]() { Stop(); });
 
     _dtlsTransport = nullptr;
     _transport = nullptr;
-    DropListeners();
   }
 
   void RTCSctpTransport::Init(pybind11::module &m) {
-    Listeners::BindClass<RTCSctpTransport>(m, "RTCSctpTransport")
+    DefineBinding(pybind11::class_<RTCSctpTransport, Binding, std::shared_ptr<RTCSctpTransport>>(m, "RTCSctpTransport"))
+        .def_property_readonly("_id", &RTCSctpTransport::Id)
         .def_property_readonly("transport", nogil_fn(&RTCSctpTransport::GetTransport))
         .def_property_readonly("state", nogil_fn(&RTCSctpTransport::GetState))
         .def_property_readonly("maxMessageSize", nogil_fn(&RTCSctpTransport::GetMaxMessageSize))
@@ -50,15 +48,14 @@ namespace python_webrtc {
         .def("_surfaceState", &RTCSctpTransport::SurfaceState, nogil(), pybind11::arg("state"));
   }
 
-  InstanceHolder<RTCSctpTransport, webrtc::SctpTransportInterface> &RTCSctpTransport::holder() {
-    // never destroyed: wrappers may outlive static destructors
-    static auto *holder = new InstanceHolder<RTCSctpTransport, webrtc::SctpTransportInterface>();
-    return *holder;
+  Registry<RTCSctpTransport, webrtc::SctpTransportInterface> &RTCSctpTransport::registry() {
+    static ForkLocal<Registry<RTCSctpTransport, webrtc::SctpTransportInterface>> registry;
+    return registry.Get();
   }
 
   void RTCSctpTransport::Stop() {
     // a newer wrapper of the transport may have taken its single observer slot
-    if (_observing && holder().TakeObserver(_transport.get(), this)) {
+    if (_observing && registry().TakeObserver(_transport.get(), this)) {
       _transport->UnregisterObserver();
     }
     _observing = false;
@@ -66,7 +63,7 @@ namespace python_webrtc {
 
   void RTCSctpTransport::OnStateChange(webrtc::SctpTransportInformation info) {
     if (info.state() != _lastState) {
-      _surfacedState.Changed(IsTracked(), _lastState);
+      _surfacedState.Changed(IsBound(), _lastState);
       _lastState = info.state();
       Emit("statechange", info.state());
     }
@@ -77,7 +74,7 @@ namespace python_webrtc {
   }
 
   void RTCSctpTransport::OnPeerConnectionClosed() {
-    Mute();
+    Unbind();
     _surfacedState.Reset();
   }
 
@@ -91,7 +88,7 @@ namespace python_webrtc {
   }
 
   webrtc::SctpTransportState RTCSctpTransport::GetState() {
-    return _surfacedState.Get(Information().state());
+    return _surfacedState.Shown(IsBound(), Information().state());
   }
 
   void RTCSctpTransport::SurfaceState(webrtc::SctpTransportState state) {

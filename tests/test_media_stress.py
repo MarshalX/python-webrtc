@@ -18,7 +18,7 @@ import pytest
 
 import webrtc
 from tests.helpers import SANITIZED, connect_track, rss_bytes, skip_if_sanitized, wait_until, write_video, writing
-from webrtc.utils.task_queue import TaskQueue
+from webrtc.utils.loops import LoopState
 
 TIMEOUT = 20
 
@@ -212,7 +212,8 @@ async def test_reader_that_never_yields_queues_nothing() -> None:
         # both are done right away, so the loop never runs in between
         await writer.write(frame(timestamp))
         close((await reader.read()).value)
-    assert len(TaskQueue.of(loop)._items) <= 2
+    state = LoopState.of(loop)
+    assert len(state.mailbox) + len(state._markers) <= 2
     # the callbacks ready to run, private to the loop
     assert len(vars(loop)['_ready']) < 100
     generator.track.stop()

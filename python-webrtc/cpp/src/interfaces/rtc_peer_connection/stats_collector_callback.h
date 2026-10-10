@@ -8,7 +8,6 @@
 #ifndef PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_STATS_COLLECTOR_CALLBACK_H_
 #define PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_STATS_COLLECTOR_CALLBACK_H_
 
-#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -18,15 +17,16 @@
 #include <api/stats/rtc_stats_report.h>
 #include <api/stats/rtcstats_objects.h>
 
+#include "../../utils/mailbox.h"
+
 namespace python_webrtc {
 
   // Delivers a stats report as JSON, which Python turns into webrtc.RTCStatsReport
   class StatsCollectorCallback : public webrtc::RTCStatsCollectorCallback {
   public:
     // remoteTrackIds by mid: libwebrtc drops trackIdentifier once a transceiver stops
-    explicit StatsCollectorCallback(std::function<void(std::string)> onDelivered,
-                                    std::map<std::string, std::string> remoteTrackIds = {})
-        : _onDelivered(std::move(onDelivered)), _remoteTrackIds(std::move(remoteTrackIds)) {}
+    explicit StatsCollectorCallback(Completion completion, std::map<std::string, std::string> remoteTrackIds = {})
+        : _completion(std::move(completion)), _remoteTrackIds(std::move(remoteTrackIds)) {}
 
     void OnStatsDelivered(const webrtc::scoped_refptr<const webrtc::RTCStatsReport> &report) override {
       webrtc::scoped_refptr<webrtc::RTCStatsReport> completed;
@@ -43,11 +43,11 @@ namespace python_webrtc {
         completed->Take(stats->id());
         completed->AddStats(std::move(stats));
       }
-      _onDelivered(completed ? completed->ToJson() : report->ToJson());
+      _completion.Succeed(completed ? completed->ToJson() : report->ToJson());
     }
 
   private:
-    std::function<void(std::string)> _onDelivered;
+    Completion _completion;
     std::map<std::string, std::string> _remoteTrackIds;
   };
 

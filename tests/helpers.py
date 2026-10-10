@@ -12,12 +12,14 @@ import contextlib
 import ctypes
 import faulthandler
 import functools
+import gc
 import inspect
 import os
 import pathlib
 import signal
 import subprocess
 import sys
+import time
 from typing import TYPE_CHECKING, Callable, Protocol, TypeVar, cast
 
 import pytest
@@ -86,7 +88,8 @@ async def generate_answer(offer: webrtc.RTCSessionDescriptionInit) -> webrtc.RTC
 QUIET_PERIOD = 0.3
 
 
-async def _called(function: Callable[[], object]) -> object:
+async def called(function: Callable[[], _T | Awaitable[_T]]) -> _T:
+    """Calls the function, awaiting an awaitable result."""
     result = function()
     return await result if inspect.isawaitable(result) else result
 
@@ -99,7 +102,7 @@ async def wait_until(predicate: Callable[[], object], what: str, timeout: float 
     """
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
-    while not bool(await _called(predicate)):
+    while not bool(await called(predicate)):
         if loop.time() > deadline:
             msg = f'Timed out waiting for {what}'
             raise TimeoutError(msg)
@@ -152,6 +155,18 @@ async def next_task() -> None:
     timer = loop.create_future()
     loop.call_later(0, timer.set_result, None)
     await timer
+
+
+def exit_code_within(pid: int, seconds: float) -> int | None:
+    """A forked child's exit code, or None if killed on timeout."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        done, status = os.waitpid(pid, os.WNOHANG)
+        if done != 0:
+            return os.waitstatus_to_exitcode(status)
+        time.sleep(0.05)
+    os.kill(pid, 9)
+    return None
 
 
 def register_stack_dump() -> None:
@@ -272,6 +287,39 @@ async def writing(write: Callable[..., Awaitable[None]], *args: object, **kwargs
     finally:
         stop.set()
         await asyncio.wait_for(task, 10)
+
+
+#: seconds for native counts to settle, and the polling interval
+SETTLE_TIMEOUT = 2
+SETTLE_INTERVAL = 0.05
+
+
+def collect() -> None:
+    """Collects twice: the first pass can free more garbage."""
+    gc.collect()
+    gc.collect()
+
+
+def _alive_once_dispatched() -> tuple[dict[str, int], int]:
+    """The counts once the Dispatcher is idle."""
+    wrtc._testing.dispatcher_idle()
+    return wrtc._alive(), wrtc._alive_factories()
+
+
+def settled_alive(released: Callable[[dict[str, int], int], bool] | None = None) -> tuple[dict[str, int], int]:
+    """Native object and factory counts, polled until ``released`` (or two equal readings) or the timeout."""
+    collect()
+    alive, factories = _alive_once_dispatched()
+    deadline = time.monotonic() + SETTLE_TIMEOUT
+    while not (released is not None and released(alive, factories)) and time.monotonic() < deadline:
+        time.sleep(SETTLE_INTERVAL)
+        gc.collect()
+        current = _alive_once_dispatched()
+        # equal readings don't mean released: an in-flight destructor keeps its count flat
+        if released is None and current == (alive, factories):
+            break
+        alive, factories = current
+    return alive, factories
 
 
 # the memory of sanitizers (ASan quarantine, TSan shadow) hides leaks from resident memory

@@ -104,6 +104,7 @@ namespace python_webrtc {
 
   void EncodedFrame::Init(pybind11::module &m) {
     pybind11::class_<EncodedFrame, std::shared_ptr<EncodedFrame>>(m, "RTCEncodedFrame")
+        .def_property_readonly("_id", &EncodedFrame::Id)
         .def_property_readonly("video", &EncodedFrame::IsVideo)
         .def("getData", &EncodedFrame::GetData)
         .def("getMetadata", &EncodedFrame::GetMetadata);

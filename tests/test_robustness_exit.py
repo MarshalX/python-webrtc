@@ -11,19 +11,25 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import gc
+import itertools
 import os
 import sys
 import threading
 import time
 import warnings
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import pytest
 
 import webrtc
-from tests.helpers import connect
+import wrtc
+from tests.helpers import connect, exit_code_within
 from tests.isolation import isolated
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # kept alive until the interpreter finalizes
 _kept: list[object] = []
@@ -59,24 +65,21 @@ def test_exit_while_objects_are_busy(_attempt: int) -> None:
     asyncio.run(_keep_busy_objects())
 
 
-def _ignore(_result: object) -> None:
-    pass
-
-
 @pytest.mark.parametrize('_attempt', range(5))
 @isolated(timeout=30)
 def test_exit_while_operations_are_pending(_attempt: int) -> None:
-    """Callbacks of operations completing at exit are dropped, not run by a libwebrtc thread taking the GIL."""
+    """Completions at exit never run on libwebrtc threads."""
     pc = webrtc.RTCPeerConnection()
     pc.add_transceiver('audio')
+    mailbox = wrtc.Mailbox()
 
-    def spin() -> None:
+    def spin(tokens: Iterator[int]) -> None:
         while True:
-            pc._native_obj.getStats(_ignore, _ignore)
+            pc._native_obj.getStats(mailbox, next(tokens))
             time.sleep(0)
 
-    for _ in range(4):
-        _start(spin)
+    for thread in range(4):
+        _start(functools.partial(spin, itertools.count(thread, 4)))
     time.sleep(0.3)
     _kept.append(pc)
 
@@ -106,17 +109,6 @@ def _forked_child_works() -> bool:
     return True
 
 
-def _exit_code_within(pid: int, seconds: float) -> int | None:
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        done, status = os.waitpid(pid, os.WNOHANG)
-        if done != 0:
-            return os.waitstatus_to_exitcode(status)
-        time.sleep(0.05)
-    os.kill(pid, 9)
-    return None
-
-
 @pytest.mark.skipif(not hasattr(os, 'fork'), reason='no fork')
 @isolated(timeout=60)
 def test_forked_child_leaves_the_objects_of_its_parent_alone() -> None:
@@ -131,4 +123,4 @@ def test_forked_child_leaves_the_objects_of_its_parent_alone() -> None:
         gc.collect()
         sys.exit(0 if _forked_child_works() else 1)
 
-    assert _exit_code_within(pid, 30) == 0
+    assert exit_code_within(pid, 30) == 0

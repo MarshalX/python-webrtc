@@ -23,7 +23,7 @@
 
 #include <pybind11/pybind11.h>
 
-#include "../utils/alive_count.h"
+#include "../utils/native_object.h"
 
 namespace python_webrtc {
 
@@ -63,8 +63,11 @@ namespace python_webrtc {
     std::function<void()> sendKeyFrameRequest;
   };
 
+  // Owned by libwebrtc, which destroys it on its threads: counted like a NativeObject, but not one
   class FrameTransformerBridge : public webrtc::FrameTransformerInterface {
   public:
+    static constexpr const char *kName = "FrameTransformerBridge";
+
     explicit FrameTransformerBridge(FrameSource source);
 
     ~FrameTransformerBridge() override;
@@ -93,7 +96,7 @@ namespace python_webrtc {
     void UnregisterTransformedFrameSinkCallback(uint32_t ssrc) override;
 
   private:
-    AliveCount<FrameTransformerBridge> _counted;
+    static inline AliveCounter _counter{kName};
     const FrameSource _source;
     const uint64_t _id;
 
@@ -106,6 +109,13 @@ namespace python_webrtc {
 
   class TransformSlot {
   public:
+    TransformSlot() = default;
+
+    ~TransformSlot() { Release(); }
+
+    TransformSlot(const TransformSlot &) = delete;
+    TransformSlot &operator=(const TransformSlot &) = delete;
+
     std::shared_ptr<RtpTransform> Get();
 
     // calls libwebrtc: without the GIL

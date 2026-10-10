@@ -529,6 +529,14 @@
         "FAIL",
         "PASS"
       ],
+      "RTCIceTransport should transition to \"disconnected\" if packets stop flowing": [
+        "FAIL",
+        "PASS"
+      ],
+      "RTCIceTransport should transition to \"disconnected\" if packets stop flowing (DataChannel case)": [
+        "FAIL",
+        "PASS"
+      ],
       "RTCIceTransport.role should not change when the answerer initiates an ICE restart": [
         "FAIL",
         "NOTRUN"

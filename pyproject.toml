@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core>=0.11", "pybind11>=3.0"]
+requires = ["scikit-build-core>=0.11", "pybind11>=3.1"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -40,6 +40,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Programming Language :: Python :: Implementation",
     "Programming Language :: Python :: Implementation :: CPython",
     "Typing :: Typed",
@@ -57,7 +58,7 @@ test = ["pytest>=8", "pytest-asyncio>=0.24", "pytest-timeout>=2.3"]
 dev = [
     { include-group = "test" },
     "scikit-build-core>=0.11",
-    "pybind11>=3.0",
+    "pybind11>=3.1",
     "ruff>=0.16.9",
     "pybind11-stubgen>=2.5",
     "coverage>=7.10",
@@ -87,13 +88,14 @@ wheel.packages = ["python-webrtc/python/webrtc"]
 sdist.exclude = [".github", ".idea", "docs", "examples", "wpt"]
 
 [tool.cibuildwheel]
-build = "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
+# free-threaded from 3.14, where it's no longer experimental
+build = "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-* cp314t-* cp315-* cp315t-*"
 skip = "*-musllinux_*"
 build-frontend = "build[uv]"
 # dev builds stay per file to catch missing includes
 config-settings = { "cmake.define.CMAKE_UNITY_BUILD" = "ON" }
 test-groups = ["test"]
-# again with the garbage collector on libwebrtc threads (see DeleteOffLibwebrtcThread)
+# again with a collection on every emit (--gc-on-emit in tests/conftest.py)
 test-command = "pytest {project}/tests && pytest {project}/tests --gc-on-emit"
 
 [tool.cibuildwheel.linux]

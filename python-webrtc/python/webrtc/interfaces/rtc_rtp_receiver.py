@@ -10,17 +10,17 @@
 from __future__ import annotations
 
 import math
-from typing import TypeVar
+from typing import TypeVar, cast
 
 import webrtc
 import wrtc
 from webrtc.base import WebRTCObject
 from webrtc.exceptions import InvalidRangeError
-from webrtc.interfaces.rtc_rtp_sender import _native_transform
+from webrtc.interfaces.rtc_rtp_sender import _set_transform
 from webrtc.models.rtc_stats import RTCStatsReport
 from webrtc.models.rtp_parameters import RTCRtpCapabilities, RTCRtpReceiveParameters
 from webrtc.models.rtp_source import RTCRtpContributingSource, RTCRtpSynchronizationSource
-from webrtc.utils.native_calls import call_native
+from webrtc.utils.loops import call_native
 
 _SourceT = TypeVar('_SourceT', bound=RTCRtpContributingSource)
 
@@ -36,6 +36,8 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
     See :mdn:`RTCRtpReceiver`.
     """
 
+    __slots__ = ()
+
     _class = wrtc.RTCRtpReceiver
 
     def _sources(self, cls: type[_SourceT]) -> list[_SourceT]:
@@ -49,7 +51,7 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
 
         See :mdn:`RTCRtpReceiver/track`.
         """
-        return webrtc.MediaStreamTrack._wrap(self._native_obj.track)
+        return webrtc.MediaStreamTrack._wrap(self._native_obj.track, connection=self._connection)
 
     @property
     def transport(self) -> webrtc.RTCDtlsTransport | None:
@@ -58,7 +60,7 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
         It's :obj:`None` until there's one.
         See :mdn:`RTCRtpReceiver/transport`.
         """
-        return webrtc.RTCDtlsTransport._wrap_optional(self._native_obj.transport)
+        return webrtc.RTCDtlsTransport._wrap_optional(self._native_obj.transport, connection=self._connection)
 
     @property
     def transform(self) -> webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameDecryptor | None:
@@ -75,12 +77,14 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
         """
         native = self._native_obj.transform
         if isinstance(native, wrtc.SFrameTransform):
-            return webrtc.RTCRtpSFrameDecryptor._wrap(native)
-        return webrtc.RTCRtpScriptTransform._of_native(native)
+            return webrtc.RTCRtpSFrameDecryptor._wrap(native, connection=self._connection)
+        if isinstance(native, wrtc.RTCRtpScriptTransform):
+            return webrtc.RTCRtpScriptTransform._wrap(native, connection=self._connection)
+        return None
 
     @transform.setter
     def transform(self, transform: webrtc.RTCRtpScriptTransform | webrtc.RTCRtpSFrameDecryptor | None) -> None:
-        self._native_obj.transform = _native_transform(transform, webrtc.RTCRtpSFrameDecryptor)
+        _set_transform(self._native_obj, transform, sframe=webrtc.RTCRtpSFrameDecryptor, connection=self._connection)
 
     @property
     def jitter_buffer_target(self) -> float | None:
@@ -141,7 +145,7 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
         Raises:
             webrtc.InvalidStateError: If the connection is closed.
         """
-        return RTCStatsReport._from_native(await call_native(self._native_obj.getStats), [self])
+        return RTCStatsReport._from_native(cast('str', await call_native(self._native_obj.getStats)), [self])
 
     def get_synchronization_sources(self) -> list[webrtc.RTCRtpSynchronizationSource]:
         """Returns the synchronization sources (SSRCs) of the media received in the last 10 seconds.

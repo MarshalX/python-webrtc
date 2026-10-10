@@ -21,16 +21,19 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "../utils/alive_guard.h"
-#include "../utils/listeners.h"
+#include "../utils/mailbox.h"
+#include "../utils/native_object.h"
+#include "../utils/registry.h"
 #include "media_stream_track.h"
 #include "peer_connection_factory.h"
 
 namespace python_webrtc {
 
   // Emits addtrack and removetrack when libwebrtc changes the tracks of a remote stream
-  class MediaStream : public webrtc::ObserverInterface, public Listeners {
+  class MediaStream : public webrtc::ObserverInterface, public NativeObject<MediaStream>, public Emitter<MediaStream> {
   public:
+    static constexpr const char *kName = "MediaStream";
+
     MediaStream(std::shared_ptr<PeerConnectionFactory> factory,
                 webrtc::scoped_refptr<webrtc::MediaStreamInterface> stream);
 
@@ -47,7 +50,7 @@ namespace python_webrtc {
     // A new stream of these tracks (new MediaStream() in a browser)
     static std::shared_ptr<MediaStream> Create(const std::vector<std::shared_ptr<MediaStreamTrack>> &tracks);
 
-    static InstanceHolder<MediaStream, webrtc::MediaStreamInterface> &holder();
+    static Registry<MediaStream, webrtc::MediaStreamInterface> &registry();
 
     webrtc::scoped_refptr<webrtc::MediaStreamInterface> stream();
 
@@ -79,9 +82,6 @@ namespace python_webrtc {
     std::mutex _tracksMutex;
     // the tracks the stream had when last notified, or as Python changed them, guarded by _tracksMutex
     std::set<webrtc::MediaStreamTrackInterface *> _known;
-
-    // see AliveGuard
-    AliveGuard _alive;
   };
 
 } // namespace python_webrtc

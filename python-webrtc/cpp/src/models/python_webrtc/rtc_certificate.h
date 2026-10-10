@@ -18,11 +18,15 @@
 
 #include <rtc_base/rtc_certificate.h>
 
+#include "../../utils/native_object.h"
+
 namespace python_webrtc {
 
   // A DTLS certificate of a connection (webrtc.RTCCertificate)
-  class RTCCertificate {
+  class RTCCertificate : public NativeObject<RTCCertificate> {
   public:
+    static constexpr const char *kName = "RTCCertificate";
+
     explicit RTCCertificate(webrtc::scoped_refptr<webrtc::RTCCertificate> certificate)
         : _certificate(std::move(certificate)) {}
 

@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import re
-import weakref
 from typing import Callable, Literal, TypeVar, cast, overload
 
 from typing_extensions import override
@@ -29,12 +28,6 @@ from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
 _UFRAG = re.compile(r'[A-Za-z0-9+/]{4,256}')
 _PASSWORD = re.compile(r'[A-Za-z0-9+/]{22,256}')
 
-# the candidates of every transport, by their candidate-attribute: a candidate is the same object each time
-_candidates: weakref.WeakKeyDictionary[wrtc.RTCIceTransport, dict[str, webrtc.RTCIceCandidate]] = (
-    weakref.WeakKeyDictionary()
-)
-
-
 _IceTransportStateEvent = Literal['statechange', 'gatheringstatechange', 'selectedcandidatepairchange', 'error']
 _IceTransportEvent = Literal[_IceTransportStateEvent, 'icecandidate']
 _R = TypeVar('_R')
@@ -45,7 +38,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
 
     A standalone transport (``RTCIceTransport()``, from WebRTC Extensions) is driven by hand. Call :meth:`gather`,
     :meth:`start` and :meth:`add_remote_candidate`, then :meth:`stop` when done. Those methods raise for a
-    transport of a connection. Its events go to the event loop it was created on.
+    transport of a connection.
 
     See :mdn:`RTCIceTransport`.
 
@@ -59,7 +52,11 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
             agent doesn't report it.
     """
 
+    __slots__ = ('_candidates',)
+
     _class = wrtc.RTCIceTransport
+    #: by candidate-attribute, so a candidate is the same object each time
+    _candidates: dict[str, webrtc.RTCIceCandidate]
 
     @overload
     def on(self, name: _IceTransportStateEvent, handler: None = None) -> HandlerDecorator[Event]: ...
@@ -104,19 +101,37 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
     def __init__(self) -> None:
         super().__init__()
         # a standalone transport delivers its events to the loop it's created on
-        self._attach()
+        _ = self._attach()
+
+    @override
+    def _init_native(self, native_obj: wrtc.RTCIceTransport | None) -> None:
+        super()._init_native(native_obj)
+        self._candidates = {}
 
     def _candidate_of(self, native: wrtc.IceCandidateInit) -> webrtc.RTCIceCandidate:
         """The candidate object of a native candidate, the same one each time."""
         kwargs = native.kwargs()
-        known = _candidates.setdefault(self._native_obj, {})
-        if kwargs['candidate'] not in known:
-            known[kwargs['candidate']] = RTCIceCandidate(**kwargs)
-        return known[kwargs['candidate']]
+        if kwargs['candidate'] not in self._candidates:
+            self._candidates[kwargs['candidate']] = RTCIceCandidate(**kwargs)
+        return self._candidates[kwargs['candidate']]
 
     def _remember(self, candidate: webrtc.RTCIceCandidate) -> None:
         """Makes a candidate the object of its native candidate, unless there's one already."""
-        _ = _candidates.setdefault(self._native_obj, {}).setdefault(candidate.candidate, candidate)
+        _ = self._candidates.setdefault(candidate.candidate, candidate)
+
+    @override
+    def _open(self) -> bool:
+        # once stopped or closed, even queued candidates don't fire
+        return super()._open() and not self._native_obj._stopped
+
+    @override
+    def _activity(self) -> str | None:
+        state = self.state
+        # failed isn't terminal: an ICE restart takes the transport further (webrtc-pc RTCIceTransportState)
+        closed = state == RTCIceTransportState.closed or not self._open()
+        if closed or len(self.event_names()) == 0:
+            return None
+        return f'{state.value} with handlers'
 
     @override
     def _on_event(self, name: str, *args: object) -> None:
@@ -242,7 +257,8 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
             webrtc.InvalidStateError: If it belongs to a connection.
         """
         self._check_standalone('stop')
-        self._native_obj.stop()
+        with self._changing():
+            self._native_obj.stop()
 
     def get_selected_candidate_pair(self) -> webrtc.RTCIceCandidatePair | None:
         """Returns the local and the remote candidate the transport sends and receives with.

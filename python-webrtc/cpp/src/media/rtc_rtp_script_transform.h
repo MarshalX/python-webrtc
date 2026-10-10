@@ -20,26 +20,23 @@
 
 #include <pybind11/pybind11.h>
 
-#include "../utils/alive_count.h"
-#include "../utils/listeners.h"
+#include "../utils/mailbox.h"
+#include "../utils/native_object.h"
 #include "encoded_frame.h"
 #include "frame_transformer_bridge.h"
-#include "wakeup.h"
 
 namespace python_webrtc {
 
   class RTCRtpScriptTransform : public RtpTransform,
-                                public Listeners,
-                                public Wakeable,
-                                public std::enable_shared_from_this<RTCRtpScriptTransform> {
+                                public NativeObject<RTCRtpScriptTransform>,
+                                public Emitter<RTCRtpScriptTransform> {
   public:
+    static constexpr const char *kName = "RTCRtpScriptTransform";
     static constexpr size_t kMaxQueuedFrames = 120;
 
     enum class State : uint8_t { kNew, kAssociated, kDisassociated };
 
     enum class KeyFrameResult : uint8_t { kRequested, kInvalidState, kNotFound };
-
-    static std::shared_ptr<RTCRtpScriptTransform> Create();
 
     ~RTCRtpScriptTransform() override;
 
@@ -53,8 +50,6 @@ namespace python_webrtc {
     void Associate(webrtc::scoped_refptr<FrameTransformerBridge> bridge) override;
 
     void Disassociate() override;
-
-    void OnWakeup() override;
 
     std::shared_ptr<EncodedFrame> Read();
 
@@ -74,13 +69,13 @@ namespace python_webrtc {
     bool SendKeyFrameRequest();
 
   private:
+    friend class NativeObject<RTCRtpScriptTransform>;
+
     RTCRtpScriptTransform() = default;
 
     webrtc::scoped_refptr<FrameTransformerBridge> Bridge();
 
-    void WakeLocked();
-
-    AliveCount<RTCRtpScriptTransform> _counted;
+    bool ArmWakeLocked();
 
     std::mutex _mutex;
     State _state = State::kNew;

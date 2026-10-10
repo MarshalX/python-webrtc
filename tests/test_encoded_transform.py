@@ -18,7 +18,7 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import QUIET_PERIOD, connect, mistyped, wait_until, wait_until_unmuted
+from tests.helpers import QUIET_PERIOD, connect, mistyped, settled_alive, wait_until, wait_until_unmuted
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -509,21 +509,8 @@ def released_to(baseline: dict[str, int]) -> bool:
 
 def alive_objects() -> dict[str, int]:
     """The native objects of transforms alive, once releases on helper threads are done."""
-
-    def current() -> dict[str, int]:
-        gc.collect()
-        alive = wrtc._alive()
-        return {name: alive[name] for name in ('RTCRtpScriptTransform', 'RTCEncodedFrame', 'FrameTransformerBridge')}
-
-    alive = current()
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline:
-        time.sleep(0.05)
-        now = current()
-        if now == alive:
-            break
-        alive = now
-    return alive
+    alive = settled_alive()[0]
+    return {name: alive[name] for name in ('RTCRtpScriptTransform', 'RTCEncodedFrame', 'FrameTransformerBridge')}
 
 
 @pytest.mark.asyncio

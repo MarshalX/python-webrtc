@@ -12,14 +12,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import gc
-import time
 from typing import TYPE_CHECKING, NamedTuple, Union
 
 import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import connect, mistyped, wait_until
+from tests.helpers import connect, mistyped, settled_alive, wait_until
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -656,17 +655,7 @@ def released_to(baseline: int) -> bool:
 
 def alive_transforms() -> int:
     """The native SFrame transforms alive, once releases on helper threads are done."""
-    gc.collect()
-    alive = wrtc._alive()['SFrameTransform']
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline:
-        time.sleep(0.05)
-        gc.collect()
-        now = wrtc._alive()['SFrameTransform']
-        if now == alive:
-            break
-        alive = now
-    return alive
+    return settled_alive()[0]['SFrameTransform']
 
 
 @pytest.mark.asyncio

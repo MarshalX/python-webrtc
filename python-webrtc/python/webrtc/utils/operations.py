@@ -18,7 +18,9 @@ An operation (like setting a description) is used as::
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
+import threading
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
@@ -34,13 +36,22 @@ class OperationsChain:
     Args:
         on_empty (:obj:`callable`): Called when the last operation ends.
         closed (:obj:`callable`): Whether the connection is closed.
+        changing (:obj:`callable`, optional): A context manager around a change of :attr:`busy`.
     """
 
-    def __init__(self, on_empty: Callable[[], None], closed: Callable[[], bool]) -> None:
+    def __init__(
+        self,
+        on_empty: Callable[[], None],
+        closed: Callable[[], bool],
+        changing: Callable[[], contextlib.AbstractContextManager[None]] = contextlib.nullcontext,
+    ) -> None:
         self._on_empty = on_empty
         self._closed = closed
-        #: The operation that ends last
-        self._last: asyncio.Future[None] | None = None
+        self._changing = changing
+        #: loop-agnostic: loops on several threads may chain operations
+        self._last: concurrent.futures.Future[None] | None = None
+        # operations start from any thread; chaining is a read-modify-write
+        self._lock = threading.Lock()
 
     @property
     def busy(self) -> bool:
@@ -54,13 +65,14 @@ class OperationsChain:
             # it fails its checks right away
             yield
             return
-        previous = self._last
-        done = asyncio.get_running_loop().create_future()
-        self._last = done
+        done: concurrent.futures.Future[None] = concurrent.futures.Future()
+        with self._changing(), self._lock:
+            previous = self._last
+            self._last = done
         try:
             if previous is not None and not previous.done():
                 # shielded: cancelling this operation must not cancel the end of the previous one
-                await asyncio.shield(previous)
+                await asyncio.shield(asyncio.wrap_future(previous))
             try:
                 yield
             except Exception:
@@ -79,14 +91,12 @@ class OperationsChain:
             # the specification aborts its steps, it neither resolves nor rejects
             raise asyncio.CancelledError
 
-    def _end(self, done: asyncio.Future[None]) -> None:
-        if done.get_loop().is_closed():
-            # nothing waits anymore
-            return
-
-        done.set_result(None)
-        if self._last is done:
-            self._on_empty()
+    def _end(self, done: concurrent.futures.Future[None]) -> None:
+        # waiters may be on other loops
+        with self._changing():
+            done.set_result(None)
+            if self._last is done:
+                self._on_empty()
 
 
 async def later() -> None:

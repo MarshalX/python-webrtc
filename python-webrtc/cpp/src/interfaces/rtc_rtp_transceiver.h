@@ -20,6 +20,8 @@
 #include <pybind11/pybind11.h>
 
 #include "../enums/enums.h"
+#include "../utils/native_object.h"
+#include "../utils/registry.h"
 #include "peer_connection_factory.h"
 #include "rtc_rtp_receiver.h"
 #include "rtc_rtp_sender.h"
@@ -28,14 +30,16 @@ namespace python_webrtc {
 
   class RTCPeerConnection;
 
-  class RTCRtpTransceiver {
+  class RTCRtpTransceiver : public NativeObject<RTCRtpTransceiver> {
   public:
+    static constexpr const char *kName = "RTCRtpTransceiver";
+
     RTCRtpTransceiver(std::shared_ptr<PeerConnectionFactory> factory,
                       webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver);
 
     static void Init(pybind11::module &m);
 
-    static InstanceHolder<RTCRtpTransceiver, webrtc::RtpTransceiverInterface> &holder();
+    static Registry<RTCRtpTransceiver, webrtc::RtpTransceiverInterface> &registry();
 
     // the connection of the transceiver, where stop() fails once it's closed; set by the connection
     void SetConnection(std::weak_ptr<RTCPeerConnection> connection);

@@ -16,6 +16,7 @@ from typing_extensions import override
 import webrtc
 import wrtc
 from webrtc.base import WebRTCObject
+from webrtc.enums import RTCSctpTransportState
 from webrtc.models.events import Event
 from webrtc.utils.events import UniformEventTarget
 
@@ -31,6 +32,8 @@ class RTCSctpTransport(WebRTCObject[wrtc.RTCSctpTransport], UniformEventTarget[L
         statechange (:obj:`webrtc.Event`): :attr:`state` changed.
     """
 
+    __slots__ = ()
+
     _class = wrtc.RTCSctpTransport
 
     @override
@@ -39,13 +42,20 @@ class RTCSctpTransport(WebRTCObject[wrtc.RTCSctpTransport], UniformEventTarget[L
         # the state changes along with its event
         self._native_obj._surfaceState(state)
 
+    @override
+    def _activity(self) -> str | None:
+        state = self.state
+        if state == RTCSctpTransportState.closed or not self._open() or len(self.event_names()) == 0:
+            return None
+        return f'{state.value} with handlers'
+
     @property
     def transport(self) -> webrtc.RTCDtlsTransport:
         """:obj:`webrtc.RTCDtlsTransport`: The DTLS transport the SCTP packets go over.
 
         See :mdn:`RTCSctpTransport/transport`.
         """
-        return webrtc.RTCDtlsTransport._wrap(self._native_obj.transport)
+        return webrtc.RTCDtlsTransport._wrap(self._native_obj.transport, connection=self._connection)
 
     @property
     def state(self) -> webrtc.RTCSctpTransportState:

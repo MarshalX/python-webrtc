@@ -50,7 +50,7 @@ namespace python_webrtc {
       stream->AddTrack(CreateCameraTrack(factory, width, height, frameRate));
     }
 
-    return MediaStream::holder().GetOrCreate(factory, stream);
+    return MediaStream::registry().GetOrCreate(factory, stream);
   }
 
 } // namespace python_webrtc

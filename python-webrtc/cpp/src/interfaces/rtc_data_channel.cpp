@@ -18,37 +18,33 @@ namespace python_webrtc {
   RTCDataChannel::RTCDataChannel(std::shared_ptr<PeerConnectionFactory> factory,
                                  webrtc::scoped_refptr<webrtc::DataChannelInterface> channel)
       : _factory(std::move(factory)), _channel(std::move(channel)) {
-    Hold();
     // open only once the open event is delivered
     _surfacedState.Surface(DataState::kConnecting);
-    // see AliveGuard
-    _factory->signalingThread()->PostTask(_alive.Guard([this]() {
+    _factory->signalingThread()->PostTask(Guard([this]() {
       _lastState = _channel->state();
       if (_lastState != DataState::kOpen && _lastState != DataState::kConnecting) {
         _surfacedState.Surface(_lastState);
       }
-      // messages received meanwhile are delivered to the observer once it's registered, and are held too
+      // messages received meanwhile are delivered to the observer once it's registered, and queue behind the event
       _channel->RegisterObserver(this);
-      holder().SetObserver(_channel.get(), this);
-      // a channel announced by the remote peer is open already, but its open event follows the datachannel one
+      registry().SetObserver(_channel.get(), this);
+      // a channel open already (announced by the remote peer, or negotiated) opens with its event when bound
       if (_lastState == DataState::kOpen) {
+        _surfacedState.Changed(IsBound(), DataState::kConnecting);
         Emit("open", _lastState);
       }
     }));
   }
 
   RTCDataChannel::~RTCDataChannel() {
-    const BlockingDestructor release("RTCDataChannel");
-
     // callbacks run on the signaling thread, so after this none of them can be running or start again
     BlockingCallOn(_factory->signalingThread(), [this]() {
       // a newer wrapper of the channel may have taken its single observer slot
-      if (holder().TakeObserver(_channel.get(), this)) {
+      if (registry().TakeObserver(_channel.get(), this)) {
         _channel->UnregisterObserver();
       }
     });
     _channel = nullptr;
-    DropListeners();
   }
 
   void RTCDataChannel::Init(pybind11::module &m) {
@@ -62,7 +58,8 @@ namespace python_webrtc {
               PyUnicode_DecodeUTF8(message.data.data(), static_cast<Py_ssize_t>(message.data.size()), "replace"));
         });
 
-    Listeners::BindClass<RTCDataChannel>(m, "RTCDataChannel")
+    DefineBinding(pybind11::class_<RTCDataChannel, Binding, std::shared_ptr<RTCDataChannel>>(m, "RTCDataChannel"))
+        .def_property_readonly("_id", &RTCDataChannel::Id)
         .def_property_readonly("label", nogil_fn(&RTCDataChannel::GetLabel))
         .def_property_readonly("ordered", nogil_fn(&RTCDataChannel::GetOrdered))
         .def_property_readonly("maxPacketLifeTime", nogil_fn(&RTCDataChannel::GetMaxPacketLifeTime))
@@ -79,14 +76,12 @@ namespace python_webrtc {
         .def("send", &RTCDataChannel::Send, nogil(), pybind11::arg("data"), pybind11::arg("binary"))
         .def("close", &RTCDataChannel::Close, nogil())
         .def("_surfaceState", &RTCDataChannel::SurfaceState, nogil(), pybind11::arg("state"))
-        .def("_decreaseBufferedAmount", &RTCDataChannel::DecreaseBufferedAmount, nogil(), pybind11::arg("sent"))
-        .def("_release", &RTCDataChannel::Release, nogil());
+        .def("_decreaseBufferedAmount", &RTCDataChannel::DecreaseBufferedAmount, nogil(), pybind11::arg("sent"));
   }
 
-  InstanceHolder<RTCDataChannel, webrtc::DataChannelInterface> &RTCDataChannel::holder() {
-    // never destroyed: wrappers may outlive static destructors
-    static auto *holder = new InstanceHolder<RTCDataChannel, webrtc::DataChannelInterface>();
-    return *holder;
+  Registry<RTCDataChannel, webrtc::DataChannelInterface> &RTCDataChannel::registry() {
+    static ForkLocal<Registry<RTCDataChannel, webrtc::DataChannelInterface>> registry;
+    return registry.Get();
   }
 
   void RTCDataChannel::OnStateChange() {
@@ -103,7 +98,7 @@ namespace python_webrtc {
         // closing locally has shown the closing state already, and fires no event
         return;
       }
-      _surfacedState.Changed(IsTracked(), previous);
+      _surfacedState.Changed(IsBound(), previous);
     }
 
     switch (state) {
@@ -154,7 +149,7 @@ namespace python_webrtc {
   }
 
   void RTCDataChannel::OnPeerConnectionClosed() {
-    Mute();
+    Unbind();
     _surfacedState.Reset();
   }
 
@@ -217,7 +212,7 @@ namespace python_webrtc {
   }
 
   RTCDataChannel::DataState RTCDataChannel::GetReadyState() {
-    return _surfacedState.Get(_channel->state());
+    return _surfacedState.Shown(IsBound(), _channel->state());
   }
 
   void RTCDataChannel::SurfaceState(DataState state) {
