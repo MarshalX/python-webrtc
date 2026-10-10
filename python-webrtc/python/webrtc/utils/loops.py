@@ -45,6 +45,8 @@ class _Item(NamedTuple):
     resumes: bool
     #: waits for the loop's ready callbacks
     after_ready: bool
+    #: runs instead when the loop closes first
+    dropped: Callable[[], object] | None = None
 
 
 class _Call(NamedTuple):
@@ -198,15 +200,26 @@ class LoopState:
             self.pending[token] = _Call(future, weakref.ref(target) if target is not None else None)
         return token, future
 
-    def post(self, callback: Callable[[], object], *, resumes: bool = False, after_ready: bool = False) -> None:
-        """Schedules a callback in order with the native records (flags as in ``_Item``)."""
-        item = _Item(callback, resumes, after_ready)
+    def post(
+        self,
+        callback: Callable[[], object],
+        *,
+        resumes: bool = False,
+        after_ready: bool = False,
+        dropped: Callable[[], object] | None = None,
+    ) -> None:
+        """Schedules a callback in order with the native records (as in ``_Item``); it runs, or else ``dropped``."""
+        item = _Item(callback, resumes, after_ready, dropped)
         with self._lock:
             key = self._key()
             # after allocating: gc may have released the state under the lock
-            if self._released:
-                return
-            self._markers[key] = item
+            released = self._released
+            if not released:
+                self._markers[key] = item
+        if released:
+            if dropped is not None:
+                _ = dropped()
+            return
         self.mailbox.postMarker(key)
         self._schedule()
 
@@ -454,6 +467,7 @@ class LoopState:
             self._scheduled = False
             pending = self.pending
             self.pending = {}
+            items = [*self._markers.values(), *([self._held] if self._held is not None else [])]
             self._markers.clear()
             self._held = None
             self.tasks.clear()
@@ -462,6 +476,10 @@ class LoopState:
             self.targets.clear()
         # outside the lock: native calls may never return once exit starts
         self.mailbox.close()
+        if not sys.is_finalizing():
+            for item in items:
+                if item.dropped is not None:
+                    _ = item.dropped()
         loop = self._loop_ref()
         if loop is not None and not sys.is_finalizing():
             _let_go(loop, list(pending.values()), targets)

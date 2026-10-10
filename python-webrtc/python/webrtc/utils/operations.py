@@ -73,7 +73,7 @@ class OperationsChain:
             self._last = done
         try:
             if previous is not None and not previous.done():
-                await _on_running_loop(previous)
+                await self._after(previous, done)
             try:
                 yield
             except Exception:
@@ -92,26 +92,35 @@ class OperationsChain:
             # the specification aborts its steps, it neither resolves nor rejects
             raise asyncio.CancelledError
 
+    def _after(
+        self, previous: concurrent.futures.Future[None], done: concurrent.futures.Future[None]
+    ) -> asyncio.Future[None]:
+        """A future of the running loop that the end of the previous operation resolves."""
+        waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        state = LoopState.of(waiter.get_loop())
+
+        def resolve() -> None:
+            # cancelling it leaves the previous operation be
+            if not waiter.done():
+                waiter.set_result(None)
+
+        # through the loop's mailbox; if the loop closes first, this operation can't run, so it ends then
+        previous.add_done_callback(
+            lambda _: state.post(resolve, resumes=True, after_ready=True, dropped=lambda: self._end(done))
+        )
+        return waiter
+
     def _end(self, done: concurrent.futures.Future[None]) -> None:
         # waiters may be on other loops
         with self._changing():
-            done.set_result(None)
+            try:
+                done.set_result(None)
+            except concurrent.futures.InvalidStateError:
+                # ended already: its loop closed while it waited
+                return
+
             if self._last is done:
                 self._on_empty()
-
-
-def _on_running_loop(future: concurrent.futures.Future[None]) -> asyncio.Future[None]:
-    """A future of the running loop that the future's end resolves; cancelling it leaves the future be."""
-    waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-    state = LoopState.of(waiter.get_loop())
-
-    def resolve() -> None:
-        if not waiter.done():
-            waiter.set_result(None)
-
-    # through the loop's mailbox, which drops it once the loop is closed
-    future.add_done_callback(lambda _: state.post(resolve, resumes=True, after_ready=True))
-    return waiter
 
 
 async def later() -> None:
