@@ -78,7 +78,7 @@ namespace python_webrtc {
       static constexpr const char *kName = "Registered";
 
       Registered(std::shared_ptr<PeerConnectionFactory> factory, webrtc::scoped_refptr<Identity> identity)
-          : createdOnSignalingThread(factory->signalingThread()->IsCurrent()), _factory(std::move(factory)),
+          : _createdOnSignalingThread(factory->signalingThread()->IsCurrent()), _factory(std::move(factory)),
             _identity(std::move(identity)) {}
 
       static Registry<Registered, Identity> &registry() {
@@ -86,9 +86,10 @@ namespace python_webrtc {
         return registry.Get();
       }
 
-      const bool createdOnSignalingThread;
+      [[nodiscard]] bool CreatedOnSignalingThread() const { return _createdOnSignalingThread; }
 
     private:
+      const bool _createdOnSignalingThread;
       std::shared_ptr<PeerConnectionFactory> _factory;
       webrtc::scoped_refptr<Identity> _identity;
     };
@@ -112,6 +113,7 @@ namespace python_webrtc {
       return names->insert(name).first->c_str();
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): mirrors post_from_threads(mailbox, threads, count)
     void PostFromThreads(Mailbox &mailbox, int threads, int count) {
       std::vector<std::thread> posting;
       posting.reserve(threads);
@@ -190,8 +192,8 @@ namespace python_webrtc {
     pybind11::class_<Registered, std::shared_ptr<Registered>>(testing, "Registered",
                                                               "The wrapper of an Identity, made by a Registry.")
         .def_property_readonly("id", &Registered::Id, "The id of the object, never reused.")
-        .def_readonly("createdOnSignalingThread", &Registered::createdOnSignalingThread,
-                      "Whether the constructor ran on the signaling thread of the default factory.");
+        .def_property_readonly("createdOnSignalingThread", &Registered::CreatedOnSignalingThread,
+                               "Whether the constructor ran on the signaling thread of the default factory.");
     testing.def(
         "registered",
         [](const IdentityHandle &identity) {
@@ -221,6 +223,7 @@ namespace python_webrtc {
         nogil(), pybind11::arg("mailbox"), "Posts a record whose args don't convert to Python.");
     testing.def(
         "complete",
+        // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): mirrors complete(mailbox, token, value)
         [](std::shared_ptr<Mailbox> mailbox, uint64_t token, int64_t value) {
           Completion completion(std::move(mailbox), token);
           completion.Succeed(value);

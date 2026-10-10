@@ -167,7 +167,7 @@ namespace python_webrtc {
     };
 
     template <typename... Args>
-    void Emit(const char *name, Args... args) {
+    void Emit(const char *name, const Args &...args) {
       _held.Emit([this, name, args...]() { Emitter::Emit(name, args...); });
     }
 

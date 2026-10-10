@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import asyncio
+import gc
+import logging
 import threading
 from typing import TYPE_CHECKING, Callable
 
@@ -100,6 +102,38 @@ def test_operation_waiting_for_one_of_another_loop_resumes() -> None:
     asyncio.run(second())
     other.join(5)
     assert not chain.busy
+
+
+def test_operation_waiting_in_a_closed_loop_lets_the_chain_go_on(caplog: pytest.LogCaptureFixture) -> None:
+    """An operation whose loop closes while it waits neither wakes that loop nor holds up the chain."""
+    chain = OperationsChain(lambda: None, lambda: False)
+    started = threading.Event()
+    release = threading.Event()
+
+    async def first() -> None:
+        async with chain.operation():
+            started.set()
+            await asyncio.get_running_loop().run_in_executor(None, release.wait)
+
+    other = threading.Thread(target=asyncio.run, args=(first(),))
+    other.start()
+    assert started.wait(5)
+
+    async def operation() -> None:
+        async with chain.operation():
+            pass
+
+    loop = asyncio.new_event_loop()
+    waiting = loop.create_task(operation())
+    loop.run_until_complete(asyncio.sleep(0))
+    loop.close()
+    release.set()
+    other.join(5)
+    # collected once nothing wakes it: its coroutine is closed and its operation ends
+    del waiting
+    _ = gc.collect()
+    assert not chain.busy
+    assert [record.message for record in caplog.records if record.levelno >= logging.ERROR] == []
 
 
 async def remote_offer() -> webrtc.RTCSessionDescriptionInit:

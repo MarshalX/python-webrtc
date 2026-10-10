@@ -26,10 +26,13 @@ namespace python_webrtc {
 
   class AliveCounter {
   public:
-    explicit AliveCounter(const char *name) {
+    // noexcept: counters are made at static initialization, where nothing can catch
+    explicit AliveCounter(const char *name) noexcept {
       const std::scoped_lock lock(Mutex());
       Counters().emplace(name, this);
     }
+
+    ~AliveCounter() = default;
 
     AliveCounter(const AliveCounter &) = delete;
     AliveCounter &operator=(const AliveCounter &) = delete;
@@ -70,6 +73,9 @@ namespace python_webrtc {
   template <typename T>
   class NativeObject : public std::enable_shared_from_this<T> {
   public:
+    NativeObject(const NativeObject &) = delete;
+    NativeObject &operator=(const NativeObject &) = delete;
+
     [[nodiscard]] uint64_t Id() const { return _id; }
 
     static int Alive() { return _counter.alive.load(); }
@@ -91,8 +97,6 @@ namespace python_webrtc {
     }
 
   protected:
-    NativeObject() : _id(NextNativeId()++) { _counter.alive++; }
-
     // runs after T's members: the count holds while T is destroyed
     ~NativeObject() {
 #ifdef WRTC_SANITIZED
@@ -107,16 +111,21 @@ namespace python_webrtc {
       _counter.alive--;
     }
 
-    NativeObject(const NativeObject &) = delete;
-    NativeObject &operator=(const NativeObject &) = delete;
-
     void Disarm() { *_alive = false; }
 
   private:
-    static inline AliveCounter _counter{T::kName};
+    friend T;
+
+    NativeObject() : _id(NextNativeId()++) { _counter.alive++; }
+
+    static AliveCounter _counter;
     const uint64_t _id;
     const std::shared_ptr<std::atomic<bool>> _alive = std::make_shared<std::atomic<bool>>(true);
   };
+
+  // out of the class: an in-class initializer would read T::kName before T is complete (MSVC)
+  template <typename T>
+  AliveCounter NativeObject<T>::_counter{T::kName};
 
 } // namespace python_webrtc
 

@@ -40,9 +40,6 @@ namespace python_webrtc {
     explicit RTCRtpSender(std::shared_ptr<PeerConnectionFactory> factory,
                           webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender);
 
-    RTCRtpSender(const RTCRtpSender &) = delete;
-    RTCRtpSender &operator=(const RTCRtpSender &) = delete;
-
     static void Init(pybind11::module &m);
 
     static Registry<RTCRtpSender, webrtc::RtpSenderInterface> &registry();

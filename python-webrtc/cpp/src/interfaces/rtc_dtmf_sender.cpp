@@ -42,8 +42,8 @@ namespace python_webrtc {
         .def("_checkCanSend", &RTCDTMFSender::CheckCanSend, nogil())
         .def("insertDTMF", &RTCDTMFSender::InsertDtmf, nogil(), pybind11::arg("tones"), pybind11::arg("duration"),
              pybind11::arg("interToneGap"))
-        .def("_surfaceBuffer", &RTCDTMFSender::SurfaceBuffer, nogil(), pybind11::arg("tone"), pybind11::arg("buffer"),
-             pybind11::arg("insertion"))
+        .def("_surfaceBuffer", &RTCDTMFSender::SurfaceBuffer, nogil(), pybind11::arg("buffer"),
+             pybind11::arg("insertion"), pybind11::arg("ended"))
         .def_property_readonly("_playing", nogil_fn(&RTCDTMFSender::GetPlaying));
   }
 
@@ -116,12 +116,12 @@ namespace python_webrtc {
     return _dtmf->tones();
   }
 
-  void RTCDTMFSender::SurfaceBuffer(const std::string &tone, const std::string &buffer, uint64_t insertion) {
+  void RTCDTMFSender::SurfaceBuffer(const std::string &buffer, uint64_t insertion, bool ended) {
     const std::scoped_lock lock(_bufferMutex);
     // a tone played before the last insertDTMF() doesn't change what it set
     if (insertion == _insertions) {
       _surfacedBuffer = buffer;
-      if (tone.empty()) {
+      if (ended) {
         _playing = false;
       }
     }

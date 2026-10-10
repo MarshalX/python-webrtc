@@ -43,7 +43,7 @@ class RTCDTMFSender(
     def _on_event(self, name: str, *args: object) -> None:
         tone, tone_buffer, insertion = cast('tuple[str, str, int]', args)
         # the buffer shrinks with each event; the empty tone ends playout
-        self._native_obj._surfaceBuffer(tone, tone_buffer, insertion)
+        self._native_obj._surfaceBuffer(tone_buffer, insertion, ended=tone == '')
 
     @override
     def _activity(self) -> str | None:

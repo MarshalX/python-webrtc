@@ -158,11 +158,12 @@ class LoopState:
             attributes = None
         if attributes is not None:
             state: LoopState | None = attributes.get(_ATTRIBUTE)
-            if state is None:
-                _sweep()
-                # atomic: racing threads keep the same state
-                state = attributes.setdefault(_ATTRIBUTE, cls(loop))
-            return state
+            if state is not None:
+                return state
+            _sweep()
+            # atomic: racing threads keep the same state
+            shared: LoopState = attributes.setdefault(_ATTRIBUTE, cls(loop))
+            return shared
         key = id(loop)
         with _states_lock:
             state = _held_states.get(key)
@@ -276,8 +277,7 @@ class LoopState:
     def _item(self, record: _Record) -> _Item | None:
         name, token, failed, args = record
         if name is not None:
-            event_args = args if args is not None else ()
-            run = functools.partial(self._dispatch_event, event_args[0], name, event_args[1:])
+            run = functools.partial(self._dispatch_event, name, args if args is not None else ())
             return _Item(run, resumes=False, after_ready=False)
         with self._lock:
             marker = self._markers.pop(token, None)
@@ -289,8 +289,9 @@ class LoopState:
         run = functools.partial(self._settle_call, call, args, failed=failed)
         return _Item(run, resumes=True, after_ready=True)
 
-    def _dispatch_event(self, native: object, name: str, args: tuple[object, ...]) -> None:
-        """Delivers an event record to its native object's wrapper, recreating a dead one."""
+    def _dispatch_event(self, name: str, args: tuple[object, ...]) -> None:
+        """Delivers an event record, its native object first, to that object's wrapper, recreating a dead one."""
+        native, args = args[0], args[1:]
         wrapper = lifetime.find(cast('lifetime.Native', native))
         created = wrapper is None
         target = (wrapper if wrapper is not None else lifetime.wrapper_of(cast('lifetime.Native', native)))._target()

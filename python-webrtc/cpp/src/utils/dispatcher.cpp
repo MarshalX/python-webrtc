@@ -139,6 +139,7 @@ namespace python_webrtc {
   Dispatcher::PythonEntry::PythonEntry() {
     // counted before the check: StopAtExit sees the entry or the entry sees the exit
     Entries()++;
+    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer): an initializer would check before counting
     _entered = !Instance()._exiting || std::this_thread::get_id() == ExitThread();
   }
 
@@ -234,6 +235,7 @@ namespace python_webrtc {
     _left.notify_all();
   }
 
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static): uses _view on 3.15
   void Dispatcher::EnterPython(const std::function<void()> &function) {
 #if PY_VERSION_HEX >= 0x030F0000
     // PEP 788: fails instead of hanging or ending the thread

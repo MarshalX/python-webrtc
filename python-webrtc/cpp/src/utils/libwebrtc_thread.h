@@ -23,7 +23,7 @@
 #define WRTC_SANITIZED
 #endif
 #endif
-#if defined(__SANITIZE_THREAD__)
+#ifdef __SANITIZE_THREAD__
 #define WRTC_THREAD_SANITIZED
 #elif defined(__has_feature)
 #if __has_feature(thread_sanitizer)

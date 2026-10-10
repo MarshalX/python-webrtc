@@ -95,7 +95,7 @@ namespace python_webrtc {
   // on the class, not the pybind base: a base method costs a derived-to-base cast per call
   template <typename Class>
   Class DefineBinding(Class cls) {
-    using T = typename Class::type;
+    using T = Class::type;
     cls.def(
            "_bind", [](T &self, std::shared_ptr<Mailbox> mailbox) { return self.Bind(std::move(mailbox)); },
            pybind11::arg("mailbox"))
@@ -108,7 +108,7 @@ namespace python_webrtc {
   class Emitter : public Binding {
   protected:
     template <typename... Args>
-    void Emit(const char *name, Args... args) {
+    void Emit(const char *name, const Args &...args) {
       CheckNativeThreadDetached("Emitter::Emit");
       if (!IsBound()) {
         return;
@@ -122,6 +122,11 @@ namespace python_webrtc {
                     return pybind11::make_tuple(self, args...);
                   }});
     }
+
+  private:
+    friend T;
+
+    Emitter() = default;
   };
 
   class Completion {
@@ -136,7 +141,7 @@ namespace python_webrtc {
     Completion &operator=(const Completion &) = delete;
 
     template <typename... Args>
-    void Succeed(Args... result) {
+    void Succeed(const Args &...result) {
       Settle(false, [result...]() { return pybind11::make_tuple(result...); });
     }
 

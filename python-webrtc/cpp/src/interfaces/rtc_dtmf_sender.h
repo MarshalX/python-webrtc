@@ -59,8 +59,8 @@ namespace python_webrtc {
     // the tones not played yet, as Python sees them: set by insertDTMF(), shortened along with tonechange events
     std::string GetToneBuffer();
 
-    // the buffer a delivered tonechange event left, if no insertDTMF() came after the tone
-    void SurfaceBuffer(const std::string &tone, const std::string &buffer, uint64_t insertion);
+    // the buffer a delivered tonechange event left, if no insertDTMF() came after the tone; ended by the empty tone
+    void SurfaceBuffer(const std::string &buffer, uint64_t insertion, bool ended);
 
     bool GetPlaying();
 

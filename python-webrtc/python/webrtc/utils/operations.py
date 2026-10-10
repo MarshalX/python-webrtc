@@ -23,6 +23,8 @@ import contextlib
 import threading
 from typing import TYPE_CHECKING, Callable
 
+from webrtc.utils.loops import LoopState
+
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
@@ -71,8 +73,7 @@ class OperationsChain:
             self._last = done
         try:
             if previous is not None and not previous.done():
-                # shielded: cancelling this operation must not cancel the end of the previous one
-                await asyncio.shield(asyncio.wrap_future(previous))
+                await _on_running_loop(previous)
             try:
                 yield
             except Exception:
@@ -97,6 +98,20 @@ class OperationsChain:
             done.set_result(None)
             if self._last is done:
                 self._on_empty()
+
+
+def _on_running_loop(future: concurrent.futures.Future[None]) -> asyncio.Future[None]:
+    """A future of the running loop that the future's end resolves; cancelling it leaves the future be."""
+    waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+    state = LoopState.of(waiter.get_loop())
+
+    def resolve() -> None:
+        if not waiter.done():
+            waiter.set_result(None)
+
+    # through the loop's mailbox, which drops it once the loop is closed
+    future.add_done_callback(lambda _: state.post(resolve, resumes=True, after_ready=True))
+    return waiter
 
 
 async def later() -> None:
