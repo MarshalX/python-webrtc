@@ -19,6 +19,8 @@ import webrtc
 from tests.helpers import connect, stats_of_type, wait_for_event, wait_until, wait_until_unmuted
 from webrtc.models import rtc_stats
 
+ICE_TYPES = {'candidate-pair', 'local-candidate', 'remote-candidate'}
+
 
 async def send_audio(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, stream: webrtc.MediaStream
@@ -32,6 +34,11 @@ async def send_audio(
     remote = event.track
     await wait_until_unmuted(remote)
     return remote
+
+
+def ice_free_ids(report: webrtc.RTCStatsReport) -> set[str]:
+    """The ids of the stats in a report, but of its candidate pair and candidates."""
+    return {stats.id for stats in report.values() if stats.type not in ICE_TYPES}
 
 
 @pytest.mark.asyncio
@@ -74,7 +81,10 @@ async def test_sender_stats(
     assert len(stats_of_type(sender_report, 'outbound-rtp')) > 0
     assert len(stats_of_type(sender_report, 'inbound-rtp')) == 0
     track_report = await caller.get_stats(audio_stream.get_tracks()[0])
-    assert set(track_report.keys()) == set(sender_report.keys())
+    assert ice_free_ids(track_report) == ice_free_ids(sender_report)
+    # ICE may still switch the selected pair between the two reports
+    assert len(stats_of_type(track_report, 'candidate-pair')) == 1
+    assert len(stats_of_type(sender_report, 'candidate-pair')) == 1
 
 
 @pytest.mark.asyncio
