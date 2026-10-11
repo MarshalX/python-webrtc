@@ -45,13 +45,6 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: uv build --sdist
       - uses: actions/upload-artifact@v7
-        id: upload
-        continue-on-error: true
-        with:
-          name: sdist
-          path: dist/*.tar.gz
-      - uses: actions/upload-artifact@v7
-        if: steps.upload.outcome == 'failure'
         with:
           name: sdist
           path: dist/*.tar.gz
@@ -64,14 +57,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-latest]
-        # PRs: oldest and newest only, with and without the GIL
-        python: ${{ fromJSON(github.event_name == 'pull_request' && '["cp39","cp315","cp315t"]' || '["cp39","cp310","cp311","cp312","cp313","cp314","cp314t","cp315","cp315t"]') }}
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest]
+        # PRs and main: oldest and newest only, with and without the GIL; all of them for tags, Fridays and by hand
+        python: ${{ fromJSON((startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["cp39","cp310","cp311","cp312","cp313","cp314","cp314t","cp315","cp315t"]' || '["cp39","cp315","cp315t"]') }}
     env:
       WRTC_CACHE_DIR: ${{ github.workspace }}/.wrtc-cache
       WRTC_ARCHIVE_DIR: ${{ matrix.os == 'windows-latest' && format('{0}/.wrtc-cache/archives', github.workspace) || '' }}
       UV_HTTP_RETRIES: 10
       CIBW_ENVIRONMENT_PASS_LINUX: UV_HTTP_RETRIES
+      # not on main and tags
+      CIBW_TEST_COMMAND: ${{ github.event_name != 'push' && endsWith(matrix.python, 't') && 'pytest {project}/tests && pytest {project}/tests --gc-on-emit' || 'pytest {project}/tests' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -103,20 +98,55 @@ jobs:
         with:
           package-dir: ${{ env.SDIST }}
       - uses: actions/upload-artifact@v7
-        id: upload
-        continue-on-error: true
-        with:
-          name: wheels-${{ matrix.os }}-${{ matrix.python }}
-          path: wheelhouse/*.whl
-      - uses: actions/upload-artifact@v7
-        if: steps.upload.outcome == 'failure'
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.python }}
           path: wheelhouse/*.whl
           overwrite: true
 
+  # macOS has 5 concurrent jobs for the whole account: one job builds several wheels and tests them at once
+  wheels-macos:
+    name: wheels (${{ matrix.os }}, ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15-intel, macos-15]
+        # as many as the 3 cores of macos-15
+        python: ${{ fromJSON((startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["cp39 cp310 cp311","cp312 cp313 cp314","cp314t cp315 cp315t"]' || '["cp39 cp315 cp315t"]') }}
+    env:
+      WRTC_CACHE_DIR: ${{ github.workspace }}/.wrtc-cache
+      UV_HTTP_RETRIES: 10
+      CIBW_TEST_SKIP: "*"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: .ci-src
+      - uses: astral-sh/setup-uv@v7
+      - name: Build sdist
+        run: |
+          uv build --sdist --out-dir sdist .ci-src
+          echo "SDIST=$(ls sdist/*.tar.gz)" >> "$GITHUB_ENV"
+          python="${{ matrix.python }}"
+          echo "CIBW_BUILD=$(printf '%s-* ' $python)" >> "$GITHUB_ENV"
+          echo "LABEL=${python// /-}" >> "$GITHUB_ENV"
+      - uses: actions/cache@v6
+        with:
+          path: .wrtc-cache
+          key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.ci-src/cmake/libwebrtc.cmake', '.ci-src/cmake/libcxx/*.sha256', '.ci-src/cmake/openh264.*') }}
+      - uses: pypa/cibuildwheel@v4.2.1
+        with:
+          package-dir: ${{ env.SDIST }}
+      - run: bash .ci-src/.github/scripts/test-wheels.sh "$SDIST" wheelhouse ${{ github.event_name != 'push' && '--gc-on-emit' || '' }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}-${{ env.LABEL }}
+          path: wheelhouse/*.whl
+          overwrite: true
+
   sanitizers:
     name: sanitizers (ASan + UBSan, ${{ matrix.arch }})
+    if: github.event_name != 'push'
     runs-on: ${{ matrix.runner }}
     container: quay.io/pypa/manylinux_2_28_${{ matrix.arch }}
     timeout-minutes: 60
@@ -143,6 +173,7 @@ jobs:
 
   sanitizers-macos:
     name: sanitizers (ASan + UBSan, macOS)
+    if: github.event_name != 'push'
     runs-on: macos-15
     timeout-minutes: 60
     env:
@@ -159,7 +190,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [lint, sdist, wheels, sanitizers, sanitizers-macos]
+    needs: [lint, sdist, wheels, wheels-macos]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
