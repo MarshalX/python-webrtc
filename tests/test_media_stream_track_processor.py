@@ -93,8 +93,10 @@ async def test_wakeup_sent_before_the_listeners_is_not_lost(
     attach = webrtc.MediaStreamTrackProcessor._attach
 
     def attach_once_media_came(processor: webrtc.MediaStreamTrackProcessor) -> bool:
-        deadline = time.monotonic() + 5
-        while processor._native_obj.totalFrames == 0 and time.monotonic() < deadline:
+        deadline = time.monotonic() + 10
+        while processor._native_obj.totalFrames == 0:
+            # binding without media first would test nothing
+            assert time.monotonic() < deadline, 'no media came before binding'
             time.sleep(0.01)
         return attach(processor)
 

@@ -342,10 +342,10 @@ def _alive_once_dispatched() -> tuple[dict[str, int], int]:
 
 
 def settled_alive(released: Callable[[dict[str, int], int], bool] | None = None) -> tuple[dict[str, int], int]:
-    """Native object and factory counts, polled until ``released`` (or two equal readings) or the timeout."""
+    """Native object and factory counts, polled until ``released`` (or two equal readings) or a stall in releases."""
     collect()
     alive, factories = _alive_once_dispatched()
-    deadline = time.monotonic() + SETTLE_TIMEOUT
+    deadline, fewest = time.monotonic() + SETTLE_TIMEOUT, sum(alive.values()) + factories
     while not (released is not None and released(alive, factories)) and time.monotonic() < deadline:
         time.sleep(SETTLE_INTERVAL)
         gc.collect()
@@ -354,6 +354,9 @@ def settled_alive(released: Callable[[dict[str, int], int], bool] | None = None)
         if released is None and current == (alive, factories):
             break
         alive, factories = current
+        # a slow release goes on; a leak stays flat
+        if (total := sum(alive.values()) + factories) < fewest:
+            deadline, fewest = time.monotonic() + SETTLE_TIMEOUT, total
     return alive, factories
 
 

@@ -112,13 +112,16 @@ async def kept(dropped: Sequence[Tracked], base: Alive) -> bool:
 
 
 async def collected(dropped: Sequence[Tracked]) -> bool:
-    """Whether the wrappers die within the settle wait."""
+    """Whether the wrappers die, unless nothing native was released for the settle wait."""
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + SETTLE_TIMEOUT
+    deadline, fewest = loop.time() + SETTLE_TIMEOUT, sum(wrtc._alive().values())
     while True:
         collect()
         if dead(dropped):
             return True
+        # a slow release goes on; a leak stays flat
+        if (total := sum(wrtc._alive().values())) < fewest:
+            deadline, fewest = loop.time() + SETTLE_TIMEOUT, total
         if loop.time() > deadline:
             return False
         await asyncio.sleep(SETTLE_INTERVAL)
