@@ -2,7 +2,7 @@
 
 ## Version 0.0.1
 
-**11.10.2026**
+**12.10.2026**
 
 **🔌 The whole WebRTC API is bound. Every interface, every method, every dictionary: all 154 binding issues of the [tracker](https://github.com/users/MarshalX/projects/1/views/1) are done, and the API goes beyond them**
 

@@ -156,6 +156,16 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: .github/scripts/sanitizers-macos.sh ${{ matrix.args }}
 
+  # branch protection check
+  ci:
+    if: always()
+    needs: [lint, sdist, wheels, sanitizers, sanitizers-macos]
+    runs-on: ubuntu-latest
+    steps:
+      # a skipped job passes: the sanitizers on tags
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [lint, sdist, wheels]
