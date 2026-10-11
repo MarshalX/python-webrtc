@@ -98,7 +98,7 @@ too. Enums compare equal to the strings of the specification, and dictionaries a
 
 ## Supported platforms
 
-Pre-built wheels for CPython 3.9 to 3.14 on:
+Pre-built wheels for CPython 3.9 to 3.15, and free-threaded 3.14t and 3.15t, on:
 
 | Linux                                       | macOS                        | Windows |
 |---------------------------------------------|------------------------------|---------|

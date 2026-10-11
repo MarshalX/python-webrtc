@@ -59,7 +59,7 @@ if __name__ == '__main__':
 
 #### Pre-built wheels
 
-Python 3.9 – 3.14 (CPython) on:
+Python 3.9 – 3.15 (CPython), free-threaded 3.14t and 3.15t too, on:
 
 | Linux                                       | macOS                        | Windows |
 |---------------------------------------------|------------------------------|---------|
