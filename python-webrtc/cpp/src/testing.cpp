@@ -242,9 +242,9 @@ namespace python_webrtc {
         []() {
           const auto factory = PeerConnectionFactory::GetOrCreateDefault();
           // in order: what these threads queued before is done, and its records posted, on return
-          factory->signalingThread()->BlockingCall([]() {});
-          factory->workerThread()->BlockingCall([]() {});
-          factory->signalingThread()->BlockingCall([]() {});
+          BlockingCallOn(factory->signalingThread(), []() {});
+          BlockingCallOn(factory->workerThread(), []() {});
+          BlockingCallOn(factory->signalingThread(), []() {});
         },
         nogil(), "Returns once the signaling, worker and signaling threads ran what they queued.");
     testing.def(

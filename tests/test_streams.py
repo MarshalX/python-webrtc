@@ -19,7 +19,7 @@ import pytest
 from typing_extensions import override
 
 import webrtc
-from tests.helpers import wait_until
+from tests.helpers import wait_progressing, wait_until
 from webrtc import streams
 
 if TYPE_CHECKING:
@@ -295,12 +295,14 @@ async def test_pipe_goes_on_when_nothing_references_it() -> None:
         return source.pipe_through(webrtc.TransformStream()).pipe_to(sink)
 
     done = start()
-    deadline = asyncio.get_running_loop().time() + 5
-    while not done.done() and asyncio.get_running_loop().time() < deadline:
+
+    def collect_and_wake() -> int:
         gc.collect()
         wake(waiting)
-        await asyncio.sleep(0.005)
-    await asyncio.wait_for(done, 1)
+        return len(written)
+
+    await wait_progressing(collect_and_wake, done.done, 'the pipe', stall=5)
+    await done
     assert written == list(range(50))
 
 
