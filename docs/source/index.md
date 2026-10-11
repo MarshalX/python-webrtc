@@ -1,38 +1,108 @@
 ---
 myst:
   html_meta:
-    "description": "Python WebRTC: bindings to the native WebRTC, with the API of the browsers"
+    "description": "Python WebRTC: Chrome's WebRTC engine, with the browser API, in Python"
 ---
 
 # Python WebRTC
 
-Bindings to the native WebRTC M152, with the API of the browsers: peer connections, data channels, media tracks
-and their frames, encoded transforms and stats, as the W3C specifications define them, in asyncio.
+**Chrome's WebRTC engine, with the browser API, in Python.**
 
-```python
-import asyncio
-import webrtc
-
-
-async def main():
-    pc = webrtc.RTCPeerConnection()
-    channel = pc.create_data_channel('chat')
-
-    offer = await pc.create_offer()
-    await pc.set_local_description(offer)
-    print(pc.local_description.sdp)
-
-
-asyncio.run(main())
-```
+Python WebRTC binds libwebrtc M152, the engine inside Chrome, and exposes it through the W3C APIs you already know
+from the browser: peer connections, data channels, tracks, WebCodecs frames, encoded transforms and stats, in
+asyncio. Talk to browsers, servers, SFUs and AI agents peer-to-peer, with no vendor service in between.
 
 ```bash
 pip install wrtc
 ```
 
-:::{warning}
-Under development. Until the 1.0.0 release, compatibility between versions is not guaranteed.
+## If you know it in JavaScript, you know it in Python
+
+::::{tab-set}
+
+:::{tab-item} Python
+:sync: python
+
+```python
+pc = webrtc.RTCPeerConnection()
+channel = pc.create_data_channel('chat')
+channel.on('open', lambda e: channel.send('Hello!'))
+channel.on('message', lambda e: print(e.data))
+pc.on('icecandidate', lambda e: signaling.send(e.candidate))
+
+offer = await pc.create_offer()
+await pc.set_local_description(offer)
+signaling.send(pc.local_description)
+```
 :::
+
+:::{tab-item} Browser
+:sync: js
+
+```js
+const pc = new RTCPeerConnection();
+const channel = pc.createDataChannel('chat');
+channel.onopen = () => channel.send('Hello!');
+channel.onmessage = (e) => console.log(e.data);
+pc.onicecandidate = (e) => signaling.send(e.candidate);
+
+const offer = await pc.createOffer();
+await pc.setLocalDescription(offer);
+signaling.send(pc.localDescription);
+```
+:::
+
+::::
+
+Names follow the specifications in snake_case (`create_offer`), and the camelCase originals (`createOffer`) work
+too. Enums compare equal to the strings of the specification, and dictionaries are typed dataclasses.
+
+:::{note}
+Pre-1.0: until the 1.0.0 release, compatibility between versions isn't guaranteed.
+:::
+
+## Why Python WebRTC
+
+::::{grid} 1 2 2 3
+:gutter: 3
+
+:::{grid-item-card} {octicon}`globe;1em;sd-mr-1` The real engine
+ICE, DTLS, SCTP, congestion control, jitter buffers and codecs are Chrome's own, so interop with browsers is the
+browsers' interop.
+:::
+
+:::{grid-item-card} {octicon}`code;1em;sd-mr-1` The browser API
+Written against the W3C specifications and tested with the web-platform-tests the browsers use.
+:::
+
+:::{grid-item-card} {octicon}`zap;1em;sd-mr-1` Native media path
+Packets, decoding and encoding never touch Python. You see frames, not packets.
+:::
+
+:::{grid-item-card} {octicon}`device-camera-video;1em;sd-mr-1` Every modern codec
+VP8, VP9, AV1, H.264 and Opus. Hardware H.264 through VideoToolbox on macOS. See [H.264](guides/h264.md).
+:::
+
+:::{grid-item-card} {octicon}`rocket;1em;sd-mr-1` Fast connection setup
+[WARP](guides/field-trials.md#warp): DTLS 1.3, SNAP and SPED cut round trips off every new connection.
+:::
+
+:::{grid-item-card} {octicon}`package;1em;sd-mr-1` pip install and go
+Prebuilt wheels for Linux, macOS and Windows, including free-threaded Python. Nothing else to install.
+:::
+
+::::
+
+## How it compares
+
+|                                                     | **Python WebRTC**    | aiortc         | LiveKit SDK               | GStreamer webrtcbin |
+|-----------------------------------------------------|----------------------|----------------|---------------------------|---------------------|
+| Engine                                              | libwebrtc (Chrome's) | own, in Python | libwebrtc                 | own, in C           |
+| Connects peer-to-peer to any WebRTC endpoint        | ✅                   | ✅             | ❌ needs a LiveKit server | ✅                  |
+| Browser API (`RTCPeerConnection`, `createOffer`, …) | ✅                   | similar        | ❌ rooms                  | ❌ GObject signals  |
+| Media path                                          | native               | Python         | native                    | native              |
+| VP9 and AV1                                         | ✅                   | ❌             | ✅                        | ✅                  |
+| `pip install` on Linux, macOS and Windows           | ✅                   | ✅             | ✅                        | ❌ system packages  |
 
 ## Where to start
 
@@ -92,9 +162,6 @@ What changed in each release.
   {obj}`~webrtc.MediaStreamTrackGenerator`, with the {obj}`~webrtc.VideoFrame` and {obj}`~webrtc.AudioData` of
   WebCodecs and WHATWG Streams.
 - **WebRTC Encoded Transform**: {obj}`~webrtc.RTCRtpScriptTransform` and end-to-end encryption with SFrame.
-
-Names follow the specifications in snake_case (`create_offer`), and the camelCase originals (`createOffer`) work
-too. Enums compare equal to the strings of the specification, and dictionaries are typed dataclasses.
 
 ## Supported platforms
 

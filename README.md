@@ -1,143 +1,151 @@
 <p align="center">
     <a href="https://github.com/MarshalX/python-webrtc">
-        <img src="https://github.com/MarshalX/python-webrtc/raw/main/.github/images/logo.png" alt="python-webrtc logo">
-    </a>
-    <br>
-    <b>A Python extension that provides bindings to WebRTC M152</b>
-    <br>
-    <a href="https://github.com/MarshalX/python-webrtc/tree/main/examples">
-        Examples
-    </a>
-    •
-    <a href="https://wrtc.marshal.dev/">
-        Documentation
-    </a>
-    •
-    <a href="https://pypi.org/project/wrtc/">
-        PyPI
+        <img src="https://github.com/MarshalX/python-webrtc/raw/main/.github/images/logo.png" alt="Python WebRTC logo">
     </a>
 </p>
 
-## Python WebRTC
+<h3 align="center">Chrome's WebRTC engine, with the browser API, in Python.</h3>
 
-> Let's use the native WebRTC with strict compatibility and fully implemented stuff!
+<p align="center">
+    <a href="https://wrtc.marshal.dev/">Documentation</a>
+    •
+    <a href="https://wrtc.marshal.dev/quickstart/">Quickstart</a>
+    •
+    <a href="https://github.com/MarshalX/python-webrtc/tree/main/examples">Examples</a>
+    •
+    <a href="https://pypi.org/project/wrtc/">PyPI</a>
+</p>
 
-This project follows the [W3C specification](https://w3c.github.io/webrtc-pc/) with some modifications and additions to make it work better with Python applications. Audio and video are read from tracks and written to them with the APIs of browsers: `MediaStreamTrackProcessor`, `VideoTrackGenerator` and `MediaStreamTrackGenerator`, with the `VideoFrame` and `AudioData` of WebCodecs.
+---
 
-## DISCLAIMER
+Python WebRTC binds **libwebrtc M152**, the engine inside Chrome, and exposes it through the **W3C APIs you
+already know from the browser**: `RTCPeerConnection`, data channels, tracks, WebCodecs frames, encoded transforms and
+stats. Talk to browsers, servers, SFUs and AI agents peer-to-peer, with no vendor service in between.
 
-This project is still under development and isn't ready for any serious use. In the current stage, it's possible to establish connection and work with audio, but many interfaces and methods not implemented yet.
-
-You can easily check status of methods and interfaces availability [here](https://github.com/users/MarshalX/projects/1/views/1).
-
-#### Snippet
-
-```python
-import asyncio
-import webrtc
-
-
-async def main():
-    pc = webrtc.RTCPeerConnection()
-
-    stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))
-    for track in stream.get_tracks():
-        pc.add_track(track, stream)
-
-    generator = webrtc.MediaStreamTrackGenerator('audio')
-    pc.add_track(generator)
-
-    local_sdp = await pc.create_offer()
-    print(local_sdp.sdp)
-
-
-if __name__ == '__main__':
-    asyncio.run(main())
+```bash
+pip install wrtc
 ```
 
-### Requirements
+## If you know it in JavaScript, you know it in Python
 
-#### Pre-built wheels
+<table>
+<tr><th>Browser</th><th>Python</th></tr>
+<tr>
+<td>
 
-Python 3.9 – 3.15 (CPython), free-threaded 3.14t and 3.15t too, on:
+```js
+const pc = new RTCPeerConnection();
+const channel = pc.createDataChannel('chat');
+channel.onopen = () => channel.send('Hello!');
+channel.onmessage = (e) => console.log(e.data);
+pc.onicecandidate = (e) => signaling.send(e.candidate);
+
+const offer = await pc.createOffer();
+await pc.setLocalDescription(offer);
+signaling.send(pc.localDescription);
+```
+
+</td>
+<td>
+
+```python
+pc = webrtc.RTCPeerConnection()
+channel = pc.create_data_channel('chat')
+channel.on('open', lambda e: channel.send('Hello!'))
+channel.on('message', lambda e: print(e.data))
+pc.on('icecandidate', lambda e: signaling.send(e.candidate))
+
+offer = await pc.create_offer()
+await pc.set_local_description(offer)
+signaling.send(pc.local_description)
+```
+
+</td>
+</tr>
+</table>
+
+Names follow the specifications in snake_case, and the camelCase originals (`createOffer`) work too. Enums compare
+equal to the strings of the specification, dictionaries are typed dataclasses, and everything is asyncio.
+
+## Highlights
+
+- 🌐 **The real engine.** ICE, DTLS, SCTP, congestion control, jitter buffers and codecs are Chrome's own, so
+  interop with browsers is the browsers' interop.
+- 🧩 **The browser API.** Written against the W3C specifications and tested with the
+  [web-platform-tests](https://github.com/web-platform-tests/wpt) the browsers use.
+- 🎞️ **Every modern codec.** VP8, VP9, AV1, H.264 and Opus. Hardware H.264 through VideoToolbox on macOS.
+- ⚡ **Native media path.** Packets, decoding and encoding never touch Python. You see frames, not packets.
+- 🖼️ **Frames in, frames out.** `MediaStreamTrackProcessor`, `VideoTrackGenerator` and `MediaStreamTrackGenerator`
+  with WebCodecs' `VideoFrame` and `AudioData`, piped through WHATWG Streams.
+- 🔐 **Encoded transforms.** `RTCRtpScriptTransform` and end-to-end encryption with SFrame.
+- 🚀 **Fast connection setup.** [WARP](https://wrtc.marshal.dev/guides/field-trials/#warp): DTLS 1.3, SNAP and
+  SPED cut round trips off every new connection.
+- 📦 **`pip install` and go.** Prebuilt wheels for Linux, macOS and Windows, CPython 3.9–3.15, including
+  free-threaded 3.14t and 3.15t. Nothing else to install.
+- 🏷️ **Typed.** Full type stubs, so your editor knows every interface, dictionary and event.
+
+## How it compares
+
+|                                                         | **Python WebRTC**    | aiortc            | LiveKit SDK                | GStreamer webrtcbin   |
+|---------------------------------------------------------|----------------------|-------------------|----------------------------|-----------------------|
+| Engine                                                  | libwebrtc (Chrome's) | own, in Python    | libwebrtc                  | own, in C             |
+| Connects peer-to-peer to any WebRTC endpoint            | ✅                    | ✅                 | ❌ needs a LiveKit server   | ✅                     |
+| Browser API (`RTCPeerConnection`, `createOffer`, …)     | ✅                    | similar           | ❌ rooms                    | ❌ GObject signals     |
+| Media path                                              | native               | Python            | native                     | native                |
+| VP9 and AV1                                             | ✅                    | ❌                 | ✅                          | ✅                     |
+| `pip install` on Linux, macOS and Windows               | ✅                    | ✅                 | ✅                          | ❌ system packages     |
+
+## Codecs
+
+|       | Linux and Windows                                                         | macOS                       |
+|-------|---------------------------------------------------------------------------|-----------------------------|
+| Video | VP8, VP9, AV1, H.264 with [OpenH264](https://wrtc.marshal.dev/guides/h264/) | VP8, VP9, AV1, H.264 with VideoToolbox |
+| Audio | Opus, G.722, G.711                                                        | Opus, G.722, G.711          |
+
+No H.264 implementation is built into the package. `webrtc.openh264.install()` downloads Cisco's binary on the
+user's device, under Cisco's patent license.
+
+## Platforms
+
+Prebuilt wheels for CPython 3.9–3.15, and free-threaded 3.14t and 3.15t, on:
 
 | Linux                                       | macOS                        | Windows |
 |---------------------------------------------|------------------------------|---------|
 | x86_64 and aarch64 (glibc 2.27+, manylinux) | 13+, Intel and Apple Silicon | x64     |
 
-#### Building from sources (sdist)
+Elsewhere pip builds it from sources with CMake and a C++20 compiler. See [CONTRIBUTING.md](https://github.com/MarshalX/python-webrtc/blob/main/CONTRIBUTING.md#building-from-sources-sdist).
 
-- CMake 3.26 or higher
-- A C++20 compiler: Clang on Linux (libwebrtc there is built against Chromium's libc++), Apple Clang on macOS, MSVC on Windows
-- ~150 MB of free disk space
+## Examples
 
-Nothing else has to be installed or configured manually: a prebuilt static libwebrtc for the target platform
-(from [libwebrtc-bin](https://github.com/crow-misia/libwebrtc-bin)) is downloaded once, verified and unpacked
-into a shared cache (`~/.cache/python-webrtc`, `%LOCALAPPDATA%\python-webrtc` on Windows or `$WRTC_CACHE_DIR`).
-Only the headers in use are extracted and debug info is stripped, so it takes ~60 MB per platform.
-Pass `-Ccmake.define.LIBWEBRTC_ROOT=/path/to/libwebrtc` to use your own libwebrtc build instead.
+Complete programs, ready to copy. The ones with dependencies declare them inline, so `uv run` needs nothing installed.
 
-### Installing
+- 🤖 [**Voice chat with OpenAI GPT-Live**](https://github.com/MarshalX/python-webrtc/blob/main/examples/openai_live.py): talk to the model through your microphone and
+  speakers. No server, just an API key.
+- 📺 [**Live stream in the terminal**](https://github.com/MarshalX/python-webrtc/blob/main/examples/janus_streaming.py): watch a public Janus stream as colored
+  characters, with the audio on your speakers.
+- 🔁 [**Echo peer**](https://github.com/MarshalX/python-webrtc/blob/main/examples/echo.py): send the received video back in grayscale.
+- 💾 [**Recorder**](https://github.com/MarshalX/python-webrtc/blob/main/examples/recorder.py): write received video and audio to files.
 
-Pre-built wheel:
-``` bash
-pip install wrtc
+```bash
+uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/janus_streaming.py
 ```
 
-Build from sources:
-``` bash
-pip install wrtc --no-binary wrtc
-```
+## Status
 
-### Development
+Pre-1.0: the API follows the specifications, but compatibility between versions isn't guaranteed until 1.0.0. See
+the [changelog](https://wrtc.marshal.dev/change_log/).
 
-Requires [uv](https://docs.astral.sh/uv/).
+## Getting help
 
-``` bash
-make dev     # editable install into .venv, C++ is rebuilt on import when changed
-make test    # run the test suite
-make lint    # ruff
-make stub    # regenerate type stubs of the native module
-make wheels  # build wheels for the current platform the same way CI does
-```
+- 📖 [Documentation](https://wrtc.marshal.dev/): quickstart, guides and the API reference.
+- 🐛 [Report a bug or request a feature](https://github.com/MarshalX/python-webrtc/issues/new).
+- 💬 [Ask a question](https://github.com/MarshalX/python-webrtc/discussions/new).
 
-#### Releasing
+## Contributing
 
-1. Bump `version` in `pyproject.toml` and run `uv lock`.
-2. Push a `v<version>` tag. CI builds the sdist and wheels for every platform and publishes them to PyPI.
+Contributions of any size are welcome. [CONTRIBUTING.md](https://github.com/MarshalX/python-webrtc/blob/main/CONTRIBUTING.md) covers the development setup, building from
+sources, releasing and updating libwebrtc.
 
-Publishing uses [trusted publishing](https://docs.pypi.org/trusted-publishers/): the PyPI project needs a
-trusted publisher for this repository's `ci.yml` workflow, and the repository a `pypi` environment. No tokens needed.
+## License
 
-#### Updating WebRTC
-
-The libwebrtc version and archive hashes are pinned in `cmake/libwebrtc.cmake`:
-
-1. Set `LIBWEBRTC_VERSION` to a [libwebrtc-bin release](https://github.com/crow-misia/libwebrtc-bin/releases)
-   and update the `LIBWEBRTC_SHA256_*` values (the release page lists a SHA256 digest per asset).
-2. Refresh the Linux libc++ pins as described in [`cmake/libcxx/README.md`](cmake/libcxx/README.md).
-3. Build and run the tests. On Linux, check whether `cmake/libwebrtc_linux_fixups.cpp` is still needed:
-   remove it and see whether the module imports (it is linked with `-z now`, so missing symbols fail on import).
-
-### Documentation
-
-The documentation is live at [wrtc.marshal.dev](https://wrtc.marshal.dev/).
-
-### Getting help
-
-You can get help in several ways:
-- Report bugs, request new features by [creating an issue](https://github.com/MarshalX/python-webrtc/issues/new).
-- Ask questions by [starting a discussion](https://github.com/MarshalX/python-webrtc/discussions/new).
-
-### Contributing
-
-Contributions of any sizes are welcome.
-
-### Special thanks to
-
-- [Authors](https://github.com/node-webrtc/node-webrtc/blob/develop/AUTHORS) of [node-webrtc](https://github.com/node-webrtc/node-webrtc).
-- Authors of [web-platform-tests](https://github.com/web-platform-tests/wpt).
-
-### License
-
-The `python-webrtc` is published under the [BSD 3-Clause License](LICENSE.md).
+Python WebRTC is published under the [BSD 3-Clause License](https://github.com/MarshalX/python-webrtc/blob/main/LICENSE.md).
