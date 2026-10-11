@@ -65,6 +65,7 @@ namespace python_webrtc {
     DefineBinding(pybind11::class_<MediaStreamTrack, Binding, std::shared_ptr<MediaStreamTrack>>(m, "MediaStreamTrack"))
         .def_property_readonly("_id", &MediaStreamTrack::Id)
         .def_property_readonly("_remote", nogil_fn(&MediaStreamTrack::IsRemote))
+        .def_property_readonly("_stopped", &MediaStreamTrack::IsStopped)
         .def_property("enabled", nogil_fn(&MediaStreamTrack::GetEnabled), nogil_fn(&MediaStreamTrack::SetEnabled))
         .def_property_readonly("id", nogil_fn(&MediaStreamTrack::GetId))
         .def_property_readonly("label", nogil_fn(&MediaStreamTrack::GetLabel))
@@ -207,6 +208,10 @@ namespace python_webrtc {
     _heldEnded.Release();
   }
 
+  bool MediaStreamTrack::IsStopped() const {
+    return _stopped;
+  }
+
   void MediaStreamTrack::SurfaceEnded() {
     _surfacedEnded.Reset();
     Unbind();
@@ -290,8 +295,8 @@ namespace python_webrtc {
         settings["frame_rate"] = frameRate;
         settings["device"] = "camera";
       }
-      if (video) {
-        // the frames themselves, rather than what the camera was asked for
+      if (video && !camera) {
+        // a camera reports its selected mode, as browsers do; other tracks what their frames measure
         settings["width"] = video->width;
         settings["height"] = video->height;
         if (video->frameRate) {

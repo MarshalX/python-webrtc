@@ -72,6 +72,14 @@ class State:
         with self.lock:
             return self.random.choice(pool) if len(pool) > 0 else None
 
+    def pick_sender(self) -> tuple[webrtc.RTCPeerConnection, webrtc.RTCRtpSender] | None:
+        """A connection and one of its senders, read once: another worker's close() empties them."""
+        pc = self.pick(self.connections)
+        if pc is None:
+            return None
+        senders = pc.get_senders()
+        return (pc, self.random.choice(senders)) if len(senders) > 0 else None
+
     def drop(self, pool: list[T]) -> None:
         with self.lock:
             if len(pool) > 0:
@@ -130,9 +138,10 @@ class ConnectionSteps(State):
             pc.add_track(track)
 
     async def remove_track(self) -> None:
-        pc = self.pick(self.connections)
-        if pc is not None and len(pc.get_senders()) > 0:
-            pc.remove_track(self.random.choice(pc.get_senders()))
+        picked = self.pick_sender()
+        if picked is not None:
+            pc, sender = picked
+            pc.remove_track(sender)
 
     async def add_transceiver(self) -> None:
         pc = self.pick(self.connections)
@@ -188,14 +197,14 @@ class ConnectionSteps(State):
             _ = pc.on(self.random.choice(names), self.handler())
 
     async def replace_track(self) -> None:
-        pc = self.pick(self.connections)
-        if pc is not None and len(pc.get_senders()) > 0:
-            await self.random.choice(pc.get_senders()).replace_track(self.pick([*self.tracks, None]))
+        picked = self.pick_sender()
+        if picked is not None:
+            await picked[1].replace_track(self.pick([*self.tracks, None]))
 
     async def set_parameters(self) -> None:
-        pc = self.pick(self.connections)
-        if pc is not None and len(pc.get_senders()) > 0:
-            sender = self.random.choice(pc.get_senders())
+        picked = self.pick_sender()
+        if picked is not None:
+            sender = picked[1]
             parameters = sender.get_parameters()
             for encoding in parameters.encodings:
                 encoding.active = self.random.random() < 0.8

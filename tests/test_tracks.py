@@ -61,6 +61,22 @@ async def test_stopped_transceiver_ends_the_track_with_its_event(pc: webrtc.RTCP
 
 
 @pytest.mark.asyncio
+async def test_stop_drops_a_queued_ended_event(pc: webrtc.RTCPeerConnection) -> None:
+    """A track stopped while its ended event is queued fires no event: stop() ended it first."""
+    transceiver = pc.add_transceiver(webrtc.MediaType.audio)
+    track = transceiver.receiver.track
+    calls: list[str] = []
+    track.on('ended', lambda event: calls.append(event.type))
+
+    transceiver.stop()
+    track.stop()
+    # its completion is drained after the queued event
+    _ = await pc.get_stats()
+    assert calls == []
+    assert track.ready_state == webrtc.MediaStreamTrackState.ended
+
+
+@pytest.mark.asyncio
 async def test_ended_track_is_not_kept_by_its_handlers(
     pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
 ) -> None:

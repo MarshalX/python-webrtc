@@ -134,13 +134,19 @@ async def sframe_call(
 
 
 async def settled(baseline: dict[str, int]) -> dict[str, int]:
-    """What's alive once back to the baseline, or after a while: cycles are collectable once helper threads let go."""
-    deadline = asyncio.get_running_loop().time() + 10
+    """What's alive once back to the baseline, or once nothing was released for a while: queued events go first."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 10
+    fewest = sum(wrtc._alive().values())
     while True:
         await asyncio.sleep(QUIET_PERIOD)
         collect()
         alive = wrtc._alive()
-        if alive == baseline or asyncio.get_running_loop().time() > deadline:
+        # a leak stays flat; a backlog of events, each with its frame, shrinks (a sleep may outlast the deadline)
+        if sum(alive.values()) < fewest:
+            fewest = sum(alive.values())
+            deadline = loop.time() + 10
+        if alive == baseline or loop.time() > deadline:
             return alive
 
 

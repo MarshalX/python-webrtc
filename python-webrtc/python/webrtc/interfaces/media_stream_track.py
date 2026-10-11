@@ -344,8 +344,8 @@ class MediaStreamTrack(
 
     @override
     def _open(self) -> bool:
-        # webrtc-pc close() ends remote tracks with their event, unbinding them
-        return True
+        # webrtc-pc close() ends remote tracks with their event; stop() with none, not even a queued one
+        return not self._native_obj._stopped
 
     @override
     def _activity(self) -> str | None:

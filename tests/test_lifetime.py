@@ -319,7 +319,14 @@ def test_states_show_the_engine_once_their_loop_is_gone() -> None:
     finally:
         wrtc._testing.release('dispatcher.wake')
     # the closing records were dropped with the loop
-    asyncio.run(wait_until(lambda: channel.ready_state == webrtc.RTCDataChannelState.closed, 'the channel to close'))
+    try:
+        asyncio.run(
+            wait_until(lambda: channel.ready_state == webrtc.RTCDataChannelState.closed, 'the channel to close')
+        )
+    except TimeoutError as e:
+        native = channel._native_obj
+        msg = f'{e}: {channel.ready_state=} {native._bound=} {native._orphaned=} {caller.connection_state=}'
+        raise TimeoutError(msg) from e
     caller.close()
     callee.close()
 

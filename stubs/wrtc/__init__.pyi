@@ -353,6 +353,9 @@ class MediaStreamTrack(Binding):
     @property
     def _remote(self) -> bool:
         ...
+    @property
+    def _stopped(self) -> bool:
+        ...
     _constraints: str | None
     contentHint: str
     enabled: bool

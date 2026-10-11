@@ -90,6 +90,8 @@ namespace python_webrtc {
 
     bool IsRemote();
 
+    bool IsStopped() const;
+
     void SetMuted(bool muted);
 
     // see Surfaced
