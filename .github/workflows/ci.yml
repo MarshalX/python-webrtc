@@ -57,7 +57,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-latest]
         # PRs and main: oldest and newest only, with and without the GIL; all of them for tags, Fridays and by hand
         python: ${{ fromJSON((startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["cp39","cp310","cp311","cp312","cp313","cp314","cp314t","cp315","cp315t"]' || '["cp39","cp315","cp315t"]') }}
     env:
@@ -103,49 +103,8 @@ jobs:
           path: wheelhouse/*.whl
           overwrite: true
 
-  # macOS has 5 concurrent jobs for the whole account: one job builds several wheels and tests them at once
-  wheels-macos:
-    name: wheels (${{ matrix.os }}, ${{ matrix.python }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-15-intel, macos-15]
-        # as many as the 3 cores of macos-15
-        python: ${{ fromJSON((startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["cp39 cp310 cp311","cp312 cp313 cp314","cp314t cp315 cp315t"]' || '["cp39 cp315 cp315t"]') }}
-    env:
-      WRTC_CACHE_DIR: ${{ github.workspace }}/.wrtc-cache
-      UV_HTTP_RETRIES: 10
-      CIBW_TEST_SKIP: "*"
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: .ci-src
-      - uses: astral-sh/setup-uv@v7
-      - name: Build sdist
-        run: |
-          uv build --sdist --out-dir sdist .ci-src
-          echo "SDIST=$(ls sdist/*.tar.gz)" >> "$GITHUB_ENV"
-          python="${{ matrix.python }}"
-          echo "CIBW_BUILD=$(printf '%s-* ' $python)" >> "$GITHUB_ENV"
-          echo "LABEL=${python// /-}" >> "$GITHUB_ENV"
-      - uses: actions/cache@v6
-        with:
-          path: .wrtc-cache
-          key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.ci-src/cmake/libwebrtc.cmake', '.ci-src/cmake/libcxx/*.sha256', '.ci-src/cmake/openh264.*') }}
-      - uses: pypa/cibuildwheel@v4.2.1
-        with:
-          package-dir: ${{ env.SDIST }}
-      - run: bash .ci-src/.github/scripts/test-wheels.sh "$SDIST" wheelhouse ${{ github.event_name != 'push' && '--gc-on-emit' || '' }}
-      - uses: actions/upload-artifact@v7
-        with:
-          name: wheels-${{ matrix.os }}-${{ env.LABEL }}
-          path: wheelhouse/*.whl
-          overwrite: true
-
   sanitizers:
-    name: sanitizers (ASan + UBSan, ${{ matrix.arch }})
+    name: sanitizers (ASan + UBSan, ${{ matrix.arch }}, ${{ matrix.pass }})
     if: github.event_name != 'push'
     runs-on: ${{ matrix.runner }}
     container: quay.io/pypa/manylinux_2_28_${{ matrix.arch }}
@@ -153,10 +112,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        arch: [x86_64, aarch64]
+        pass: [plain, gc-on-emit, stress]
         include:
           - { arch: x86_64, runner: ubuntu-latest }
           # also covers the libc++ built from source for arm64
           - { arch: aarch64, runner: ubuntu-24.04-arm }
+          - { pass: plain, args: "" }
+          - { pass: gc-on-emit, args: --gc-on-emit }
+          - { pass: stress, args: --stress -k "stress or chaos" }
     steps:
       - uses: actions/checkout@v7
       # github.workspace is the host's path
@@ -165,17 +129,19 @@ jobs:
         with:
           path: .wrtc-cache
           key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/libwebrtc.cmake', 'cmake/libcxx/*.sha256', 'cmake/openh264.*') }}
-      - run: .github/scripts/sanitizers.sh
-      # the collector running on libwebrtc threads, whenever they emit (see tests/conftest.py)
-      - run: .github/scripts/sanitizers.sh --gc-on-emit
-      # long random sequences of calls (tests/chaos.py)
-      - run: .github/scripts/sanitizers.sh --stress -k "stress or chaos"
+      - run: .github/scripts/sanitizers.sh ${{ matrix.args }}
 
   sanitizers-macos:
-    name: sanitizers (ASan + UBSan, macOS)
+    name: sanitizers (ASan + UBSan, macOS, ${{ matrix.pass }})
     if: github.event_name != 'push'
     runs-on: macos-15
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { pass: plain, args: "" }
+          - { pass: gc-on-emit, args: --gc-on-emit }
     env:
       WRTC_CACHE_DIR: ${{ github.workspace }}/.wrtc-cache
     steps:
@@ -185,12 +151,11 @@ jobs:
           path: .wrtc-cache
           key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/libwebrtc.cmake', 'cmake/libcxx/*.sha256', 'cmake/openh264.*') }}
       - uses: astral-sh/setup-uv@v7
-      - run: .github/scripts/sanitizers-macos.sh
-      - run: .github/scripts/sanitizers-macos.sh --gc-on-emit
+      - run: .github/scripts/sanitizers-macos.sh ${{ matrix.args }}
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [lint, sdist, wheels, wheels-macos]
+    needs: [lint, sdist, wheels]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
