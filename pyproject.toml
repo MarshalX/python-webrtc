@@ -99,7 +99,7 @@ build-frontend = "build[uv]"
 # dev builds stay per file to catch missing includes
 config-settings = { "cmake.define.CMAKE_UNITY_BUILD" = "ON" }
 test-groups = ["test"]
-# CI adds --gc-on-emit for free-threaded builds on PRs (.github/workflows/ci.yml)
+# CI adds --gc-on-emit on PRs (.github/workflows/ci.yml)
 test-command = "pytest {project}/tests"
 
 [tool.cibuildwheel.linux]

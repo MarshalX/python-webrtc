@@ -68,8 +68,8 @@ jobs:
       WRTC_ARCHIVE_DIR: ${{ matrix.os == 'windows-latest' && format('{0}/.wrtc-cache/archives', github.workspace) || '' }}
       UV_HTTP_RETRIES: 10
       CIBW_ENVIRONMENT_PASS_LINUX: UV_HTTP_RETRIES
-      # not on main and tags
-      CIBW_TEST_COMMAND: ${{ github.event_name != 'push' && endsWith(matrix.python, 't') && 'pytest {project}/tests && pytest {project}/tests --gc-on-emit' || 'pytest {project}/tests' }}
+      # --gc-on-emit not on main and tags
+      CIBW_TEST_COMMAND: ${{ github.event_name != 'push' && 'pytest {project}/tests && pytest {project}/tests --gc-on-emit' || 'pytest {project}/tests' }}
     steps:
       - uses: actions/checkout@v7
         with:
