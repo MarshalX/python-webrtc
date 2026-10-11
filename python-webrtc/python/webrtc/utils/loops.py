@@ -61,6 +61,8 @@ class _Call(NamedTuple):
 _states: weakref.WeakValueDictionary[int, LoopState] = weakref.WeakValueDictionary()
 # re-entrant: gc sweeps at any allocation, even under this lock
 _states_lock = threading.RLock()
+# a leaf lock: held over int arithmetic only, which never runs gc
+_counts_lock = threading.Lock()
 
 
 @contextlib.contextmanager
@@ -108,17 +110,13 @@ def check_bound(target: EventTarget[Never]) -> None:
         return
     loop = _current_loop()
     roots = LoopState.of(loop) if loop is not None and not loop.is_closed() else None
-    generation = roots.generation if roots is not None else 0
-    if roots is not None and roots.changes > 0:
+    generation = roots.settled_generation() if roots is not None else 0
+    if generation is None:
         # another thread is mid-change, like rebinding it
         return
     msg = _unbound(target)
-    if msg is None:
+    if msg is None or (roots is not None and not roots.settled(generation)):
         return
-    if roots is not None:
-        with roots._lock:
-            if roots.changes > 0 or roots.generation != generation:
-                return
     record_mismatch(msg)
     raise AssertionError(msg)
 
@@ -424,7 +422,8 @@ class LoopState:
             for each, reason in reasons:
                 if not self._store(each, reason, started):
                     return
-            self.generation += 1
+            with _counts_lock:
+                self.generation += 1
         if reasons[0][1] is None:
             # children may be rooted on other loops
             for other in _states_elsewhere(self._loop_ref()):
@@ -462,10 +461,10 @@ class LoopState:
     def _check_roots(self) -> None:
         """Asserts every object of the loop is rooted iff it's bound here and active, and is bound if it's active."""
         with self._lock:
-            if self.changes > 0:
+            generation = self.settled_generation()
+            if generation is None:
                 # another thread is mid-change
                 return
-            generation = self.generation
             rooted = set(self.active)
             targets = rooted | set(self.targets)
         # a racing change voids this check; the next one sees it
@@ -482,18 +481,27 @@ class LoopState:
                 rooting = 'rooted' if target in rooted else 'not rooted'
                 where = '' if binding is self else ' and bound elsewhere' if binding is not None else ' and unbound'
                 msgs.append(f'{type(target).__name__} is {rooting} with activity {reason!r}{where}')
-        with self._lock:
-            if self.generation != generation or self.changes > 0:
-                return
+        if not self.settled(generation):
+            return
         if len(msgs) > 0:
             record_mismatch(msgs[0])
             raise AssertionError(msgs[0])
 
     def changing(self, delta: int) -> None:
         """Counts an activity change another thread starts (1) or ends (-1)."""
-        with self._lock:
+        with _counts_lock:
             self.changes += delta
             self.generation += 1
+
+    def settled_generation(self) -> int | None:
+        """The root generation, or None while another thread is mid-change."""
+        with _counts_lock:
+            return self.generation if self.changes == 0 else None
+
+    def settled(self, generation: int) -> bool:
+        """Whether no root or activity changed since ``generation``."""
+        with _counts_lock:
+            return self.changes == 0 and self.generation == generation
 
     def release(self) -> None:
         """Drops records, pending calls, roots and handlers once the loop is closed or gone."""

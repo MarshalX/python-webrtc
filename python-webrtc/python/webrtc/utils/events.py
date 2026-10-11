@@ -189,10 +189,9 @@ def _check_handled(
         rooted = target in roots.active
     if rooted or target._activity() is not None:
         return
-    with roots._lock:
+    if not roots.settled(generation):
         # raced a change on another thread; the next check sees it settled
-        if roots.changes > 0 or roots.generation != generation:
-            return
+        return
     msg = (
         f'{type(target).__name__} is neither rooted nor active while {name!r} is handled by '
         f'{_handler_names(registrations)}'
