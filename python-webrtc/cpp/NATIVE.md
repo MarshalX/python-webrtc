@@ -100,8 +100,8 @@ Python decides what an unreferenced object's lifetime is, per event loop (`webrt
 alive while it can still fire an event that has a handler, following the WebRTC specifications (each class's
 `_activity()`). Only the bound loop roots an object, so whatever makes it active binds it first. A closed or
 collected loop releases what it kept: its mailbox closes and its queued records are dropped, pending operations are
-cancelled, and its handlers are removed. Its objects with handlers left on another loop are bound to that loop.
-Everything else is plain Python garbage.
+cancelled, a callback queued into it with `call_soon` runs its drop handler instead, and its handlers are removed.
+Its objects with handlers left on another loop are bound to that loop. Everything else is plain Python garbage.
 
 ## Debugging a hang
 

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import gc
 import inspect
 import pathlib
@@ -829,7 +830,9 @@ async def test_a_session_releases_every_native_object() -> None:
         callee.close()
 
     await session()
-    await asyncio.sleep(QUIET_PERIOD)
+    # the deadline only bounds a failing run: a slow machine releases later, not never
+    with contextlib.suppress(TimeoutError):
+        await wait_until(lambda: alive_objects() == baseline, 'every native object released', timeout=30)
 
     assert alive_objects() == baseline
 

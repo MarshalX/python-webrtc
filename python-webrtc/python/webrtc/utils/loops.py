@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import collections
 import contextlib
 import functools
 import gc
@@ -25,7 +26,7 @@ from webrtc.exceptions import InvalidStateError
 from webrtc.utils import lifetime
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterable
+    from collections.abc import Generator
 
     from typing_extensions import Concatenate, Never, ParamSpec
 
@@ -45,8 +46,6 @@ class _Item(NamedTuple):
     resumes: bool
     #: waits for the loop's ready callbacks
     after_ready: bool
-    #: runs instead when the loop closes first
-    dropped: Callable[[], object] | None = None
 
 
 class _Call(NamedTuple):
@@ -150,6 +149,8 @@ class LoopState:
         self._read_at: weakref.WeakKeyDictionary[EventTarget[Never], list[int]] = weakref.WeakKeyDictionary()
         self._passes = 0
         self._markers: dict[int, _Item] = {}
+        # drop handlers of call_soon callbacks not run yet, by key
+        self._soon: dict[int, Callable[[], object]] = {}
         self._next_key = 0
         # re-entrant, like _states_lock
         self._lock = threading.RLock()
@@ -229,31 +230,51 @@ class LoopState:
             self.pending[token] = _Call(future, weakref.ref(target) if target is not None else None)
         return token, future
 
-    def post(
-        self,
-        callback: Callable[[], object],
-        *,
-        resumes: bool = False,
-        after_ready: bool = False,
-        dropped: Callable[[], object] | None = None,
-    ) -> None:
-        """Schedules a callback in order with the native records (as in ``_Item``); it runs, or else ``dropped``."""
-        item = _Item(callback, resumes, after_ready, dropped)
+    def post(self, callback: Callable[[], object], *, resumes: bool = False, after_ready: bool = False) -> None:
+        """Schedules a callback in order with the native records (flags as in ``_Item``)."""
+        item = _Item(callback, resumes, after_ready)
         with self._lock:
             key = self._key()
             # after allocating: gc may have released the state under the lock
-            released = self._released
-            if not released:
-                self._markers[key] = item
-        if released:
-            if dropped is not None:
-                _ = dropped()
-            return
+            if self._released:
+                return
+            self._markers[key] = item
         self.mailbox.postMarker(key)
         self._schedule()
 
+    def call_soon(self, callback: Callable[[], object], *, dropped: Callable[[], object]) -> None:
+        """Runs a callback on the loop soon, from any thread, unordered with the native records.
+
+        If the loop is released first, ``dropped`` runs instead: exactly one of them runs.
+        """
+        with self._lock:
+            key = self._key()
+            released = self._released
+            if not released:
+                self._soon[key] = dropped
+        if released:
+            _ = dropped()
+            return
+
+        def run() -> None:
+            with self._lock:
+                # gone once released: its drop handler ran
+                if self._soon.pop(key, None) is None:
+                    return
+            _ = callback()
+
+        # closed or gone: the release runs the drop handler
+        loop = self._loop_ref()
+        if loop is None:
+            self.release()
+            return
+        try:
+            _ = loop.call_soon_threadsafe(run)
+        except RuntimeError:
+            self.release()
+
     def _key(self) -> int:
-        """Next marker or completion key; call under the lock."""
+        """Next marker, completion or ``call_soon`` key; call under the lock."""
         self._next_key += 1
         return self._next_key
 
@@ -388,9 +409,10 @@ class LoopState:
         """Whether the loop has ready callbacks other than timers, its own or this state's."""
         # CPython internals: other loops (e.g. uvloop) never report any
         loop = self._loop_ref()
-        ready: Iterable[object] | None = getattr(loop, '_ready', None)
-        # copied: call_soon_threadsafe appends concurrently
-        for handle in tuple(ready) if ready is not None else ():
+        ready: object = getattr(loop, '_ready', None)
+        # copy() is one call under the deque's lock; iterating it races call_soon_threadsafe's appends (free-threaded)
+        handles = cast('collections.deque[object]', ready).copy() if isinstance(ready, collections.deque) else ()
+        for handle in handles:
             owner = getattr(getattr(handle, '_callback', None), '__self__', None)
             if isinstance(handle, asyncio.TimerHandle) or owner is self or owner is loop:
                 continue
@@ -526,7 +548,8 @@ class LoopState:
             self._scheduled = False
             pending = self.pending
             self.pending = {}
-            items = [*self._markers.values(), *([self._held] if self._held is not None else [])]
+            dropped = list(self._soon.values())
+            self._soon.clear()
             self._markers.clear()
             self._held = None
             self.tasks.clear()
@@ -536,9 +559,8 @@ class LoopState:
         # outside the lock: native calls may never return once exit starts
         self.mailbox.close()
         if not sys.is_finalizing():
-            for item in items:
-                if item.dropped is not None:
-                    _ = item.dropped()
+            for drop in dropped:
+                _ = drop()
         loop = self._loop_ref()
         if loop is not None and not sys.is_finalizing():
             _let_go(loop, list(pending.values()), targets)

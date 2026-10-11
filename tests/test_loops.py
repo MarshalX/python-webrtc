@@ -520,6 +520,40 @@ def test_handlers_bind_an_object_bound_to_a_closed_loop_not_swept_yet() -> None:
         pc.close()
 
 
+def test_call_soon_runs_on_the_loop_from_another_thread() -> None:
+    """A callback scheduled from another thread runs on the loop's thread; its drop handler doesn't."""
+    ran: list[str] = []
+
+    async def schedule() -> None:
+        state = LoopState.of(asyncio.get_running_loop())
+        done = asyncio.Event()
+
+        def callback() -> None:
+            ran.append(threading.current_thread().name)
+            done.set()
+
+        loop_thread = threading.current_thread().name
+        _in_thread(lambda: state.call_soon(callback, dropped=lambda: ran.append('dropped')))
+        await asyncio.wait_for(done.wait(), TIMEOUT)
+        assert ran == [loop_thread]
+
+    asyncio.run(schedule())
+
+
+def test_call_soon_of_a_released_loop_runs_the_drop_handler_instead() -> None:
+    """A callback queued when its loop is released never runs; its drop handler runs once, a later one drops at once."""
+    loop = asyncio.new_event_loop()
+    state = LoopState.of(loop)
+    ran: list[str] = []
+    # queued in the loop, which never runs again
+    state.call_soon(lambda: ran.append('queued'), dropped=lambda: ran.append('queued dropped'))
+    loop.close()
+    state.release()
+    state.release()
+    state.call_soon(lambda: ran.append('late'), dropped=lambda: ran.append('late dropped'))
+    assert ran == ['queued dropped', 'late dropped']
+
+
 def test_update_roots_by_activity() -> None:
     loop = asyncio.new_event_loop()
     try:

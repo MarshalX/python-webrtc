@@ -104,10 +104,8 @@ class OperationsChain:
             if not waiter.done():
                 waiter.set_result(None)
 
-        # through the loop's mailbox; if the loop closes first, this operation can't run, so it ends then
-        previous.add_done_callback(
-            lambda _: state.post(resolve, resumes=True, after_ready=True, dropped=lambda: self._end(done))
-        )
+        # if the loop is released first, this operation can't run, so it ends then
+        previous.add_done_callback(lambda _: state.call_soon(resolve, dropped=lambda: self._end(done)))
         return waiter
 
     def _end(self, done: concurrent.futures.Future[None]) -> None:
