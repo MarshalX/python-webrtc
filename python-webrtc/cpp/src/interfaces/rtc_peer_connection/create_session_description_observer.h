@@ -8,6 +8,11 @@
 #ifndef PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_CREATE_SESSION_DESCRIPTION_OBSERVER_H_
 #define PYTHON_WEBRTC_INTERFACES_RTC_PEER_CONNECTION_CREATE_SESSION_DESCRIPTION_OBSERVER_H_
 
+#include <functional>
+#include <memory>
+#include <utility>
+
+#include "../../utils/mailbox.h"
 #include "rtc_peer_connection.h"
 
 namespace webrtc {
@@ -16,12 +21,14 @@ namespace webrtc {
 
 namespace python_webrtc {
 
+  // hands the description to `created` for the implicit answer of setLocalDescription
   class CreateSessionDescriptionObserver : public webrtc::CreateSessionDescriptionObserver {
   public:
     CreateSessionDescriptionObserver(std::weak_ptr<RTCPeerConnection> peerConnection,
-                                     std::function<void(RTCSessionDescription)> &onSuccess,
-                                     std::function<void(RTCCallbackException)> &onFailure)
-        : _peerConnection(std::move(peerConnection)), _onSuccess(onSuccess), _onFailure(onFailure) {}
+                                     std::shared_ptr<Completion> completion,
+                                     std::function<void(const RTCSessionDescription &)> created = nullptr)
+        : _peerConnection(std::move(peerConnection)), _completion(std::move(completion)), _created(std::move(created)) {
+    }
 
     void OnSuccess(webrtc::SessionDescriptionInterface *description) override;
 
@@ -30,8 +37,8 @@ namespace python_webrtc {
   private:
     // the connection may be gone by the time the description is created
     std::weak_ptr<RTCPeerConnection> _peerConnection;
-    std::function<void(RTCSessionDescription)> _onSuccess = nullptr;
-    std::function<void(RTCCallbackException)> _onFailure = nullptr;
+    std::shared_ptr<Completion> _completion;
+    std::function<void(const RTCSessionDescription &)> _created;
   };
 
 } // namespace python_webrtc

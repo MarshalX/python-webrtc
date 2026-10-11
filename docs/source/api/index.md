@@ -38,7 +38,7 @@ The `DOMException` names of the specifications.
 :link: events
 :link-type: doc
 
-Registering and removing event handlers.
+Registering and removing event handlers, and what they keep alive.
 :::
 
 :::{grid-item-card} {octicon}`git-merge;1em;sd-mr-1` Streams

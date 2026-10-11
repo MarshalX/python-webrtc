@@ -20,14 +20,11 @@ namespace python_webrtc {
     for (const auto &track : tracks()) {
       _known.insert(track.get());
     }
-    // see AliveGuard
-    _factory->signalingThread()->PostTask(_alive.Guard([this]() { _stream->RegisterObserver(this); }));
+    _factory->signalingThread()->PostTask(Guard([this]() { _stream->RegisterObserver(this); }));
   }
 
   MediaStream::~MediaStream() {
-    const BlockingDestructor release("MediaStream");
     BlockingCallOn(_factory->signalingThread(), [this]() { _stream->UnregisterObserver(this); });
-    DropListeners();
   }
 
   void MediaStream::OnChanged() {
@@ -50,10 +47,10 @@ namespace python_webrtc {
       _known = std::move(current);
     }
     for (const auto &track : removed) {
-      Emit("removetrack", MediaStreamTrack::holder().GetOrCreate(_factory, track));
+      Emit("removetrack", MediaStreamTrack::registry().GetOrCreate(_factory, track));
     }
     for (const auto &track : added) {
-      Emit("addtrack", MediaStreamTrack::holder().GetOrCreate(_factory, track));
+      Emit("addtrack", MediaStreamTrack::registry().GetOrCreate(_factory, track));
     }
   }
 
@@ -69,10 +66,9 @@ namespace python_webrtc {
   }
 
   std::vector<std::shared_ptr<MediaStreamTrack>> MediaStream::SyncTracks() {
-    // Python keeps the wrappers, the holder finds them
     std::vector<std::shared_ptr<MediaStreamTrack>> tracks;
     for (const auto &track : this->tracks()) {
-      tracks.push_back(MediaStreamTrack::holder().GetOrCreate(_factory, track));
+      tracks.push_back(MediaStreamTrack::registry().GetOrCreate(_factory, track));
     }
     return tracks;
   }
@@ -82,7 +78,8 @@ namespace python_webrtc {
   }
 
   void MediaStream::Init(pybind11::module &m) {
-    Listeners::BindClass<MediaStream>(m, "MediaStream")
+    DefineBinding(pybind11::class_<MediaStream, Binding, std::shared_ptr<MediaStream>>(m, "MediaStream"))
+        .def_property_readonly("_id", &MediaStream::Id)
         .def_property_readonly("id", nogil_fn(&MediaStream::GetId))
         .def_property_readonly("active", nogil_fn(&MediaStream::GetActive))
         .def("getAudioTracks", &MediaStream::GetAudioTracks, nogil())
@@ -178,7 +175,7 @@ namespace python_webrtc {
 
   std::shared_ptr<MediaStream> MediaStream::Create(const std::vector<std::shared_ptr<MediaStreamTrack>> &tracks) {
     auto factory = PeerConnectionFactory::GetOrCreateDefault();
-    auto stream = MediaStream::holder().GetOrCreate(
+    auto stream = MediaStream::registry().GetOrCreate(
         factory, factory->factory()->CreateLocalMediaStream(webrtc::CreateRandomUuid()));
     for (const auto &track : tracks) {
       stream->AddTrack(track);
@@ -186,10 +183,9 @@ namespace python_webrtc {
     return stream;
   }
 
-  InstanceHolder<MediaStream, webrtc::MediaStreamInterface> &MediaStream::holder() {
-    // never destroyed: wrappers may outlive static destructors
-    static auto *holder = new InstanceHolder<MediaStream, webrtc::MediaStreamInterface>();
-    return *holder;
+  Registry<MediaStream, webrtc::MediaStreamInterface> &MediaStream::registry() {
+    static ForkLocal<Registry<MediaStream, webrtc::MediaStreamInterface>> registry;
+    return registry.Get();
   }
 
 } // namespace python_webrtc

@@ -102,8 +102,6 @@ class VideoTrackGenerator:
 
     def __init__(self) -> None:
         self._native = wrtc.TrackGenerator('video')
-        # the native generator doesn't keep the track, Python does
-        self._track = MediaStreamTrack._wrap(self._native.track)
         self._writable = WritableStream(_TrackSink(self._native))
 
     @property
@@ -112,7 +110,7 @@ class VideoTrackGenerator:
 
         See :mdn:`VideoTrackGenerator/track`.
         """
-        return self._track
+        return MediaStreamTrack._wrap(self._native.track)
 
     @property
     def writable(self) -> WritableStream:
@@ -169,6 +167,8 @@ class MediaStreamTrackGenerator(MediaStreamTrack):
         TypeError: If the kind isn't audio or video.
     """
 
+    __slots__ = ('_generator', '_writable')
+
     def __init__(self, kind: MediaType | MediaTypeValue | MediaStreamTrackGeneratorInit) -> None:
         if isinstance(kind, MediaStreamTrackGeneratorInit):
             kind = kind.kind
@@ -177,7 +177,7 @@ class MediaStreamTrackGenerator(MediaStreamTrack):
             raise TypeError(msg)
         self._generator = wrtc.TrackGenerator(MediaType(kind).value)
         super().__init__(self._generator.track)
-        self._attach()
+        _ = self._attach()
         self._writable = WritableStream(_TrackSink(self._generator))
 
     @property

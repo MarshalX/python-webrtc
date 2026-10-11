@@ -35,13 +35,21 @@ class RTCDTMFSender(
             (with an empty ``tone``).
     """
 
+    __slots__ = ()
+
     _class = wrtc.RTCDTMFSender
 
     @override
     def _on_event(self, name: str, *args: object) -> None:
-        _, tone_buffer, insertion = cast('tuple[str, str, int]', args)
-        # the tone buffer is shortened along with the event
-        self._native_obj._surfaceBuffer(tone_buffer, insertion)
+        tone, tone_buffer, insertion = cast('tuple[str, str, int]', args)
+        # the buffer shrinks with each event; the empty tone ends playout
+        self._native_obj._surfaceBuffer(tone_buffer, insertion, ended=tone == '')
+
+    @override
+    def _activity(self) -> str | None:
+        if not self._open() or not self._native_obj._playing:
+            return None
+        return 'playing tones with handlers' if 'tonechange' in self.event_names() else None
 
     @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
@@ -71,7 +79,8 @@ class RTCDTMFSender(
             raise webrtc.InvalidCharacterError(msg)
         duration = min(max(int(duration), 40), 6000)
         inter_tone_gap = min(max(int(inter_tone_gap), 30), 6000)
-        self._native_obj.insertDTMF(tones.upper(), duration, inter_tone_gap)
+        with self._changing():
+            self._native_obj.insertDTMF(tones.upper(), duration, inter_tone_gap)
 
     @property
     def tone_buffer(self) -> str:

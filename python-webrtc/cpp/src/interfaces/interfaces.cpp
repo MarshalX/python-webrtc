@@ -14,9 +14,8 @@
 #include "../media/sframe_transform.h"
 #include "../media/track_generator.h"
 #include "../media/video_frame_buffer.h"
-#include "../utils/alive_count.h"
 #include "../utils/gil.h"
-#include "../utils/libwebrtc_thread.h"
+#include "../utils/native_object.h"
 #include "media_stream.h"
 #include "media_stream_track.h"
 #include "peer_connection_factory.h"
@@ -55,28 +54,18 @@ namespace python_webrtc {
     m.def(
         "_alive",
         []() {
-          return std::map<std::string, int>{
-              {"RTCPeerConnection", AliveCount<RTCPeerConnection>::count.load()},
-              {"MediaStreamTrack", MediaStreamTrack::holder().Alive()},
-              {"MediaStream", MediaStream::holder().Alive()},
-              {"RTCRtpTransceiver", RTCRtpTransceiver::holder().Alive()},
-              {"RTCRtpSender", RTCRtpSender::holder().Alive()},
-              {"RTCRtpReceiver", RTCRtpReceiver::holder().Alive()},
-              {"RTCDTMFSender", RTCDTMFSender::holder().Alive()},
-              {"RTCDataChannel", RTCDataChannel::holder().Alive()},
-              {"RTCSctpTransport", RTCSctpTransport::holder().Alive()},
-              {"RTCDtlsTransport", RTCDtlsTransport::holder().Alive()},
-              {"RTCIceTransport", RTCIceTransport::holder().Alive()},
-              {"MediaStreamTrackProcessor", AliveCount<MediaStreamTrackProcessor>::count.load()},
-              {"TrackGenerator", AliveCount<TrackGenerator>::count.load()},
-              {"VideoFrameBuffer", AliveCount<VideoFrameBuffer>::count.load()},
-              {"RTCRtpScriptTransform", AliveCount<RTCRtpScriptTransform>::count.load()},
-              {"SFrameTransform", AliveCount<SFrameTransform>::count.load()},
-              {"RTCEncodedFrame", AliveCount<EncodedFrame>::count.load()},
-              {"FrameTransformerBridge", AliveCount<FrameTransformerBridge>::count.load()},
-          };
+          auto counts = AliveCounts();
+          std::map<std::string, int> alive;
+          for (const char *name : {RTCPeerConnection::kName, MediaStreamTrack::kName, MediaStream::kName,
+                                   RTCRtpTransceiver::kName, RTCRtpSender::kName, RTCRtpReceiver::kName,
+                                   RTCDTMFSender::kName, RTCDataChannel::kName, RTCSctpTransport::kName,
+                                   RTCDtlsTransport::kName, RTCIceTransport::kName, MediaStreamTrackProcessor::kName,
+                                   TrackGenerator::kName, VideoFrameBuffer::kName, RTCRtpScriptTransform::kName,
+                                   SFrameTransform::kName, EncodedFrame::kName, FrameTransformerBridge::kName}) {
+            alive[name] = counts[name];
+          }
+          return alive;
         },
         nogil());
-    m.def("_release_threads", []() { return ReleaseThreads().load(); });
   }
 } // namespace python_webrtc

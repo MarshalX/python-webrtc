@@ -18,18 +18,14 @@
 
 namespace python_webrtc {
 
-  MediaStreamTrackProcessor::MediaStreamTrackProcessor(std::shared_ptr<PeerConnectionFactory> factory,
-                                                       webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track,
-                                                       size_t maxBufferSize)
-      : _factory(std::move(factory)), _track(std::move(track)),
+  MediaStreamTrackProcessor::MediaStreamTrackProcessor(std::shared_ptr<MediaStreamTrack> track, size_t maxBufferSize)
+      : _trackWrapper(std::move(track)), _factory(_trackWrapper->factory()), _track(_trackWrapper->track()),
         _video(_track->kind() == webrtc::MediaStreamTrackInterface::kVideoKind),
         _maxBufferSize(std::max<size_t>(1, maxBufferSize)) {}
 
   std::shared_ptr<MediaStreamTrackProcessor>
   MediaStreamTrackProcessor::Create(const std::shared_ptr<MediaStreamTrack> &track, size_t maxBufferSize) {
-    // Python keeps the track's wrapper, so the collector sees handlers of the track referencing the processor
-    std::shared_ptr<MediaStreamTrackProcessor> processor(
-        new MediaStreamTrackProcessor(track->factory(), track->track(), maxBufferSize), DeleteOffLibwebrtcThread());
+    auto processor = NativeObject::Create(track, maxBufferSize);
     if (!track->ended()) {
       processor->Attach();
     }
@@ -39,13 +35,13 @@ namespace python_webrtc {
   }
 
   MediaStreamTrackProcessor::~MediaStreamTrackProcessor() {
-    const BlockingDestructor release("MediaStreamTrackProcessor");
     Detach();
-    DropListeners();
   }
 
   void MediaStreamTrackProcessor::Init(pybind11::module &m) {
-    Listeners::BindClass<MediaStreamTrackProcessor>(m, "MediaStreamTrackProcessor")
+    DefineBinding(pybind11::class_<MediaStreamTrackProcessor, Binding, std::shared_ptr<MediaStreamTrackProcessor>>(
+                      m, "MediaStreamTrackProcessor"))
+        .def_property_readonly("_id", &MediaStreamTrackProcessor::Id)
         .def(pybind11::init(nogil_factory(&MediaStreamTrackProcessor::Create)), pybind11::arg("track"),
              pybind11::arg("maxBufferSize"))
         .def("read", &MediaStreamTrackProcessor::Read)
@@ -84,24 +80,31 @@ namespace python_webrtc {
   }
 
   void MediaStreamTrackProcessor::Push(Item item) {
-    const std::scoped_lock lock(_mutex);
-    if (_ended) {
-      return;
+    bool wake = false;
+    {
+      const std::scoped_lock lock(_mutex);
+      if (_ended) {
+        return;
+      }
+      while (_queue.size() >= _maxBufferSize) {
+        _queue.pop_front();
+        _discardedFrames++;
+      }
+      _totalFrames++;
+      _queue.push_back(std::move(item));
+      wake = ArmWakeLocked();
     }
-    while (_queue.size() >= _maxBufferSize) {
-      _queue.pop_front();
-      _discardedFrames++;
+    if (wake) {
+      Emit("_ready");
     }
-    _totalFrames++;
-    _queue.push_back(std::move(item));
-    WakeLocked();
   }
 
-  void MediaStreamTrackProcessor::WakeLocked() {
-    if (!_wakePending) {
-      _wakePending = true;
-      Wakeup::Post(weak_from_this());
+  bool MediaStreamTrackProcessor::ArmWakeLocked() {
+    if (_wakePending) {
+      return false;
     }
+    _wakePending = true;
+    return true;
   }
 
   void MediaStreamTrackProcessor::OnFrame(const webrtc::VideoFrame &frame) {
@@ -140,20 +143,18 @@ namespace python_webrtc {
                    .timestampUs = webrtc::TimeMicros()});
   }
 
-  void MediaStreamTrackProcessor::OnWakeup() {
-    Emit("_ready");
-  }
-
   void MediaStreamTrackProcessor::OnTrackEnded() {
-    const std::scoped_lock lock(_mutex);
-    if (_ended) {
-      return;
+    {
+      const std::scoped_lock lock(_mutex);
+      if (_ended) {
+        return;
+      }
+      _ended = true;
+      _queue.clear();
+      // the end wakes Python even while a wakeup is pending
+      _wakePending = true;
     }
-    _ended = true;
-    _queue.clear();
-    // the end wakes Python even while a wakeup is pending
-    _wakePending = false;
-    WakeLocked();
+    Emit("_ready");
   }
 
   void MediaStreamTrackProcessor::Cancel() {

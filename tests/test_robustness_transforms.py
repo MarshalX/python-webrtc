@@ -22,7 +22,7 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import connect
+from tests.helpers import connect, wait_until
 from tests.isolation import isolated
 
 KEY = bytes(range(16))
@@ -84,7 +84,7 @@ async def _call() -> tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]:
 
     callee.on('track', on_track)
     await connect(caller, callee)
-    await asyncio.sleep(0.3)
+    await wait_until(lambda: len(_held) > 0, 'frames through the transforms')
     return caller, callee
 
 

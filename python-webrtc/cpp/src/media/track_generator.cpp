@@ -48,42 +48,15 @@ namespace python_webrtc {
       _audioSource = webrtc::make_ref_counted<RTCAudioTrackSource>();
       track = _factory->factory()->CreateAudioTrack(webrtc::CreateRandomUuid(), _audioSource.get());
     }
-    _webrtcTrack = track;
     SourceControl::Register(track.get(), track->id(), _control);
-    _initialTrack = MediaStreamTrack::holder().GetOrCreate(_factory, track);
-    _initialTrack->AddEndObserver(_endState);
-    _track = _initialTrack;
-  }
-
-  std::shared_ptr<MediaStreamTrack> TrackGenerator::GetTrack() {
-    // wrapped out of the lock: wrapping may wait for the signaling thread (the holder finds a live wrapper)
-    auto wrapped = MediaStreamTrack::holder().GetOrCreate(_factory, _webrtcTrack);
-    const std::scoped_lock lock(_trackMutex);
-    auto track = _track.lock();
-    if (!track) {
-      track = std::move(wrapped);
-      if (_endState->ended) {
-        // a new wrapper of a track stopped meanwhile
-        track->Stop();
-      } else {
-        track->AddEndObserver(_endState);
-      }
-      if (_muted) {
-        track->SetMuted(true);
-      }
-      _track = track;
-    }
-    _initialTrack = nullptr;
-    return track;
-  }
-
-  std::shared_ptr<TrackGenerator> TrackGenerator::Create(const std::string &kind) {
-    return {new TrackGenerator(kind), DeleteOffLibwebrtcThread()};
+    _track = MediaStreamTrack::registry().GetOrCreate(_factory, track);
   }
 
   void TrackGenerator::Init(pybind11::module &m) {
     pybind11::class_<TrackGenerator, std::shared_ptr<TrackGenerator>>(m, "TrackGenerator")
-        .def(pybind11::init(nogil_factory(&TrackGenerator::Create)), pybind11::arg("kind"))
+        .def_property_readonly("_id", &TrackGenerator::Id)
+        .def(pybind11::init(nogil_factory(+[](const std::string &kind) { return TrackGenerator::Create(kind); })),
+             pybind11::arg("kind"))
         .def_property_readonly("track", nogil_fn(&TrackGenerator::GetTrack))
         .def_property_readonly("kind", &TrackGenerator::GetKind)
         .def_property_readonly("live", nogil_fn(&TrackGenerator::GetLive))
@@ -107,9 +80,7 @@ namespace python_webrtc {
 
   void TrackGenerator::SetMuted(bool muted) {
     _muted = muted;
-    if (auto track = _track.lock()) {
-      track->SetMuted(muted);
-    }
+    _track->SetMuted(muted);
   }
 
   void TrackGenerator::WriteVideo(const std::shared_ptr<VideoFrameBuffer> &buffer, int64_t timestampUs, int rotation) {

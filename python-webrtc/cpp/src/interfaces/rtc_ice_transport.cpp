@@ -63,17 +63,11 @@ namespace python_webrtc {
     BlockingCallOn(_factory->workerThread(), [this]() {
       auto *internal = _transport->internal();
       if (internal) {
-        auto alive = _alive;
-        internal->SubscribeIceTransportStateChanged(this, [this, alive](webrtc::IceTransportInternal *transport) {
-          if (*alive) {
-            OnStateChanged(transport);
-          }
-        });
-        internal->AddGatheringStateCallback(this, [this, alive](webrtc::IceTransportInternal *transport) {
-          if (*alive) {
-            OnGatheringStateChanged(transport);
-          }
-        });
+        // state changes can't be unsubscribed from: guarded until the destructor disarms them
+        internal->SubscribeIceTransportStateChanged(
+            this, Guard([this](webrtc::IceTransportInternal *transport) { OnStateChanged(transport); }));
+        internal->AddGatheringStateCallback(
+            this, Guard([this](webrtc::IceTransportInternal *transport) { OnGatheringStateChanged(transport); }));
         _subscribed = internal;
       }
       TakeSnapshot();
@@ -81,11 +75,9 @@ namespace python_webrtc {
   }
 
   RTCIceTransport::~RTCIceTransport() {
-    const BlockingDestructor release("RTCIceTransport");
-
     // callbacks run on the network thread, so after this none of them can be running or start again
+    Disarm();
     BlockingCallOn(_factory->workerThread(), [this]() {
-      *_alive = false;
       // the internal transport is gone (with its callbacks) once the ice transport is cleared
       if (_subscribed && _transport->internal() == _subscribed) {
         _subscribed->RemoveGatheringStateCallback(this);
@@ -98,11 +90,11 @@ namespace python_webrtc {
     });
 
     _transport = nullptr;
-    DropListeners();
   }
 
   void RTCIceTransport::Init(pybind11::module &m) {
-    Listeners::BindClass<RTCIceTransport>(m, "RTCIceTransport")
+    DefineBinding(pybind11::class_<RTCIceTransport, Binding, std::shared_ptr<RTCIceTransport>>(m, "RTCIceTransport"))
+        .def_property_readonly("_id", &RTCIceTransport::Id)
         // a transport of its own
         .def(pybind11::init(
             nogil_factory(+[]() { return CreateStandalone(PeerConnectionFactory::GetOrCreateDefault()); })))
@@ -122,15 +114,15 @@ namespace python_webrtc {
              pybind11::arg("sdpMid"), pybind11::arg("sdpMLineIndex"), pybind11::arg("usernameFragment"))
         .def("stop", &RTCIceTransport::StopStandalone, nogil())
         .def_property_readonly("_standalone", &RTCIceTransport::IsStandalone)
+        .def_property_readonly("_stopped", nogil_fn(&RTCIceTransport::Stopped))
         .def("_surfaceState", &RTCIceTransport::SurfaceState, nogil(), pybind11::arg("state"))
         .def("_surfaceGatheringState", &RTCIceTransport::SurfaceGatheringState, nogil(), pybind11::arg("state"))
         .def("_surfaceCandidate", &RTCIceTransport::SurfaceLocalCandidate, nogil());
   }
 
-  InstanceHolder<RTCIceTransport, webrtc::IceTransportInterface> &RTCIceTransport::holder() {
-    // never destroyed: wrappers may outlive static destructors
-    static auto *holder = new InstanceHolder<RTCIceTransport, webrtc::IceTransportInterface>();
-    return *holder;
+  Registry<RTCIceTransport, webrtc::IceTransportInterface> &RTCIceTransport::registry() {
+    static ForkLocal<Registry<RTCIceTransport, webrtc::IceTransportInterface>> registry;
+    return registry.Get();
   }
 
   RTCIceTransport::StateChange RTCIceTransport::TakeSnapshot() {
@@ -194,7 +186,7 @@ namespace python_webrtc {
   }
 
   void RTCIceTransport::OnPeerConnectionClosed() {
-    Mute();
+    Unbind();
     {
       const std::scoped_lock lock(_mutex);
       _gatheringState = _surfacedGatheringState.Get(_gatheringState);
@@ -227,7 +219,7 @@ namespace python_webrtc {
     if (emitter && emitter(previous, state)) {
       return;
     }
-    _surfacedState.Changed(IsTracked(), previous);
+    _surfacedState.Changed(IsBound(), previous);
     Emit("statechange", state);
   }
 
@@ -237,7 +229,7 @@ namespace python_webrtc {
     if (current == change.previousGatheringState) {
       return;
     }
-    _surfacedGatheringState.Changed(IsTracked(), change.previousGatheringState);
+    _surfacedGatheringState.Changed(IsBound(), change.previousGatheringState);
     if (_standalone) {
       // a transport of its own completes by itself, its candidates end first (gather() started gathering,
       // without an event)
@@ -262,7 +254,7 @@ namespace python_webrtc {
       const std::scoped_lock lock(_mutex);
       state = _gatheringState;
     }
-    return _surfacedGatheringState.Get(state);
+    return _surfacedGatheringState.Shown(IsBound(), state);
   }
 
   webrtc::IceRole RTCIceTransport::GetRole() {
@@ -295,7 +287,7 @@ namespace python_webrtc {
       const std::scoped_lock lock(_mutex);
       state = _state;
     }
-    return _surfacedState.Get(state);
+    return _surfacedState.Shown(IsBound(), state);
   }
 
   std::optional<std::tuple<IceCandidateInit, IceCandidateInit, bool>> RTCIceTransport::GetSelectedCandidatePair() {
@@ -365,7 +357,7 @@ namespace python_webrtc {
 
   std::vector<IceCandidateInit> RTCIceTransport::GetLocalCandidates() {
     const std::scoped_lock lock(_mutex);
-    if (_standalone && HasListeners()) {
+    if (_standalone && IsBound()) {
       // the candidates of a transport of its own come with their events
       const auto surfaced = static_cast<std::ptrdiff_t>(std::min(_surfacedLocal, _localCandidates.size()));
       return {_localCandidates.begin(), _localCandidates.begin() + surfaced};
@@ -396,8 +388,8 @@ namespace python_webrtc {
     return _state;
   }
 
-  void RTCIceTransport::StateChanged(bool listening, webrtc::IceTransportState previous) {
-    _surfacedState.Changed(listening, previous);
+  void RTCIceTransport::StateChanged(bool bound, webrtc::IceTransportState previous) {
+    _surfacedState.Changed(bound, previous);
   }
 
   void RTCIceTransport::EmitStateChange(webrtc::IceTransportState state) {
@@ -439,7 +431,7 @@ namespace python_webrtc {
       transport->internal()->SetIceParameters(webrtc::IceParameters(parameters.first, parameters.second, false));
     });
 
-    auto wrapper = holder().GetOrCreate(factory, transport);
+    auto wrapper = registry().GetOrCreate(factory, transport);
     {
       const std::scoped_lock lock(wrapper->_mutex);
       wrapper->_standalone = std::move(standalone);
@@ -447,28 +439,25 @@ namespace python_webrtc {
     }
     BlockingCallOn(factory->workerThread(), [&]() {
       auto *internal = transport->internal();
-      auto alive = wrapper->_alive;
       auto *self = wrapper.get();
       internal->SubscribeCandidateGathered(
-          self, [self, alive](webrtc::IceTransportInternal *, const webrtc::Candidate &candidate) {
-            if (*alive) {
-              IceCandidateInit init(*webrtc::CreateIceCandidate("", 0, candidate));
-              self->AddLocalCandidate(init);
-              self->Emit("icecandidate", std::optional<IceCandidateInit>(init));
+          self, self->Guard([self](webrtc::IceTransportInternal *, const webrtc::Candidate &candidate) {
+            if (self->Stopped()) {
+              return;
             }
-          });
+            IceCandidateInit init(*webrtc::CreateIceCandidate("", 0, candidate));
+            self->AddLocalCandidate(init);
+            self->Emit("icecandidate", std::optional<IceCandidateInit>(init));
+          }));
       // both ends took the same role: the one told to switch does (RFC 8445 section 7.3.1.1)
-      internal->SubscribeRoleConflict(self, [alive](webrtc::IceTransportInternal *transport) {
-        if (*alive) {
+      internal->SubscribeRoleConflict(self, self->Guard([self](webrtc::IceTransportInternal *transport) {
+        if (!self->Stopped()) {
           transport->SetIceRole(transport->GetIceRole() == webrtc::ICEROLE_CONTROLLING ? webrtc::ICEROLE_CONTROLLED
                                                                                        : webrtc::ICEROLE_CONTROLLING);
         }
-      });
-      internal->SetCandidatePairChangeCallback([self, alive](const webrtc::CandidatePairChangeEvent &) {
-        if (*alive) {
-          self->CheckSelectedCandidatePair();
-        }
-      });
+      }));
+      internal->SetCandidatePairChangeCallback(
+          self->Guard([self](const webrtc::CandidatePairChangeEvent &) { self->CheckSelectedCandidatePair(); }));
     });
     return wrapper;
   }
@@ -540,18 +529,19 @@ namespace python_webrtc {
     SurfaceCurrent();
   }
 
+  bool RTCIceTransport::Stopped() {
+    const std::scoped_lock lock(_mutex);
+    return _stopped;
+  }
+
   void RTCIceTransport::StopStandalone() {
-    BlockingCallOn(_factory->workerThread(), [&]() {
-      // nothing more to connect with, and no more events
-      *_alive = false;
-      _transport->internal()->RemoveAllRemoteCandidates();
-    });
     {
       const std::scoped_lock lock(_mutex);
       _stopped = true;
       _state = webrtc::IceTransportState::kClosed;
     }
-    Mute();
+    BlockingCallOn(_factory->workerThread(), [&]() { _transport->internal()->RemoveAllRemoteCandidates(); });
+    Unbind();
     _surfacedState.Reset();
     _surfacedGatheringState.Reset();
   }

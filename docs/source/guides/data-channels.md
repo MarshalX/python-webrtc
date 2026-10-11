@@ -77,4 +77,5 @@ for chunk in chunks:
 ## Closing
 
 {meth}`~webrtc.RTCDataChannel.close` closes the channel on both ends. Each end fires `close`, and the remote one
-fires `closing` before it. Closing the connection closes its channels.
+fires `closing` before it. Closing the connection closes its channels. A channel with handlers or data to send stays
+alive until it closes (see [Events](events.md)).

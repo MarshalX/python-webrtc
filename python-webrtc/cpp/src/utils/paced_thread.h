@@ -15,6 +15,8 @@
 #include <thread>
 #include <utility>
 
+#include "libwebrtc_thread.h"
+
 namespace python_webrtc {
 
   // A thread calling a function at a steady pace (the synthetic microphone and camera), stopped when destroyed.
@@ -40,6 +42,7 @@ namespace python_webrtc {
     // the first call is right away
     void Start(std::chrono::microseconds interval, std::function<void()> tick) {
       _thread = std::thread([this, interval, tick = std::move(tick)]() {
+        TagNativeThread();
         auto next = std::chrono::steady_clock::now();
         while (true) {
           {

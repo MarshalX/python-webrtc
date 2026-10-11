@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import wrtc
 from webrtc.base import WebRTCObject
@@ -38,7 +38,11 @@ class RTCSessionDescription(WebRTCObject[wrtc.RTCSessionDescription]):
         TypeError: If the SDP is :obj:`None`.
     """
 
+    __slots__ = ()
+
     _class = wrtc.RTCSessionDescription
+    # a value: the setters replace the native object
+    _canonical: ClassVar[bool] = False
 
     def __init__(
         self,

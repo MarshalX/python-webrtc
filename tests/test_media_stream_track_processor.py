@@ -17,7 +17,7 @@ from typing import TypeVar
 import pytest
 
 import webrtc
-from tests.helpers import QUIET_PERIOD, wait_for_event, wait_until
+from tests.helpers import wait_for_event, wait_until
 
 TIMEOUT = 10
 I420_4X2 = bytes(range(1, 13))
@@ -89,14 +89,16 @@ async def test_audio_data_of_a_microphone(audio_stream: webrtc.MediaStream) -> N
 async def test_wakeup_sent_before_the_listeners_is_not_lost(
     audio_stream: webrtc.MediaStream, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Media comes as soon as the sink is attached, before the listeners are: the wakeup it sends is dropped."""
+    """Media before binding is still read."""
     attach = webrtc.MediaStreamTrackProcessor._attach
 
-    def attach_once_media_came(processor: webrtc.MediaStreamTrackProcessor) -> None:
-        deadline = time.monotonic() + 5
-        while processor._native_obj.totalFrames == 0 and time.monotonic() < deadline:
+    def attach_once_media_came(processor: webrtc.MediaStreamTrackProcessor) -> bool:
+        deadline = time.monotonic() + 10
+        while processor._native_obj.totalFrames == 0:
+            # binding without media first would test nothing
+            assert time.monotonic() < deadline, 'no media came before binding'
             time.sleep(0.01)
-        attach(processor)
+        return attach(processor)
 
     monkeypatch.setattr(webrtc.MediaStreamTrackProcessor, '_attach', attach_once_media_came)
     init = webrtc.MediaStreamTrackProcessorInit(audio_stream.get_tracks()[0], max_buffer_size=1)
@@ -143,12 +145,16 @@ async def test_full_buffer_drops_the_oldest_frames(video_stream: webrtc.MediaStr
 @pytest.mark.asyncio
 async def test_cancel_stops_reading(video_stream: webrtc.MediaStream) -> None:
     """Canceling the stream detaches the processor from the track."""
-    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(video_stream.get_tracks()[0]))
+    track = video_stream.get_tracks()[0]
+    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
+    # a second processor of the track sees the frames the canceled one would get
+    witness = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
+    _ = witness.readable.get_reader()
     reader = processor.readable.get_reader()
     as_video_frame((await read(reader)).value).close()
     await reader.cancel()
-    total = processor.total_frames
-    await asyncio.sleep(QUIET_PERIOD)
+    total, seen = processor.total_frames, witness.total_frames
+    await wait_until(lambda: witness.total_frames >= seen + 3, 'later frames of the track')
     assert processor.total_frames == total
     assert (await reader.read()).done
 

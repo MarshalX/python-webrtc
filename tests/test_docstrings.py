@@ -24,6 +24,8 @@ MODULES = [
     'openh264',
     'streams',
     'utils/events',
+    'utils/lifetime',
+    'utils/loops',
     *sorted(
         f'{d}/{p.stem}' for d in ('interfaces', 'models') for p in (PACKAGE / d).glob('*.py') if p.stem != '__init__'
     ),

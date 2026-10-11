@@ -130,7 +130,7 @@ def classify(evidence: Evidence) -> str:
     if ended is not None:
         return ended
     leaked = _leaked(evidence.output)
-    if evidence.returncode == 0 and leaked is not None and leaked != []:
+    if leaked is not None and leaked != []:
         return 'leak'
     unfinished_chaos = _CHAOS_START.search(evidence.output) is not None and leaked is None
     return 'failure' if evidence.returncode != 0 or unfinished_chaos else 'pass'

@@ -15,13 +15,17 @@ namespace python_webrtc {
     const std::unique_ptr<webrtc::SessionDescriptionInterface> owned(description);
     if (auto peerConnection = _peerConnection.lock()) {
       peerConnection->SaveCreatedDescription(RTCSessionDescriptionInit::Wrap(owned.get()));
-      RTCPeerConnection::ReleaseElsewhere(std::move(peerConnection));
     }
-    _onSuccess(RTCSessionDescription::Wrap(owned.get()));
+    auto created = RTCSessionDescription::Wrap(owned.get());
+    if (_created) {
+      _created(created);
+    } else {
+      _completion->Succeed(created);
+    }
   }
 
   void CreateSessionDescriptionObserver::OnFailure(webrtc::RTCError error) {
-    _onFailure(RTCCallbackException(std::move(error)));
+    _completion->Fail(RTCCallbackException(std::move(error)));
   }
 
 } // namespace python_webrtc

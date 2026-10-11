@@ -43,11 +43,11 @@ namespace python_webrtc {
   RTCDtlsTransport::RTCDtlsTransport(std::shared_ptr<PeerConnectionFactory> factory,
                                      webrtc::scoped_refptr<webrtc::DtlsTransportInterface> transport)
       : _factory(std::move(factory)), _transport(std::move(transport)) {
-    _iceTransport = RTCIceTransport::holder().GetOrCreate(_factory, _transport->ice_transport());
+    _iceTransport = RTCIceTransport::registry().GetOrCreate(_factory, _transport->ice_transport());
 
     BlockingCallOn(_factory->workerThread(), [this]() {
       _transport->RegisterObserver(this);
-      holder().SetObserver(_transport.get(), this);
+      registry().SetObserver(_transport.get(), this);
       _observing = true;
 
       auto information = _transport->Information();
@@ -61,18 +61,16 @@ namespace python_webrtc {
   }
 
   RTCDtlsTransport::~RTCDtlsTransport() {
-    const BlockingDestructor release("RTCDtlsTransport");
-
     // callbacks run on the network thread, so after this none of them can be running or start again
     BlockingCallOn(_factory->workerThread(), [this]() { Unobserve(); });
 
     _iceTransport = nullptr;
     _transport = nullptr;
-    DropListeners();
   }
 
   void RTCDtlsTransport::Init(pybind11::module &m) {
-    Listeners::BindClass<RTCDtlsTransport>(m, "RTCDtlsTransport")
+    DefineBinding(pybind11::class_<RTCDtlsTransport, Binding, std::shared_ptr<RTCDtlsTransport>>(m, "RTCDtlsTransport"))
+        .def_property_readonly("_id", &RTCDtlsTransport::Id)
         .def_property_readonly("iceTransport", nogil_fn(&RTCDtlsTransport::GetIceTransport))
         .def_property_readonly("state", nogil_fn(&RTCDtlsTransport::GetState))
         .def("getRemoteCertificates",
@@ -86,10 +84,9 @@ namespace python_webrtc {
         .def("_surfaceState", &RTCDtlsTransport::SurfaceState, nogil(), pybind11::arg("state"));
   }
 
-  InstanceHolder<RTCDtlsTransport, webrtc::DtlsTransportInterface> &RTCDtlsTransport::holder() {
-    // never destroyed: wrappers may outlive static destructors
-    static auto *holder = new InstanceHolder<RTCDtlsTransport, webrtc::DtlsTransportInterface>();
-    return *holder;
+  Registry<RTCDtlsTransport, webrtc::DtlsTransportInterface> &RTCDtlsTransport::registry() {
+    static ForkLocal<Registry<RTCDtlsTransport, webrtc::DtlsTransportInterface>> registry;
+    return registry.Get();
   }
 
   void RTCDtlsTransport::OnStateChange(webrtc::DtlsTransportInformation information) {
@@ -112,7 +109,7 @@ namespace python_webrtc {
       }
       auto emitter = _stateEmitter.Get();
       if (!emitter || !emitter(previous, information.state())) {
-        _surfacedState.Changed(IsTracked(), previous);
+        _surfacedState.Changed(IsBound(), previous);
         Emit("statechange", information.state());
       }
     }
@@ -128,7 +125,7 @@ namespace python_webrtc {
 
   void RTCDtlsTransport::Unobserve() {
     // a newer wrapper of the transport may have taken its single observer slot
-    if (_observing && holder().TakeObserver(_transport.get(), this)) {
+    if (_observing && registry().TakeObserver(_transport.get(), this)) {
       _transport->UnregisterObserver();
     }
     _observing = false;
@@ -140,7 +137,7 @@ namespace python_webrtc {
   }
 
   void RTCDtlsTransport::OnPeerConnectionClosed() {
-    Mute();
+    Unbind();
     _surfacedState.Reset();
   }
 
@@ -154,7 +151,7 @@ namespace python_webrtc {
       const std::scoped_lock lock(_mutex);
       state = _state;
     }
-    return _surfacedState.Get(state);
+    return _surfacedState.Shown(IsBound(), state);
   }
 
   std::vector<webrtc::Buffer> RTCDtlsTransport::GetRemoteCertificates() {
@@ -180,8 +177,8 @@ namespace python_webrtc {
     return _state;
   }
 
-  void RTCDtlsTransport::StateChanged(bool listening, webrtc::DtlsTransportState previous) {
-    _surfacedState.Changed(listening, previous);
+  void RTCDtlsTransport::StateChanged(bool bound, webrtc::DtlsTransportState previous) {
+    _surfacedState.Changed(bound, previous);
   }
 
   void RTCDtlsTransport::EmitStateChange(webrtc::DtlsTransportState state) {

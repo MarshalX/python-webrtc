@@ -99,3 +99,5 @@ for stats in report.values():
 reused, so create a new one to connect again.
 
 Calls pending when the connection closes are cancelled: they raise {obj}`asyncio.CancelledError`.
+
+A connection with handlers or a call in flight stays alive until it's closed (see [Events](events.md)).

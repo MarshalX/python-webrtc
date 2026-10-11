@@ -28,7 +28,7 @@ namespace python_webrtc {
   }
 
   void RTCPeerConnection::OnIceGatheringChange(IceGatheringState newState) {
-    _surfacedIceGatheringState.Changed(HasListeners(), _lastIceGatheringState);
+    _surfacedIceGatheringState.Changed(IsBound(), _lastIceGatheringState);
     _lastIceGatheringState = newState;
     if (newState != IceGatheringState::kIceGatheringComplete) {
       EmitGathering("icegatheringstatechange", newState);
@@ -44,7 +44,7 @@ namespace python_webrtc {
     std::vector<std::shared_ptr<RTCIceTransport>> iceTransports;
     for (const auto &iceTransport : IceTransports()) {
       if (iceTransport->IsHeld()) {
-        // Python doesn't have it yet: its completion waits along with its other events
+        // an operation holds its events: its completion waits along with them
         iceTransport->EmitGatheringComplete();
       } else {
         iceTransports.push_back(iceTransport);
@@ -95,7 +95,7 @@ namespace python_webrtc {
       return iceTransports;
     }
     for (const auto &transport : dtlsTransports(pc)) {
-      auto dtls = RTCDtlsTransport::holder().Find(transport.get());
+      auto dtls = RTCDtlsTransport::registry().Find(transport.get());
       auto ice = dtls ? dtls->GetIceTransport() : nullptr;
       if (ice && std::ranges::find(iceTransports, ice) == iceTransports.end()) {
         iceTransports.push_back(ice);
@@ -107,7 +107,7 @@ namespace python_webrtc {
   std::shared_ptr<RTCIceTransport> RTCPeerConnection::IceTransportByMid(const std::string &mid) {
     auto pc = connection();
     auto dtls = pc && !mid.empty() ? pc->LookupDtlsTransportByMid(mid) : nullptr;
-    auto wrapper = dtls ? RTCDtlsTransport::holder().Find(dtls.get()) : nullptr;
+    auto wrapper = dtls ? RTCDtlsTransport::registry().Find(dtls.get()) : nullptr;
     return wrapper ? wrapper->GetIceTransport() : nullptr;
   }
 
@@ -119,13 +119,8 @@ namespace python_webrtc {
     }
     std::vector<std::shared_ptr<RTCDtlsTransport>> wrappers;
     for (const auto &transport : dtlsTransports(pc)) {
-      const bool existed = RTCDtlsTransport::holder().Find(transport.get()) != nullptr;
-      auto wrapper = RTCDtlsTransport::holder().GetOrCreate(_factory, transport);
-      if (!existed) {
-        // Python doesn't have the transports yet, their events wait for it
-        wrapper->Hold();
-        wrapper->GetIceTransport()->Hold();
-      }
+      const bool existed = RTCDtlsTransport::registry().Find(transport.get()) != nullptr;
+      auto wrapper = RTCDtlsTransport::registry().GetOrCreate(_factory, transport);
       Adopt(wrapper);
       if (std::ranges::find(wrappers, wrapper) == wrappers.end()) {
         if (!existed) {
@@ -157,17 +152,15 @@ namespace python_webrtc {
           dtls->GetIceTransport()->OnDropped();
         }
       }
-      auto self = weak.lock();
-      if (self) {
+      if (auto self = weak.lock()) {
         self->EmitIceConnectionState();
       }
-      ReleaseElsewhere(std::move(self));
     });
     // wrappers of transports that are gone are released here, out of the lock
     return created;
   }
 
-  void RTCPeerConnection::MuteTransports() {
+  void RTCPeerConnection::UnbindTransports() {
     auto pc = connection();
     if (!pc) {
       return;
@@ -180,11 +173,11 @@ namespace python_webrtc {
       sctpTransport = pc->GetSctpTransport();
     });
 
-    if (auto sctp = sctpTransport ? RTCSctpTransport::holder().Find(sctpTransport.get()) : nullptr) {
+    if (auto sctp = sctpTransport ? RTCSctpTransport::registry().Find(sctpTransport.get()) : nullptr) {
       sctp->OnPeerConnectionClosed();
     }
     for (const auto &transport : transports) {
-      if (auto dtls = RTCDtlsTransport::holder().Find(transport.get())) {
+      if (auto dtls = RTCDtlsTransport::registry().Find(transport.get())) {
         dtls->OnPeerConnectionClosed();
         dtls->GetIceTransport()->OnPeerConnectionClosed();
       }
@@ -272,14 +265,14 @@ namespace python_webrtc {
     }
   }
 
-  void RTCPeerConnection::AddIceCandidate(std::function<void()> &onSuccess,
-                                          std::function<void(RTCCallbackException)> &onFailure,
+  void RTCPeerConnection::AddIceCandidate(std::shared_ptr<Mailbox> mailbox, uint64_t token,
                                           const std::string &candidate, const std::optional<std::string> &sdpMid,
                                           std::optional<int> sdpMLineIndex,
                                           const std::optional<std::string> &usernameFragment) {
+    Completion completion(std::move(mailbox), token);
     auto pc = connection();
     if (!pc) {
-      onFailure(RTCCallbackException(closedError("addIceCandidate")));
+      completion.Fail(RTCCallbackException(closedError("addIceCandidate")));
       return;
     }
 
@@ -291,7 +284,7 @@ namespace python_webrtc {
       error = candidateSections(remote, sdpMid, sdpMLineIndex, usernameFragment, mids);
     });
     if (error) {
-      onFailure(*error);
+      completion.Fail(*error);
       return;
     }
 
@@ -306,7 +299,7 @@ namespace python_webrtc {
         _remoteEndOfCandidates.insert(mids.begin(), mids.end());
       }
       RefreshDescriptions();
-      onSuccess();
+      completion.Succeed();
       return;
     }
 
@@ -314,28 +307,29 @@ namespace python_webrtc {
     auto iceCandidate =
         webrtc::IceCandidate::Create(sdpMid.value_or(""), sdpMLineIndex.value_or(0), candidate, &parseError);
     if (!iceCandidate) {
-      onFailure(RTCCallbackException(webrtc::RTCErrorType::UNSUPPORTED_OPERATION,
-                                     "Failed to parse the ICE candidate: " + parseError.description));
+      completion.Fail(RTCCallbackException(webrtc::RTCErrorType::UNSUPPORTED_OPERATION,
+                                           "Failed to parse the ICE candidate: " + parseError.description));
       return;
     }
 
     if (isBlockedCandidate(iceCandidate->candidate())) {
-      onSuccess();
+      completion.Succeed();
       return;
     }
 
     auto added = std::make_shared<IceCandidateInit>(*iceCandidate);
-    auto complete = [weak = weak_from_this(), onSuccess, onFailure, added](webrtc::RTCError error) {
+    // libwebrtc copies the callback
+    auto shared = std::make_shared<Completion>(std::move(completion));
+    auto complete = [weak = weak_from_this(), shared, added](webrtc::RTCError error) {
       if (error.ok()) {
         // the remote description has the candidate now
         if (auto self = weak.lock()) {
           self->RecordRemoteCandidate(*added);
           self->RefreshDescriptions();
-          ReleaseElsewhere(std::move(self));
         }
-        onSuccess();
+        shared->Succeed();
       } else {
-        onFailure(RTCCallbackException(std::move(error)));
+        shared->Fail(RTCCallbackException(std::move(error)));
       }
     };
     pc->AddIceCandidate(std::move(iceCandidate), complete);

@@ -221,7 +221,8 @@ class MediaTrackSettings(Dictionary):
         width (:obj:`int`, optional): The width of the video.
         height (:obj:`int`, optional): The height of the video.
         aspect_ratio (:obj:`float`, optional): The width divided by the height.
-        frame_rate (:obj:`float`, optional): The frames per second, measured over the last frames.
+        frame_rate (:obj:`float`, optional): The frames per second: a camera's selected one, otherwise measured over
+            the last frames.
         resize_mode (:obj:`str`, optional): How the source is resized. It's ``'none'`` for the synthetic camera.
         device_id (:obj:`str`, optional): The device of a track of :meth:`webrtc.MediaDevices.get_user_media`.
         group_id (:obj:`str`, optional): The group ID of the device.

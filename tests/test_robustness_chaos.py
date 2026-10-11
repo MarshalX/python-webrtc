@@ -12,11 +12,14 @@ A failure prints the seed and the steps, replayed with ``python -m tests.chaos -
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 import sys
 
 import pytest
 
+import webrtc
+from tests import chaos
 from tests.helpers import ROOT
 from tests.isolation import HUNTING
 
@@ -43,6 +46,27 @@ def run_chaos(seed: int, steps: int, timeout: float, *, transforms: bool = False
     output = result.stdout + (result.stderr if result.stderr is not None else '')
     assert result.returncode == 0, f'seed {seed}, exit code {result.returncode}:\n{output[-5000:]}'
     assert 'done' in result.stdout, output[-3000:]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('step', ['remove_track', 'replace_track', 'set_parameters'])
+async def test_sender_steps_survive_a_close_from_another_worker(step: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A sender step reads the senders once: another worker's close() between two reads would empty them."""
+    get_senders = webrtc.RTCPeerConnection.get_senders
+
+    def closing_get_senders(self: webrtc.RTCPeerConnection) -> list[webrtc.RTCRtpSender]:
+        senders = get_senders(self)
+        self.close()
+        return senders
+
+    state = chaos.Chaos(0)
+    pc = webrtc.RTCPeerConnection()
+    _ = pc.add_transceiver(webrtc.MediaType.audio)
+    state.connections.append(pc)
+    monkeypatch.setattr(webrtc.RTCPeerConnection, 'get_senders', closing_get_senders)
+    with contextlib.suppress(*chaos.MISUSE):
+        await getattr(state, step)()
+    assert pc.connection_state == webrtc.RTCPeerConnectionState.closed
 
 
 @pytest.mark.parametrize('seed', range(2))

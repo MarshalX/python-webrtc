@@ -6,11 +6,9 @@
 //
 
 #include "rtc_rtp_receiver.h"
-#include "../utils/python_callback.h"
 
 #include <rtc_base/time_utils.h>
 
-#include <pybind11/functional.h>
 #include <pybind11/stl.h>
 
 #include "../enums/enums.h"
@@ -23,24 +21,20 @@ namespace python_webrtc {
   RTCRtpReceiver::RTCRtpReceiver(std::shared_ptr<PeerConnectionFactory> factory,
                                  webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver)
       : _factory(std::move(factory)), _receiver(std::move(receiver)),
-        _track(MediaStreamTrack::holder().GetOrCreate(_factory, _receiver->track())) {
+        _track(MediaStreamTrack::registry().GetOrCreate(_factory, _receiver->track())) {
     // the track of a receiver is a remote one
     _track->MarkRemote();
-    // see AliveGuard
-    _factory->signalingThread()->PostTask(_alive.Guard([this]() {
+    _factory->signalingThread()->PostTask(Guard([this]() {
       _receiver->SetObserver(this);
-      holder().SetObserver(_receiver.get(), this);
+      registry().SetObserver(_receiver.get(), this);
     }));
   }
 
   RTCRtpReceiver::~RTCRtpReceiver() {
-    const BlockingDestructor release("RTCRtpReceiver");
-    _transform.Release();
-
     // callbacks run on the signaling thread, so after this none of them can be running or start again
     BlockingCallOn(_factory->signalingThread(), [this]() {
       // a newer wrapper of the receiver may have taken its single observer slot
-      if (holder().TakeObserver(_receiver.get(), this)) {
+      if (registry().TakeObserver(_receiver.get(), this)) {
         _receiver->SetObserver(nullptr);
       }
     });
@@ -56,22 +50,21 @@ namespace python_webrtc {
 
   void RTCRtpReceiver::Init(pybind11::module &m) {
     pybind11::class_<RTCRtpReceiver, std::shared_ptr<RTCRtpReceiver>>(m, "RTCRtpReceiver")
+        .def_property_readonly("_id", &RTCRtpReceiver::Id)
         .def_property_readonly("track", nogil_fn(&RTCRtpReceiver::GetTrack))
         .def_property_readonly("transport", nogil_fn(&RTCRtpReceiver::GetTransport))
         .def_property("jitterBufferTarget", nogil_fn(&RTCRtpReceiver::GetJitterBufferTarget),
                       nogil_fn(&RTCRtpReceiver::SetJitterBufferTarget))
         .def("getParameters", &RTCRtpReceiver::GetParameters, nogil())
-        .def("getStats", WithCallbacks(&RTCRtpReceiver::GetStats), pybind11::arg("onSuccess"),
-             pybind11::arg("onFailure"))
+        .def("getStats", &RTCRtpReceiver::GetStats, nogil(), pybind11::arg("mailbox"), pybind11::arg("token"))
         .def_static("getCapabilities", &RTCRtpReceiver::GetCapabilities, nogil(), pybind11::arg("kind"))
         .def_property("transform", nogil_fn(&RTCRtpReceiver::GetTransform), nogil_fn(&RTCRtpReceiver::SetTransform))
         .def("_getSources", &RTCRtpReceiver::GetSources, nogil());
   }
 
-  InstanceHolder<RTCRtpReceiver, webrtc::RtpReceiverInterface> &RTCRtpReceiver::holder() {
-    // never destroyed: wrappers may outlive static destructors
-    static auto *holder = new InstanceHolder<RTCRtpReceiver, webrtc::RtpReceiverInterface>();
-    return *holder;
+  Registry<RTCRtpReceiver, webrtc::RtpReceiverInterface> &RTCRtpReceiver::registry() {
+    static ForkLocal<Registry<RTCRtpReceiver, webrtc::RtpReceiverInterface>> registry;
+    return registry.Get();
   }
 
   void RTCRtpReceiver::SetConnection(std::weak_ptr<RTCPeerConnection> connection) {
@@ -91,7 +84,7 @@ namespace python_webrtc {
   std::optional<std::shared_ptr<RTCDtlsTransport>> RTCRtpReceiver::GetTransport() {
     auto transport = _receiver->dtls_transport();
     // wrapped out of the lock: wrapping may wait for the signaling thread
-    auto wrapper = RTCDtlsTransport::holder().GetOrCreate(_factory, transport);
+    auto wrapper = RTCDtlsTransport::registry().GetOrCreate(_factory, transport);
 
     std::shared_ptr<RTCDtlsTransport> previous;
     const std::scoped_lock lock(_mutex);
@@ -136,14 +129,14 @@ namespace python_webrtc {
     _receiver->SetJitterBufferMinimumDelay(target ? std::optional<double>(*target / msPerSecond) : std::nullopt);
   }
 
-  void RTCRtpReceiver::GetStats(std::function<void(std::string)> &onSuccess,
-                                std::function<void(RTCCallbackException)> &onFailure) {
+  void RTCRtpReceiver::GetStats(std::shared_ptr<Mailbox> mailbox, uint64_t token) {
+    Completion completion(std::move(mailbox), token);
     auto connection = GetConnection();
     if (!connection) {
-      onFailure(RTCCallbackException(closedError("getStats", "RTCRtpReceiver")));
+      completion.Fail(RTCCallbackException(closedError("getStats", "RTCRtpReceiver")));
       return;
     }
-    connection->CollectStats(_receiver, onSuccess, onFailure);
+    connection->CollectStats(_receiver, std::move(completion));
   }
 
   std::vector<RTCRtpReceiver::Source> RTCRtpReceiver::GetSources() {

@@ -8,8 +8,10 @@
 #ifndef PYTHON_WEBRTC_EXCEPTIONS_H_
 #define PYTHON_WEBRTC_EXCEPTIONS_H_
 
+#include <exception>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include <api/rtc_error.h>
 
@@ -64,6 +66,18 @@ namespace python_webrtc {
 
   // the Python exception (a webrtc.RTCException subclass) for a libwebrtc error
   pybind11::object rtcErrorToPython(const webrtc::RTCError &error, std::optional<int> sdpLineNumber = std::nullopt);
+
+  template <typename F>
+  void CallUnraisable(const char *context, F &&call) {
+    try {
+      std::forward<F>(call)();
+    } catch (pybind11::error_already_set &e) {
+      e.discard_as_unraisable(context);
+    } catch (const std::exception &e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      pybind11::error_already_set().discard_as_unraisable(context);
+    }
+  }
 
   class Exceptions {
   public:

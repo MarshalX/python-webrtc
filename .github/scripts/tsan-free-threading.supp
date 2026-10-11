@@ -1,0 +1,13 @@
+# Free-threaded only: the uninstrumented interpreter orders these pybind11 accesses; our own frames stay reported.
+race:pybind11::detail::value_and_holder::value_and_holder
+race:pybind11::detail::value_and_holder::set_instance_registered
+race:pybind11::detail::type_caster_generic::load_value
+race:pybind11::detail::instance::allocate_layout
+race:pybind11::detail::make_new_instance
+# registries pybind11 guards with CPython mutexes
+race:pybind11::detail::register_instance_impl
+race:pybind11::detail::deregister_instance_impl
+race:pybind11::detail::with_instance_map
+race:pybind11::detail::get_internals
+race:pybind11::detail::all_type_info
+race:pybind11::detail::get_type_info

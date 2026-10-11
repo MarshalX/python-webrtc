@@ -24,25 +24,24 @@ namespace python_webrtc {
       : _encrypting(encrypting), _context(suite) {}
 
   std::shared_ptr<SFrameTransform> SFrameTransform::Create(int cipherSuite, bool encrypting) {
-    // the bridge may hold the last reference on a libwebrtc thread
-    return {new SFrameTransform(CipherSuiteOf(cipherSuite), encrypting), DeleteOffLibwebrtcThread()};
+    return NativeObject::Create(CipherSuiteOf(cipherSuite), encrypting);
   }
 
   SFrameTransform::~SFrameTransform() {
-    const gil_release_if_held release;
     {
       const std::scoped_lock lock(_mutex);
-      _errors.clear();
       _bridge = nullptr;
     }
-    DropListeners();
   }
 
   void SFrameTransform::Init(pybind11::module &m) {
     SFrameContext::Init(m);
-    Listeners::BindClass<SFrameTransform, RtpTransform>(m, "SFrameTransform")
+    DefineBinding(pybind11::class_<SFrameTransform, RtpTransform, Binding, std::shared_ptr<SFrameTransform>>(
+                      m, "SFrameTransform"))
+        .def_property_readonly("_id", &SFrameTransform::Id)
         .def(pybind11::init(&SFrameTransform::Create), pybind11::arg("cipherSuite"), pybind11::arg("encrypting"))
         .def_property_readonly("encrypting", &SFrameTransform::IsEncrypting)
+        .def_property_readonly("state", nogil_fn(&SFrameTransform::GetState))
         .def(
             "setEncryptionKey",
             [](SFrameTransform &self, const pybind11::buffer &key, uint64_t keyId) {
@@ -128,15 +127,10 @@ namespace python_webrtc {
       bridge->Output(std::move(frame));
       return;
     }
-    Error dropped;
-    const std::scoped_lock lock(_mutex);
-    if (_errors.size() >= kMaxQueuedErrors) {
-      dropped = std::move(_errors.front());
-      _errors.pop_front();
+    // the frame goes with the event; unbound, nobody gets it
+    if (IsBound()) {
+      Emit("error", static_cast<int>(result.error), result.keyId, EncodedFrame::Create(std::move(frame), bridge->Id()));
     }
-    _errors.push_back(
-        {.error = result.error, .keyId = result.keyId, .frame = std::move(frame), .source = bridge->Id()});
-    WakeLocked();
   }
 
   void SFrameTransform::Associate(webrtc::scoped_refptr<FrameTransformerBridge> bridge) {
@@ -149,33 +143,14 @@ namespace python_webrtc {
     const std::scoped_lock lock(_mutex);
     bridge = std::move(_bridge);
     _disassociated = true;
-    WakeLocked();
   }
 
-  void SFrameTransform::WakeLocked() {
-    if (!_wakePending) {
-      _wakePending = true;
-      Wakeup::Post(weak_from_this());
+  int SFrameTransform::GetState() {
+    const std::scoped_lock lock(_mutex);
+    if (_disassociated) {
+      return 2;
     }
-  }
-
-  void SFrameTransform::OnWakeup() {
-    std::deque<Error> errors;
-    bool ended = false;
-    {
-      const std::scoped_lock lock(_mutex);
-      std::swap(errors, _errors);
-      _wakePending = false;
-      ended = _disassociated;
-    }
-    for (auto &error : errors) {
-      Emit("error", static_cast<int>(error.error), error.keyId,
-           std::make_shared<EncodedFrame>(std::move(error.frame), error.source));
-    }
-    if (ended) {
-      // never associated again: drops handlers that may reference the sender or receiver
-      CloseListeners();
-    }
+    return _bridge ? 1 : 0;
   }
 
 } // namespace python_webrtc

@@ -31,7 +31,7 @@ class MediaStream(
 ):
     """A group of audio and video tracks, played or sent together.
 
-    The stream holds its tracks, which stay alive as long as the stream does.
+    The stream keeps its tracks alive.
 
     See :mdn:`MediaStream`.
 
@@ -43,6 +43,8 @@ class MediaStream(
         tracks (:obj:`list` of :obj:`webrtc.MediaStreamTrack`, optional): The tracks of the new stream,
             or a stream whose tracks the new stream shares.
     """
+
+    __slots__ = ('_tracks',)
 
     _class = wrtc.MediaStream
     #: The native tracks, kept alive here because the native stream holds them weakly
@@ -56,8 +58,8 @@ class MediaStream(
 
     @classmethod
     @override
-    def _wrap(cls, item: wrtc.MediaStream) -> Self:
-        stream = super()._wrap(item)
+    def _wrap(cls, item: wrtc.MediaStream, *, connection: webrtc.RTCPeerConnection | None = None) -> Self:
+        stream = super()._wrap(item, connection=connection)
         stream._keep_tracks()
         return stream
 
@@ -68,6 +70,10 @@ class MediaStream(
         self._keep_tracks()
         return self._tracks
 
+    def _wrap_track(self, track: wrtc.MediaStreamTrack) -> webrtc.MediaStreamTrack:
+        # only remote tracks are children of the stream's connection
+        return MediaStreamTrack._wrap(track, connection=self._connection if track._remote else None)
+
     @override
     def _on_event(self, name: str, *_args: object) -> None:
         if name in {'addtrack', 'removetrack'}:
@@ -76,7 +82,14 @@ class MediaStream(
     @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
         (track,) = cast('tuple[wrtc.MediaStreamTrack]', args)
-        return MediaStreamTrackEvent(name, MediaStreamTrackEventInit(MediaStreamTrack._wrap(track)))
+        return MediaStreamTrackEvent(name, MediaStreamTrackEventInit(self._wrap_track(track)))
+
+    @override
+    def _activity(self) -> str | None:
+        connection = self._connection
+        if connection is None or connection._is_closed() or len(self.event_names()) == 0:
+            return None
+        return 'remote with handlers'
 
     @property
     def id(self) -> str:
@@ -102,7 +115,7 @@ class MediaStream(
         Returns:
             :obj:`list` of :obj:`webrtc.MediaStreamTrack`: The tracks.
         """
-        return MediaStreamTrack._wrap_many([t for t in self._kept_tracks() if t.kind == MediaType.audio])
+        return [self._wrap_track(t) for t in self._kept_tracks() if t.kind == MediaType.audio]
 
     def get_video_tracks(self) -> list[webrtc.MediaStreamTrack]:
         """Returns the video tracks of the stream, in no defined order.
@@ -112,7 +125,7 @@ class MediaStream(
         Returns:
             :obj:`list` of :obj:`webrtc.MediaStreamTrack`: The tracks.
         """
-        return MediaStreamTrack._wrap_many([t for t in self._kept_tracks() if t.kind == MediaType.video])
+        return [self._wrap_track(t) for t in self._kept_tracks() if t.kind == MediaType.video]
 
     def get_tracks(self) -> list[webrtc.MediaStreamTrack]:
         """Returns all the tracks of the stream, in no defined order.
@@ -122,7 +135,7 @@ class MediaStream(
         Returns:
             :obj:`list` of :obj:`webrtc.MediaStreamTrack`: The tracks.
         """
-        return MediaStreamTrack._wrap_many(self._kept_tracks())
+        return [self._wrap_track(t) for t in self._kept_tracks()]
 
     def get_track_by_id(self, track_id: str) -> webrtc.MediaStreamTrack | None:
         """Returns the track with an ID, the first one if several tracks have it.
@@ -137,7 +150,7 @@ class MediaStream(
         """
         track = self._native_obj.getTrackById(track_id)
         self._keep_tracks()
-        return MediaStreamTrack._wrap_optional(track)
+        return self._wrap_track(track) if track is not None else None
 
     def add_track(self, track: webrtc.MediaStreamTrack) -> None:
         """Adds a track to the stream, unless it's there already. Fires no ``addtrack`` event.

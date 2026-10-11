@@ -9,19 +9,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Literal, TypeVar, cast, overload
+from typing import Callable, Literal, TypeVar, cast, overload
 
 from typing_extensions import override
 
 import webrtc
 import wrtc
 from webrtc.base import WebRTCObject
+from webrtc.enums import RTCDtlsTransportState
 from webrtc.exceptions import _event_error
 from webrtc.models.events import Event, RTCErrorEvent, RTCErrorEventInit
 from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
-
-if TYPE_CHECKING:
-    from webrtc.enums import RTCDtlsTransportState
 
 _DtlsTransportEvent = Literal['statechange', 'error']
 _R = TypeVar('_R')
@@ -39,6 +37,8 @@ class RTCDtlsTransport(WebRTCObject[wrtc.RTCDtlsTransport], EventTarget[_DtlsTra
         error (:obj:`webrtc.RTCErrorEvent`): The transport failed. The event carries the
             :obj:`webrtc.RTCError` that explains why.
     """
+
+    __slots__ = ()
 
     _class = wrtc.RTCDtlsTransport
 
@@ -88,13 +88,21 @@ class RTCDtlsTransport(WebRTCObject[wrtc.RTCDtlsTransport], EventTarget[_DtlsTra
             return RTCErrorEvent(name, RTCErrorEventInit(_event_error(error)))
         return super()._create_event(name, *args)
 
+    @override
+    def _activity(self) -> str | None:
+        state = self.state
+        closed = state in {RTCDtlsTransportState.closed, RTCDtlsTransportState.failed} or not self._open()
+        if closed or len(self.event_names()) == 0:
+            return None
+        return f'{state.value} with handlers'
+
     @property
     def ice_transport(self) -> webrtc.RTCIceTransport:
         """:obj:`webrtc.RTCIceTransport`: The ICE transport the DTLS packets go over.
 
         See :mdn:`RTCDtlsTransport/iceTransport`.
         """
-        return webrtc.RTCIceTransport._wrap(self._native_obj.iceTransport)
+        return webrtc.RTCIceTransport._wrap(self._native_obj.iceTransport, connection=self._connection)
 
     @property
     def state(self) -> webrtc.RTCDtlsTransportState:

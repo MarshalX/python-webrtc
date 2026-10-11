@@ -137,6 +137,7 @@ namespace python_webrtc {
 
   void VideoFrameBuffer::Init(pybind11::module &m) {
     pybind11::class_<VideoFrameBuffer, std::shared_ptr<VideoFrameBuffer>>(m, "VideoFrameBuffer")
+        .def_property_readonly("_id", &VideoFrameBuffer::Id)
         .def_static("fromData", &VideoFrameBuffer::FromData, pybind11::arg("format"), pybind11::arg("width"),
                     pybind11::arg("height"), pybind11::arg("data"), pybind11::arg("layout"))
         .def_property_readonly("format", &VideoFrameBuffer::GetFormat)
@@ -193,7 +194,7 @@ namespace python_webrtc {
     using Type = webrtc::VideoFrameBuffer::Type;
     std::shared_ptr<VideoFrameBuffer> result;
     auto wrapYuv = [&](const char *name, const webrtc::PlanarYuv8Buffer *planes) {
-      result.reset(new VideoFrameBuffer(PixelFormat::Parse(name), buffer->width(), buffer->height()));
+      result = Create(PixelFormat::Parse(name), buffer->width(), buffer->height());
       result->_data = {planes->DataY(), planes->DataU(), planes->DataV(), nullptr};
       result->_stride = {planes->StrideY(), planes->StrideU(), planes->StrideV(), 0};
     };
@@ -213,7 +214,7 @@ namespace python_webrtc {
       break;
     case Type::kNV12: {
       const auto *planes = buffer->GetNV12();
-      result.reset(new VideoFrameBuffer(PixelFormat::Parse("NV12"), buffer->width(), buffer->height()));
+      result = Create(PixelFormat::Parse("NV12"), buffer->width(), buffer->height());
       result->_data = {planes->DataY(), planes->DataUV(), nullptr, nullptr};
       result->_stride = {planes->StrideY(), planes->StrideUV(), 0, 0};
       break;
@@ -249,7 +250,7 @@ namespace python_webrtc {
     const auto *source = static_cast<const uint8_t *>(info.ptr);
     auto sourceSize = static_cast<size_t>(info.size * info.itemsize);
 
-    std::shared_ptr<VideoFrameBuffer> result(new VideoFrameBuffer(format, width, height));
+    auto result = Create(format, width, height);
     std::array<size_t, 4> offsets{};
     std::array<size_t, 4> rows{};
     size_t total = 0;
@@ -294,8 +295,7 @@ namespace python_webrtc {
       // I420A, I420AP10...
       name.erase(4, 1);
     }
-    std::shared_ptr<VideoFrameBuffer> result = std::make_shared<VideoFrameBuffer>(*this);
-    result->_format = &PixelFormat::Parse(name);
+    auto result = Create(*this, PixelFormat::Parse(name));
     if (_format->layout != Layout::RGB) {
       result->_data[3] = nullptr;
       result->_stride[3] = 0;

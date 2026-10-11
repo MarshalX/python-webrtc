@@ -116,7 +116,11 @@ class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], Ev
             frame.close()
     """
 
+    __slots__ = ('_readable', '_source')
+
     _class = wrtc.MediaStreamTrackProcessor
+    #: None in a wrapper recreated after the application's one died
+    _source: _TrackSource | None
 
     def __init__(self, init: MediaStreamTrackProcessorInit) -> None:
         track, max_buffer_size = init.track, init.max_buffer_size
@@ -131,25 +135,29 @@ class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], Ev
             raise TypeError(msg)
 
         super().__init__(wrtc.MediaStreamTrackProcessor(track._native_obj, max(1, max_buffer_size)))
-        # the native processor doesn't keep the track, Python does
-        self._track = track
         self._source = _TrackSource(self)
         self._readable: ReadableStream[VideoFrame | AudioData] = ReadableStream(
             self._source, QueuingStrategy(high_water_mark=0)
         )
-        # media can come before the listeners are set
+        # media can come before the processor is bound to the loop
         self._attach_reader()
 
+    @override
+    def _init_native(self, native_obj: wrtc.MediaStreamTrackProcessor | None) -> None:
+        super()._init_native(native_obj)
+        self._source = None
+
     def _attach_reader(self) -> None:
-        # a wakeup sent with no open loop was dropped
-        if self._attach_running_loop():
+        # a wakeup sent while unbound was dropped
+        if self._attach():
             self._native_obj._ackWakeup()
 
     @override
     def _on_event(self, name: str, *_args: object) -> None:
         if name == '_ready':
             self._native_obj._ackWakeup()
-            self._source.deliver()
+            if self._source is not None:
+                self._source.deliver()
 
     @staticmethod
     def _wrap_media(

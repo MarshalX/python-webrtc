@@ -279,6 +279,7 @@ from .streams import (
     WritableStreamDefaultController,
     WritableStreamDefaultWriter,
 )
+from .utils import loops as loops  # registers the wake function of the Dispatcher at import
 from .utils.events import EventTarget, HandlerDecorator, UniformEventTarget
 
 __all__ = [

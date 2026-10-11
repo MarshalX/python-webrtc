@@ -15,8 +15,8 @@ import pytest
 
 import webrtc
 from tests.helpers import (
-    QUIET_PERIOD,
     connect,
+    delivered,
     exchange_offer_answer,
     wait_for_event,
     wait_for_ice_gathering_complete,
@@ -94,7 +94,7 @@ async def test_ice_restart_keeps_the_connection_connected(
 
     caller.restart_ice()
     await exchange_offer_answer(caller, callee)
-    await asyncio.sleep(QUIET_PERIOD)
+    await delivered()
 
     assert events == []
     assert caller.ice_connection_state == webrtc.RTCIceConnectionState.connected
@@ -149,20 +149,23 @@ async def test_dropped_transport_closes(
 
 
 @pytest.mark.asyncio
-async def test_transport_taken_late_gets_its_events(
+async def test_transport_taken_late_shows_its_state_and_gets_the_next_events(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:
-    """A transport Python takes once connected still gets its events."""
+    """Transport taken after connecting gets later events."""
     caller.create_data_channel('late')
     await connect(caller, callee)
     ice = sctp_transport(caller).ice_transport
-    states: list[str] = []
-    ice.on('statechange', lambda _event: states.append(ice.state))
-
-    await wait_until(lambda: len(states) >= 2, 'the events of the transport')
-
-    assert states == ['checking', 'connected']
     assert ice.state == webrtc.RTCIceTransportState.connected
+    assert ice.gathering_state == webrtc.RTCIceGathererState.complete
+    states: list[str] = []
+    ice.on('gatheringstatechange', lambda _event: states.append(ice.gathering_state))
+
+    caller.restart_ice()
+    await exchange_offer_answer(caller, callee)
+    await wait_until(lambda: 'complete' in states, 'the transport to gather again')
+
+    assert states == ['gathering', 'complete']
 
 
 async def connect_watching_ice(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> list[str]:

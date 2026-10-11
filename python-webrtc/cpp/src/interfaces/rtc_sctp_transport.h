@@ -15,15 +15,21 @@
 #include <api/sctp_transport_interface.h>
 
 #include "../enums/enums.h"
-#include "../utils/listeners.h"
 #include "../utils/locked_function.h"
+#include "../utils/mailbox.h"
+#include "../utils/native_object.h"
+#include "../utils/registry.h"
 #include "../utils/surfaced.h"
 #include "rtc_dtls_transport.h"
 
 namespace python_webrtc {
 
-  class RTCSctpTransport : public webrtc::SctpTransportObserverInterface, public Listeners, public SingleObserverSlot {
+  class RTCSctpTransport : public webrtc::SctpTransportObserverInterface,
+                           public NativeObject<RTCSctpTransport>,
+                           public Emitter<RTCSctpTransport> {
   public:
+    static constexpr const char *kName = "RTCSctpTransport";
+
     explicit RTCSctpTransport(std::shared_ptr<PeerConnectionFactory> factory,
                               webrtc::scoped_refptr<webrtc::SctpTransportInterface> transport);
 
@@ -34,7 +40,7 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
-    static InstanceHolder<RTCSctpTransport, webrtc::SctpTransportInterface> &holder();
+    static Registry<RTCSctpTransport, webrtc::SctpTransportInterface> &registry();
 
     webrtc::scoped_refptr<webrtc::SctpTransportInterface> transport() { return _transport; }
 

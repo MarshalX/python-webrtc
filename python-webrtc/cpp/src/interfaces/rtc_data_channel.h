@@ -20,10 +20,10 @@
 #include <pybind11/pybind11.h>
 
 #include "../enums/enums.h"
-#include "../utils/alive_guard.h"
-#include "../utils/instance_holder.h"
-#include "../utils/listeners.h"
 #include "../utils/locked_function.h"
+#include "../utils/mailbox.h"
+#include "../utils/native_object.h"
+#include "../utils/registry.h"
 #include "../utils/surfaced.h"
 #include "peer_connection_factory.h"
 
@@ -35,11 +35,14 @@ namespace python_webrtc {
     bool binary;
   };
 
-  class RTCDataChannel : public webrtc::DataChannelObserver, public Listeners, public SingleObserverSlot {
+  class RTCDataChannel : public webrtc::DataChannelObserver,
+                         public NativeObject<RTCDataChannel>,
+                         public Emitter<RTCDataChannel> {
   public:
+    static constexpr const char *kName = "RTCDataChannel";
+
     using DataState = webrtc::DataChannelInterface::DataState;
 
-    // Starts holding its events (see Listeners::Hold), Python releases them once it has the channel
     RTCDataChannel(std::shared_ptr<PeerConnectionFactory> factory,
                    webrtc::scoped_refptr<webrtc::DataChannelInterface> channel);
 
@@ -50,7 +53,7 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
-    static InstanceHolder<RTCDataChannel, webrtc::DataChannelInterface> &holder();
+    static Registry<RTCDataChannel, webrtc::DataChannelInterface> &registry();
 
     webrtc::scoped_refptr<webrtc::DataChannelInterface> channel() { return _channel; }
 
@@ -132,9 +135,6 @@ namespace python_webrtc {
 
     LockedFunction<std::optional<double>()> _maxMessageSizeGetter;
     LockedFunction<void()> _closedCallback;
-
-    // see AliveGuard
-    AliveGuard _alive;
   };
 
 } // namespace python_webrtc

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import datetime
+import datetime as dt
 import pathlib
 import shutil
 import subprocess
@@ -171,7 +171,7 @@ async def run(groups: Collection[str], *, quick: bool) -> str:
         '# Benchmarks',
         '',
         (
-            f'{datetime.datetime.now().astimezone().date().isoformat()}, {machine()}, commit {_commit()}. '
+            f'{dt.datetime.now().astimezone().date().isoformat()}, {machine()}, commit {_commit()}. '
             f'Written by `python -m benchmarks{" --quick" if quick else ""}`.'
         ),
         '',

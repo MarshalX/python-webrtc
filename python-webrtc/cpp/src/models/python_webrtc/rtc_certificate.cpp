@@ -21,6 +21,7 @@ namespace python_webrtc {
 
   void RTCCertificate::Init(pybind11::module &m) {
     pybind11::class_<RTCCertificate, std::shared_ptr<RTCCertificate>>(m, "RTCCertificate")
+        .def_property_readonly("_id", &RTCCertificate::Id)
         .def_static("generate", &RTCCertificate::Generate, nogil(), pybind11::arg("keyType"),
                     pybind11::arg("modulusLength"), pybind11::arg("publicExponent"), pybind11::arg("expires"))
         .def_property_readonly("expires", &RTCCertificate::Expires)
@@ -34,7 +35,7 @@ namespace python_webrtc {
       return nullptr;
     }
     auto certificate = webrtc::RTCCertificateGenerator::GenerateCertificate(params, expiresMs);
-    return certificate ? std::make_shared<RTCCertificate>(certificate) : nullptr;
+    return certificate ? Create(certificate) : nullptr;
   }
 
   std::vector<std::pair<std::string, std::string>> RTCCertificate::Fingerprints() const {

@@ -30,7 +30,7 @@ class VideoConstraints(TypedDict, total=False, closed=True):
 
 @pytest.mark.asyncio
 async def test_camera_settings_and_capabilities() -> None:
-    """A camera track has the size and measured frame rate of its frames, and the capabilities of the camera."""
+    """A camera track has the size and frame rate its camera selected, and the capabilities of the camera."""
     stream = await webrtc.media_devices.get_user_media(
         webrtc.MediaStreamConstraints(video=webrtc.MediaTrackConstraints(width=320, height=240, frame_rate=30))
     )
@@ -183,6 +183,20 @@ async def test_camera_stays_within_its_capabilities(
         )
     ).get_tracks()[0]
     assert capture_mode(track) == expected
+
+
+@pytest.mark.asyncio
+async def test_camera_settings_are_its_mode_while_old_frames_are_recent(video_stream: webrtc.MediaStream) -> None:
+    """A camera reconfigured reports its new mode at once, not the rate its last frames were captured at."""
+    track = video_stream.get_tracks()[0]
+    reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
+    for _ in range(3):
+        frame = (await asyncio.wait_for(reader.read(), 10)).value
+        assert isinstance(frame, webrtc.VideoFrame)
+        frame.close()
+    await track.apply_constraints(C(frame_rate=1))
+    assert capture_mode(track) == (640, 480, 1)
+    reader.release_lock()
     track.stop()
 
 

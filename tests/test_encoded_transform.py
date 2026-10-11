@@ -18,7 +18,7 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import QUIET_PERIOD, connect, mistyped, wait_until, wait_until_unmuted
+from tests.helpers import connect, delivered, mistyped, settled_alive, wait_progressing, wait_until, wait_until_unmuted
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -39,7 +39,6 @@ class Recorder:
         self.transformer: webrtc.RTCRtpScriptTransformer | None = None
         self.started = asyncio.get_running_loop().create_future()
         self.done = asyncio.get_running_loop().create_future()
-        self._waiters: list[tuple[int, asyncio.Future[None]]] = []
 
     async def __call__(self, event: webrtc.RTCTransformEvent) -> None:
         self.transformer = event.transformer
@@ -57,20 +56,18 @@ class Recorder:
                 self.change(frame)
             if writer is not None:
                 _ = writer.write(frame)
-            for count, waiter in self._waiters:
-                if len(self.frames) >= count and not waiter.done():
-                    waiter.set_result(None)
         self.done.set_result(None)
 
     async def wait_frames(self, count: int) -> None:
-        waiter = asyncio.get_running_loop().create_future()
-        self._waiters.append((count, waiter))
-        if len(self.frames) >= count:
-            waiter.set_result(None)
         try:
-            await asyncio.wait_for(waiter, TIMEOUT)
-        except asyncio.TimeoutError:
-            msg = f'Timed out waiting for {count} frames: {self.describe()}'
+            await wait_progressing(
+                lambda: min(len(self.frames), count),
+                lambda: len(self.frames) >= count,
+                f'{count} frames',
+                stall=TIMEOUT,
+            )
+        except TimeoutError as e:
+            msg = f'{e}: {self.describe()}'
             raise TimeoutError(msg) from None
 
     def describe(self) -> str:
@@ -151,7 +148,7 @@ async def test_frames_pass_through_transforms(
 
     receiving.change = check
     _, receiver = await transformed_call(caller, callee, kind, sender_worker=sending, receiver_worker=receiving)
-    await wait_until(lambda: len(marked) >= 20, 'frames with data', TIMEOUT)
+    await wait_progressing(lambda: min(len(marked), 20), lambda: len(marked) >= 20, 'frames with data', stall=TIMEOUT)
     assert sum(marked) >= 15
 
     frame_class = webrtc.RTCEncodedVideoFrame if kind == 'video' else webrtc.RTCEncodedAudioFrame
@@ -294,10 +291,13 @@ async def test_write_rules(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerC
     await writer.write(second)
     first.data = bytearray(b'reordered')
     await writer.write(first)
-    await asyncio.sleep(QUIET_PERIOD * 3)
+    assert third.get_metadata().mime_type == 'audio/opus'
+    # frames arrive in order: the dropped ones would come before this one
+    third.data = bytearray(b'after')
+    await writer.write(third)
+    await wait_until(lambda: b'after' in payloads, 'the frame written last', TIMEOUT)
     assert b'accepted' in payloads
     assert {b'copy', b'twice', b'reordered'}.isdisjoint(payloads)
-    assert third.get_metadata().mime_type == 'audio/opus'
 
     with pytest.raises(TypeError):
         await writer.write(mistyped(None))
@@ -314,8 +314,7 @@ async def test_generate_key_frame(pair: tuple[webrtc.RTCPeerConnection, webrtc.R
 
     keys = key_frames(sending)
     await asyncio.wait_for(sending.transformer.generate_key_frame(), TIMEOUT)
-    await asyncio.sleep(QUIET_PERIOD)
-    assert key_frames(sending) > keys
+    await wait_until(lambda: key_frames(sending) > keys, 'the key frame recorded', TIMEOUT)
     await asyncio.wait_for(sending.transformer.generateKeyFrame(), TIMEOUT)
 
     with pytest.raises(webrtc.NotFoundError):
@@ -507,23 +506,15 @@ def released_to(baseline: dict[str, int]) -> bool:
     return all(count <= baseline.get(name, 0) for name, count in wrtc._alive().items())
 
 
+def left_over(baseline: dict[str, int]) -> int:
+    """The native objects alive past the baseline."""
+    return sum(max(0, count - baseline.get(name, 0)) for name, count in wrtc._alive().items())
+
+
 def alive_objects() -> dict[str, int]:
     """The native objects of transforms alive, once releases on helper threads are done."""
-
-    def current() -> dict[str, int]:
-        gc.collect()
-        alive = wrtc._alive()
-        return {name: alive[name] for name in ('RTCRtpScriptTransform', 'RTCEncodedFrame', 'FrameTransformerBridge')}
-
-    alive = current()
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline:
-        time.sleep(0.05)
-        now = current()
-        if now == alive:
-            break
-        alive = now
-    return alive
+    alive = settled_alive()[0]
+    return {name: alive[name] for name in ('RTCRtpScriptTransform', 'RTCEncodedFrame', 'FrameTransformerBridge')}
 
 
 @pytest.mark.asyncio
@@ -547,7 +538,9 @@ async def test_closing_releases_transforms() -> None:
 
     await session()
     try:
-        await wait_until(lambda: released_to(baseline), 'the transforms released', TIMEOUT)
+        await wait_progressing(
+            lambda: -left_over(baseline), lambda: released_to(baseline), 'the transforms released', stall=TIMEOUT
+        )
     except TimeoutError:
         left = {name: count for name, count in wrtc._alive().items() if count > baseline.get(name, 0)}
         msg = f'Timed out waiting for the transforms released, still alive: {left}'
@@ -588,7 +581,8 @@ async def test_generate_key_frame_settles_when_the_transform_is_removed(
     transformer = await asyncio.wait_for(started, TIMEOUT)
     await wait_until(lambda: transformer._native_obj.sourceKind is not None, 'a source', TIMEOUT)
     request = asyncio.ensure_future(transformer.generate_key_frame())
-    await asyncio.sleep(QUIET_PERIOD)
+    # only a read key frame fulfills it, and nothing reads
+    await delivered()
     assert not request.done()
     sender.transform = None
     with pytest.raises(webrtc.InvalidStateError):

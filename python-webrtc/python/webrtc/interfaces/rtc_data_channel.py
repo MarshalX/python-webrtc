@@ -136,7 +136,15 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannel
         close (:obj:`webrtc.Event`): The channel is closed.
     """
 
+    __slots__ = ()
+
     _class = wrtc.RTCDataChannel
+    # handlers that keep a channel alive in each state, per spec
+    _KEEPING: ClassVar[dict[RTCDataChannelState, frozenset[str]]] = {
+        RTCDataChannelState.connecting: frozenset({'open', 'message', 'error', 'closing', 'close'}),
+        RTCDataChannelState.open: frozenset({'message', 'error', 'closing', 'close'}),
+        RTCDataChannelState.closing: frozenset({'error', 'close'}),
+    }
 
     @overload
     def on(self, name: _DataChannelStateEvent, handler: None = None) -> HandlerDecorator[Event]: ...
@@ -225,9 +233,21 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannel
                 self._dispatch('bufferedamountlow')
 
     @override
+    def _activity(self) -> str | None:
+        state = self.ready_state
+        keeping = self._KEEPING.get(state)
+        # the native state follows the connection's close later
+        if keeping is None or not self._open():
+            return None
+        handled = self.event_names() & keeping
+        if len(handled) > 0:
+            return f'{state.value} with {", ".join(sorted(handled))} handlers'
+        return 'data queued' if self.buffered_amount > 0 else None
+
+    @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
-        if name == 'open' and self.ready_state != RTCDataChannelState.open:
-            # closed before it opened
+        if name in {'open', 'message'} and self.ready_state != RTCDataChannelState.open:
+            # discarded: closed before open, or a message once closing
             return None
         if name == 'message':
             (message,) = cast('tuple[wrtc.DataChannelMessage]', args)
@@ -371,13 +391,14 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannel
             webrtc.InvalidStateError: If the channel isn't open.
             webrtc.OperationError: If the send queue is full.
         """
-        if isinstance(data, str):
-            self._native_obj.send(usv_string(data).encode(), binary=False)
-        elif isinstance(data, (bytes, bytearray, memoryview, Blob)):
-            self._native_obj.send(bytes(data), binary=True)
-        else:
-            msg = f'data must be str, bytes-like or Blob, not {type(data).__name__}'
-            raise TypeError(msg)
+        with self._changing():
+            if isinstance(data, str):
+                self._native_obj.send(usv_string(data).encode(), binary=False)
+            elif isinstance(data, (bytes, bytearray, memoryview, Blob)):
+                self._native_obj.send(bytes(data), binary=True)
+            else:
+                msg = f'data must be str, bytes-like or Blob, not {type(data).__name__}'
+                raise TypeError(msg)
 
     def close(self) -> None:
         """Starts closing the channel, but messages queued before are still sent.
@@ -385,7 +406,8 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannel
         It does nothing if the channel is already closing.
         See :mdn:`RTCDataChannel/close`.
         """
-        self._native_obj.close()
+        with self._changing():
+            self._native_obj.close()
 
     #: Alias for :attr:`binary_type`
     binaryType = binary_type

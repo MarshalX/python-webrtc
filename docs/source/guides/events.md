@@ -27,8 +27,8 @@ The names are the ones of the specification, without the `on` prefix. A name the
 {obj}`ValueError`, which lists the names it does.
 
 Handlers run on the event loop they were registered from, so they have to be registered from a running loop. The
-native threads only schedule events on that loop. A slow handler delays the events after it, and the media keeps
-flowing.
+native threads never run Python: they post the events to that loop, which delivers them in order. A slow handler
+delays the events after it, and the media keeps flowing.
 
 ## One-shot handlers
 
@@ -51,6 +51,19 @@ pc.off()  # every handler of every event
 
 {meth}`~webrtc.utils.events.EventTarget.listeners` returns the handlers of an event, and
 {meth}`~webrtc.utils.events.EventTarget.event_names` the events that have some. Registering the same handler twice has no effect.
+
+## What handlers keep alive
+
+An object that can still fire an event you handle stays alive even when nothing references it: a connection with
+handlers or a call in flight, a channel with handlers or data to send, a live track with handlers. So end a
+connection with {meth}`~webrtc.RTCPeerConnection.close`, not by dropping it; that releases its channels, tracks and
+transports too.
+
+When the loop the handlers were registered on closes, they're removed, its pending calls are cancelled, and what
+they kept alive is released.
+
+A native object always returns the same Python object, so `is` works and objects can be dictionary keys. They take
+no attributes; keep your state in a dictionary keyed by them.
 
 ## Errors
 

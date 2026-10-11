@@ -12,21 +12,17 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import gc
-import os
-import subprocess
 import sys
 import threading
 import time
 from typing import Callable
-from unittest import mock
 
 import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import ROOT, connect, exchange_offer_answer, wait_for_event
+from tests.helpers import connect, exchange_offer_answer, settled_alive, wait_for_event
 from tests.isolation import isolated
-from webrtc.utils import events
 
 
 def _join(threads: list[threading.Thread]) -> None:
@@ -209,69 +205,14 @@ def test_objects_of_connections_read_while_they_connect() -> None:
     asyncio.run(_read_connections_while_they_connect())
 
 
-@isolated
-def test_callback_argument_that_cannot_be_converted() -> None:
-    """An unconvertible callback argument is reported, not fatal."""
-    reported: list[str] = []
-
-    def callback(_argument: object) -> None:
-        pass
-
-    sys.unraisablehook = lambda unraisable: reported.append(type(unraisable.exc_value).__name__)
-    wrtc._callback_unconvertible(callback)
-
-    assert reported == ['RuntimeError']
-
-
-@pytest.mark.skipif(not wrtc._sanitized, reason='checked in sanitizer builds only')
-def test_held_events_with_the_gil_abort() -> None:
-    """Held events taken with the GIL held abort."""
-    result = subprocess.run(
-        [sys.executable, '-c', 'import wrtc; wrtc._held_events_with_gil()'],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        cwd=ROOT,
-        check=False,
-    )
-    assert result.returncode != 0
-    assert 'HeldEvents' in result.stderr, result.stderr
-
-
-class _Parking:
-    def __init__(self) -> None:
-        self.park_signaling, self.signaling_parked, self.release_signaling = (
-            threading.Event(),
-            threading.Event(),
-            threading.Event(),
-        )
-        self.park_worker, self.worker_parked = threading.Event(), threading.Event()
-
-    def park(self, listeners: events._Listeners, name: str) -> None:
-        if name == 'negotiationneeded' and self.park_signaling.is_set():
-            self.park_signaling.clear()
-            self.signaling_parked.set()
-            self.release_signaling.wait(5)
-        elif (
-            name == 'icecandidate'
-            and self.park_worker.is_set()
-            and isinstance(listeners.target, webrtc.RTCIceTransport)
-        ):
-            self.park_worker.clear()
-            self.worker_parked.set()
-            time.sleep(0.5)
-            gc.collect()
-
-
-def _create_channel(pc: webrtc.RTCPeerConnection) -> None:
-    pc.create_data_channel('x')
+def _garbage_connection() -> None:
+    """Closed connection in a cycle with its handler."""
+    pc = webrtc.RTCPeerConnection()
+    pc.on('negotiationneeded', lambda _event, _pc=pc: None)
+    pc.close()
 
 
 def _watched() -> tuple[webrtc.RTCPeerConnection, webrtc.RTCIceTransport]:
-    garbage = webrtc.RTCIceTransport()
-    garbage.stop()
-    cycle: list[object] = [garbage]
-    cycle.append(cycle)
     pc = webrtc.RTCPeerConnection()
     pc.on('negotiationneeded', lambda _event: None)
     gatherer = webrtc.RTCIceTransport()
@@ -279,42 +220,73 @@ def _watched() -> tuple[webrtc.RTCPeerConnection, webrtc.RTCIceTransport]:
     return pc, gatherer
 
 
-@isolated(timeout=30)
-def test_wrapper_released_on_the_worker_while_a_constructor_waits_for_it() -> None:
-    """Worker GC while a constructor waits for the worker."""
-    parking = _Parking()
-    original = events._Listeners.__call__
+def _watched_on_a_loop() -> tuple[asyncio.AbstractEventLoop, webrtc.RTCPeerConnection, webrtc.RTCIceTransport]:
+    """Objects with handlers, plus garbage, on a thread's loop."""
+    loop = asyncio.new_event_loop()
+    _start(loop.run_forever)
+    watched: concurrent.futures.Future[tuple[webrtc.RTCPeerConnection, webrtc.RTCIceTransport]] = (
+        concurrent.futures.Future()
+    )
+    loop.call_soon_threadsafe(lambda: watched.set_result(_watched()))
+    loop.call_soon_threadsafe(_garbage_connection)
+    pc, gatherer = watched.result(10)
+    return loop, pc, gatherer
+
+
+@isolated(timeout=60)
+def test_wrappers_made_and_collected_while_a_libwebrtc_thread_posts() -> None:
+    """GC while signaling is parked mid-post."""
+    gc.disable()
+    loop, pc, gatherer = _watched_on_a_loop()
     created = threading.Event()
 
-    def emit(listeners: events._Listeners, name: str, *args: object) -> None:
-        parking.park(listeners, name)
-        original(listeners, name, *args)
-
     def create() -> None:
-        # released once the constructor is known to return
+        # unparked once the constructor is known to return
         transport = webrtc.RTCIceTransport()
         created.set()
         del transport
 
-    with mock.patch.object(events._Listeners, '__call__', emit):
-        gc.disable()
-        loop = asyncio.new_event_loop()
-        _start(loop.run_forever)
-        # handlers are registered on a running loop
-        watched: concurrent.futures.Future[tuple[webrtc.RTCPeerConnection, webrtc.RTCIceTransport]] = (
-            concurrent.futures.Future()
-        )
-        loop.call_soon_threadsafe(lambda: watched.set_result(_watched()))
-        pc, gatherer = watched.result(10)
-        parking.park_signaling.set()
-        _start(lambda: _create_channel(pc))
-        assert parking.signaling_parked.wait(5)
+    def create_channel() -> None:
+        _ = pc.create_data_channel('x')
+
+    wrtc._testing.park('mailbox.post')
+    try:
+        _start(create_channel)
+        assert wrtc._testing.parked('mailbox.post', 5)
         _start(create)
-        time.sleep(0.3)
-        parking.park_worker.set()
         _start(gatherer.gather)
-        assert parking.worker_parked.wait(5)
-        parking.release_signaling.set()
-        assert created.wait(5), 'stuck'
-    # the parked threads would keep the interpreter from exiting
-    os._exit(0)
+        time.sleep(0.3)
+        assert not created.is_set()
+        gc.collect()
+    finally:
+        wrtc._testing.release('mailbox.post')
+    assert created.wait(10), 'stuck'
+    gatherer.stop()
+    pc.close()
+    loop.call_soon_threadsafe(loop.stop)
+    wrtc._testing.dispatcher_idle()
+
+
+@isolated(timeout=60)
+def test_dispatcher_parked_while_objects_go_and_their_loop_closes() -> None:
+    """Loop closes while the Dispatcher is parked."""
+    baseline = settled_alive()
+
+    async def scenario() -> None:
+        caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        caller.on('connectionstatechange', lambda _event: None)
+        callee.on('connectionstatechange', lambda _event: None)
+        channel = await _open_channel(caller, callee)
+        wrtc._testing.park('dispatcher.wake')
+        # a parked wake makes later events queue behind it
+        wrtc._testing.post(wrtc.Mailbox(), 'event', 1)
+        assert wrtc._testing.parked('dispatcher.wake', 5)
+        channel.send(b'parked')
+        callee.close()
+
+    try:
+        asyncio.run(scenario())
+        gc.collect()
+    finally:
+        wrtc._testing.release('dispatcher.wake')
+    assert settled_alive() == baseline

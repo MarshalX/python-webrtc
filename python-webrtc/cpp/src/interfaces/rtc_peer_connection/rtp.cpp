@@ -142,40 +142,40 @@ namespace python_webrtc {
     });
   }
 
-  webrtc::scoped_refptr<webrtc::PeerConnectionInterface>
-  RTCPeerConnection::StatsConnection(const std::function<void(RTCCallbackException)> &onFailure) {
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface> RTCPeerConnection::StatsConnection(Completion &completion) {
     auto pc = connection();
     if (!pc) {
       pc = closedConnection();
     }
     if (!pc) {
-      onFailure(RTCCallbackException(closedError("getStats")));
+      completion.Fail(RTCCallbackException(closedError("getStats")));
       return nullptr;
     }
     pc->ClearStatsCache();
     return pc;
   }
 
-  void RTCPeerConnection::GetStats(std::function<void(std::string)> &onSuccess,
-                                   std::function<void(RTCCallbackException)> &onFailure) {
-    if (auto pc = StatsConnection(onFailure)) {
-      pc->GetStats(webrtc::make_ref_counted<StatsCollectorCallback>(onSuccess, remoteTrackIds(pc)).get());
+  void RTCPeerConnection::GetStats(std::shared_ptr<Mailbox> mailbox, uint64_t token) {
+    Completion completion(std::move(mailbox), token);
+    if (auto pc = StatsConnection(completion)) {
+      auto trackIds = remoteTrackIds(pc);
+      pc->GetStats(webrtc::make_ref_counted<StatsCollectorCallback>(std::move(completion), std::move(trackIds)).get());
     }
   }
 
   void RTCPeerConnection::CollectStats(const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender,
-                                       std::function<void(std::string)> &onSuccess,
-                                       std::function<void(RTCCallbackException)> &onFailure) {
-    if (auto pc = StatsConnection(onFailure)) {
-      pc->GetStats(sender, webrtc::make_ref_counted<StatsCollectorCallback>(onSuccess));
+                                       Completion completion) {
+    if (auto pc = StatsConnection(completion)) {
+      pc->GetStats(sender, webrtc::make_ref_counted<StatsCollectorCallback>(std::move(completion)));
     }
   }
 
   void RTCPeerConnection::CollectStats(const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver,
-                                       std::function<void(std::string)> &onSuccess,
-                                       std::function<void(RTCCallbackException)> &onFailure) {
-    if (auto pc = StatsConnection(onFailure)) {
-      pc->GetStats(receiver, webrtc::make_ref_counted<StatsCollectorCallback>(onSuccess, remoteTrackIds(pc)));
+                                       Completion completion) {
+    if (auto pc = StatsConnection(completion)) {
+      auto trackIds = remoteTrackIds(pc);
+      pc->GetStats(receiver,
+                   webrtc::make_ref_counted<StatsCollectorCallback>(std::move(completion), std::move(trackIds)));
     }
   }
 

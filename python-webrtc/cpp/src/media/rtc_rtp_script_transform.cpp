@@ -19,24 +19,20 @@
 
 namespace python_webrtc {
 
-  std::shared_ptr<RTCRtpScriptTransform> RTCRtpScriptTransform::Create() {
-    // the bridge may hold the last reference on a libwebrtc thread
-    return {new RTCRtpScriptTransform(), DeleteOffLibwebrtcThread()};
-  }
-
   RTCRtpScriptTransform::~RTCRtpScriptTransform() {
-    const gil_release_if_held release;
     {
       const std::scoped_lock lock(_mutex);
       _queue.clear();
       _bridge = nullptr;
     }
-    DropListeners();
   }
 
   void RTCRtpScriptTransform::Init(pybind11::module &m) {
-    Listeners::BindClass<RTCRtpScriptTransform, RtpTransform>(m, "RTCRtpScriptTransform")
-        .def(pybind11::init(nogil_factory(&RTCRtpScriptTransform::Create)))
+    DefineBinding(
+        pybind11::class_<RTCRtpScriptTransform, RtpTransform, Binding, std::shared_ptr<RTCRtpScriptTransform>>(
+            m, "RTCRtpScriptTransform"))
+        .def_property_readonly("_id", &RTCRtpScriptTransform::Id)
+        .def(pybind11::init(nogil_factory(+[]() { return RTCRtpScriptTransform::Create(); })))
         .def("read", &RTCRtpScriptTransform::Read)
         .def("write", &RTCRtpScriptTransform::Write, pybind11::arg("frame"), pybind11::arg("data"))
         .def("_ackWakeup", &RTCRtpScriptTransform::AckWakeup, nogil())
@@ -55,16 +51,22 @@ namespace python_webrtc {
 
   void RTCRtpScriptTransform::Transform(std::unique_ptr<webrtc::TransformableFrameInterface> frame) {
     std::unique_ptr<webrtc::TransformableFrameInterface> dropped;
-    const std::scoped_lock lock(_mutex);
-    if (_state != State::kAssociated) {
-      return;
+    bool wake = false;
+    {
+      const std::scoped_lock lock(_mutex);
+      if (_state != State::kAssociated) {
+        return;
+      }
+      if (_queue.size() >= kMaxQueuedFrames) {
+        dropped = std::move(_queue.front());
+        _queue.pop_front();
+      }
+      _queue.push_back(std::move(frame));
+      wake = ArmWakeLocked();
     }
-    if (_queue.size() >= kMaxQueuedFrames) {
-      dropped = std::move(_queue.front());
-      _queue.pop_front();
+    if (wake) {
+      Emit("_ready");
     }
-    _queue.push_back(std::move(frame));
-    WakeLocked();
   }
 
   void RTCRtpScriptTransform::Associate(webrtc::scoped_refptr<FrameTransformerBridge> bridge) {
@@ -75,32 +77,25 @@ namespace python_webrtc {
 
   void RTCRtpScriptTransform::Disassociate() {
     std::deque<std::unique_ptr<webrtc::TransformableFrameInterface>> dropped;
-    const std::scoped_lock lock(_mutex);
-    if (_state == State::kDisassociated) {
-      return;
-    }
-    _state = State::kDisassociated;
-    std::swap(dropped, _queue);
-    // the end wakes Python even while a wakeup is pending
-    _wakePending = false;
-    WakeLocked();
-  }
-
-  void RTCRtpScriptTransform::WakeLocked() {
-    if (!_wakePending) {
+    {
+      const std::scoped_lock lock(_mutex);
+      if (_state == State::kDisassociated) {
+        return;
+      }
+      _state = State::kDisassociated;
+      std::swap(dropped, _queue);
+      // the end wakes Python even while a wakeup is pending
       _wakePending = true;
-      Wakeup::Post(weak_from_this());
     }
+    Emit("_ready");
   }
 
-  void RTCRtpScriptTransform::OnWakeup() {
-    // read before the event, whose delivery ends the streams then
-    const bool ended = GetState() == State::kDisassociated;
-    Emit("_ready");
-    if (ended) {
-      // never associated again: drops handlers that may reference the sender or receiver
-      CloseListeners();
+  bool RTCRtpScriptTransform::ArmWakeLocked() {
+    if (_wakePending) {
+      return false;
     }
+    _wakePending = true;
+    return true;
   }
 
   void RTCRtpScriptTransform::AckWakeup() {
@@ -122,7 +117,7 @@ namespace python_webrtc {
       // frames are queued once associated, and the bridge is kept since
       source = _bridge->Id();
     }
-    return std::make_shared<EncodedFrame>(std::move(frame), source);
+    return EncodedFrame::Create(std::move(frame), source);
   }
 
   bool RTCRtpScriptTransform::Write(EncodedFrame &frame, std::optional<pybind11::buffer> data) {

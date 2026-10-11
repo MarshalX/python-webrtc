@@ -17,6 +17,8 @@
 
 #include <api/media_stream_interface.h>
 
+#include "../utils/libwebrtc_thread.h"
+
 namespace python_webrtc {
 
   class RTCVideoTrackSource;
@@ -33,12 +35,12 @@ namespace python_webrtc {
 
     static void Register(const webrtc::MediaStreamTrackInterface *track, const std::string &trackId,
                          const std::shared_ptr<SourceControl> &control) {
-      const std::scoped_lock lock(RegistryMutex());
       auto &registry = Registry();
-      for (auto it = registry.begin(); it != registry.end();) {
-        it = it->second.expired() ? registry.erase(it) : std::next(it);
+      const std::scoped_lock lock(registry.mutex);
+      for (auto it = registry.controls.begin(); it != registry.controls.end();) {
+        it = it->second.expired() ? registry.controls.erase(it) : std::next(it);
       }
-      registry[{track, trackId}] = control;
+      registry.controls[{track, trackId}] = control;
       const std::scoped_lock controlLock(control->mutex);
       control->live.insert(track);
     }
@@ -55,26 +57,24 @@ namespace python_webrtc {
 
     static std::shared_ptr<SourceControl> Find(const webrtc::MediaStreamTrackInterface *track,
                                                const std::string &trackId) {
-      const std::scoped_lock lock(RegistryMutex());
       auto &registry = Registry();
-      auto it = registry.find({track, trackId});
-      return it != registry.end() ? it->second.lock() : nullptr;
+      const std::scoped_lock lock(registry.mutex);
+      auto it = registry.controls.find({track, trackId});
+      return it != registry.controls.end() ? it->second.lock() : nullptr;
     }
 
   private:
     // both: a loopback remote track shares the id, and an address may be reused
     using Key = std::pair<const webrtc::MediaStreamTrackInterface *, std::string>;
-    using Map = std::map<Key, std::weak_ptr<SourceControl>>;
 
-    static Map &Registry() {
-      // never destroyed: wrappers may outlive static destructors
-      static auto *registry = new Map();
-      return *registry;
-    }
+    struct Controls {
+      std::mutex mutex;
+      std::map<Key, std::weak_ptr<SourceControl>> controls;
+    };
 
-    static std::mutex &RegistryMutex() {
-      static auto *mutex = new std::mutex();
-      return *mutex;
+    static Controls &Registry() {
+      static ForkLocal<Controls> registry;
+      return registry.Get();
     }
   };
 

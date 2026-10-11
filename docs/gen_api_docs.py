@@ -21,6 +21,8 @@ SECTIONS = {
 }
 # the internals of the package, except the events every interface inherits
 TOP_LEVEL = ['enums', 'exceptions', 'streams', 'utils.events', 'base', 'openh264', 'loopback']
+# internal webrtc.utils modules, without a page
+INTERNAL = ['utils.lifetime', 'utils.loops', 'utils.names', 'utils.operations', 'utils.strings', 'utils.transfer']
 
 # modules of several public classes, or whose class name isn't the best title
 TITLES = {
@@ -102,6 +104,12 @@ def main() -> None:
 
     for module in TOP_LEVEL:
         write_page(OUT / f'{module.rsplit(".", 1)[-1]}.rst', module)
+
+    for path in (PACKAGE / 'utils').glob('*.py'):
+        module = f'utils.{path.stem}'
+        if path.stem != '__init__' and module not in TOP_LEVEL and module not in INTERNAL:
+            msg = f'list webrtc.{module} in TOP_LEVEL or INTERNAL'
+            raise SystemExit(msg)
 
 
 if __name__ == '__main__':

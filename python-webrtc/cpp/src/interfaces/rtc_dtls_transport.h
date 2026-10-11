@@ -18,17 +18,22 @@
 #include <pybind11/pybind11.h>
 
 #include "../enums/enums.h"
-#include "../utils/instance_holder.h"
-#include "../utils/listeners.h"
 #include "../utils/locked_function.h"
+#include "../utils/mailbox.h"
+#include "../utils/native_object.h"
+#include "../utils/registry.h"
 #include "../utils/surfaced.h"
 #include "peer_connection_factory.h"
 #include "rtc_ice_transport.h"
 
 namespace python_webrtc {
 
-  class RTCDtlsTransport : public webrtc::DtlsTransportObserverInterface, public Listeners, public SingleObserverSlot {
+  class RTCDtlsTransport : public webrtc::DtlsTransportObserverInterface,
+                           public NativeObject<RTCDtlsTransport>,
+                           public Emitter<RTCDtlsTransport> {
   public:
+    static constexpr const char *kName = "RTCDtlsTransport";
+
     explicit RTCDtlsTransport(std::shared_ptr<PeerConnectionFactory> factory,
                               webrtc::scoped_refptr<webrtc::DtlsTransportInterface> transport);
 
@@ -39,7 +44,7 @@ namespace python_webrtc {
 
     static void Init(pybind11::module &m);
 
-    static InstanceHolder<RTCDtlsTransport, webrtc::DtlsTransportInterface> &holder();
+    static Registry<RTCDtlsTransport, webrtc::DtlsTransportInterface> &registry();
 
     webrtc::scoped_refptr<webrtc::DtlsTransportInterface> transport() { return _transport; }
 
@@ -67,7 +72,7 @@ namespace python_webrtc {
 
     webrtc::DtlsTransportState GetCurrentState();
 
-    void StateChanged(bool listening, webrtc::DtlsTransportState previous);
+    void StateChanged(bool bound, webrtc::DtlsTransportState previous);
 
     void EmitStateChange(webrtc::DtlsTransportState state);
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import inspect
 import weakref
 from typing import TYPE_CHECKING, NoReturn, cast
 
@@ -18,7 +19,8 @@ import pytest
 from typing_extensions import override
 
 import webrtc
-from tests.helpers import wait_until
+from tests.helpers import wait_progressing, wait_until
+from webrtc import streams
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Iterable
@@ -293,12 +295,14 @@ async def test_pipe_goes_on_when_nothing_references_it() -> None:
         return source.pipe_through(webrtc.TransformStream()).pipe_to(sink)
 
     done = start()
-    deadline = asyncio.get_running_loop().time() + 5
-    while not done.done() and asyncio.get_running_loop().time() < deadline:
+
+    def collect_and_wake() -> int:
         gc.collect()
         wake(waiting)
-        await asyncio.sleep(0.005)
-    await asyncio.wait_for(done, 1)
+        return len(written)
+
+    await wait_progressing(collect_and_wake, done.done, 'the pipe', stall=5)
+    await done
     assert written == list(range(50))
 
 
@@ -558,3 +562,45 @@ async def test_failed_write_does_not_call_sink_abort() -> None:
     with pytest.raises(ValueError, match='write failed'):
         await writer.write(1)
     assert aborted == []
+
+
+@pytest.mark.asyncio
+async def test_stream_belongs_to_the_open_loop_using_it() -> None:
+    """Another loop can't write, close or read a stream while the loop using it is open."""
+    writable: webrtc.WritableStream[int] = webrtc.WritableStream()
+    readable: webrtc.ReadableStream[int] = webrtc.ReadableStream()
+    writer = writable.get_writer()
+
+    async def from_another_loop() -> None:  # ruff: ignore[unused-async]
+        with pytest.raises(webrtc.InvalidStateError):
+            _ = writer.write(1)
+        with pytest.raises(webrtc.InvalidStateError):
+            _ = writer.close()
+        with pytest.raises(webrtc.InvalidStateError):
+            _ = writable.abort()
+        with pytest.raises(webrtc.InvalidStateError):
+            _ = readable.get_reader()
+
+    await asyncio.get_running_loop().run_in_executor(None, asyncio.run, from_another_loop())
+    await writer.write(1)
+    await writer.close()
+
+
+def test_every_stream_method_checks_its_loop() -> None:
+    """The public methods of streams, readers, writers and controllers raise from another loop."""
+    classes = (
+        webrtc.ReadableStream,
+        webrtc.ReadableStreamDefaultController,
+        webrtc.ReadableStreamDefaultReader,
+        webrtc.WritableStream,
+        webrtc.WritableStreamDefaultController,
+        webrtc.WritableStreamDefaultWriter,
+        webrtc.TransformStreamDefaultController,
+    )
+    unchecked = [
+        f'{cls.__name__}.{name}'
+        for cls in classes
+        for name, member in vars(cls).items()
+        if not name.startswith('_') and inspect.isfunction(member) and member not in streams.loop_checked
+    ]
+    assert unchecked == []

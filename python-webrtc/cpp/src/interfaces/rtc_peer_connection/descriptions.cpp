@@ -37,7 +37,7 @@ namespace python_webrtc {
         }
       }
       for (const auto &transceiver : pc->GetTransceivers()) {
-        auto track = MediaStreamTrack::holder().Find(transceiver->receiver()->track().get());
+        auto track = MediaStreamTrack::registry().Find(transceiver->receiver()->track().get());
         if (track) {
           track->HoldEnded();
           _tracks.emplace_back(std::move(track));
@@ -100,22 +100,24 @@ namespace python_webrtc {
 
   } // namespace
 
-  void RTCPeerConnection::CreateOffer(std::function<void(RTCSessionDescription)> &onSuccess,
-                                      std::function<void(RTCCallbackException)> &onFailure, bool iceRestart) {
+  void RTCPeerConnection::CreateOffer(std::shared_ptr<Mailbox> mailbox, uint64_t token, bool iceRestart) {
+    Completion completion(std::move(mailbox), token);
     auto pc = connection();
     auto state = pc ? pc->signaling_state() : SignalingState::kClosed;
     if (state == SignalingState::kClosed) {
-      onFailure(RTCCallbackException(closedError("createOffer")));
+      completion.Fail(RTCCallbackException(closedError("createOffer")));
       return;
     }
     if (state != SignalingState::kStable && state != SignalingState::kHaveLocalOffer) {
-      onFailure(RTCCallbackException(webrtc::RTCErrorType::INVALID_STATE,
-                                     "Failed to execute 'createOffer' on 'RTCPeerConnection': Called in wrong state: " +
-                                         std::string(webrtc::PeerConnectionInterface::AsString(state))));
+      completion.Fail(
+          RTCCallbackException(webrtc::RTCErrorType::INVALID_STATE,
+                               "Failed to execute 'createOffer' on 'RTCPeerConnection': Called in wrong state: " +
+                                   std::string(webrtc::PeerConnectionInterface::AsString(state))));
       return;
     }
 
-    auto observer = webrtc::make_ref_counted<CreateSessionDescriptionObserver>(weak_from_this(), onSuccess, onFailure);
+    auto observer = webrtc::make_ref_counted<CreateSessionDescriptionObserver>(
+        weak_from_this(), std::make_shared<Completion>(std::move(completion)));
 
     auto options = webrtc::PeerConnectionInterface::RTCOfferAnswerOptions();
     options.ice_restart = iceRestart;
@@ -123,15 +125,16 @@ namespace python_webrtc {
     pc->CreateOffer(observer.get(), options);
   }
 
-  void RTCPeerConnection::CreateAnswer(std::function<void(RTCSessionDescription)> &onSuccess,
-                                       std::function<void(RTCCallbackException)> &onFailure) {
+  void RTCPeerConnection::CreateAnswer(std::shared_ptr<Mailbox> mailbox, uint64_t token) {
+    Completion completion(std::move(mailbox), token);
     auto pc = connection();
     if (!pc || pc->signaling_state() == SignalingState::kClosed) {
-      onFailure(RTCCallbackException(closedError("createAnswer")));
+      completion.Fail(RTCCallbackException(closedError("createAnswer")));
       return;
     }
 
-    auto observer = webrtc::make_ref_counted<CreateSessionDescriptionObserver>(weak_from_this(), onSuccess, onFailure);
+    auto observer = webrtc::make_ref_counted<CreateSessionDescriptionObserver>(
+        weak_from_this(), std::make_shared<Completion>(std::move(completion)));
     pc->CreateAnswer(observer.get(), webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
   }
 
@@ -141,19 +144,19 @@ namespace python_webrtc {
   }
 
   std::function<void(webrtc::RTCError)>
-  RTCPeerConnection::Completion(std::function<void()> &onSuccess, std::function<void(RTCCallbackException)> &onFailure,
-                                const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
-                                DescriptionKind kind) {
+  RTCPeerConnection::DescriptionCompletion(std::shared_ptr<Completion> completion,
+                                           const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
+                                           DescriptionKind kind) {
     const bool remote = kind == DescriptionKind::kRemote;
     // a local description starts gathering, the candidates come after it
     auto held = std::make_shared<HeldOperationEvents>(pc, IceTransports(), shared_from_this(), !remote);
     if (remote) {
       SnapshotRemoteStreams(pc);
     }
-    return [weak = weak_from_this(), onSuccess, onFailure, held, remote](webrtc::RTCError error) {
+    return [weak = weak_from_this(), completion = std::move(completion), held, remote](webrtc::RTCError error) {
       auto self = weak.lock();
       if (!self || self->IsClosed()) {
-        onFailure(RTCCallbackException(closedError(remote ? "setRemoteDescription" : "setLocalDescription")));
+        completion->Fail(RTCCallbackException(closedError(remote ? "setRemoteDescription" : "setLocalDescription")));
       } else if (error.ok()) {
         // the descriptions as the operation left them, before candidates gathered later
         self->_completionSnapshot = self->SnapshotDescriptions();
@@ -164,30 +167,29 @@ namespace python_webrtc {
           // before the operation resolves, as the track events of a description are
           self->FireRemoteStreamChanges();
         }
-        onSuccess();
+        completion->Succeed();
         // their gathering events come after the operation
         for (const auto &iceTransport : created) {
           iceTransport->CreatedByDescription();
         }
       } else {
-        onFailure(RTCCallbackException(std::move(error)));
+        completion->Fail(RTCCallbackException(std::move(error)));
       }
       held->Release();
-      ReleaseElsewhere(std::move(self));
     };
   }
 
-  void RTCPeerConnection::SetLocalDescription(std::function<void()> &onSuccess,
-                                              std::function<void(RTCCallbackException)> &onFailure,
+  void RTCPeerConnection::SetLocalDescription(std::shared_ptr<Mailbox> mailbox, uint64_t token,
                                               const std::optional<RTCSessionDescriptionInit> &init) {
+    Completion completion(std::move(mailbox), token);
     auto pc = connection();
     auto state = pc ? pc->signaling_state() : SignalingState::kClosed;
     if (state == SignalingState::kClosed) {
-      onFailure(RTCCallbackException(closedError("setLocalDescription")));
+      completion.Fail(RTCCallbackException(closedError("setLocalDescription")));
       return;
     }
     if (init && !canSetLocal(init->type, state)) {
-      onFailure(RTCCallbackException(
+      completion.Fail(RTCCallbackException(
           webrtc::RTCErrorType::INVALID_STATE,
           "Failed to execute 'setLocalDescription' on 'RTCPeerConnection': The description type doesn't match "
           "the signaling state."));
@@ -200,13 +202,14 @@ namespace python_webrtc {
           state == SignalingState::kHaveRemoteOffer || state == SignalingState::kHaveLocalPrAnswer;
       const auto implicitType = waitsForAnswer ? webrtc::SdpType::kAnswer : webrtc::SdpType::kOffer;
       auto type = init ? init->type : implicitType;
-      auto complete = Completion(onSuccess, onFailure, pc, DescriptionKind::kLocal);
+      auto shared = std::make_shared<Completion>(std::move(completion));
+      auto complete = DescriptionCompletion(shared, pc, DescriptionKind::kLocal);
       if (type == webrtc::SdpType::kOffer ||
           (type == webrtc::SdpType::kAnswer && state == SignalingState::kHaveRemoteOffer)) {
         // libwebrtc creates the offer or the answer the signaling state calls for
         pc->SetLocalDescription(webrtc::make_ref_counted<SetLocalDescriptionObserver>(std::move(complete)));
       } else {
-        SetImplicitAnswer(pc, type, std::move(complete), onFailure);
+        SetImplicitAnswer(pc, type, std::move(complete), shared);
       }
       return;
     }
@@ -214,7 +217,7 @@ namespace python_webrtc {
     if (init->type != webrtc::SdpType::kRollback) {
       const std::scoped_lock lock(_createdMutex);
       if (fingerprintChanged(init->type == webrtc::SdpType::kOffer ? _lastOffer : _lastAnswer, init->sdp)) {
-        onFailure(RTCCallbackException(
+        completion.Fail(RTCCallbackException(
             webrtc::RTCErrorType::INVALID_MODIFICATION,
             "Failed to execute 'setLocalDescription' on 'RTCPeerConnection': The SDP does not match the previously "
             "generated SDP for this type"));
@@ -225,22 +228,23 @@ namespace python_webrtc {
     std::optional<RTCCallbackException> error;
     auto description = parseDescription(*init, error);
     if (error) {
-      onFailure(*error);
+      completion.Fail(*error);
       return;
     }
-    pc->SetLocalDescription(std::move(description), webrtc::make_ref_counted<SetLocalDescriptionObserver>(
-                                                        Completion(onSuccess, onFailure, pc, DescriptionKind::kLocal)));
+    pc->SetLocalDescription(std::move(description),
+                            webrtc::make_ref_counted<SetLocalDescriptionObserver>(DescriptionCompletion(
+                                std::make_shared<Completion>(std::move(completion)), pc, DescriptionKind::kLocal)));
   }
 
   void RTCPeerConnection::SetImplicitAnswer(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
                                             webrtc::SdpType type, std::function<void(webrtc::RTCError)> complete,
-                                            const std::function<void(RTCCallbackException)> &onFailure) {
+                                            const std::shared_ptr<Completion> &completion) {
     auto observer = webrtc::make_ref_counted<SetLocalDescriptionObserver>(std::move(complete));
-    auto apply = [pc, observer, type, onFailure](const std::string &sdp) {
+    auto apply = [pc, observer, type, completion](const std::string &sdp) {
       std::optional<RTCCallbackException> error;
       auto description = parseDescription(RTCSessionDescriptionInit(type, sdp), error);
       if (error) {
-        onFailure(*error);
+        completion->Fail(*error);
         return;
       }
       pc->SetLocalDescription(std::move(description), observer);
@@ -254,21 +258,18 @@ namespace python_webrtc {
       apply(lastAnswer);
       return;
     }
-    std::function<void(RTCSessionDescription)> created = [apply](const RTCSessionDescription &answer) {
-      apply(answer.init().sdp);
-    };
-    std::function<void(RTCCallbackException)> failed = onFailure;
-    auto answerObserver = webrtc::make_ref_counted<CreateSessionDescriptionObserver>(weak_from_this(), created, failed);
+    auto answerObserver = webrtc::make_ref_counted<CreateSessionDescriptionObserver>(
+        weak_from_this(), completion, [apply](const RTCSessionDescription &answer) { apply(answer.init().sdp); });
     pc->CreateAnswer(answerObserver.get(), webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
   }
 
-  void RTCPeerConnection::SetRemoteDescription(std::function<void()> &onSuccess,
-                                               std::function<void(RTCCallbackException)> &onFailure,
+  void RTCPeerConnection::SetRemoteDescription(std::shared_ptr<Mailbox> mailbox, uint64_t token,
                                                const RTCSessionDescriptionInit &init) {
+    Completion completion(std::move(mailbox), token);
     auto pc = connection();
     auto state = pc ? pc->signaling_state() : SignalingState::kClosed;
     if (state == SignalingState::kClosed) {
-      onFailure(RTCCallbackException(closedError("setRemoteDescription")));
+      completion.Fail(RTCCallbackException(closedError("setRemoteDescription")));
       return;
     }
 
@@ -277,7 +278,7 @@ namespace python_webrtc {
     const bool rollback = init.type == webrtc::SdpType::kRollback;
     if ((answer && state != SignalingState::kHaveLocalOffer && state != SignalingState::kHaveRemotePrAnswer) ||
         (rollback && state != SignalingState::kHaveRemoteOffer && state != SignalingState::kHaveRemotePrAnswer)) {
-      onFailure(RTCCallbackException(
+      completion.Fail(RTCCallbackException(
           webrtc::RTCErrorType::INVALID_STATE,
           "Failed to execute 'setRemoteDescription' on 'RTCPeerConnection': Called in wrong state: " +
               std::string(webrtc::PeerConnectionInterface::AsString(state))));
@@ -285,13 +286,14 @@ namespace python_webrtc {
     }
 
     // shared by the rollback and the application of the description
+    auto shared = std::make_shared<Completion>(std::move(completion));
     auto complete = std::make_shared<const std::function<void(webrtc::RTCError)>>(
-        Completion(onSuccess, onFailure, pc, DescriptionKind::kRemote));
-    auto apply = [init, complete, onFailure](const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
+        DescriptionCompletion(shared, pc, DescriptionKind::kRemote));
+    auto apply = [init, complete, shared](const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
       std::optional<RTCCallbackException> error;
       auto description = parseDescription(init, error);
       if (error) {
-        onFailure(*error);
+        shared->Fail(*error);
         return;
       }
       removeBlockedCandidates(*description);
@@ -314,7 +316,6 @@ namespace python_webrtc {
             } else {
               apply(pc);
             }
-            ReleaseElsewhere(std::move(self));
           });
       pc->SetLocalDescription(webrtc::CreateSessionDescription(webrtc::SdpType::kRollback, ""), rollbackObserver);
       return;
@@ -377,7 +378,7 @@ namespace python_webrtc {
     {
       // the descriptions as the last event that changed them left them, until the next one
       const std::scoped_lock lock(_descriptionsMutex);
-      if (HasListeners() && _shown && _shownGeneration == _descriptionsGeneration) {
+      if (IsBound() && _shown && _shownGeneration == _descriptionsGeneration) {
         view = _shown->kinds[static_cast<size_t>(kind)];
         live = _shown->live;
         shown = true;
@@ -393,7 +394,7 @@ namespace python_webrtc {
 
     const std::scoped_lock lock(_descriptionsMutex);
     // while events are delivered, a description only changes with them; without events it's always current
-    const bool refresh = shown || !HasListeners() || _descriptionsCachedGeneration != _descriptionsGeneration;
+    const bool refresh = shown || !IsBound() || _descriptionsCachedGeneration != _descriptionsGeneration;
     _descriptionsCachedGeneration = _descriptionsGeneration;
     return FindOrCreateDescription(view, live, refresh);
   }
@@ -449,7 +450,7 @@ namespace python_webrtc {
 
   uint64_t RTCPeerConnection::SnapshotDescriptions() {
     auto pc = connection();
-    if (!pc || !HasListeners()) {
+    if (!pc || !IsBound()) {
       return 0;
     }
     DescriptionsSnapshot snapshot;

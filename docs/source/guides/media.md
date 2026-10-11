@@ -9,9 +9,10 @@ Media is read from tracks and written to them with the APIs of the browsers:
 - {obj}`~webrtc.MediaStreamTrackGenerator` does the same for audio and video. It isn't part of a standard.
   See {mdn}`MediaStreamTrackGenerator`.
 
-Frames hold memory until they are closed, so close each frame once it's used. A processor queues `max_buffer_size` frames (1 of
-video, 10 chunks of 10 ms of audio by default) and drops the oldest when a reader is slower than the track, so
-memory never grows. Media threads never wait for the GIL. Python is woken once when frames are there.
+Frames hold memory until they are closed, so close each frame once it's used. A processor queues `max_buffer_size`
+frames (1 of video, 10 chunks of 10 ms of audio by default) and drops the oldest when a reader is slower than the
+track, so memory never grows. Media threads never run Python: they post to the event loop, which is woken once when
+frames are there.
 
 ## Tracks to start with
 

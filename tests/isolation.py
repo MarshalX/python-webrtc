@@ -13,6 +13,7 @@ import functools
 import multiprocessing
 import multiprocessing.context
 import os
+import sys
 import time
 from typing import TYPE_CHECKING, Callable, Literal, TypeVar, Union, cast, overload
 from unittest import mock
@@ -45,6 +46,10 @@ def _child(
         outcome = ('skipped', str(e.msg))
     connection.send(outcome)
     connection.close()
+    # don't import the library: import tests must not find it loaded
+    mismatches: list[str] = getattr(sys.modules.get('webrtc.utils.loops'), 'mismatches', [])
+    if len(mismatches) > 0:
+        raise AssertionError('the roots checks failed:\n' + '\n'.join(mismatches))
 
 
 def _run(

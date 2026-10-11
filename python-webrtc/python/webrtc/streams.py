@@ -17,16 +17,19 @@ from __future__ import annotations
 import asyncio
 import collections
 import enum
+import functools
 import inspect
 import math
+import threading
+import weakref
 from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Generator, Iterable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, ClassVar, Generic, Protocol, cast
 
-from typing_extensions import TypeVar
+from typing_extensions import Concatenate, ParamSpec, TypeVar
 
 from webrtc.enums import ReadableStreamReaderMode
-from webrtc.exceptions import InvalidRangeError
+from webrtc.exceptions import InvalidRangeError, InvalidStateError
 from webrtc.models.dictionary import Dictionary
 from webrtc.utils.names import Alias, alias
 
@@ -79,6 +82,56 @@ def _loop() -> asyncio.AbstractEventLoop:
     except RuntimeError:
         msg = 'streams are used from a running asyncio event loop'
         raise RuntimeError(msg) from None
+
+
+class _Homed(Protocol):
+    _home: weakref.ref[asyncio.AbstractEventLoop] | None
+
+
+_homes_lock = threading.Lock()
+
+
+def _at_home(stream: _Homed) -> None:
+    """Raises unless on the stream's loop: the first loop using it, until that loop closes."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    with _homes_lock:
+        home = stream._home() if stream._home is not None else None
+        if home is loop:
+            return
+        if home is None or home.is_closed():
+            stream._home = weakref.ref(loop)
+            return
+    msg = 'A stream is used from another event loop than the one using it'
+    raise InvalidStateError(msg)
+
+
+_S = TypeVar('_S', bound='_OnALoop')
+_P = ParamSpec('_P')
+
+
+class _OnALoop(Protocol):
+    def _homed(self) -> _Homed | None: ...
+
+
+#: the methods checked by _on_its_loop
+loop_checked: set[Callable[..., object]] = set()
+
+
+def _on_its_loop(method: Callable[Concatenate[_S, _P], _R]) -> Callable[Concatenate[_S, _P], _R]:
+    """Makes the method raise when called from another loop than its stream's."""
+
+    @functools.wraps(method)
+    def checked(self: _S, /, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        homed = self._homed()
+        if homed is not None:
+            _at_home(homed)
+        return method(self, *args, **kwargs)
+
+    loop_checked.add(checked)
+    return checked
 
 
 def _pending() -> asyncio.Future[_R]:
@@ -389,6 +442,10 @@ class ReadableStreamDefaultController(Generic[_T]):
             return 0
         return self._strategy.high_water_mark - self._queue_total_size
 
+    def _homed(self) -> ReadableStream[_T]:
+        return self._stream
+
+    @_on_its_loop
     def enqueue(self, chunk: _T | None = None) -> None:
         """Adds a chunk to the stream. If a read is pending, the chunk goes straight to it.
 
@@ -407,6 +464,7 @@ class ReadableStreamDefaultController(Generic[_T]):
             raise TypeError(msg)
         self._enqueue(cast('_T', chunk))
 
+    @_on_its_loop
     def close(self) -> None:
         """Closes the stream once the chunks already queued are read.
 
@@ -420,6 +478,7 @@ class ReadableStreamDefaultController(Generic[_T]):
             raise TypeError(msg)
         self._close()
 
+    @_on_its_loop
     def error(self, e: object = None) -> None:
         """Errors the stream and drops its queue. Pending and later reads fail with the error.
 
@@ -525,6 +584,9 @@ class ReadableStream(Generic[_T]):
 
     See :mdn:`ReadableStream`.
 
+    It belongs to the first event loop using it until that loop closes: from another loop, its methods and those of
+    its readers, writers and controllers raise :obj:`webrtc.InvalidStateError`.
+
     Args:
         underlying_source (optional): An object or a :obj:`dict` with optional ``start(controller)``,
             ``pull(controller)`` and ``cancel(reason)`` callables. Each can be a plain or a coroutine function, and
@@ -537,6 +599,8 @@ class ReadableStream(Generic[_T]):
 
     def __init__(self, underlying_source: object = None, strategy: QueuingStrategy[_T] | None = None) -> None:
         extracted = _extract_strategy(strategy, 1)
+        self._home: weakref.ref[asyncio.AbstractEventLoop] | None = None
+        _at_home(self)
         self._state: _ReadableState = _ReadableState.readable
         self._stored_error: BaseException | None = None
         self._reader: ReadableStreamDefaultReader[_T] | None = None
@@ -579,6 +643,10 @@ class ReadableStream(Generic[_T]):
         """
         return self._reader is not None
 
+    def _homed(self) -> ReadableStream[_T]:
+        return self
+
+    @_on_its_loop
     def get_reader(self, options: ReadableStreamGetReaderOptions | None = None) -> ReadableStreamDefaultReader[_T]:
         """Creates a reader, which locks the stream until :meth:`ReadableStreamDefaultReader.release_lock`.
 
@@ -599,6 +667,7 @@ class ReadableStream(Generic[_T]):
             raise TypeError(msg)
         return ReadableStreamDefaultReader(self)
 
+    @_on_its_loop
     def cancel(self, reason: object = None) -> asyncio.Future[None]:
         """Cancels the stream. Queued chunks are dropped and the ``cancel`` of the source is called.
 
@@ -615,6 +684,7 @@ class ReadableStream(Generic[_T]):
             return _rejected(TypeError('The stream is locked'))
         return self._cancel(reason)
 
+    @_on_its_loop
     def pipe_to(
         self, destination: WritableStream[_T], options: StreamPipeOptions | None = None
     ) -> asyncio.Future[None]:
@@ -662,6 +732,7 @@ class ReadableStream(Generic[_T]):
             reader.release_lock()
             writer.release_lock()
 
+    @_on_its_loop
     def pipe_through(
         self,
         transform: ReadableWritablePair[_T, _O] | _GenericTransformStream[_T, _O],
@@ -688,6 +759,7 @@ class ReadableStream(Generic[_T]):
         _ = _handled(self.pipe_to(transform.writable, options))
         return transform.readable
 
+    @_on_its_loop
     def tee(self) -> list[ReadableStream[_T]]:
         """Splits the stream into two branches that each read every chunk, and locks the stream.
 
@@ -704,6 +776,7 @@ class ReadableStream(Generic[_T]):
         """
         return _Tee(self).branches
 
+    @_on_its_loop
     def values(self, options: ReadableStreamIteratorOptions | None = None) -> AsyncIterator[_T]:
         """Returns an asynchronous iterator over the chunks, which locks the stream. ``async for`` uses it too.
 
@@ -802,6 +875,10 @@ class ReadableStreamDefaultReader(Generic[_T]):
         """
         return self._closed
 
+    def _homed(self) -> ReadableStream[_T] | None:
+        return self._stream
+
+    @_on_its_loop
     def read(self) -> asyncio.Future[ReadableStreamReadResult[_T]]:
         """Reads the next chunk.
 
@@ -822,6 +899,7 @@ class ReadableStreamDefaultReader(Generic[_T]):
         stream._controller._read(self, request)
         return request
 
+    @_on_its_loop
     def cancel(self, reason: object = None) -> asyncio.Future[None]:
         """Cancels the stream, as :meth:`ReadableStream.cancel` does, while keeping the lock.
 
@@ -838,6 +916,7 @@ class ReadableStreamDefaultReader(Generic[_T]):
             return _rejected(TypeError('The reader is released'))
         return self._stream._cancel(reason)
 
+    @_on_its_loop
     def release_lock(self) -> None:
         """Unlocks the stream. Pending reads and :attr:`closed` fail with :obj:`TypeError`.
 
@@ -1052,6 +1131,10 @@ class WritableStreamDefaultController(Generic[_W_contra]):
         self._started = False
         self._in_flight = False
 
+    def _homed(self) -> WritableStream[_W_contra]:
+        return self._stream
+
+    @_on_its_loop
     def error(self, e: object = None) -> None:
         """Errors the stream, so queued and later writes fail with the error.
 
@@ -1149,6 +1232,9 @@ class WritableStream(Generic[_W_contra]):
 
     See :mdn:`WritableStream`.
 
+    It belongs to the first event loop using it until that loop closes: from another loop, its methods and those of
+    its readers, writers and controllers raise :obj:`webrtc.InvalidStateError`.
+
     Args:
         underlying_sink (optional): An object or a :obj:`dict` with optional ``start(controller)``,
             ``write(chunk, controller)``, ``close()`` and ``abort(reason)`` callables. Each can be a plain or a
@@ -1161,6 +1247,8 @@ class WritableStream(Generic[_W_contra]):
 
     def __init__(self, underlying_sink: object = None, strategy: QueuingStrategy[_W_contra] | None = None) -> None:
         extracted = _extract_strategy(strategy, 1)
+        self._home: weakref.ref[asyncio.AbstractEventLoop] | None = None
+        _at_home(self)
         self._state: _WritableState = _WritableState.writable
         self._stored_error: BaseException | None = None
         self._writer: WritableStreamDefaultWriter[_W_contra] | None = None
@@ -1176,6 +1264,10 @@ class WritableStream(Generic[_W_contra]):
         """
         return self._writer is not None
 
+    def _homed(self) -> WritableStream[_W_contra]:
+        return self
+
+    @_on_its_loop
     def get_writer(self) -> WritableStreamDefaultWriter[_W_contra]:
         """Creates a writer, which locks the stream until :meth:`WritableStreamDefaultWriter.release_lock`.
 
@@ -1189,6 +1281,7 @@ class WritableStream(Generic[_W_contra]):
         """
         return WritableStreamDefaultWriter(self)
 
+    @_on_its_loop
     def close(self) -> asyncio.Future[None]:
         """Closes the stream after the chunks already written, then calls the ``close`` of the sink.
 
@@ -1202,6 +1295,7 @@ class WritableStream(Generic[_W_contra]):
             return _rejected(TypeError('The stream is locked'))
         return self._close()
 
+    @_on_its_loop
     def abort(self, reason: object = None) -> asyncio.Future[None]:
         """Aborts the stream. Queued writes fail, the stream errors and the ``abort`` of the sink is called.
 
@@ -1356,6 +1450,10 @@ class WritableStreamDefaultWriter(Generic[_W_contra]):
             return 0
         return stream._controller._desired_size()
 
+    def _homed(self) -> WritableStream[_W_contra] | None:
+        return self._stream
+
+    @_on_its_loop
     def write(self, chunk: _W_contra | None = None) -> asyncio.Future[None]:
         """Queues a chunk for the ``write`` of the sink.
 
@@ -1379,6 +1477,7 @@ class WritableStreamDefaultWriter(Generic[_W_contra]):
         stream._controller._write(cast('_W_contra', chunk), future)
         return future
 
+    @_on_its_loop
     def close(self) -> asyncio.Future[None]:
         """Closes the stream, as :meth:`WritableStream.close` does, while keeping the lock.
 
@@ -1392,6 +1491,7 @@ class WritableStreamDefaultWriter(Generic[_W_contra]):
             return _rejected(TypeError('The writer is released'))
         return self._stream._close()
 
+    @_on_its_loop
     def abort(self, reason: object = None) -> asyncio.Future[None]:
         """Aborts the stream, as :meth:`WritableStream.abort` does, while keeping the lock.
 
@@ -1408,6 +1508,7 @@ class WritableStreamDefaultWriter(Generic[_W_contra]):
             return _rejected(TypeError('The writer is released'))
         return self._stream._abort(reason)
 
+    @_on_its_loop
     def release_lock(self) -> None:
         """Unlocks the stream. :attr:`ready` and :attr:`closed` fail with :obj:`TypeError`.
 
@@ -1449,6 +1550,10 @@ class TransformStreamDefaultController(Generic[_T, _O]):
         """
         return self._stream._readable._controller.desired_size
 
+    def _homed(self) -> ReadableStream[_O]:
+        return self._stream._readable
+
+    @_on_its_loop
     def enqueue(self, chunk: _O | None = None) -> None:
         """Adds an output chunk to the readable side.
 
@@ -1463,6 +1568,7 @@ class TransformStreamDefaultController(Generic[_T, _O]):
         """
         self._stream._readable._controller.enqueue(chunk)
 
+    @_on_its_loop
     def error(self, reason: object = None) -> None:
         """Errors both sides of the stream.
 
@@ -1475,6 +1581,7 @@ class TransformStreamDefaultController(Generic[_T, _O]):
         self._stream._readable._controller.error(error)
         self._stream._error_writable(error)
 
+    @_on_its_loop
     def terminate(self) -> None:
         """Ends the stream. Readers get the end of the stream and writers get a :obj:`TypeError`.
 
@@ -1493,6 +1600,9 @@ class TransformStream(Generic[_T, _O]):
     """A writable side and a readable side. Chunks written to one are transformed and read from the other.
 
     See :mdn:`TransformStream`.
+
+    It belongs to the first event loop using it until that loop closes: from another loop, its methods and those of
+    its readers, writers and controllers raise :obj:`webrtc.InvalidStateError`.
 
     Args:
         transformer (optional): An object or a :obj:`dict` with optional ``start(controller)``,
