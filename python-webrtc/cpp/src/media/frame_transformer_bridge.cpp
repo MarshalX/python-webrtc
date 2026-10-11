@@ -34,7 +34,7 @@ namespace python_webrtc {
   }
 
   FrameTransformerBridge::~FrameTransformerBridge() {
-    // on a libwebrtc thread: a transform it holds the last reference of is destroyed on the Dispatcher
+    // on a libwebrtc thread: a transform whose last reference it holds dies on the Dispatcher
     _transform.reset();
     _counter.alive--;
   }

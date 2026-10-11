@@ -15,6 +15,7 @@ import weakref
 from typing import TYPE_CHECKING, Callable, Literal, NamedTuple, Protocol
 
 import pytest
+from typing_extensions import Never
 
 import webrtc
 import wrtc
@@ -30,6 +31,7 @@ from tests.helpers import (
     wait_for_event,
     wait_until,
 )
+from webrtc.utils.events import EventTarget, UniformEventTarget
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Sequence
@@ -521,3 +523,47 @@ def test_collected_while_active(build: Builder) -> None:
 
     dropped = asyncio.run(scenario())
     assert released_after_loop_close(dropped, base), describe(dropped, base)
+
+
+#: what stops each event target's queued events (its ``_open()``)
+GATES: dict[str, str] = {
+    'MediaDevices': 'never ends',
+    'MediaStream': 'never ends: its track events follow add_track and remove_track',
+    'MediaStreamTrack': 'stop() and its connection closing',
+    'MediaStreamTrackGenerator': 'stop() and its connection closing',
+    'MediaStreamTrackProcessor': 'fires no events',
+    'RTCDTMFSender': 'its connection closing',
+    'RTCDataChannel': 'its connection closing; its own close fires close',
+    'RTCDtlsTransport': 'its connection closing',
+    'RTCIceTransport': 'stop() and its connection closing',
+    'RTCPeerConnection': 'close()',
+    'RTCRtpSFrameDecryptor': 'leaving its sender or receiver',
+    'RTCRtpScriptTransformer': 'leaving its sender or receiver',
+    'RTCSctpTransport': 'its connection closing',
+    'SFrameDecryptorStream': 'never ends: errors of chunks written before',
+}
+
+
+def _event_targets() -> set[type[EventTarget[Never]]]:
+    found: set[type[EventTarget[Never]]] = set()
+    pending: list[type[EventTarget[Never]]] = [EventTarget]
+    while len(pending) > 0:
+        for sub in pending.pop().__subclasses__():
+            if sub not in found and sub.__module__.startswith('webrtc.'):
+                found.add(sub)
+                pending.append(sub)
+    return {cls for cls in found if cls is not UniformEventTarget}
+
+
+def test_every_event_target_declares_its_delivery_gate() -> None:
+    """Every event target has a reviewed gate: without one, queued events fire after its end."""
+    gates = {cls.__name__: next(k for k in cls.__mro__ if '_open' in vars(k)).__name__ for cls in _event_targets()}
+    assert set(gates) == set(GATES), 'add the class to GATES with what stops its queued events'
+    assert {name for name, owner in gates.items() if owner != 'EventTarget'} == {
+        'MediaStreamTrack',
+        'MediaStreamTrackGenerator',
+        'RTCIceTransport',
+        'RTCPeerConnection',
+        'RTCRtpSFrameDecryptor',
+        'RTCRtpScriptTransformer',
+    }, 'a class ending other than with its connection overrides _open()'

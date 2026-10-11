@@ -17,9 +17,9 @@ import pytest
 
 import webrtc
 from tests.helpers import (
-    QUIET_PERIOD,
     collect,
     connect,
+    delivered,
     exchange_offer,
     exchange_offer_answer,
     wait_for_event,
@@ -101,7 +101,7 @@ async def test_ended_track_is_not_kept_by_its_handlers(
     local_track.stop()
     local_track.on('ended', lambda event: calls.append(event.type))
     assert local_track.listeners('ended') != []
-    await asyncio.sleep(QUIET_PERIOD)
+    await delivered()
     assert calls == []
 
 

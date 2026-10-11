@@ -17,7 +17,7 @@ from typing import TypeVar
 import pytest
 
 import webrtc
-from tests.helpers import QUIET_PERIOD, wait_for_event, wait_until
+from tests.helpers import wait_for_event, wait_until
 
 TIMEOUT = 10
 I420_4X2 = bytes(range(1, 13))
@@ -143,12 +143,16 @@ async def test_full_buffer_drops_the_oldest_frames(video_stream: webrtc.MediaStr
 @pytest.mark.asyncio
 async def test_cancel_stops_reading(video_stream: webrtc.MediaStream) -> None:
     """Canceling the stream detaches the processor from the track."""
-    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(video_stream.get_tracks()[0]))
+    track = video_stream.get_tracks()[0]
+    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
+    # a second processor of the track sees the frames the canceled one would get
+    witness = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
+    _ = witness.readable.get_reader()
     reader = processor.readable.get_reader()
     as_video_frame((await read(reader)).value).close()
     await reader.cancel()
-    total = processor.total_frames
-    await asyncio.sleep(QUIET_PERIOD)
+    total, seen = processor.total_frames, witness.total_frames
+    await wait_until(lambda: witness.total_frames >= seen + 3, 'later frames of the track')
     assert processor.total_frames == total
     assert (await reader.read()).done
 

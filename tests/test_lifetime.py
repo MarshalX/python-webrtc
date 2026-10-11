@@ -21,7 +21,7 @@ import textwrap
 import threading
 import weakref
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 import pytest
 
@@ -31,22 +31,31 @@ from tests.helpers import (
     QUIET_PERIOD,
     collect,
     connect,
+    delivered,
     exchange_offer_answer,
     settled_alive,
     wait_for_event,
     wait_until,
 )
 from tests.isolation import isolated
-from webrtc.utils import lifetime, loops
+from webrtc.utils import events, lifetime, loops
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
+
+_T = TypeVar('_T')
 
 
 async def received_track_event(event: Awaitable[webrtc.Event]) -> webrtc.RTCTrackEvent:
     received = await event
     assert isinstance(received, webrtc.RTCTrackEvent)
     return received
+
+
+def released(*refs: weakref.ref[_T]) -> bool:
+    """Whether the referents are collected, after a collection."""
+    collect()
+    return all(ref() is None for ref in refs)
 
 
 def alive_factories() -> int:
@@ -429,6 +438,69 @@ def test_connection_bound_by_its_child_is_unrooted_by_a_close_from_another_threa
     asyncio.run(root_a_child())
 
 
+def test_close_unbinding_a_child_while_its_loop_roots_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A child rooted while another thread's close unbinds it ends up unrooted."""
+    pc = webrtc.RTCPeerConnection()
+    started, closed = threading.Event(), threading.Event()
+    activity = webrtc.RTCDataChannel._activity
+
+    def activity_read_before_the_close(self: webrtc.RTCDataChannel) -> str | None:
+        reason = activity(self)
+        if reason is not None and not started.is_set():
+            started.set()
+            # the close runs between this read and the store
+            closer = threading.Thread(target=lambda: (pc.close(), closed.set()))
+            closer.start()
+            closer.join(10)
+        return reason
+
+    async def root_while_closed() -> None:  # ruff: ignore[unused-async]
+        state = loops.LoopState.of(asyncio.get_running_loop())
+        channel = pc.create_data_channel('rooted')
+        monkeypatch.setattr(webrtc.RTCDataChannel, '_activity', activity_read_before_the_close)
+        channel.on('open', lambda _event: channel)
+        monkeypatch.undo()
+        assert closed.is_set()
+        assert channel._state() is None
+        assert state.active == {}
+
+    asyncio.run(root_while_closed())
+
+
+def test_once_handler_spent_on_another_loop_is_a_change_for_the_roots_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A roots check between a once handler's removal and its root update sees a change in progress."""
+    remove = events._Handlers.remove
+    failed: list[AssertionError] = []
+
+    async def bound_here_handled_elsewhere() -> None:
+        state = loops.LoopState.of(asyncio.get_running_loop())
+        track = webrtc.VideoTrackGenerator().track
+        assert track._attach() or track._state() is state
+
+        async def spend_once_handler() -> None:  # ruff: ignore[unused-async]
+            _ = track.once('mute', lambda _event: None)
+            assert track in state.active
+
+            def remove_then_check(self: events._Handlers, name: str | None, handler: events.AnyHandler | None) -> None:
+                remove(self, name, handler)
+                # the bound loop's check runs before the root update
+                try:
+                    state._check_roots()
+                except AssertionError as e:
+                    failed.append(e)
+
+            monkeypatch.setattr(events._Handlers, 'remove', remove_then_check)
+            track._dispatch('mute', True)  # ruff: ignore[boolean-positional-value-in-call]
+            monkeypatch.undo()
+
+        await asyncio.get_running_loop().run_in_executor(None, asyncio.run, spend_once_handler())
+        assert track not in state.active
+        track.stop()
+
+    asyncio.run(bound_here_handled_elsewhere())
+    assert failed == []
+
+
 @pytest.mark.asyncio
 async def test_channel_handlers_do_not_dangle_after_close_and_gc() -> None:
     """Handlers of a channel collected with echoed messages in flight are never called again, and nothing crashes."""
@@ -459,7 +531,7 @@ async def test_channel_handlers_do_not_dangle_after_close_and_gc() -> None:
     callee.close()
     del channel, caller, callee
     collect()
-    await asyncio.sleep(QUIET_PERIOD)
+    await delivered()
     collect()
     assert 'close' not in received
 
@@ -612,7 +684,7 @@ def test_generators_are_collected_once_stopped_or_their_loop_closes(*, stopped: 
 
     async def scenario() -> list[weakref.ref[object]]:
         refs = [ref for _ in range(10) for ref in generators_with_ended_handlers()]
-        await asyncio.sleep(QUIET_PERIOD)
+        await delivered()
         collect()
         assert all(ref() is not None for ref in refs)
         if stopped:
@@ -678,8 +750,7 @@ async def test_handlers_of_owned_tracks_do_not_keep_owners_alive(create: Callabl
         created = create()
         refs.append(weakref.ref(await created if inspect.isawaitable(created) else created))
     del created
-    await asyncio.sleep(QUIET_PERIOD)
-    collect()
+    await wait_until(lambda: released(*refs) and alive_factories() == baseline, 'the owners collected')
 
     assert [ref for ref in refs if ref() is not None] == []
     assert alive_factories() == baseline
@@ -697,7 +768,7 @@ def test_handler_of_a_live_track_keeps_its_stream_until_its_loop_closes() -> Non
 
     async def scenario() -> weakref.ref[webrtc.MediaStream]:
         ref = await stream_with_a_handler_on_its_live_track()
-        await asyncio.sleep(QUIET_PERIOD)
+        await delivered()
         collect()
         assert ref() is not None
         return ref
@@ -764,8 +835,7 @@ async def test_handler_of_a_track_referencing_its_sender_or_receiver(part: str, 
         return weakref.ref(owner)
 
     ref = await create()
-    await asyncio.sleep(QUIET_PERIOD)
-    collect()
+    await wait_until(lambda: released(ref) and alive_factories() == baseline, 'the owner collected')
 
     assert ref() is None
     assert alive_factories() == baseline
@@ -782,7 +852,7 @@ async def test_handlers_of_a_live_track_keep_its_sender_alive() -> None:
         return weakref.ref(owner)
 
     ref = await create()
-    await asyncio.sleep(QUIET_PERIOD)
+    await delivered()
     collect()
 
     sender = ref()
@@ -858,7 +928,7 @@ async def test_operation_pending_at_close_does_not_keep_its_connection_alive() -
         task.add_done_callback(tasks.discard)
         await asyncio.sleep(0)
         pc.close()
-        await asyncio.sleep(QUIET_PERIOD)
+        await wait_until(lambda: len(tasks) == 0, 'the operation to end')
         return weakref.ref(pc)
 
     connection = await close_during_operation()
@@ -930,9 +1000,7 @@ async def test_closed_channel_is_collected_while_connection_is_open() -> None:
         await closed
         ref = weakref.ref(channel)
         del channel, opened, closed
-        collect()
-        await asyncio.sleep(QUIET_PERIOD)
-        collect()
+        await wait_until(lambda: released(ref), 'the channel collected')
         assert ref() is None
     finally:
         caller.close()

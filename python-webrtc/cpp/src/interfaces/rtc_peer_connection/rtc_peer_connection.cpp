@@ -672,7 +672,7 @@ namespace python_webrtc {
   }
 
   void RTCPeerConnection::Close() {
-    // a closed connection and its channels and transports fire no events; its remote tracks end with theirs
+    // a closed connection, its channels and transports fire nothing more; remote tracks fire ended
     Unbind();
     {
       const TrackedLock lock(_wrappersMutex);

@@ -13,9 +13,11 @@ import asyncio
 import gc
 import warnings
 
+import pytest
+
 import webrtc
 import wrtc
-from tests.helpers import exchange_ice_candidates, release_stranded_candidates, wait_until
+from tests.helpers import delivered, exchange_ice_candidates, next_task, release_stranded_candidates, wait_until
 
 
 async def gather_as_the_loop_closes(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
@@ -64,3 +66,21 @@ def test_stranded_candidates_are_released() -> None:
             return wrtc._alive()['RTCPeerConnection'] <= baseline
 
         asyncio.run(wait_until(released, 'the connections released'))
+
+
+@pytest.mark.asyncio
+async def test_delivered_waits_for_queued_events(pc: webrtc.RTCPeerConnection) -> None:
+    """Events libwebrtc queued before it are delivered, their handlers called, once it returns."""
+    transceiver = pc.add_transceiver(webrtc.MediaType.audio)
+    calls: list[str] = []
+    transceiver.receiver.track.on('ended', lambda event: calls.append(event.type))
+    # the event's record waits in the mailbox: nothing wakes the loop for it
+    wrtc._testing.park('dispatcher.wake')
+    try:
+        transceiver.stop()
+        await next_task()
+        assert calls == []
+        await delivered()
+        assert calls == ['ended']
+    finally:
+        wrtc._testing.release('dispatcher.wake')

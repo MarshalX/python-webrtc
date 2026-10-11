@@ -15,7 +15,7 @@ import asyncio
 import pytest
 
 import webrtc
-from tests.helpers import exchange_offer_answer, wait_for_ice_gathering_complete
+from tests.helpers import delivered, exchange_offer_answer, wait_for_ice_gathering_complete
 
 
 def test_1(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
@@ -193,7 +193,7 @@ async def test_10(
     caller.add_track(second_track)
 
     await exchange_offer_answer(caller, callee)
-    await asyncio.sleep(0.1)
+    await delivered()
     assert len(candidates) == 0, 'Expect no icecandidate events after adding a bundled track'
 
     first_transceiver, second_transceiver, *_ = caller.get_transceivers()

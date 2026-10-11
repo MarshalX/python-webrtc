@@ -25,10 +25,10 @@ namespace python_webrtc {
       if (_lastState != DataState::kOpen && _lastState != DataState::kConnecting) {
         _surfacedState.Surface(_lastState);
       }
-      // messages received meanwhile are delivered to the observer once it's registered, and queue behind the event
+      // messages received meanwhile reach the observer once registered, queued behind the event
       _channel->RegisterObserver(this);
       registry().SetObserver(_channel.get(), this);
-      // a channel open already (announced by the remote peer, or negotiated) opens with its event when bound
+      // a channel already open (announced or negotiated) fires open once bound
       if (_lastState == DataState::kOpen) {
         _surfacedState.Changed(IsBound(), DataState::kConnecting);
         Emit("open", _lastState);

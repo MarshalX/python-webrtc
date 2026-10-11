@@ -27,6 +27,7 @@ from typing_extensions import Never, override
 
 import webrtc
 import wrtc
+from webrtc.utils import loops
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable
@@ -107,6 +108,40 @@ async def wait_until(predicate: Callable[[], object], what: str, timeout: float 
             msg = f'Timed out waiting for {what}'
             raise TimeoutError(msg)
         await asyncio.sleep(0.05)
+
+
+async def wait_progressing(
+    progress: Callable[[], float], done: Callable[[], object], what: str, *, stall: float = 10
+) -> None:
+    """Polls until ``done()`` while ``progress()`` grows: a slow run goes on, one stuck ``stall`` seconds fails.
+
+    Raises:
+        TimeoutError: Nothing progressed for ``stall`` seconds; the message names what it waited for.
+    """
+    loop = asyncio.get_running_loop()
+    deadline, last = loop.time() + stall, progress()
+    while not bool(done()):
+        # read before the deadline: one poll may outlast it on a busy loop
+        if (current := progress()) > last:
+            deadline, last = loop.time() + stall, current
+        if loop.time() > deadline:
+            msg = f'Timed out waiting for {what}: no progress for {stall} s, at {last}'
+            raise TimeoutError(msg)
+        await asyncio.sleep(0.05)
+
+
+async def delivered() -> None:
+    """Returns once the events libwebrtc's threads queued so far were delivered on this loop, handlers called.
+
+    A deterministic stand-in for sleeping until nothing more happens: queued events go before it.
+    """
+    wrtc._testing.flush()
+    loop = asyncio.get_running_loop()
+    done: asyncio.Future[None] = loop.create_future()
+    loops.LoopState.of(loop).post(lambda: done.set_result(None))
+    await done
+    # handlers scheduled by those events run in the iteration after
+    await next_task()
 
 
 async def wait_for_ice_gathering_complete(pc: webrtc.RTCPeerConnection, timeout: float = 10) -> None:

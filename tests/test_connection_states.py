@@ -15,8 +15,8 @@ import pytest
 
 import webrtc
 from tests.helpers import (
-    QUIET_PERIOD,
     connect,
+    delivered,
     exchange_offer_answer,
     wait_for_event,
     wait_for_ice_gathering_complete,
@@ -94,7 +94,7 @@ async def test_ice_restart_keeps_the_connection_connected(
 
     caller.restart_ice()
     await exchange_offer_answer(caller, callee)
-    await asyncio.sleep(QUIET_PERIOD)
+    await delivered()
 
     assert events == []
     assert caller.ice_connection_state == webrtc.RTCIceConnectionState.connected

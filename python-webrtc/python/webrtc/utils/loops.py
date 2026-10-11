@@ -361,7 +361,7 @@ class LoopState:
         if target is None:
             return
         target._deliver(self, name, args)
-        # after handlers, so a terminal event's handlers run before unrooting; a fresh wrapper is never rooted
+        # after handlers, so a terminal event's handlers run before unrooting; fresh wrappers aren't rooted
         if created or not target._rootable:
             return
         self.update(target)
@@ -410,7 +410,7 @@ class LoopState:
         # CPython internals: other loops (e.g. uvloop) never report any
         loop = self._loop_ref()
         ready: object = getattr(loop, '_ready', None)
-        # copy() is one call under the deque's lock; iterating it races call_soon_threadsafe's appends (free-threaded)
+        # copy() holds the deque's lock; iterating races call_soon_threadsafe on free-threaded builds
         handles = cast('collections.deque[object]', ready).copy() if isinstance(ready, collections.deque) else ()
         for handle in handles:
             owner = getattr(getattr(handle, '_callback', None), '__self__', None)
@@ -436,7 +436,7 @@ class LoopState:
             started = self._passes
             # a connection's close ends its children's activity
             targets = [target, *(c for c in self.active if c._connection is target)]
-        # outside the lock: _activity() may block on a libwebrtc thread; only the bound loop roots an object
+        # outside the lock: _activity() may block on libwebrtc; only the bound loop roots
         reasons = [(t, t._activity() if t._state() is self else None) for t in targets]
         with self._lock:
             if self._released:
@@ -446,10 +446,18 @@ class LoopState:
                     return
             with _counts_lock:
                 self.generation += 1
+        self._recheck(reasons)
         if reasons[0][1] is None:
             # children may be rooted on other loops
             for other in _states_elsewhere(self._loop_ref()):
                 other._update_children(target)
+
+    def _recheck(self, reasons: list[tuple[EventTarget[Never], str | None]]) -> None:
+        """Updates again the objects just rooted here but unbound meanwhile."""
+        # an unbind sweeps the roots after it; a root stored after that sweep is caught here
+        for target, reason in reasons:
+            if reason is not None and target._state() is not self:
+                self.update(target)
 
     def _store(self, target: EventTarget[Never], reason: str | None, started: int) -> bool:
         """Stores a root for a pass unless a later pass did; returns False once released."""

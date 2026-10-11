@@ -18,7 +18,7 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import connect, mistyped, settled_alive, wait_until
+from tests.helpers import connect, mistyped, settled_alive, wait_progressing, wait_until
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -678,4 +678,9 @@ async def test_closing_releases_transforms() -> None:
         callee.close()
 
     await session()
-    await wait_until(lambda: released_to(baseline), 'the transforms released', TIMEOUT)
+    await wait_progressing(
+        lambda: -wrtc._alive()['SFrameTransform'],
+        lambda: released_to(baseline),
+        'the transforms released',
+        stall=TIMEOUT,
+    )

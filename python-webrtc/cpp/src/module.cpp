@@ -37,7 +37,7 @@ PYBIND11_MODULE(wrtc, m, pybind11::mod_gil_not_used()) {
 #else
   m.attr("_sanitized") = false;
 #endif
-  // ThreadSanitizer ends a forked child that starts a thread: tests forking with the Dispatcher running skip
+  // TSan ends a forked child that starts a thread: fork tests with the Dispatcher running skip
 #ifdef WRTC_THREAD_SANITIZED
   m.attr("_thread_sanitized") = true;
 #else

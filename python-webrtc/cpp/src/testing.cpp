@@ -238,6 +238,16 @@ namespace python_webrtc {
         },
         nogil(), pybind11::arg("mailbox"), pybind11::arg("token"), "Fails a completion of the token.");
     testing.def(
+        "flush",
+        []() {
+          const auto factory = PeerConnectionFactory::GetOrCreateDefault();
+          // in order: what these threads queued before is done, and its records posted, on return
+          factory->signalingThread()->BlockingCall([]() {});
+          factory->workerThread()->BlockingCall([]() {});
+          factory->signalingThread()->BlockingCall([]() {});
+        },
+        nogil(), "Returns once the signaling, worker and signaling threads ran what they queued.");
+    testing.def(
         "abandon",
         [](std::shared_ptr<Mailbox> mailbox, uint64_t token) {
           std::thread([mailbox = std::move(mailbox), token]() { const Completion completion(mailbox, token); }).join();

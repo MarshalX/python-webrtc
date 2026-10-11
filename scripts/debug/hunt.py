@@ -806,8 +806,9 @@ def _enable_cores(results: Results) -> None:
     if sys.platform == 'win32':
         return
     _soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
-    resource.setrlimit(resource.RLIMIT_CORE, (hard, hard))
-    off = _cores_off()
+    room = shutil.disk_usage('/cores' if sys.platform == 'darwin' else ROOT).free >= CORES_MIN_FREE_GB * GB
+    resource.setrlimit(resource.RLIMIT_CORE, (hard if room else 0, hard))
+    off = _cores_off() if room else f'less than {CORES_MIN_FREE_GB} GB free for them'
     results.log(f'cores: off, {off}' if off is not None else f'cores: on, {_core_pattern()}')
 
 

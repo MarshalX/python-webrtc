@@ -18,11 +18,20 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import QUIET_PERIOD, collect, connect, copy_frame, settled_alive, wait_until
+from tests.helpers import (
+    QUIET_PERIOD,
+    collect,
+    connect,
+    copy_frame,
+    delivered,
+    settled_alive,
+    wait_progressing,
+    wait_until,
+)
 from tests.test_lifetime import alive_factories, alive_objects
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterable, Iterator, Sequence
 
 TIMEOUT = 15
 KEY = bytes(range(16))
@@ -70,6 +79,15 @@ class Worker:
             self.ended.set_result(None)
 
 
+def frames(workers: Iterable[Worker], up_to: int) -> int:
+    """The frames the workers read, up to a count each: progress that stops once they have what's awaited."""
+    return sum(min(w.count, up_to) for w in workers)
+
+
+def all_done(futures: Iterable[asyncio.Future[None]]) -> bool:
+    return all(future.done() for future in futures)
+
+
 @pytest.fixture
 def isolated() -> Iterator[None]:
     collect()
@@ -107,7 +125,9 @@ async def script_call(
     callee.on('track', on_track)
     await connect(caller, callee)
     await wait_until(lambda: len(workers) == 4, 'the transforms of the receivers', TIMEOUT)
-    await asyncio.wait_for(asyncio.gather(*(w.flowing for w in workers)), TIMEOUT)
+    await wait_progressing(
+        lambda: frames(workers, 5), lambda: all_done(w.flowing for w in workers), 'frames', stall=TIMEOUT
+    )
     return workers
 
 
@@ -171,7 +191,7 @@ def test_transforms_of_connections_dropped_without_close() -> None:
         refs: list[weakref.ref[object]] = [weakref.ref(item) for item in (caller, callee, *transforms)]
         del caller, callee, transforms
         collect()
-        await asyncio.sleep(QUIET_PERIOD)
+        await delivered()
         # both connections have handlers (connect()'s candidates, the callee's track)
         assert all(ref() is not None for ref in refs)
         assert all(not w.ended.done() for w in workers)
@@ -208,7 +228,7 @@ def test_sframe_transforms_of_connections_dropped_without_close() -> None:
         del caller, callee, decryptors
         collect()
         errors.clear()
-        await wait_until(lambda: len(errors) > 5, 'errors after the drop', TIMEOUT)
+        await wait_progressing(lambda: len(errors), lambda: len(errors) > 5, 'errors after the drop', stall=TIMEOUT)
         assert all(ref() is not None for ref in refs)
         await stop_errors(refs)
         return refs
@@ -229,7 +249,7 @@ def test_worker_referencing_its_connection_with_a_pending_read(*, dropped: bool)
         if dropped:
             del caller, callee
             collect()
-            await asyncio.sleep(QUIET_PERIOD)
+            await delivered()
             assert all(not w.ended.done() for w in workers)
             return refs
         caller.close()
@@ -305,7 +325,7 @@ async def test_native_frames_are_written_to_their_sender_or_receiver_only() -> N
         assert own._native is not None
         assert workers[0].transformer._native_obj.write(own._native, None)
         assert own._native.getData() == b''
-        await asyncio.sleep(QUIET_PERIOD)
+        await delivered()
         assert all(not w.ended.done() for w in workers)
     finally:
         caller.close()
@@ -350,8 +370,18 @@ async def test_transforms_replaced_while_media_flows() -> None:
         final = [Worker() for _ in (*senders, *receivers)]
         for part, worker in zip((*senders, *receivers), final):
             part.transform = webrtc.RTCRtpScriptTransform(worker)
-        await asyncio.wait_for(asyncio.gather(*(w.flowing for w in final)), TIMEOUT)
-        await asyncio.wait_for(asyncio.gather(*(w.ended for w in workers)), TIMEOUT)
+        await wait_progressing(
+            lambda: frames(final, 5),
+            lambda: all_done(w.flowing for w in final),
+            'frames',
+            stall=TIMEOUT,
+        )
+        await wait_progressing(
+            lambda: sum(w.ended.done() for w in workers),
+            lambda: all_done(w.ended for w in workers),
+            'the replaced workers to end',
+            stall=TIMEOUT,
+        )
         caller.close()
         callee.close()
         await asyncio.wait_for(asyncio.gather(*(w.ended for w in final)), TIMEOUT)
@@ -371,7 +401,7 @@ async def test_decryptor_handler_referencing_the_decryptor() -> None:
         seen: list[object] = []
         for decryptor in decryptors:
             decryptor.on('error', lambda event, decryptor=decryptor: seen.append((decryptor, event.frame)))
-        await wait_until(lambda: len(seen) > 5, 'errors', TIMEOUT)
+        await wait_progressing(lambda: len(seen), lambda: len(seen) > 5, 'errors', stall=TIMEOUT)
         caller.close()
         callee.close()
         return [weakref.ref(decryptor) for decryptor in decryptors]
@@ -393,7 +423,7 @@ async def test_error_frames_used_after_close() -> None:
         errors: list[webrtc.SFrameTransformErrorEvent] = []
         for decryptor in decryptors:
             decryptor.on('error', errors.append)
-        await wait_until(lambda: len(errors) > 20, 'errors', TIMEOUT)
+        await wait_progressing(lambda: len(errors), lambda: len(errors) > 20, 'errors', stall=TIMEOUT)
         caller.close()
         callee.close()
         return errors
@@ -472,7 +502,12 @@ async def test_senders_and_receivers_collected_while_transforms_are_set() -> Non
         workers = await script_call(caller, callee)
         collect()
         counts = [w.count for w in workers]
-        await wait_until(lambda: all(w.count > c + 5 for w, c in zip(workers, counts)), 'more frames', TIMEOUT)
+        await wait_progressing(
+            lambda: sum(min(w.count, c + 6) for w, c in zip(workers, counts)),
+            lambda: all(w.count > c + 5 for w, c in zip(workers, counts)),
+            'more frames',
+            stall=TIMEOUT,
+        )
         for pc, parts in ((caller, caller.get_senders), (callee, callee.get_receivers)):
             for part in parts():
                 assert isinstance(part.transform, webrtc.RTCRtpScriptTransform)
@@ -492,7 +527,7 @@ async def referencing_sframe(caller: webrtc.RTCPeerConnection, callee: webrtc.RT
     receivers = callee.get_receivers()
     for decryptor in decryptors:
         decryptor.on('error', lambda event: seen.append((callee, receivers, event.frame)))
-    await wait_until(lambda: len(seen) > 5, 'errors', TIMEOUT)
+    await wait_progressing(lambda: len(seen), lambda: len(seen) > 5, 'errors', stall=TIMEOUT)
 
 
 async def referencing_script(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
@@ -505,7 +540,9 @@ async def referencing_script(caller: webrtc.RTCPeerConnection, callee: webrtc.RT
         assert transformer is not None
         transformer._options = (caller, callee, part)
         transformer.on('keyframerequest', lambda _event: (caller, callee))
-    await wait_until(lambda: all(w.count > 10 for w in workers), 'frames', TIMEOUT)
+    await wait_progressing(
+        lambda: frames(workers, 11), lambda: all(w.count > 10 for w in workers), 'frames', stall=TIMEOUT
+    )
 
 
 @pytest.mark.parametrize('kind', ['sframe', 'script'])
@@ -529,7 +566,7 @@ def test_handlers_referencing_their_connection(kind: str, *, closed: bool) -> No
             assert [ref for ref in refs if ref() is not None] == []
         else:
             collect()
-            await asyncio.sleep(QUIET_PERIOD)
+            await delivered()
             # handlers and associated transforms keep them while open
             assert all(ref() is not None for ref in refs)
         return refs
@@ -568,7 +605,7 @@ async def test_handlers_registered_once_detached_are_not_kept() -> None:
         receivers[0].transform = transform
         caller.close()
         callee.close()
-        await asyncio.sleep(QUIET_PERIOD)
+        await delivered()
         handlers = [Handler(callee, receivers) for _ in range(4)]
         decryptors[1].on('error', handlers[0])
         decryptors[1].once('error', handlers[1])

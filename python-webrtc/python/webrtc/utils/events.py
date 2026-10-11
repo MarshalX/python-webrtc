@@ -433,8 +433,8 @@ class EventTarget(Generic[_N_contra]):
             if handlers is None or not handlers.has(name, registration):
                 continue
             if registration.once:
-                handlers.remove(name, registration.handler)
-                self._update()
+                with self._changing():
+                    handlers.remove(name, registration.handler)
             call_handler(loop, registration.handler, event, message=f'Exception in {name!r} event handler')
 
     def _on_event(self, name: str, *args: object) -> None:

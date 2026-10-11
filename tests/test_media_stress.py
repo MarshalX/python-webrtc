@@ -17,7 +17,16 @@ import weakref
 import pytest
 
 import webrtc
-from tests.helpers import SANITIZED, connect_track, rss_bytes, skip_if_sanitized, wait_until, write_video, writing
+from tests.helpers import (
+    SANITIZED,
+    connect_track,
+    rss_bytes,
+    skip_if_sanitized,
+    wait_progressing,
+    wait_until,
+    write_video,
+    writing,
+)
 from webrtc.utils.loops import LoopState
 
 TIMEOUT = 20
@@ -141,7 +150,7 @@ def test_loop_closed_while_frames_arrive() -> None:
         ]
         for p in processors:
             p.readable.get_reader().read()
-        await asyncio.sleep(0.1)
+        await wait_until(lambda: all(p.total_frames > 0 for p in processors), 'frames to arrive')
         return processors
 
     loop = asyncio.new_event_loop()
@@ -190,12 +199,13 @@ async def test_unread_frames_do_not_grow_memory(video_stream: webrtc.MediaStream
         webrtc.MediaStreamTrackProcessorInit(video_stream.get_tracks()[0], max_buffer_size=3)
     )
     reader = processor.readable.get_reader()
-    # warm up, then measure for 2 s
-    await asyncio.sleep(0.5)
-    before = rss_bytes()
-    await asyncio.sleep(2)
+    # warm up, then measure over 60 frames (2 s of the camera)
+    await wait_until(lambda: processor.total_frames >= 15, 'frames to arrive')
+    before, discarded = rss_bytes(), processor.discarded_frames
+    await wait_progressing(
+        lambda: processor.discarded_frames, lambda: processor.discarded_frames >= discarded + 60, '60 frames dropped'
+    )
     assert rss_bytes() - before < 10 * 1024 * 1024
-    assert processor.discarded_frames > 30
     await reader.cancel()
 
 

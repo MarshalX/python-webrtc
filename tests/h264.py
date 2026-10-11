@@ -97,9 +97,9 @@ class Recorder:
             await self._recorded.wait_for(lambda: len(self.encoded) >= target)
 
     async def bitrate(self, seconds: float) -> float:
-        await asyncio.sleep(2)  # settle
+        await asyncio.wait_for(self.frames(2 * RATE), 20)  # settle
         first = len(self.encoded)
-        await asyncio.sleep(seconds)
+        await asyncio.wait_for(self.frames(round(seconds * RATE)), 20)
         sent = self.encoded[first:]
         return sum(len(e.data) for e in sent) * 8 / (sent[-1].time - sent[0].time)
 

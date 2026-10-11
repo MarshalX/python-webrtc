@@ -103,6 +103,16 @@ collected loop releases what it kept: its mailbox closes and its queued records 
 cancelled, a callback queued into it with `call_soon` runs its drop handler instead, and its handlers are removed.
 Its objects with handlers left on another loop are bound to that loop. Everything else is plain Python garbage.
 
+- Every change of binding or activity ends in an update of the root on the loop that holds it. A change made from
+  Python goes through `_changing()` (a spent `once` handler too), so roots checks on other loops wait for it. An
+  unbind updates roots after unbinding, and `LoopState.update` re-reads the binding after storing a root
+  (`_recheck`): whichever runs last sees the other.
+- Each class's `_open()` is its delivery gate: once it's false, even queued events don't fire (a stopped track, a
+  detached transform, a closed connection). The base gate is "its connection isn't closed". `GATES` in
+  `tests/test_lifetime_model.py` lists every class's gate; a new class with events is added there.
+- Streams aren't shared between loops: one belongs to the first loop using it until that loop closes, and its
+  public methods (`@_on_its_loop`) raise `InvalidStateError` from another loop.
+
 ## Debugging a hang
 
 Get the stacks of every thread first: `make stacks PID=...` (`O=--signal` adds the Python stacks on the process's

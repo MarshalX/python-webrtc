@@ -46,6 +46,13 @@ if [ "$MODE" != exec ]; then
     if [ ! -x "$BUILD/venv/bin/python" ]; then
         uv venv -q "$BUILD/venv" --python "$PYTHON"
     fi
+    # locally, a signed copy of the interpreter: macOS writes a crash's core only with get-task-allow
+    if [ -z "${CI:-}" ] && [ -L "$BUILD/venv/bin/python" ]; then
+        interpreter="$(readlink -f "$BUILD/venv/bin/python")"
+        rm "$BUILD/venv/bin/python"
+        cp "$interpreter" "$BUILD/venv/bin/python"
+        codesign -s - -f --entitlements "$SRC/scripts/debug/cores.entitlements" "$BUILD/venv/bin/python"
+    fi
     uv pip install -q --python "$BUILD/venv/bin/python" cmake ninja "pybind11>=3.1" "typing_extensions>=4.10" \
         pytest pytest-asyncio pytest-timeout
     if [ "$COVERAGE" = ON ]; then

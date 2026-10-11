@@ -213,7 +213,7 @@ namespace python_webrtc {
       applySettable(parameters.encodings[i], current.encodings[i]);
     }
     current.degradation_preference = parameters.degradation_preference;
-    // libwebrtc drops the callback uncalled without a media channel (e.g. after a rollback): fails as abandoned
+    // without a media channel (e.g. after a rollback) libwebrtc drops the callback: fails as abandoned
     _sender->SetParametersAsync(current, [completion = std::move(completion)](webrtc::RTCError error) mutable {
       if (error.ok()) {
         completion.Succeed();

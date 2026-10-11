@@ -127,7 +127,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
     @override
     def _activity(self) -> str | None:
         state = self.state
-        # failed isn't terminal: an ICE restart takes the transport further (webrtc-pc RTCIceTransportState)
+        # failed isn't terminal: an ICE restart revives the transport (webrtc-pc RTCIceTransportState)
         closed = state == RTCIceTransportState.closed or not self._open()
         if closed or len(self.event_names()) == 0:
             return None

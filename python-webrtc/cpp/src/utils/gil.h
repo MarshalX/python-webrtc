@@ -25,7 +25,7 @@ namespace python_webrtc {
 
     ~gil_release() {
 #if PY_VERSION_HEX < 0x030E0000
-      // before 3.14, re-attaching after exit runs pthread_exit, whose unwinding through libwebrtc aborts
+      // before 3.14, re-attaching after exit calls pthread_exit, which aborts unwinding through libwebrtc
       {
         const Dispatcher::PythonEntry entry;
         if (entry) {

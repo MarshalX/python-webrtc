@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 
 import webrtc
-from tests.helpers import QUIET_PERIOD, called, collect, connect, wait_for_event, wait_until
+from tests.helpers import called, collect, connect, delivered, wait_for_event, wait_until
 from webrtc.utils.loops import LoopState
 
 if TYPE_CHECKING:
@@ -119,7 +119,7 @@ async def test_off_everything_stops_delivery(pc: webrtc.RTCPeerConnection) -> No
 
     pc.add_transceiver(webrtc.MediaType.audio)
     await pc.set_local_description(await pc.create_offer())
-    await asyncio.sleep(QUIET_PERIOD)
+    await delivered()
     assert calls == []
 
 
@@ -194,7 +194,7 @@ async def test_closed_connection_emits_nothing(
     events.clear()
     caller.close()
     callee.close()
-    await asyncio.sleep(QUIET_PERIOD)
+    await delivered()
 
     assert events == []
     assert caller.connection_state == webrtc.RTCPeerConnectionState.closed
@@ -259,7 +259,7 @@ async def test_restart_ice_before_negotiation_needs_nothing(pc: webrtc.RTCPeerCo
     events: list[webrtc.Event] = []
     pc.on('negotiationneeded', events.append)
     pc.restart_ice()
-    await asyncio.sleep(QUIET_PERIOD)
+    await delivered()
     assert events == []
 
 
@@ -409,7 +409,7 @@ async def test_off_from_a_handler(pc: webrtc.RTCPeerConnection) -> None:
     pc.add_transceiver(webrtc.MediaType.audio)
     await wait_until(lambda: len(calls) > 0, 'the first handler')
     await pc.set_local_description()
-    await asyncio.sleep(QUIET_PERIOD)
+    await delivered()
     assert calls == ['first']
     assert pc.event_names() == set()
 
@@ -454,7 +454,7 @@ async def test_handler_removed_during_dispatch_is_skipped(pc: webrtc.RTCPeerConn
     negotiation = wait_for_event(pc, 'negotiationneeded')
     _ = pc.add_transceiver(webrtc.MediaType.audio)
     _ = await negotiation
-    await asyncio.sleep(QUIET_PERIOD)
+    await delivered()
     assert calls == ['first']
 
 
