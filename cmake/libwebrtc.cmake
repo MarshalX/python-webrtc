@@ -258,9 +258,9 @@ if(APPLE)
   target_compile_definitions(libwebrtc INTERFACE WEBRTC_MAC)
   # the SDK includes its headers relative to these
   set_property(TARGET libwebrtc APPEND PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${_inc}/sdk/objc;${_inc}/sdk/objc/base")
-  # ObjC categories the codec glue needs, which no symbol pulls in; -ObjC would also link the SDK's Metal views
+  # ObjC categories the SDK decoder needs, which no symbol pulls in; -ObjC would also link the SDK's Metal views
   set(_objc_categories
-      NSString+StdString.o RTCEncodedImage+Private.o RTCVideoCodecInfo+Private.o RTCVideoEncoderSettings+Private.o)
+      NSString+StdString.o RTCEncodedImage+Private.o RTCVideoCodecInfo+Private.o)
   set(_objc_dir "${CMAKE_BINARY_DIR}/libwebrtc-objc")
   file(MAKE_DIRECTORY "${_objc_dir}")
   execute_process(

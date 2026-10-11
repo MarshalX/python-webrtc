@@ -63,11 +63,18 @@ async def test_sender_stats(
 ) -> None:
     """A report of a sender has the stats of what it sends, and is the one of its track."""
     await send_audio(caller, callee, audio_stream)
+    sender = caller.get_senders()[0]
 
-    sender_report = await caller.get_senders()[0].get_stats()
+    async def has_remote_inbound() -> bool:
+        return len(stats_of_type(await sender.get_stats(), 'remote-inbound-rtp')) > 0
+
+    await wait_until(has_remote_inbound, 'the first RTCP receiver report')
+
+    sender_report = await sender.get_stats()
     assert len(stats_of_type(sender_report, 'outbound-rtp')) > 0
     assert len(stats_of_type(sender_report, 'inbound-rtp')) == 0
-    assert len(await caller.get_stats(audio_stream.get_tracks()[0])) == len(sender_report)
+    track_report = await caller.get_stats(audio_stream.get_tracks()[0])
+    assert set(track_report.keys()) == set(sender_report.keys())
 
 
 @pytest.mark.asyncio

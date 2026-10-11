@@ -7,25 +7,34 @@
 
 #include "videotoolbox.h"
 
-#include <api/make_ref_counted.h>
+#include <api/video/encoded_image.h>
 #include <api/video/i420_buffer.h>
 #include <api/video_codecs/h264_profile_level_id.h>
+#include <common_video/h264/h264_bitstream_parser.h>
 #import <components/video_codec/RTCVideoDecoderFactoryH264.h>
-#import <components/video_codec/RTCVideoEncoderFactoryH264.h>
+#import <components/video_codec/nalu_rewriter.h>
 #import <components/video_frame_buffer/RTCCVPixelBuffer.h>
 #include <libyuv/convert.h>
 #include <libyuv/convert_from.h>
+#include <media/base/media_constants.h>
 #include <modules/video_coding/codecs/h264/include/h264.h>
+#include <modules/video_coding/codecs/interface/common_constants.h>
+#include <modules/video_coding/include/video_codec_interface.h>
 #include <modules/video_coding/include/video_error_codes.h>
 #include <native/api/video_decoder_factory.h>
-#include <native/api/video_encoder_factory.h>
 #include <native/src/objc_frame_buffer.h>
+#include <rtc_base/logging.h>
 
+#include <CoreMedia/CoreMedia.h>
 #include <CoreVideo/CoreVideo.h>
+#include <TargetConditionals.h>
+#include <VideoToolbox/VideoToolbox.h>
 
+#include <algorithm>
 #include <atomic>
+#include <memory>
 
-// The SDK's codecs use full-range NV12, while libwebrtc's I420 is video range: frames are converted both ways here.
+// Encoding is our own VTCompressionSession; decoding is the SDK's, whose full-range output we map to video range.
 
 namespace {
 
@@ -35,19 +44,25 @@ namespace {
   constexpr unsigned kChromaRange = 224;
   constexpr unsigned kFullRange = 255;
 
-  // leaked: encoders may outlive static destruction at interpreter exit
-  webrtc::VideoEncoderFactory &EncoderFactory() {
-    static auto *factory =
-        webrtc::ObjCToNativeVideoEncoderFactory([[RTC_OBJC_TYPE(RTCVideoEncoderFactoryH264) alloc] init]).release();
-    return *factory;
+  // the SDK encoder's QP thresholds, for libwebrtc's quality scaler
+  constexpr int kLowQpThreshold = 28;
+  constexpr int kHighQpThreshold = 39;
+
+  // key frames come on request, so the periodic ones are rare
+  constexpr int kMaxKeyFrameInterval = 7200;
+  constexpr int kMaxKeyFrameIntervalSeconds = 240;
+
+  constexpr int32_t kMicrosecondsPerSecond = 1'000'000;
+
+  uint8_t *PlaneData(CVPixelBufferRef pixelBuffer, size_t plane) {
+    return static_cast<uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, plane));
   }
 
-  webrtc::VideoDecoderFactory &DecoderFactory() {
-    static auto *factory =
-        webrtc::ObjCToNativeVideoDecoderFactory([[RTC_OBJC_TYPE(RTCVideoDecoderFactoryH264) alloc] init]).release();
-    return *factory;
+  int PlaneStride(CVPixelBufferRef pixelBuffer, size_t plane) {
+    return static_cast<int>(CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, plane));
   }
 
+  // the CVPixelBuffer behind an SDK frame, or null
   CVPixelBufferRef PixelBufferOf(webrtc::VideoFrameBuffer &buffer) {
     const auto *objc = dynamic_cast<const webrtc::ObjCFrameBuffer *>(&buffer);
     if (objc == nullptr) {
@@ -59,107 +74,284 @@ namespace {
                : nullptr;
   }
 
-  class VideoRangeEncoder : public webrtc::VideoEncoder {
-  public:
-    explicit VideoRangeEncoder(std::unique_ptr<webrtc::VideoEncoder> encoder) : _encoder(std::move(encoder)) {}
-
-    ~VideoRangeEncoder() override { CVPixelBufferPoolRelease(_pool); }
-
-    VideoRangeEncoder(const VideoRangeEncoder &) = delete;
-    VideoRangeEncoder &operator=(const VideoRangeEncoder &) = delete;
-    VideoRangeEncoder(VideoRangeEncoder &&) = delete;
-    VideoRangeEncoder &operator=(VideoRangeEncoder &&) = delete;
-
-    void SetFecControllerOverride(webrtc::FecControllerOverride *override) override {
-      _encoder->SetFecControllerOverride(override);
+  // AutoLevel: the SDP's level 3.1 stops at 1280x720, VideoToolbox picks one that fits the stream
+  CFStringRef ProfileLevelOf(const webrtc::SdpVideoFormat &format) {
+    const auto id = webrtc::ParseSdpForH264ProfileLevelId(format.parameters);
+    switch (id ? id->profile : webrtc::H264Profile::kProfileConstrainedBaseline) {
+    case webrtc::H264Profile::kProfileConstrainedBaseline:
+    case webrtc::H264Profile::kProfileBaseline:
+      return kVTProfileLevel_H264_Baseline_AutoLevel;
+    case webrtc::H264Profile::kProfileMain:
+      return kVTProfileLevel_H264_Main_AutoLevel;
+    default:
+      return kVTProfileLevel_H264_High_AutoLevel;
     }
+  }
 
-    int InitEncode(const webrtc::VideoCodec *codec, const Settings &settings) override {
-      return _encoder->InitEncode(codec, settings);
+  webrtc::H264PacketizationMode PacketizationModeOf(const webrtc::SdpVideoFormat &format) {
+    const auto mode = format.parameters.find(webrtc::kH264FmtpPacketizationMode);
+    const bool nonInterleaved = mode != format.parameters.end() && mode->second == "1";
+    return nonInterleaved ? webrtc::H264PacketizationMode::NonInterleaved
+                          : webrtc::H264PacketizationMode::SingleNalUnit;
+  }
+
+  bool IsKeyFrameRequested(const std::vector<webrtc::VideoFrameType> *types) {
+    return types != nullptr && std::ranges::find(*types, webrtc::VideoFrameType::kVideoFrameKey) != types->end();
+  }
+
+  bool IsKeyFrame(CMSampleBufferRef sample) {
+    CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sample, false);
+    if (attachments == nullptr || CFArrayGetCount(attachments) == 0) {
+      return false;
+    }
+    const auto attachment = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(attachments, 0));
+    return !CFDictionaryContainsKey(attachment, kCMSampleAttachmentKey_NotSync);
+  }
+
+  class VideoToolboxEncoder : public webrtc::VideoEncoder {
+  public:
+    explicit VideoToolboxEncoder(const webrtc::SdpVideoFormat &format)
+        : _profileLevel(ProfileLevelOf(format)), _packetizationMode(PacketizationModeOf(format)) {}
+
+    ~VideoToolboxEncoder() override { DestroySession(); }
+
+    VideoToolboxEncoder(const VideoToolboxEncoder &) = delete;
+    VideoToolboxEncoder &operator=(const VideoToolboxEncoder &) = delete;
+    VideoToolboxEncoder(VideoToolboxEncoder &&) = delete;
+    VideoToolboxEncoder &operator=(VideoToolboxEncoder &&) = delete;
+
+    int InitEncode(const webrtc::VideoCodec *codec, const Settings & /*settings*/) override {
+      DestroySession();
+      _width = codec->width;
+      _height = codec->height;
+      _screenshare = codec->mode == webrtc::VideoCodecMode::kScreensharing;
+      _bitrate = codec->startBitrate * 1000;
+      _framerate = codec->maxFramerate;
+      return CreateSession() ? WEBRTC_VIDEO_CODEC_OK : WEBRTC_VIDEO_CODEC_ERROR;
     }
 
     int32_t RegisterEncodeCompleteCallback(webrtc::EncodedImageCallback *callback) override {
-      return _encoder->RegisterEncodeCompleteCallback(callback);
+      _callback = callback;
+      return WEBRTC_VIDEO_CODEC_OK;
     }
 
-    int32_t Release() override { return _encoder->Release(); }
+    int32_t Release() override {
+      DestroySession();
+      return WEBRTC_VIDEO_CODEC_OK;
+    }
 
     int32_t Encode(const webrtc::VideoFrame &frame, const std::vector<webrtc::VideoFrameType> *types) override {
       @autoreleasepool {
-        if (PixelBufferOf(*frame.video_frame_buffer()) != nullptr) {
-          return _encoder->Encode(frame, types);
+        if (_session == nullptr || _callback.load() == nullptr) {
+          return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
         }
-        auto i420 = frame.video_frame_buffer()->ToI420();
-        CVPixelBufferRef pixelBuffer = i420 ? Allocate(i420->width(), i420->height()) : nullptr;
+        const auto i420 = frame.video_frame_buffer()->ToI420();
+        if (i420 == nullptr || !FitSession(i420->width(), i420->height())) {
+          return WEBRTC_VIDEO_CODEC_ERROR;
+        }
+        CVPixelBufferRef pixelBuffer = PoolBufferOf(*i420);
         if (pixelBuffer == nullptr) {
           return WEBRTC_VIDEO_CODEC_ERROR;
         }
-        if (CVPixelBufferLockBaseAddress(pixelBuffer, 0) != kCVReturnSuccess) {
-          CVPixelBufferRelease(pixelBuffer);
-          return WEBRTC_VIDEO_CODEC_ERROR;
-        }
-        libyuv::I420ToNV12(i420->DataY(), i420->StrideY(), i420->DataU(), i420->StrideU(), i420->DataV(),
-                           i420->StrideV(), static_cast<uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0)),
-                           static_cast<int>(CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)),
-                           static_cast<uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1)),
-                           static_cast<int>(CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 1)), i420->width(),
-                           i420->height());
-        CVPixelBufferUnlockBaseAddress(pixelBuffer, 0);
-        CVBufferSetAttachment(pixelBuffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4,
-                              kCVAttachmentMode_ShouldPropagate);
 
-        webrtc::VideoFrame converted = frame;
-        converted.set_video_frame_buffer(webrtc::make_ref_counted<webrtc::ObjCFrameBuffer>(
-            [[RTC_OBJC_TYPE(RTCCVPixelBuffer) alloc] initWithPixelBuffer:pixelBuffer]));
+        NSDictionary *const options = IsKeyFrameRequested(types)
+                                          ? @{(__bridge NSString *)kVTEncodeFrameOptionKey_ForceKeyFrame : @YES}
+                                          : nil;
+        // freed by OnEncoded, which VideoToolbox calls for failed frames too
+        auto *info = new FrameInfo{frame.rtp_timestamp(), frame.render_time_ms(), frame.rotation(), _width, _height};
+        const OSStatus status = VTCompressionSessionEncodeFrame(
+            _session, pixelBuffer, CMTimeMake(frame.timestamp_us(), kMicrosecondsPerSecond), kCMTimeInvalid,
+            (__bridge CFDictionaryRef)options, info, nullptr);
         CVPixelBufferRelease(pixelBuffer);
-        return _encoder->Encode(converted, types);
+
+        // lost on sleep, or the encoder failed: a new session starts with a key frame
+        if (status == kVTInvalidSessionErr || status == kVTVideoEncoderMalfunctionErr) {
+          RTC_LOG(LS_WARNING) << "VideoToolbox lost its H.264 session (" << status << "), starting a new one";
+          DestroySession();
+          return CreateSession() ? WEBRTC_VIDEO_CODEC_NO_OUTPUT : WEBRTC_VIDEO_CODEC_ERROR;
+        }
+        return status == noErr ? WEBRTC_VIDEO_CODEC_OK : WEBRTC_VIDEO_CODEC_ERROR;
       }
     }
 
-    void SetRates(const RateControlParameters &parameters) override { _encoder->SetRates(parameters); }
-
-    void OnPacketLossRateUpdate(float rate) override { _encoder->OnPacketLossRateUpdate(rate); }
-
-    void OnRttUpdate(int64_t rtt) override { _encoder->OnRttUpdate(rtt); }
-
-    void OnLossNotification(const LossNotification &notification) override {
-      _encoder->OnLossNotification(notification);
+    void SetRates(const RateControlParameters &parameters) override {
+      _bitrate = parameters.bitrate.get_sum_bps();
+      _framerate = parameters.framerate_fps;
+      ApplyRates();
     }
 
-    [[nodiscard]] EncoderInfo GetEncoderInfo() const override { return _encoder->GetEncoderInfo(); }
+    [[nodiscard]] EncoderInfo GetEncoderInfo() const override {
+      EncoderInfo info;
+      info.implementation_name = "VideoToolbox";
+      info.is_hardware_accelerated = true;
+      info.scaling_settings = ScalingSettings(kLowQpThreshold, kHighQpThreshold);
+      return info;
+    }
 
   private:
-    // a video-range buffer, from a pool recreated when the size changes
-    CVPixelBufferRef Allocate(int width, int height) {
-      if (_pool == nullptr || width != _width || height != _height) {
-        CVPixelBufferPoolRelease(_pool);
-        _pool = nullptr;
-        NSDictionary *const attributes = @{
-          (__bridge NSString *)kCVPixelBufferPixelFormatTypeKey :
-              [NSNumber numberWithUnsignedInt:kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange],
-          (__bridge NSString *)kCVPixelBufferWidthKey : [NSNumber numberWithInt:width],
-          (__bridge NSString *)kCVPixelBufferHeightKey : [NSNumber numberWithInt:height],
+    // what OnEncoded needs of the frame
+    struct FrameInfo {
+      uint32_t rtpTimestamp;
+      int64_t captureTimeMs;
+      webrtc::VideoRotation rotation;
+      int width;
+      int height;
+    };
+
+    bool CreateSession() {
+      @autoreleasepool {
+#if TARGET_OS_OSX
+        NSDictionary *const specification =
+            @{(__bridge NSString *)kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder : @YES};
+#else
+        NSDictionary *const specification = @{};
+#endif
+        // the session's pool then hands out video-range NV12
+        NSDictionary *const source = @{
+          (__bridge NSString *)kCVPixelBufferPixelFormatTypeKey : @(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange),
+          (__bridge NSString *)kCVPixelBufferWidthKey : @(_width),
+          (__bridge NSString *)kCVPixelBufferHeightKey : @(_height),
           (__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey : @{},
         };
-        if (CVPixelBufferPoolCreate(nullptr, nullptr, (__bridge CFDictionaryRef)attributes, &_pool) !=
-            kCVReturnSuccess) {
-          _pool = nullptr;
-          return nullptr;
+        const OSStatus status = VTCompressionSessionCreate(
+            nullptr, _width, _height, kCMVideoCodecType_H264, (__bridge CFDictionaryRef)specification,
+            (__bridge CFDictionaryRef)source, nullptr, &OnEncoded, this, &_session);
+        if (status != noErr) {
+          RTC_LOG(LS_ERROR) << "VideoToolbox can't create an H.264 session: " << status;
+          _session = nullptr;
+          return false;
         }
-        _width = width;
-        _height = height;
+        SetProperty(kVTCompressionPropertyKey_RealTime, @YES);
+        SetProperty(kVTCompressionPropertyKey_ProfileLevel, (__bridge NSString *)_profileLevel);
+        SetProperty(kVTCompressionPropertyKey_AllowFrameReordering, @NO);
+        SetProperty(kVTCompressionPropertyKey_MaxKeyFrameInterval, @(kMaxKeyFrameInterval));
+        SetProperty(kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, @(kMaxKeyFrameIntervalSeconds));
+        ApplyRates();
+        return true;
       }
+    }
+
+    // waits for the frames in flight, so OnEncoded never runs after it
+    void DestroySession() {
+      if (_session != nullptr) {
+        VTCompressionSessionCompleteFrames(_session, kCMTimeInvalid);
+        VTCompressionSessionInvalidate(_session);
+        CFRelease(_session);
+        _session = nullptr;
+      }
+    }
+
+    // a session is made for one size
+    bool FitSession(int width, int height) {
+      if (width == _width && height == _height) {
+        return true;
+      }
+      DestroySession();
+      _width = width;
+      _height = height;
+      return CreateSession();
+    }
+
+    // no DataRateLimits: once they're set, VideoToolbox ignores any later rise of the bitrate
+    void ApplyRates() {
+      if (_session == nullptr) {
+        return;
+      }
+      @autoreleasepool {
+        if (_bitrate > 0) {
+          SetProperty(kVTCompressionPropertyKey_AverageBitRate, @(_bitrate));
+        }
+        if (_framerate > 0) {
+          SetProperty(kVTCompressionPropertyKey_ExpectedFrameRate, @(_framerate));
+        }
+      }
+    }
+
+    void SetProperty(CFStringRef key, id value) {
+      const OSStatus status = VTSessionSetProperty(_session, key, (__bridge CFTypeRef)value);
+      if (status != noErr) {
+        RTC_LOG(LS_WARNING) << "VideoToolbox rejected " << [(__bridge NSString *)key UTF8String] << ": " << status;
+      }
+    }
+
+    // the frame copied into a buffer of the session's pool; the caller releases it
+    CVPixelBufferRef PoolBufferOf(const webrtc::I420BufferInterface &i420) {
+      CVPixelBufferPoolRef pool = VTCompressionSessionGetPixelBufferPool(_session);
       CVPixelBufferRef pixelBuffer = nullptr;
-      CVPixelBufferPoolCreatePixelBuffer(nullptr, _pool, &pixelBuffer);
+      if (pool == nullptr || CVPixelBufferPoolCreatePixelBuffer(nullptr, pool, &pixelBuffer) != kCVReturnSuccess) {
+        return nullptr;
+      }
+      if (CVPixelBufferLockBaseAddress(pixelBuffer, 0) != kCVReturnSuccess) {
+        CVPixelBufferRelease(pixelBuffer);
+        return nullptr;
+      }
+      libyuv::I420ToNV12(i420.DataY(), i420.StrideY(), i420.DataU(), i420.StrideU(), i420.DataV(), i420.StrideV(),
+                         PlaneData(pixelBuffer, 0), PlaneStride(pixelBuffer, 0), PlaneData(pixelBuffer, 1),
+                         PlaneStride(pixelBuffer, 1), i420.width(), i420.height());
+      CVPixelBufferUnlockBaseAddress(pixelBuffer, 0);
+      CVBufferSetAttachment(pixelBuffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4,
+                            kCVAttachmentMode_ShouldPropagate);
       return pixelBuffer;
     }
 
-    std::unique_ptr<webrtc::VideoEncoder> _encoder;
-    CVPixelBufferPoolRef _pool = nullptr;
+    // on VideoToolbox's thread, one frame at a time
+    static void OnEncoded(void *encoder, void *info, OSStatus status, VTEncodeInfoFlags flags,
+                          CMSampleBufferRef sample) {
+      static_cast<VideoToolboxEncoder *>(encoder)->Deliver(std::unique_ptr<FrameInfo>(static_cast<FrameInfo *>(info)),
+                                                           status, flags, sample);
+    }
+
+    void Deliver(std::unique_ptr<FrameInfo> info, OSStatus status, VTEncodeInfoFlags flags, CMSampleBufferRef sample) {
+      if (status != noErr) {
+        RTC_LOG(LS_ERROR) << "VideoToolbox failed to encode an H.264 frame: " << status;
+        return;
+      }
+      auto *callback = _callback.load();
+      if (callback == nullptr || sample == nullptr || (flags & kVTEncodeInfo_FrameDropped) != 0) {
+        return;
+      }
+      const bool key = IsKeyFrame(sample);
+      webrtc::Buffer annexB;
+      if (!webrtc::H264CMSampleBufferToAnnexBBuffer(sample, key, &annexB)) {
+        return;
+      }
+      _qpParser.ParseBitstream(annexB);
+
+      webrtc::EncodedImage image;
+      image._encodedWidth = info->width;
+      image._encodedHeight = info->height;
+      image._frameType = key ? webrtc::VideoFrameType::kVideoFrameKey : webrtc::VideoFrameType::kVideoFrameDelta;
+      image.SetRtpTimestamp(info->rtpTimestamp);
+      image.capture_time_ms_ = info->captureTimeMs;
+      image.rotation_ = info->rotation;
+      image.content_type_ =
+          _screenshare ? webrtc::VideoContentType::SCREENSHARE : webrtc::VideoContentType::UNSPECIFIED;
+      image.qp_ = _qpParser.GetLastSliceQp().value_or(-1);
+      image.SetEncodedData(webrtc::EncodedImageBuffer::Create(std::move(annexB)));
+
+      webrtc::CodecSpecificInfo codecInfo;
+      codecInfo.codecType = webrtc::kVideoCodecH264;
+      codecInfo.codecSpecific.H264.packetization_mode = _packetizationMode;
+      codecInfo.codecSpecific.H264.temporal_idx = webrtc::kNoTemporalIdx;
+      codecInfo.codecSpecific.H264.idr_frame = key;
+      callback->OnEncodedImage(image, &codecInfo);
+    }
+
+    const CFStringRef _profileLevel;
+    const webrtc::H264PacketizationMode _packetizationMode;
+    // set on the encoding thread, read on VideoToolbox's
+    std::atomic<webrtc::EncodedImageCallback *> _callback = nullptr;
+    VTCompressionSessionRef _session = nullptr;
     int _width = 0;
     int _height = 0;
+    bool _screenshare = false;
+    uint32_t _bitrate = 0;
+    double _framerate = 0;
+    // VideoToolbox's thread only
+    webrtc::H264BitstreamParser _qpParser;
   };
 
+  // the SDK's decoder, with its full-range output mapped to video range
   class VideoRangeDecoder : public webrtc::VideoDecoder, public webrtc::DecodedImageCallback {
   public:
     explicit VideoRangeDecoder(std::unique_ptr<webrtc::VideoDecoder> decoder) : _decoder(std::move(decoder)) {}
@@ -200,7 +392,7 @@ namespace {
     }
 
   private:
-    // full-range NV12 as video-range I420; false drops the frame
+    // full-range NV12 to video-range I420; false drops the frame
     static bool Convert(webrtc::VideoFrame &frame) {
       CVPixelBufferRef pixelBuffer = PixelBufferOf(*frame.video_frame_buffer());
       if (pixelBuffer == nullptr ||
@@ -213,12 +405,9 @@ namespace {
       const int width = static_cast<int>(CVPixelBufferGetWidth(pixelBuffer));
       const int height = static_cast<int>(CVPixelBufferGetHeight(pixelBuffer));
       auto i420 = webrtc::I420Buffer::Create(width, height);
-      libyuv::NV12ToI420(static_cast<const uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0)),
-                         static_cast<int>(CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)),
-                         static_cast<const uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1)),
-                         static_cast<int>(CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 1)), i420->MutableDataY(),
-                         i420->StrideY(), i420->MutableDataU(), i420->StrideU(), i420->MutableDataV(), i420->StrideV(),
-                         width, height);
+      libyuv::NV12ToI420(PlaneData(pixelBuffer, 0), PlaneStride(pixelBuffer, 0), PlaneData(pixelBuffer, 1),
+                         PlaneStride(pixelBuffer, 1), i420->MutableDataY(), i420->StrideY(), i420->MutableDataU(),
+                         i420->StrideU(), i420->MutableDataV(), i420->StrideV(), width, height);
       CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
       Compress(i420->MutableDataY(), i420->StrideY(), width, height, kLumaRange);
       Compress(i420->MutableDataU(), i420->StrideU(), i420->ChromaWidth(), i420->ChromaHeight(), kChromaRange);
@@ -243,18 +432,29 @@ namespace {
     std::atomic<webrtc::DecodedImageCallback *> _callback = nullptr;
   };
 
+  // leaked: decoders may outlive static destruction at interpreter exit
+  webrtc::VideoDecoderFactory &DecoderFactory() {
+    static auto *factory =
+        webrtc::ObjCToNativeVideoDecoderFactory([[RTC_OBJC_TYPE(RTCVideoDecoderFactoryH264) alloc] init]).release();
+    return *factory;
+  }
+
 } // namespace
 
 namespace python_webrtc {
 
   std::vector<webrtc::SdpVideoFormat> VideoToolboxEncoderAdapter::SupportedFormats() {
-    return EncoderFactory().GetSupportedFormats();
+    // level 3.1 like browsers; the stream's own level follows its size
+    return {
+        webrtc::CreateH264Format(webrtc::H264Profile::kProfileConstrainedHigh, webrtc::H264Level::kLevel3_1, "1"),
+        // the same stream, as frames are never reordered: for Chrome, which offers no Constrained High
+        webrtc::CreateH264Format(webrtc::H264Profile::kProfileHigh, webrtc::H264Level::kLevel3_1, "1"),
+        webrtc::CreateH264Format(webrtc::H264Profile::kProfileConstrainedBaseline, webrtc::H264Level::kLevel3_1, "1")};
   }
 
   std::unique_ptr<webrtc::VideoEncoder>
-  VideoToolboxEncoderAdapter::CreateEncoder(const webrtc::Environment &env, const webrtc::SdpVideoFormat &format) {
-    auto encoder = EncoderFactory().Create(env, format);
-    return encoder ? std::make_unique<VideoRangeEncoder>(std::move(encoder)) : nullptr;
+  VideoToolboxEncoderAdapter::CreateEncoder(const webrtc::Environment & /*env*/, const webrtc::SdpVideoFormat &format) {
+    return std::make_unique<VideoToolboxEncoder>(format);
   }
 
   bool VideoToolboxEncoderAdapter::IsScalabilityModeSupported(webrtc::ScalabilityMode mode) {
@@ -262,7 +462,7 @@ namespace python_webrtc {
   }
 
   std::vector<webrtc::SdpVideoFormat> VideoToolboxDecoderAdapter::SupportedFormats() {
-    // the SDK lists only the profiles its encoder sends
+    // the SDK's factory lists only CB and CH, VideoToolbox decodes all of these
     std::vector<webrtc::SdpVideoFormat> formats;
     for (const auto profile : {webrtc::H264Profile::kProfileConstrainedBaseline, webrtc::H264Profile::kProfileBaseline,
                                webrtc::H264Profile::kProfileMain, webrtc::H264Profile::kProfileConstrainedHigh,
