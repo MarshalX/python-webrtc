@@ -5,17 +5,19 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "wrtc"  # "webrtc" isn't allowed on PyPI
 version = "0.0.1"
-description = "a Python extension that provides bindings to WebRTC M152"
+description = "Chrome's WebRTC engine (libwebrtc M152), with the browser API, in Python"
 readme = "README.md"
 license = "BSD-3-Clause"
 license-files = ["LICENSE.md", "THIRD_PARTY_LICENSES.md"]
 authors = [{ name = "Ilya (Marshal)", email = "ilya@marshal.dev" }]
 requires-python = ">=3.9"
+keywords = ["webrtc", "libwebrtc", "rtc", "peer-to-peer", "data-channel", "video", "audio", "voip", "asyncio", "w3c"]
 dependencies = ["typing_extensions>=4.10"]
 classifiers = [
-    "Development Status :: 1 - Planning",
+    "Development Status :: 3 - Alpha",
     "Natural Language :: English",
     "Intended Audience :: Developers",
+    "Framework :: AsyncIO",
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
@@ -43,14 +45,16 @@ classifiers = [
     "Programming Language :: Python :: 3.15",
     "Programming Language :: Python :: Implementation",
     "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Free Threading :: 2 - Beta",
     "Typing :: Typed",
 ]
 
 [project.urls]
-Homepage = "https://github.com/MarshalX/python-webrtc"
+Homepage = "https://wrtc.marshal.dev/"
 Documentation = "https://wrtc.marshal.dev/"
 Source = "https://github.com/MarshalX/python-webrtc"
 Tracker = "https://github.com/MarshalX/python-webrtc/issues"
+Changelog = "https://wrtc.marshal.dev/change_log/"
 Author = "https://github.com/MarshalX"
 
 [dependency-groups]

@@ -37,13 +37,6 @@ Watches a public stream, with the video as colored characters and the audio on y
 Talks to the model through your microphone and speakers.
 :::
 
-:::{grid-item-card} {octicon}`people;1em;sd-mr-1` Telegram group calls
-:link: telegram_group_calls
-:link-type: doc
-
-Streams audio from a raw file to a group call.
-:::
-
 ::::
 
 ```{toctree}
@@ -53,5 +46,4 @@ echo
 recorder
 janus_streaming
 openai_live
-telegram_group_calls
 ```
