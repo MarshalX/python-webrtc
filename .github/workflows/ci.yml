@@ -2,12 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
   schedule:
-    - cron: '0 17 * * 5'  # Fridays, catches breakage from runner images, dependencies and downloads
+    # Fridays, catches breakage from runner images, dependencies and downloads, and saves main's caches PRs restore
+    - cron: '0 17 * * 5'
       timezone: Europe/Warsaw
 
 concurrency:
@@ -58,7 +58,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-latest]
-        # PRs and main: oldest and newest only, with and without the GIL; all of them for tags, Fridays and by hand
+        # PRs: oldest and newest only, with and without the GIL; all of them for tags, Fridays and by hand
         python: ${{ fromJSON((startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["cp39","cp310","cp311","cp312","cp313","cp314","cp314t","cp315","cp315t"]' || '["cp39","cp315","cp315t"]') }}
         # Intel macOS with the full matrix only
         exclude:
@@ -68,7 +68,7 @@ jobs:
       WRTC_ARCHIVE_DIR: ${{ matrix.os == 'windows-latest' && format('{0}/.wrtc-cache/archives', github.workspace) || '' }}
       UV_HTTP_RETRIES: 10
       CIBW_ENVIRONMENT_PASS_LINUX: UV_HTTP_RETRIES
-      # --gc-on-emit not on main and tags
+      # --gc-on-emit not on tags
       CIBW_TEST_COMMAND: ${{ github.event_name != 'push' && 'pytest {project}/tests && pytest {project}/tests --gc-on-emit' || 'pytest {project}/tests' }}
     steps:
       - uses: actions/checkout@v7
