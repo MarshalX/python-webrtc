@@ -13,6 +13,7 @@
 
     uv run janus_streaming.py
     uv run janus_streaming.py --id 1
+    uv run janus_streaming.py --id 3  # stereo music
 
 The video is drawn with colored half blocks, so the terminal needs 24-bit color. Press Ctrl+C to stop.
 """
@@ -22,6 +23,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import re
 import shutil
 import sys
 import threading
@@ -139,13 +141,17 @@ class Janus:
 class Speakers:
     """Plays 16-bit audio from a buffer that keeps half a second at most."""
 
-    def __init__(self, rate: int, channels: int) -> None:
-        self.buffer, self.lock, self.limit = bytearray(), threading.Lock(), rate * channels
-        self.stream = sounddevice.RawOutputStream(rate, channels=channels, dtype='int16', callback=self._on_need)
-        self.stream.start()
+    def __init__(self) -> None:
+        self.buffer, self.lock, self.limit = bytearray(), threading.Lock(), 0
+        self.stream: sounddevice.RawOutputStream | None = None
 
-    def play(self, samples: bytes | bytearray) -> None:
-        """Queues samples, dropping the oldest ones over the limit."""
+    def play(self, samples: bytes | bytearray, rate: int, channels: int) -> None:
+        """Queues samples, dropping the oldest ones over the limit, reopens the output when their format changes."""
+        if self.stream is None or (self.stream.samplerate, self.stream.channels) != (rate, channels):
+            self.close()
+            self.buffer, self.limit = bytearray(), rate * channels
+            self.stream = sounddevice.RawOutputStream(rate, channels=channels, dtype='int16', callback=self._on_need)
+            self.stream.start()
         with self.lock:
             self.buffer += samples
             del self.buffer[: -self.limit]
@@ -155,6 +161,11 @@ class Speakers:
             chunk = self.buffer[: len(out)]
             del self.buffer[: len(out)]
         out[:] = chunk.ljust(len(out), b'\0')
+
+    def close(self) -> None:
+        """Stops the output."""
+        if self.stream is not None:
+            self.stream.close()
 
 
 def draw(rgbx: bytes | bytearray, width: int, height: int, *, slot: int, slots: int) -> None:
@@ -212,7 +223,7 @@ async def watch(track: webrtc.MediaStreamTrack, videos: list[webrtc.MediaStreamT
 
 async def listen(track: webrtc.MediaStreamTrack) -> None:
     """Plays the audio track until it ends."""
-    speakers: Speakers | None = None
+    speakers = Speakers()
     try:
         async for data in webrtc.MediaStreamTrackProcessor(
             webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=50)
@@ -225,12 +236,17 @@ async def listen(track: webrtc.MediaStreamTrack) -> None:
                 samples = bytearray(data.allocation_size(options))
                 data.copy_to(samples, options)
                 rate, channels = int(data.sample_rate), data.number_of_channels
-            if speakers is None:
-                speakers = Speakers(rate, channels)
-            speakers.play(samples)
+            # the first frames of a stereo stream are mono, until the decoder gets its packets
+            speakers.play(samples, rate, channels)
     finally:
-        if speakers is not None:
-            speakers.stream.close()
+        speakers.close()
+
+
+def with_stereo(sdp: str) -> str:
+    """Adds stereo=1 to the Opus formats of the SDP: answers ask for mono unless munged, as browsers do."""
+    for payload_type in re.findall(r'^a=rtpmap:(\d+) opus/', sdp, flags=re.MULTILINE | re.IGNORECASE):
+        sdp = re.sub(rf'^(a=fmtp:{payload_type} .*?)(?=\r?$)', r'\1;stereo=1', sdp, flags=re.MULTILINE)
+    return sdp
 
 
 async def answer(pc: webrtc.RTCPeerConnection, offer: Jsep) -> Jsep:
@@ -238,7 +254,10 @@ async def answer(pc: webrtc.RTCPeerConnection, offer: Jsep) -> Jsep:
     gathered = asyncio.Event()
     pc.on('icegatheringstatechange', lambda _: pc.ice_gathering_state == 'complete' and gathered.set())
     await pc.set_remote_description(webrtc.RTCSessionDescriptionInit.from_json(offer))
-    await pc.set_local_description(await pc.create_answer())
+    local = await pc.create_answer()
+    if 'stereo=1' in offer['sdp']:
+        local = webrtc.RTCSessionDescriptionInit('answer', with_stereo(local.sdp))
+    await pc.set_local_description(local)
     with contextlib.suppress(asyncio.TimeoutError):
         await asyncio.wait_for(gathered.wait(), 5)
     if pc.local_description is None:
