@@ -66,8 +66,8 @@ is destroyed where it was made. The factory and the ICE, DTLS and SCTP transport
   first binding holds until that loop is released. Children the connection creates natively inherit its binding, so
   their records queue behind the parent's event. Closing a connection unbinds its children (`Surfaced` reads
   `IsBound()`). `HeldEvents` only orders events inside libwebrtc callbacks.
-- `DefineBinding(cls)` defines `_bind`, `_bound` and `_mailbox` per class, not on a pybind base: a base method costs
-  a derived-to-base cast per call (6–8 µs vs 0.1 µs).
+- `DefineBinding(cls)` defines `_bind`, `_bound`, `_mailbox` and `_orphaned` (its mailbox closed) per class, not on a pybind base: a base method costs a derived-to-base cast per call (6–8 µs vs
+  0.1 µs).
 - `NativeObject<T>` (`utils/native_object.h`) counts objects per `T::kName` (`AliveCounts()`) and exposes `_id`,
   which `webrtc.utils.lifetime` keys one Python wrapper on. A `Registry` (`utils/registry.h`) keeps one wrapper per
   libwebrtc object. `wrtc._testing` exposes these plus parking points (`utils/parking.h`) that stop a native thread
@@ -98,8 +98,10 @@ One direction: Python → C++ → libwebrtc.
 
 Python decides what an unreferenced object's lifetime is, per event loop (`webrtc/utils/loops.py`): an object stays
 alive while it can still fire an event that has a handler, following the WebRTC specifications (each class's
-`_activity()`). A closed or collected loop releases everything it kept: its mailbox closes, pending operations are
-cancelled, and its handlers are removed. Everything else is plain Python garbage.
+`_activity()`). Only the bound loop roots an object, so whatever makes it active binds it first. A closed or
+collected loop releases what it kept: its mailbox closes and its queued records are dropped, pending operations are
+cancelled, and its handlers are removed. Its objects with handlers left on another loop are bound to that loop.
+Everything else is plain Python garbage.
 
 ## Debugging a hang
 

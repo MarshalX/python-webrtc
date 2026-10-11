@@ -25,6 +25,8 @@ from tests.isolation import isolated
 from webrtc.utils.events import EventTarget
 from webrtc.utils.loops import LoopState
 
+TIMEOUT = 5
+
 
 def _in_thread(target: Callable[[], None]) -> None:
     thread = threading.Thread(target=target)
@@ -296,6 +298,10 @@ class _Unbound:
         return False
 
     @property
+    def _orphaned(self) -> bool:
+        return False
+
+    @property
     def _mailbox(self) -> int | None:
         return None
 
@@ -305,13 +311,18 @@ class _Unbound:
 
 
 class _Active(EventTarget[Never]):
-    """A target with manual activity."""
+    """A target bound to a state, with activity set by hand."""
 
-    __slots__ = ('__weakref__', '_parent', 'reason')
+    __slots__ = ('__weakref__', '_bound_to', '_parent', 'reason')
 
-    def __init__(self, parent: _Active | None = None) -> None:
+    def __init__(self, state: LoopState | None, parent: _Active | None = None) -> None:
         self.reason: str | None = 'has handlers'
+        self._bound_to = state
         self._parent = parent
+
+    @override
+    def _state(self) -> LoopState | None:
+        return self._bound_to
 
     @property
     @override
@@ -331,7 +342,7 @@ class _Active(EventTarget[Never]):
 @pytest.mark.asyncio
 async def test_completion_re_evaluates_the_object_of_its_call() -> None:
     state = LoopState.of(asyncio.get_running_loop())
-    target = _Active()
+    target = _Active(state)
     state.update(target)
     assert target in state.active
     token, future = state.start(target)
@@ -344,7 +355,7 @@ async def test_completion_re_evaluates_the_object_of_its_call() -> None:
 def test_release_of_a_closed_loop_drops_what_it_kept() -> None:
     """Sweep drops a held closed loop's state."""
     loop = asyncio.new_event_loop()
-    target = _Active()
+    target = _Active(LoopState.of(loop))
 
     def keep() -> tuple[LoopState, webrtc.RTCPeerConnection]:
         state = LoopState.of(loop)
@@ -383,12 +394,138 @@ def test_release_of_a_running_loop_cancels_its_calls() -> None:
     assert state.pending == {}
 
 
+def test_only_the_loop_of_an_object_roots_it() -> None:
+    """Only the bound loop roots an active object."""
+    first, second = asyncio.new_event_loop(), asyncio.new_event_loop()
+    try:
+        bound, unbound = _Active(LoopState.of(first)), _Active(None)
+        for state in (LoopState.of(first), LoopState.of(second)):
+            state.update(bound)
+            state.update(unbound)
+        assert LoopState.of(first).active == {bound: 'has handlers'}
+        assert LoopState.of(second).active == {}
+    finally:
+        first.close()
+        second.close()
+
+
+def test_release_binds_an_object_to_a_loop_with_handlers_of_it() -> None:
+    """A released loop's object is bound to a loop with handlers of it."""
+    first = asyncio.new_event_loop()
+
+    def bind() -> tuple[LoopState, webrtc.RTCPeerConnection]:
+        pc = webrtc.RTCPeerConnection()
+        pc.on('negotiationneeded', lambda _event: None)
+        return LoopState.of(asyncio.get_running_loop()), pc
+
+    released, pc = first.run_until_complete(called(bind))
+
+    def handle_elsewhere() -> None:
+        pc.on('icecandidate', lambda _event: None)
+        assert pc._state() is released
+        first.close()
+        released.release()
+        state = LoopState.of(asyncio.get_running_loop())
+        assert pc._state() is state
+        assert state.active == {pc: 'handlers'}
+        pc.close()
+        assert state.active == {}
+
+    asyncio.run(called(handle_elsewhere))
+
+
+@pytest.mark.roots('an _Active bound to no loop')
+def test_an_active_object_bound_to_no_loop_is_a_mismatch() -> None:
+    """An active object bound to no loop fails its update and the roots check."""
+    loop = asyncio.new_event_loop()
+    try:
+        state = LoopState.of(loop)
+        target = _Active(None)
+        with pytest.raises(AssertionError, match='_Active is active but unbound'):
+            target._update()
+        # with handlers registered from the loop
+        state.remember(target)
+        with pytest.raises(AssertionError, match='_Active is active but unbound'):
+            state._check_roots()
+        target.reason = None
+        target._update()
+        state._check_roots()
+    finally:
+        loop.close()
+
+
+def test_a_pending_operation_binds_a_connection_bound_to_no_loop() -> None:
+    """A connection made outside a loop is bound by its first operation."""
+    pc = webrtc.RTCPeerConnection()
+    assert pc._state() is None
+
+    async def operate() -> None:
+        state = LoopState.of(asyncio.get_running_loop())
+        first = asyncio.Event()
+        release = asyncio.Event()
+
+        async def hold() -> None:
+            async with pc._operation():
+                first.set()
+                await release.wait()
+
+        async def wait() -> None:
+            async with pc._operation():
+                pass
+
+        held = asyncio.ensure_future(hold())
+        await asyncio.wait_for(first.wait(), TIMEOUT)
+        assert pc._state() is state
+        assert state.active == {pc: 'pending operation'}
+        # waits in the chain: still pending, still bound here
+        waiting = asyncio.ensure_future(wait())
+        await asyncio.sleep(0)
+        assert state.active == {pc: 'pending operation'}
+        release.set()
+        await asyncio.wait_for(asyncio.gather(held, waiting), TIMEOUT)
+        assert state.active == {}
+
+    try:
+        asyncio.run(operate())
+    finally:
+        pc.close()
+
+
+def test_handlers_bind_an_object_bound_to_a_closed_loop_not_swept_yet() -> None:
+    """A handler on another loop binds an object whose loop closed but isn't swept yet."""
+    pc = webrtc.RTCPeerConnection()
+
+    def register() -> None:
+        pc.on('negotiationneeded', lambda _event: None)
+
+    def register_elsewhere() -> None:
+        pc.on('icecandidate', lambda _event: None)
+        state = LoopState.of(asyncio.get_running_loop())
+        assert pc._state() is state
+        assert state.active == {pc: 'handlers'}
+
+    elsewhere = asyncio.new_event_loop()
+    # its state exists, so binding there sweeps nothing on the way
+    _ = LoopState.of(elsewhere)
+    try:
+        asyncio.run(called(register))
+        # the closed loop's state stays until a sweep
+        gc.disable()
+        try:
+            elsewhere.run_until_complete(called(register_elsewhere))
+        finally:
+            gc.enable()
+    finally:
+        elsewhere.close()
+        pc.close()
+
+
 def test_update_roots_by_activity() -> None:
     loop = asyncio.new_event_loop()
     try:
         state = LoopState.of(loop)
-        connection = _Active()
-        child = _Active(connection)
+        connection = _Active(state)
+        child = _Active(state, connection)
         state.update(connection)
         state.update(child)
         assert state.active == {connection: 'has handlers', child: 'has handlers'}

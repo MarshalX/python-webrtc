@@ -78,6 +78,8 @@ namespace python_webrtc {
 
     [[nodiscard]] bool IsBound() const;
 
+    [[nodiscard]] bool IsOrphaned() const;
+
     void Post(Record record) const;
 
     [[nodiscard]] std::shared_ptr<Mailbox> mailbox() const;
@@ -100,6 +102,7 @@ namespace python_webrtc {
            "_bind", [](T &self, std::shared_ptr<Mailbox> mailbox) { return self.Bind(std::move(mailbox)); },
            pybind11::arg("mailbox"))
         .def_property_readonly("_bound", [](const T &self) { return self.IsBound(); })
+        .def_property_readonly("_orphaned", [](const T &self) { return self.IsOrphaned(); })
         .def_property_readonly("_mailbox", [](const T &self) { return self.MailboxId(); });
     return cls;
   }

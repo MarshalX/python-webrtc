@@ -295,10 +295,9 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             with _chains_lock:
                 if self._chain is None:
                     self._chain = OperationsChain(self._chain_emptied, self._is_closed, self._changing)
+        # bound before it's pending: only its loop roots it
+        _ = self._attach()
         async with self._chain.operation():
-            # a pending operation keeps the connection alive
-            _ = self._attach()
-            self._update()
             yield
 
     def _is_closed(self) -> bool:

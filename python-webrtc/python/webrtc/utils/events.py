@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     import wrtc
 
 import webrtc
-from webrtc.utils.loops import LoopState, checking_roots, record_mismatch, states_elsewhere
+from webrtc.utils.loops import LoopState, check_bound, checking_roots, record_mismatch, states_elsewhere
 
 #: A handler, which is a function or a coroutine function called with the :obj:`webrtc.Event` of an event
 Handler = Callable[['webrtc.Event'], object]
@@ -142,6 +142,11 @@ class _Handlers:
         with self._lock:
             return [r for r in self._registrations.get(name, ()) if r.loop is loop]
 
+    def all_loops(self) -> list[asyncio.AbstractEventLoop]:
+        """The loops with a handler of any event, in the order of registration."""
+        with self._lock:
+            return list(dict.fromkeys(r.loop for registrations in self._registrations.values() for r in registrations))
+
     def loops(self, name: str) -> list[asyncio.AbstractEventLoop]:
         """The loops with a handler of an event."""
         with self._lock:
@@ -205,6 +210,9 @@ class _Bound(Protocol):
     def _bound(self) -> bool: ...
 
     @property
+    def _orphaned(self) -> bool: ...
+
+    @property
     def _mailbox(self) -> int | None: ...
 
 
@@ -259,7 +267,12 @@ class EventTarget(Generic[_N_contra]):
 
     def _state(self) -> LoopState | None:
         """The bound loop's state while it's open."""
-        return LoopState.find(self._native_obj._mailbox)
+        native = self._native_obj
+        state = LoopState.find(native._mailbox)
+        if state is None and native._bound:
+            # the lookup released a closed loop, which may have bound it anew
+            state = LoopState.find(native._mailbox)
+        return state
 
     def _loop(self) -> asyncio.AbstractEventLoop | None:
         """The bound loop, if any."""
@@ -274,7 +287,11 @@ class EventTarget(Generic[_N_contra]):
         connection = self._connection
         if connection is not None:
             _ = connection._attach()
-        bound = self._native_obj._bind(LoopState.of(loop).mailbox)
+        mailbox = LoopState.of(loop).mailbox
+        bound = self._native_obj._bind(mailbox)
+        if not bound and self._state() is None:
+            # the lookup released the closed loop it was bound to
+            bound = self._native_obj._bind(mailbox)
         if bound:
             self._update(loop)
         return bound
@@ -290,14 +307,14 @@ class EventTarget(Generic[_N_contra]):
         return connection is None or not connection._is_closed()
 
     def _update(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
-        """Re-evaluates the object's root; ``loop`` covers a native object that dropped its binding."""
-        if loop is None:
-            loop = self._loop()
-        if loop is None:
-            loop = _running_loop()
-        state = _roots_of(loop)
+        """Re-evaluates the root on the bound loop, and on ``loop``, the one it was bound to before a change."""
+        previous, state = _roots_of(loop), self._state()
+        if previous is not None and previous is not state:
+            previous.update(self)
         if state is not None:
             state.update(self)
+        if checking_roots():
+            check_bound(self)
 
     @contextlib.contextmanager
     def _changing(self) -> Generator[None, None, None]:
@@ -316,13 +333,20 @@ class EventTarget(Generic[_N_contra]):
                 state.changing(-1)
 
     def _released(self, loop: asyncio.AbstractEventLoop) -> None:
-        """Drops a released loop's handlers and updates the root."""
+        """Drops a released loop's handlers and binds the object to a loop with handlers left."""
         handlers = self._handlers
-        if handlers is not None:
+        if handlers is None:
+            return
+        with self._changing():
             handlers.remove_loop(loop)
-        state = self._state()
-        if state is not None:
-            state.update(self)
+            if self._state() is None:
+                self._rebind(handlers)
+
+    def _rebind(self, handlers: _Handlers) -> None:
+        """Binds the object to the first open loop with handlers of it."""
+        for loop in handlers.all_loops():
+            if not loop.is_closed() and self._native_obj._bind(LoopState.of(loop).mailbox):
+                return
 
     def _check_event(self, name: str) -> None:
         if name not in self._events:

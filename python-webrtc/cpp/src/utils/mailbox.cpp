@@ -147,6 +147,11 @@ namespace python_webrtc {
     return _mailbox && !_mailbox->Closed();
   }
 
+  bool Binding::IsOrphaned() const {
+    const std::scoped_lock lock(_mutex);
+    return _mailbox && _mailbox->Closed();
+  }
+
   void Binding::Post(Record record) const {
     if (auto bound = mailbox()) {
       bound->Post(std::move(record));

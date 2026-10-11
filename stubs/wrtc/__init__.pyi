@@ -42,6 +42,9 @@ class Binding:
     @property
     def _mailbox(self) -> int | None:
         ...
+    @property
+    def _orphaned(self) -> bool:
+        ...
 class RTCSessionDescriptionInit:
     sdp: str
     @property

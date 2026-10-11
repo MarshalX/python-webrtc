@@ -95,6 +95,34 @@ def record_mismatch(msg: str) -> None:
     mismatches.append(msg)
 
 
+def _unbound(target: EventTarget[Never]) -> str | None:
+    """The mismatch of an active object bound to no loop, unless a released loop let go of it."""
+    if target._state() is not None or (reason := target._activity()) is None or target._native_obj._orphaned:
+        return None
+    return f'{type(target).__name__} is active but unbound, with activity {reason!r}'
+
+
+def check_bound(target: EventTarget[Never]) -> None:
+    """Asserts an active object is bound, as only its loop roots it."""
+    if not target._rootable:
+        return
+    loop = _current_loop()
+    roots = LoopState.of(loop) if loop is not None and not loop.is_closed() else None
+    generation = roots.generation if roots is not None else 0
+    if roots is not None and roots.changes > 0:
+        # another thread is mid-change, like rebinding it
+        return
+    msg = _unbound(target)
+    if msg is None:
+        return
+    if roots is not None:
+        with roots._lock:
+            if roots.changes > 0 or roots.generation != generation:
+                return
+    record_mismatch(msg)
+    raise AssertionError(msg)
+
+
 class LoopState:
     """Per-loop mailbox, pending calls, handler tasks and roots; released when the loop closes or is collected."""
 
@@ -179,7 +207,7 @@ class LoopState:
 
     @classmethod
     def find(cls, mailbox_id: int | None) -> LoopState | None:
-        """Returns the state of a mailbox id if its loop is open, else None."""
+        """Returns the state of a mailbox id if its loop is open, else None, releasing a closed loop's state."""
         if mailbox_id is None:
             return None
         with _states_lock:
@@ -187,7 +215,10 @@ class LoopState:
         if state is None or state._released:
             return None
         loop = state._loop_ref()
-        return state if loop is not None and not loop.is_closed() else None
+        if loop is not None and not loop.is_closed():
+            return state
+        state.release()
+        return None
 
     def start(self, target: EventTarget[Never] | None) -> tuple[int, asyncio.Future[object]]:
         """Returns a token and the future its completion settles; fails at exit."""
@@ -385,8 +416,8 @@ class LoopState:
             started = self._passes
             # a connection's close ends its children's activity
             targets = [target, *(c for c in self.active if c._connection is target)]
-        # outside the lock: _activity() may block on a libwebrtc thread
-        reasons = [(t, t._activity()) for t in targets]
+        # outside the lock: _activity() may block on a libwebrtc thread; only the bound loop roots an object
+        reasons = [(t, t._activity() if t._state() is self else None) for t in targets]
         with self._lock:
             if self._released:
                 return
@@ -429,7 +460,7 @@ class LoopState:
             self.targets.add(target)
 
     def _check_roots(self) -> None:
-        """Asserts every object of the loop is rooted iff it's active."""
+        """Asserts every object of the loop is rooted iff it's bound here and active, and is bound if it's active."""
         with self._lock:
             if self.changes > 0:
                 # another thread is mid-change
@@ -438,16 +469,25 @@ class LoopState:
             rooted = set(self.active)
             targets = rooted | set(self.targets)
         # a racing change voids this check; the next one sees it
-        bound = [t for t in targets if t in rooted or t._state() is self]
-        mismatched = [(t, r) for t in bound if ((t in rooted) != ((r := t._activity()) is not None))]
+        msgs: list[str] = []
+        for target in targets:
+            binding = target._state()
+            if binding is not self and target not in rooted:
+                # its own loop checks it
+                if binding is None and (msg := _unbound(target)) is not None:
+                    msgs.append(msg)
+                continue
+            reason = target._activity() if binding is self else None
+            if (target in rooted) != (reason is not None):
+                rooting = 'rooted' if target in rooted else 'not rooted'
+                where = '' if binding is self else ' and bound elsewhere' if binding is not None else ' and unbound'
+                msgs.append(f'{type(target).__name__} is {rooting} with activity {reason!r}{where}')
         with self._lock:
             if self.generation != generation or self.changes > 0:
                 return
-        for target, reason in mismatched:
-            rooting = 'rooted' if target in rooted else 'not rooted'
-            msg = f'{type(target).__name__} is {rooting} with activity {reason!r}'
-            record_mismatch(msg)
-            raise AssertionError(msg)
+        if len(msgs) > 0:
+            record_mismatch(msgs[0])
+            raise AssertionError(msgs[0])
 
     def changing(self, delta: int) -> None:
         """Counts an activity change another thread starts (1) or ends (-1)."""
@@ -460,6 +500,17 @@ class LoopState:
         # unlocked check: a gc sweep mustn't wait for a release in progress
         if self._released:
             return
+        others: list[LoopState] = [] if sys.is_finalizing() else _states_elsewhere(self._loop_ref())
+        # their roots checks wait while its objects are rebound
+        for other in others:
+            other.changing(1)
+        try:
+            self._release()
+        finally:
+            for other in others:
+                other.changing(-1)
+
+    def _release(self) -> None:
         with _acquired(self._lock) as acquired:
             if not acquired or self._released:
                 return
