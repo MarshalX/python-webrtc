@@ -20,11 +20,24 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 
 import webrtc
-from tests.helpers import called, collect, connect, delivered, wait_for_event, wait_until
+from tests.helpers import (
+    called,
+    collect,
+    connect,
+    delivered,
+    exchange_offer_answer,
+    wait_for_event,
+    wait_for_ice_gathering_complete,
+    wait_until,
+)
 from webrtc.utils.loops import LoopState
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+    from tests.helpers import CreatePC
+
+TIMEOUT = 5
 
 
 @pytest.mark.asyncio
@@ -55,6 +68,53 @@ async def test_on_decorator_once_and_off(pc: webrtc.RTCPeerConnection) -> None:
 
 
 @pytest.mark.asyncio
+async def test_negotiation_needed_waits_for_the_operations_chain(pc: webrtc.RTCPeerConnection) -> None:
+    """It fires once the operations chain is empty."""
+    fired_after_offer: list[bool] = []
+    pc.on('negotiationneeded', lambda _event: fired_after_offer.append(offering.done()))
+    fired = wait_for_event(pc, 'negotiationneeded')
+    offering = asyncio.ensure_future(pc.create_offer())
+    pc.add_transceiver(webrtc.MediaType.audio)
+
+    await fired
+
+    assert fired_after_offer == [True]
+
+
+@pytest.mark.asyncio
+async def test_negotiation_needed_not_fired_once_negotiated(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """Not fired when the negotiation makes it unneeded."""
+    events: list[webrtc.Event] = []
+    caller.on('negotiationneeded', events.append)
+    caller.add_transceiver(webrtc.MediaType.audio)
+
+    await exchange_offer_answer(caller, callee)
+    await delivered()
+
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_unreachable_ice_server_fires_icecandidateerror(create_pc: CreatePC) -> None:
+    """An unresolvable STUN host fires icecandidateerror with its URL."""
+    pc = create_pc(webrtc.RTCConfiguration(ice_servers=[webrtc.RTCIceServer('stun:stun.invalid')]))
+    pc.create_data_channel('gather')
+    error = wait_for_event(pc, 'icecandidateerror')
+
+    await pc.set_local_description()
+
+    event = await error
+    assert isinstance(event, webrtc.RTCPeerConnectionIceErrorEvent)
+    assert event.target is pc
+    assert event.error_code == 701
+    assert event.url == 'stun:stun.invalid:3478'
+    assert event.error_text != ''
+    await wait_for_ice_gathering_complete(pc)
+
+
+@pytest.mark.asyncio
 async def test_async_handlers_run_as_tasks(pc: webrtc.RTCPeerConnection) -> None:
     """A coroutine function handler is run as a task on the loop."""
     done = asyncio.get_running_loop().create_future()
@@ -66,7 +126,7 @@ async def test_async_handlers_run_as_tasks(pc: webrtc.RTCPeerConnection) -> None
             done.set_result(event.type)
 
     pc.create_data_channel('events')
-    assert await asyncio.wait_for(done, 5) == 'negotiationneeded'
+    assert await asyncio.wait_for(done, TIMEOUT) == 'negotiationneeded'
 
 
 @pytest.mark.asyncio
@@ -110,6 +170,29 @@ async def test_listeners_and_their_removal(pc: webrtc.RTCPeerConnection) -> None
 
 
 @pytest.mark.asyncio
+async def test_off_of_an_event_without_handlers_does_nothing(pc: webrtc.RTCPeerConnection) -> None:
+    """It leaves the handlers of the other events."""
+    fired: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+
+    def first(event: webrtc.Event) -> None:
+        if not fired.done():
+            fired.set_result(event.type)
+
+    _ = pc.on('negotiationneeded', first)
+    pc.off('track', first)
+    pc.remove_listener('track', first)
+    assert pc.event_names() == {'negotiationneeded'}
+    pc.add_transceiver(webrtc.MediaType.audio)
+    assert await asyncio.wait_for(fired, TIMEOUT) == 'negotiationneeded'
+
+
+def test_off_before_any_handler_does_nothing(pc: webrtc.RTCPeerConnection) -> None:
+    pc.off()
+    pc.off('track')
+    assert pc.event_names() == set()
+
+
+@pytest.mark.asyncio
 async def test_off_everything_stops_delivery(pc: webrtc.RTCPeerConnection) -> None:
     """off() removes every handler."""
     calls: list[str] = []
@@ -138,6 +221,24 @@ def test_event_names_come_from_the_literal() -> None:
         'datachannel',
     }
     assert webrtc.MediaStreamTrackProcessor._events == ()
+
+
+def test_ice_candidate_error_event_constructor() -> None:
+    """The event has the members of its init, also from its JSON form."""
+    init = webrtc.RTCPeerConnectionIceErrorEventInit.from_json({
+        'errorCode': 701,
+        'address': '192.0.2.1',
+        'port': 50000,
+        'url': 'stun:stun.example.org',
+        'errorText': 'unreachable',
+    })
+    event = webrtc.RTCPeerConnectionIceErrorEvent('icecandidateerror', init)
+    assert event.type == 'icecandidateerror'
+    assert (event.address, event.port, event.url) == ('192.0.2.1', 50000, 'stun:stun.example.org')
+    assert (event.error_code, event.error_text) == (701, 'unreachable')
+    assert event.target is None
+    unknown = webrtc.RTCPeerConnectionIceErrorEvent('icecandidateerror', webrtc.RTCPeerConnectionIceErrorEventInit(701))
+    assert (unknown.address, unknown.port, unknown.url, unknown.error_text) == (None, None, '', '')
 
 
 @pytest.mark.parametrize('method', ['listeners', 'remove_all_listeners', 'off'])
@@ -429,7 +530,7 @@ async def test_async_handler_exception_goes_to_the_loop(pc: webrtc.RTCPeerConnec
             raise ValueError(msg)
 
         pc.create_data_channel('events')
-        context = await asyncio.wait_for(reported, 5)
+        context = await asyncio.wait_for(reported, TIMEOUT)
         assert context['message'] == "Exception in 'negotiationneeded' event handler"
         assert isinstance(context['exception'], ValueError)
         assert isinstance(context['event'], webrtc.Event)

@@ -196,3 +196,22 @@ def test_13(pc: webrtc.RTCPeerConnection) -> None:
     encodings = [webrtc.RTCRtpEncodingParameters(rid='a'), webrtc.RTCRtpEncodingParameters(rid='b')]
     init = webrtc.RTCRtpTransceiverInit(send_encodings=encodings)
     pc.add_transceiver(webrtc.MediaType.video, init)
+
+
+def test_scale_resolution_down_by_below_one_is_a_range_error(pc: webrtc.RTCPeerConnection) -> None:
+    """Only video encodings scale; audio ignores it."""
+    encodings = [webrtc.RTCRtpEncodingParameters(scale_resolution_down_by=0.5)]
+    init = webrtc.RTCRtpTransceiverInit(send_encodings=encodings)
+
+    with pytest.raises(webrtc.InvalidRangeError, match=r'scale_resolution_down_by must be >= 1\.0'):
+        pc.add_transceiver(webrtc.MediaType.video, init)
+    pc.add_transceiver(webrtc.MediaType.audio, init)
+    assert [t.receiver.track.kind for t in pc.get_transceivers()] == [webrtc.MediaType.audio]
+
+
+def test_unknown_scalability_mode_is_an_operation_error(pc: webrtc.RTCPeerConnection) -> None:
+    encodings = [webrtc.RTCRtpEncodingParameters(scalability_mode='L9T9')]
+
+    with pytest.raises(webrtc.OperationError, match='scalabilityMode'):
+        pc.add_transceiver(webrtc.MediaType.video, webrtc.RTCRtpTransceiverInit(send_encodings=encodings))
+    assert pc.get_transceivers() == []

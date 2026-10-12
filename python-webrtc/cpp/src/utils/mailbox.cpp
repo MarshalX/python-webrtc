@@ -188,15 +188,6 @@ namespace python_webrtc {
     other._mailbox = nullptr;
   }
 
-  Completion &Completion::operator=(Completion &&other) noexcept {
-    if (this != &other) {
-      _mailbox = std::move(other._mailbox);
-      _token = other._token;
-      other._mailbox = nullptr;
-    }
-    return *this;
-  }
-
   void Completion::Fail(RTCCallbackException error) {
     Settle(true, [error = std::move(error)]() { return pybind11::make_tuple(error.ToPython()); });
   }

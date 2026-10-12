@@ -8,9 +8,16 @@
 #include "rtc_peer_connection.h"
 
 #include <algorithm>
+#include <map>
 #include <utility>
 
+#include <api/rtp_parameters.h>
+#include <media/base/media_constants.h>
+#include <pc/session_description.h>
+
+#include "../../media/sframe_transform.h"
 #include "../peer_connection_factory.h"
+#include "../rtc_rtp_receiver.h"
 #include "create_session_description_observer.h"
 #include "sdp.h"
 #include "set_session_description_observer.h"
@@ -87,9 +94,97 @@ namespace python_webrtc {
         return state == SignalingState::kStable || state == SignalingState::kHaveLocalOffer;
       }
       if (type == webrtc::SdpType::kRollback) {
-        return state == SignalingState::kHaveLocalOffer || state == SignalingState::kHaveLocalPrAnswer;
+        // webrtc-pc rejects a rollback of a provisional answer
+        return state == SignalingState::kHaveLocalOffer;
       }
       return state == SignalingState::kHaveRemoteOffer || state == SignalingState::kHaveLocalPrAnswer;
+    }
+
+    bool isSFrame(const std::shared_ptr<RtpTransform> &transform) {
+      return dynamic_cast<const SFrameTransform *>(transform.get()) != nullptr;
+    }
+
+    bool sframeVideo(const webrtc::RtpTransceiverInterface &transceiver) {
+      if (transceiver.media_type() != webrtc::MediaType::VIDEO || transceiver.stopping()) {
+        return false;
+      }
+      auto sender = RTCRtpSender::registry().Find(transceiver.sender().get());
+      auto receiver = RTCRtpReceiver::registry().Find(transceiver.receiver().get());
+      return (sender && isSFrame(sender->GetTransform())) || (receiver && isSFrame(receiver->GetTransform()));
+    }
+
+    bool hasSFrameVideo(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
+      return std::ranges::any_of(pc->GetTransceivers(),
+                                 [](const auto &transceiver) { return sframeVideo(*transceiver); });
+    }
+
+    using Transceiver = webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>;
+
+    // in an offer, transceivers without a mid take the free sections in order, as libwebrtc assigns them
+    std::map<std::string, Transceiver> transceiversByMid(const std::vector<Transceiver> &transceivers,
+                                                         const webrtc::SessionDescription &description, bool offer) {
+      std::map<std::string, Transceiver> byMid;
+      std::vector<Transceiver> unassigned;
+      for (const auto &transceiver : transceivers) {
+        if (auto mid = transceiver->mid()) {
+          byMid.emplace(*mid, transceiver);
+        } else if (!transceiver->stopping()) {
+          unassigned.push_back(transceiver);
+        }
+      }
+      if (!offer) {
+        return byMid;
+      }
+      auto next = unassigned.begin();
+      for (const auto &content : description.contents()) {
+        const auto *media = content.media_description();
+        if (next == unassigned.end()) {
+          break;
+        }
+        if (content.rejected || byMid.contains(content.mid()) || media == nullptr ||
+            (media->type() != webrtc::MediaType::AUDIO && media->type() != webrtc::MediaType::VIDEO)) {
+          continue;
+        }
+        if (media->type() != (*next)->media_type()) {
+          break;
+        }
+        byMid.emplace(content.mid(), *next++);
+      }
+      return byMid;
+    }
+
+    bool hasDependencyDescriptor(const webrtc::MediaContentDescription &media) {
+      return std::ranges::any_of(media.rtp_header_extensions(), [](const webrtc::RtpExtension &extension) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay): libwebrtc's URIs are char arrays
+        return extension.uri == webrtc::RtpExtension::kDependencyDescriptorUri;
+      });
+    }
+
+    bool isRaw(const webrtc::Codec &codec) {
+      return codec.packetization == webrtc::kPacketizationParamRaw;
+    }
+
+    bool offeredRaw(const webrtc::SessionDescriptionInterface *offer, const std::string &mid,
+                    const webrtc::Codec &codec) {
+      const auto *content = offer != nullptr ? offer->description()->GetContentByName(mid) : nullptr;
+      if (content == nullptr || content->media_description() == nullptr) {
+        return false;
+      }
+      return std::ranges::any_of(content->media_description()->codecs(), [&](const webrtc::Codec &offered) {
+        return offered.id == codec.id && isRaw(offered);
+      });
+    }
+
+    void setCreated(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, webrtc::SdpType type,
+                    const std::string &sdp, const webrtc::scoped_refptr<SetLocalDescriptionObserver> &observer,
+                    Completion &completion) {
+      std::optional<RTCCallbackException> error;
+      auto description = parseDescription(RTCSessionDescriptionInit(type, sdp), error);
+      if (error) {
+        completion.Fail(*error);
+        return;
+      }
+      pc->SetLocalDescription(std::move(description), observer);
     }
 
     std::vector<const webrtc::SessionDescriptionInterface *>
@@ -138,6 +233,33 @@ namespace python_webrtc {
     pc->CreateAnswer(observer.get(), webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
   }
 
+  void RTCPeerConnection::PrepareCreatedDescription(webrtc::SessionDescriptionInterface &description) {
+    auto pc = connection();
+    if (!pc) {
+      return;
+    }
+    const bool offer = description.GetType() == webrtc::SdpType::kOffer;
+    const auto *remoteOffer = offer ? nullptr : pc->remote_description();
+    for (const auto &[mid, transceiver] : transceiversByMid(pc->GetTransceivers(), *description.description(), offer)) {
+      auto *content = description.description()->GetContentByName(mid);
+      if (content == nullptr || content->rejected || !sframeVideo(*transceiver)) {
+        continue;
+      }
+      auto *media = content->media_description();
+      // only the dependency descriptor tells key frames of raw packetization
+      if (!hasDependencyDescriptor(*media)) {
+        continue;
+      }
+      auto codecs = media->codecs();
+      for (auto &codec : codecs) {
+        if (codec.IsMediaCodec() && (offer || offeredRaw(remoteOffer, mid, codec))) {
+          codec.packetization = std::string(webrtc::kPacketizationParamRaw);
+        }
+      }
+      media->set_codecs(codecs);
+    }
+  }
+
   void RTCPeerConnection::SaveCreatedDescription(const RTCSessionDescriptionInit &description) {
     const std::scoped_lock lock(_createdMutex);
     (description.type == webrtc::SdpType::kOffer ? _lastOffer : _lastAnswer) = description.sdp;
@@ -161,6 +283,7 @@ namespace python_webrtc {
         // the descriptions as the operation left them, before candidates gathered later
         self->_completionSnapshot = self->SnapshotDescriptions();
         auto created = self->WrapTransports();
+        self->UpdateMaxMessageSize();
         self->MarkIceRolesKnown();
         if (remote) {
           self->RecordRemoteDescriptionCandidates();
@@ -204,8 +327,12 @@ namespace python_webrtc {
       auto type = init ? init->type : implicitType;
       auto shared = std::make_shared<Completion>(std::move(completion));
       auto complete = DescriptionCompletion(shared, pc, DescriptionKind::kLocal);
-      if (type == webrtc::SdpType::kOffer ||
-          (type == webrtc::SdpType::kAnswer && state == SignalingState::kHaveRemoteOffer)) {
+      const bool created = type == webrtc::SdpType::kOffer ||
+                           (type == webrtc::SdpType::kAnswer && state == SignalingState::kHaveRemoteOffer);
+      if (created && hasSFrameVideo(pc)) {
+        // libwebrtc's own implicit description can't get raw packetization
+        SetCreatedDescription(pc, type, std::move(complete), shared);
+      } else if (created) {
         // libwebrtc creates the offer or the answer the signaling state calls for
         pc->SetLocalDescription(webrtc::make_ref_counted<SetLocalDescriptionObserver>(std::move(complete)));
       } else {
@@ -239,28 +366,33 @@ namespace python_webrtc {
   void RTCPeerConnection::SetImplicitAnswer(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
                                             webrtc::SdpType type, std::function<void(webrtc::RTCError)> complete,
                                             const std::shared_ptr<Completion> &completion) {
-    auto observer = webrtc::make_ref_counted<SetLocalDescriptionObserver>(std::move(complete));
-    auto apply = [pc, observer, type, completion](const std::string &sdp) {
-      std::optional<RTCCallbackException> error;
-      auto description = parseDescription(RTCSessionDescriptionInit(type, sdp), error);
-      if (error) {
-        completion->Fail(*error);
-        return;
-      }
-      pc->SetLocalDescription(std::move(description), observer);
-    };
     std::string lastAnswer;
     {
       const std::scoped_lock lock(_createdMutex);
       lastAnswer = _lastAnswer;
     }
     if (!lastAnswer.empty()) {
-      apply(lastAnswer);
+      setCreated(pc, type, lastAnswer, webrtc::make_ref_counted<SetLocalDescriptionObserver>(std::move(complete)),
+                 *completion);
       return;
     }
-    auto answerObserver = webrtc::make_ref_counted<CreateSessionDescriptionObserver>(
-        weak_from_this(), completion, [apply](const RTCSessionDescription &answer) { apply(answer.init().sdp); });
-    pc->CreateAnswer(answerObserver.get(), webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
+    SetCreatedDescription(pc, type, std::move(complete), completion);
+  }
+
+  void RTCPeerConnection::SetCreatedDescription(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
+                                                webrtc::SdpType type, std::function<void(webrtc::RTCError)> complete,
+                                                const std::shared_ptr<Completion> &completion) {
+    auto observer = webrtc::make_ref_counted<SetLocalDescriptionObserver>(std::move(complete));
+    auto apply = [pc, observer, type, completion](const RTCSessionDescription &created) {
+      setCreated(pc, type, created.init().sdp, observer, *completion);
+    };
+    auto createdObserver =
+        webrtc::make_ref_counted<CreateSessionDescriptionObserver>(weak_from_this(), completion, std::move(apply));
+    if (type == webrtc::SdpType::kOffer) {
+      pc->CreateOffer(createdObserver.get(), webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
+    } else {
+      pc->CreateAnswer(createdObserver.get(), webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
+    }
   }
 
   void RTCPeerConnection::SetRemoteDescription(std::shared_ptr<Mailbox> mailbox, uint64_t token,
@@ -277,7 +409,7 @@ namespace python_webrtc {
     const bool answer = init.type == webrtc::SdpType::kAnswer || init.type == webrtc::SdpType::kPrAnswer;
     const bool rollback = init.type == webrtc::SdpType::kRollback;
     if ((answer && state != SignalingState::kHaveLocalOffer && state != SignalingState::kHaveRemotePrAnswer) ||
-        (rollback && state != SignalingState::kHaveRemoteOffer && state != SignalingState::kHaveRemotePrAnswer)) {
+        (rollback && state != SignalingState::kHaveRemoteOffer)) {
       completion.Fail(RTCCallbackException(
           webrtc::RTCErrorType::INVALID_STATE,
           "Failed to execute 'setRemoteDescription' on 'RTCPeerConnection': Called in wrong state: " +
@@ -367,7 +499,11 @@ namespace python_webrtc {
   }
 
   std::shared_ptr<RTCSessionDescription> RTCPeerConnection::GetDescription(DescriptionKind kind) {
+    // close() keeps the descriptions
     auto pc = connection();
+    if (!pc) {
+      pc = closedConnection();
+    }
     if (!pc) {
       return nullptr;
     }

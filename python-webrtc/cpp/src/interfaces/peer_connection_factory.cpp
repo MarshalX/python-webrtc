@@ -115,11 +115,6 @@ namespace python_webrtc {
     _signalingThread = nullptr;
   }
 
-  std::shared_ptr<PeerConnectionFactory> PeerConnectionFactory::Create() {
-    const std::scoped_lock lock(_mutex);
-    return CreateLocked();
-  }
-
   std::shared_ptr<PeerConnectionFactory> PeerConnectionFactory::CreateLocked() {
 #ifdef __APPLE__
     // libwebrtc runs its task queues on libdispatch, which crashes in the child of a fork
@@ -214,7 +209,6 @@ namespace python_webrtc {
 
     pybind11::class_<PeerConnectionFactory, std::shared_ptr<PeerConnectionFactory>>(m, "PeerConnectionFactory")
         .def_property_readonly("_id", &PeerConnectionFactory::Id)
-        .def(pybind11::init(nogil_factory(&PeerConnectionFactory::Create)))
         .def_static("getOrCreateDefault", &PeerConnectionFactory::GetOrCreateDefault, nogil())
         .def_static("dispose", &PeerConnectionFactory::Dispose, nogil());
 

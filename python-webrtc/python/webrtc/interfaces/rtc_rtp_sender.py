@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Union, cast
 import webrtc
 import wrtc
 from webrtc.base import WebRTCObject
-from webrtc.enums import MediaType
+from webrtc.enums import MediaType, RTCRtpTransceiverDirection
 from webrtc.exceptions import InvalidStateError
 from webrtc.models.rtc_stats import RTCStatsReport
 from webrtc.models.rtp_parameters import RTCRtpCapabilities, RTCRtpSendParameters
@@ -32,6 +32,8 @@ if TYPE_CHECKING:
     from typing_extensions import Never
 
     _Transform = Union[webrtc.RTCRtpScriptTransform, webrtc.RTCRtpSFrameEncryptor, webrtc.RTCRtpSFrameDecryptor]
+
+_DEPENDENCY_DESCRIPTOR = 'https://aomediacodec.github.io/av1-rtp-spec/#dependency-descriptor-rtp-header-extension'
 
 
 class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
@@ -165,6 +167,11 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         kind = self._kind
         # a copy (pybind returns one): changed, then set back
         encodings = last.encodings
+        for encoding in parameters.encodings:
+            # a codec without a valid MIME type matches no negotiated codec
+            if encoding.codec is not None and encoding.codec.mime_type.partition('/')[2] == '':
+                msg = f'{encoding.codec.mime_type!r} is not a valid MIME type of a codec'
+                raise webrtc.InvalidModificationError(msg)
         for native, encoding in zip(encodings, parameters.encodings):
             _ = encoding._for_kind(kind)._apply(native)
         for native, option in zip(encodings, options if options is not None else ()):
@@ -311,6 +318,31 @@ def _set_transform(
         if unset is not None:
             changing.enter_context(unset._changing())
         part.transform = native
+    if isinstance(transform, sframe) and connection is not None:
+        _negotiate_dependency_descriptor(connection, part)
+
+
+def _negotiate_dependency_descriptor(
+    connection: webrtc.RTCPeerConnection, part: wrtc.RTCRtpSender | wrtc.RTCRtpReceiver
+) -> None:
+    """Offers the dependency descriptor: a receiver can't tell key frames by a payload SFrame encrypts."""
+    transceiver = _transceiver_of(connection, part)
+    if transceiver is None or transceiver.kind != MediaType.video:
+        return
+    extensions = transceiver.getHeaderExtensionsToNegotiate()
+    for extension in extensions:
+        if extension.uri == _DEPENDENCY_DESCRIPTOR and extension.direction == RTCRtpTransceiverDirection.stopped:
+            extension.direction = RTCRtpTransceiverDirection.sendrecv
+    transceiver.setHeaderExtensionsToNegotiate(extensions)
+
+
+def _transceiver_of(
+    connection: webrtc.RTCPeerConnection, part: wrtc.RTCRtpSender | wrtc.RTCRtpReceiver
+) -> wrtc.RTCRtpTransceiver | None:
+    for transceiver in connection._native_obj.getTransceivers():
+        if part in {transceiver.sender, transceiver.receiver}:
+            return transceiver
+    return None
 
 
 def _check_unchanged(

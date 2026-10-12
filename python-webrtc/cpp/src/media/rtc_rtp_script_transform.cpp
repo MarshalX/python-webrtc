@@ -179,7 +179,9 @@ namespace python_webrtc {
 
   RTCRtpScriptTransform::KeyFrameResult RTCRtpScriptTransform::GenerateKeyFrame(const std::optional<std::string> &rid) {
     auto bridge = Bridge();
-    if (!bridge || !bridge->Source().sender || !bridge->Source().video || !bridge->Source().generateKeyFrame) {
+    // a removed transform keeps its bridge, but no longer has an encoder
+    if (GetState() != State::kAssociated || !bridge || !bridge->Source().sender || !bridge->Source().video ||
+        !bridge->Source().generateKeyFrame) {
       return KeyFrameResult::kInvalidState;
     }
     std::vector<std::string> rids;
@@ -193,7 +195,8 @@ namespace python_webrtc {
 
   bool RTCRtpScriptTransform::SendKeyFrameRequest() {
     auto bridge = Bridge();
-    if (!bridge || bridge->Source().sender || !bridge->Source().video || !bridge->Source().sendKeyFrameRequest) {
+    if (GetState() != State::kAssociated || !bridge || bridge->Source().sender || !bridge->Source().video ||
+        !bridge->Source().sendKeyFrameRequest) {
       return false;
     }
     bridge->Source().sendKeyFrameRequest();

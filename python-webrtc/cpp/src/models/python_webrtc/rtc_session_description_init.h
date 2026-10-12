@@ -19,8 +19,6 @@ namespace python_webrtc {
 
   class RTCSessionDescriptionInit {
   public:
-    RTCSessionDescriptionInit();
-
     RTCSessionDescriptionInit(webrtc::SdpType type, std::string sdp);
 
     static void Init(pybind11::module &m);

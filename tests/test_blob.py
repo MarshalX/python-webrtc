@@ -70,3 +70,16 @@ async def test_text_stream() -> None:
     assert all(isinstance(chunk, str) for chunk in chunks)
     assert ''.join(chunks) == text
     assert [chunk async for chunk in webrtc.Blob([b'\xef\xbb\xbf']).text_stream()] == []
+
+
+def test_equality_by_content() -> None:
+    """Blobs are equal, and hash alike, when their bytes and type are."""
+    blob = webrtc.Blob(['ab', b'c'], webrtc.BlobPropertyBag(type='text/plain'))
+    same = webrtc.Blob([b'abc'], webrtc.BlobPropertyBag(type='TEXT/PLAIN'))
+    assert len(blob) == blob.size == 3
+    assert blob == same
+    assert hash(blob) == hash(same)
+    assert blob != webrtc.Blob([b'abc'])
+    assert blob != webrtc.Blob([b'abd'], webrtc.BlobPropertyBag(type='text/plain'))
+    assert blob != b'abc'
+    assert repr(blob) == "<webrtc.Blob size=3 type='text/plain'>"

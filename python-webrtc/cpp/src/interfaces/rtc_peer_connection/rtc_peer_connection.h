@@ -75,6 +75,9 @@ namespace python_webrtc {
 
     void CreateAnswer(std::shared_ptr<Mailbox> mailbox, uint64_t token);
 
+    // gives SFrame video sections raw packetization, on the signaling thread
+    void PrepareCreatedDescription(webrtc::SessionDescriptionInterface &description);
+
     // for the fingerprint check of setLocalDescription
     void SaveCreatedDescription(const RTCSessionDescriptionInit &description);
 
@@ -303,8 +306,10 @@ namespace python_webrtc {
     template <typename T>
     std::vector<webrtc::RtpCodecParameters> NegotiatedCodecsOf(const webrtc::scoped_refptr<T> &endpoint);
 
-    // the maxMessageSize of the SCTP transport, from the descriptions until the transport knows it
-    std::optional<double> MaxMessageSize();
+    // the SCTP transport's maxMessageSize, cached in kept while the connection still uses that transport
+    std::optional<double> MaxMessageSize(const webrtc::SctpTransportInterface *transport, std::optional<double> &kept);
+    // the spec's "update the data max message size", for a transport Python may hold
+    void UpdateMaxMessageSize();
 
     // waits for the negotiationneeded event a change may have caused to be emitted
     void QueueNegotiationNeeded();
@@ -317,6 +322,11 @@ namespace python_webrtc {
     void SetImplicitAnswer(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, webrtc::SdpType type,
                            std::function<void(webrtc::RTCError)> complete,
                            const std::shared_ptr<Completion> &completion);
+
+    // creates and sets the implicit offer or answer, prepared as createOffer and createAnswer are
+    void SetCreatedDescription(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, webrtc::SdpType type,
+                               std::function<void(webrtc::RTCError)> complete,
+                               const std::shared_ptr<Completion> &completion);
 
     // What completes setLocalDescription (kLocal) or setRemoteDescription (kRemote); created right before the
     // operation starts, as it holds its events
@@ -402,6 +412,8 @@ namespace python_webrtc {
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> _jinglePeerConnection;
     // a closed connection still has stats, guarded by _connectionMutex
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> _closedConnection;
+    // the gathering state close() leaves (webrtc-pc), guarded by _connectionMutex
+    IceGatheringState _closedIceGatheringState = IceGatheringState::kIceGatheringNew;
     // as it was set, guarded by _connectionMutex
     ConfigurationInit _configuration;
 

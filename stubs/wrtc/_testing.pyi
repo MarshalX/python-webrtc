@@ -1,6 +1,6 @@
 from __future__ import annotations
 import typing
-from wrtc import Mailbox
+from wrtc import Mailbox, SFrameTransform
 class GuardedTask:
     def __call__(self) -> None:
         ...
@@ -48,6 +48,8 @@ class Throwing:
 def abandon(mailbox: Mailbox, token: typing.SupportsInt | typing.SupportsIndex) -> None:
     ...
 def flush() -> None:
+    ...
+def sframe_skip_counters(transform: SFrameTransform, next: typing.SupportsInt | typing.SupportsIndex) -> None:
     ...
 def alive_counts() -> dict[str, int]:
     ...

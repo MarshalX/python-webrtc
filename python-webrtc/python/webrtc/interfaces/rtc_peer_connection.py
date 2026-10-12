@@ -76,13 +76,13 @@ _LOCAL_DESCRIPTION_STATES = {
     RTCSdpType.offer: (RTCSignalingState.stable, RTCSignalingState.have_local_offer),
     RTCSdpType.answer: (RTCSignalingState.have_remote_offer, RTCSignalingState.have_local_pranswer),
     RTCSdpType.pranswer: (RTCSignalingState.have_remote_offer, RTCSignalingState.have_local_pranswer),
-    RTCSdpType.rollback: (RTCSignalingState.have_local_offer, RTCSignalingState.have_local_pranswer),
+    RTCSdpType.rollback: (RTCSignalingState.have_local_offer,),
 }
 # the same for a remote description, but an offer, which can be set in any state (a local one is rolled back)
 _REMOTE_DESCRIPTION_STATES = {
     RTCSdpType.answer: (RTCSignalingState.have_local_offer, RTCSignalingState.have_remote_pranswer),
     RTCSdpType.pranswer: (RTCSignalingState.have_local_offer, RTCSignalingState.have_remote_pranswer),
-    RTCSdpType.rollback: (RTCSignalingState.have_remote_offer, RTCSignalingState.have_remote_pranswer),
+    RTCSdpType.rollback: (RTCSignalingState.have_remote_offer,),
 }
 
 _RID = re.compile(r'[A-Za-z0-9]{1,16}')

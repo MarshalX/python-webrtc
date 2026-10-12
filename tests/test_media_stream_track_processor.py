@@ -17,7 +17,7 @@ from typing import TypeVar
 import pytest
 
 import webrtc
-from tests.helpers import wait_for_event, wait_until
+from tests.helpers import mistyped, wait_for_event, wait_until
 
 TIMEOUT = 10
 I420_4X2 = bytes(range(1, 13))
@@ -221,6 +221,140 @@ async def test_generator_sends_the_visible_rect() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('format', 'planes'),
+    [
+        ('I420P10', array.array('H', [1020] * 8 + [360] * 2 + [960] * 2).tobytes()),
+        ('I422A', bytes([255] * 8 + [90] * 4 + [240] * 4 + [7] * 8)),
+        ('I444A', bytes([255] * 8 + [90] * 8 + [240] * 8 + [7] * 8)),
+    ],
+)
+async def test_generator_sends_other_formats_as_i420(format: webrtc.VideoPixelFormatValue, planes: bytes) -> None:
+    """Frames libwebrtc has no buffer for are sent as 8-bit I420."""
+    generator = webrtc.VideoTrackGenerator()
+    reader = webrtc.MediaStreamTrackProcessor(
+        webrtc.MediaStreamTrackProcessorInit(generator.track)
+    ).readable.get_reader()
+    frame = webrtc.VideoFrame(
+        planes, webrtc.VideoFrameBufferInit(format=format, coded_width=4, coded_height=2, timestamp=0)
+    )
+    await generator.writable.get_writer().write(frame)
+    with as_video_frame((await read(reader)).value) as received:
+        assert received.format == webrtc.VideoPixelFormat.I420
+        out = bytearray(received.allocation_size())
+        await received.copy_to(out)
+        assert list(out) == [255] * 8 + [90] * 2 + [240] * 2
+    generator.track.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('format', 'size'),
+    [('I420A', 20), ('I422', 16), ('I444', 24), ('NV12', 12)],
+)
+async def test_generator_sends_formats_libwebrtc_has_as_they_are(
+    format: webrtc.VideoPixelFormatValue, size: int
+) -> None:
+    generator = webrtc.VideoTrackGenerator()
+    reader = webrtc.MediaStreamTrackProcessor(
+        webrtc.MediaStreamTrackProcessorInit(generator.track)
+    ).readable.get_reader()
+    planes = bytes(range(1, size + 1))
+    frame = webrtc.VideoFrame(
+        planes, webrtc.VideoFrameBufferInit(format=format, coded_width=4, coded_height=2, timestamp=0)
+    )
+    await generator.writable.get_writer().write(frame)
+    with as_video_frame((await read(reader)).value) as received:
+        assert received.format == webrtc.VideoPixelFormat(format)
+        out = bytearray(received.allocation_size())
+        await received.copy_to(out)
+        assert bytes(out) == planes
+    generator.track.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('format', 'pixel'), [('RGBA', [255, 0, 0, 7]), ('BGRX', [0, 0, 255, 0])])
+async def test_generator_sends_rgb_as_i420(format: webrtc.VideoPixelFormatValue, pixel: list[int]) -> None:
+    """The channel order is kept: red stays red."""
+    generator = webrtc.VideoTrackGenerator()
+    reader = webrtc.MediaStreamTrackProcessor(
+        webrtc.MediaStreamTrackProcessorInit(generator.track)
+    ).readable.get_reader()
+    frame = webrtc.VideoFrame(
+        bytes(pixel * 8), webrtc.VideoFrameBufferInit(format=format, coded_width=4, coded_height=2, timestamp=0)
+    )
+    await generator.writable.get_writer().write(frame)
+    with as_video_frame((await read(reader)).value) as received:
+        assert received.format == webrtc.VideoPixelFormat.I420
+        out = bytearray(received.allocation_size())
+        await received.copy_to(out)
+        # libyuv's SIMD paths may round by one
+        expected = [82] * 8 + [90] * 2 + [239] * 2
+        assert len(out) == len(expected)
+        assert all(abs(got - want) <= 1 for got, want in zip(out, expected))
+    generator.track.stop()
+
+
+@pytest.mark.asyncio
+async def test_stopped_video_generator_drops_frames() -> None:
+    """Frames are taken and closed, but not sent."""
+    generator = webrtc.VideoTrackGenerator()
+    writer = generator.writable.get_writer()
+    generator.track.stop()
+    frame = video_frame(0)
+    await writer.write(frame)
+    assert frame.format is None, 'written frame is closed'
+    assert generator.track.ready_state == webrtc.MediaStreamTrackState.ended
+
+
+@pytest.mark.asyncio
+async def test_received_alpha_discarded_is_sent_as_i420() -> None:
+    """An I420A frame without its alpha goes on as I420."""
+    generator = webrtc.VideoTrackGenerator()
+    reader = webrtc.MediaStreamTrackProcessor(
+        webrtc.MediaStreamTrackProcessorInit(generator.track)
+    ).readable.get_reader()
+    writer = generator.writable.get_writer()
+    planes = bytes(range(1, 21))
+    init = webrtc.VideoFrameBufferInit(format='I420A', coded_width=4, coded_height=2, timestamp=0)
+    await writer.write(webrtc.VideoFrame(planes, init))
+    with as_video_frame((await read(reader)).value) as received:
+        await writer.write(webrtc.VideoFrame(received, webrtc.VideoFrameInit(alpha='discard')))
+    with as_video_frame((await read(reader)).value) as opaque:
+        assert opaque.format == webrtc.VideoPixelFormat.I420
+        out = bytearray(opaque.allocation_size())
+        await opaque.copy_to(out)
+        assert bytes(out) == planes[:12]
+    generator.track.stop()
+
+
+@pytest.mark.parametrize('size', [65536, -1, 1.5, True])
+def test_max_buffer_size_is_an_unsigned_short(size: object) -> None:
+    """A size that isn't an integer from 0 to 65535 is a TypeError."""
+    generator = webrtc.VideoTrackGenerator()
+    with pytest.raises(TypeError):
+        webrtc.MediaStreamTrackProcessor(
+            webrtc.MediaStreamTrackProcessorInit(generator.track, max_buffer_size=mistyped(size))
+        )
+    generator.track.stop()
+
+
+@pytest.mark.asyncio
+async def test_audio_generator_rejects_closed_data() -> None:
+    """An audio generator takes open AudioData only."""
+    generator = webrtc.MediaStreamTrackGenerator('audio')
+    data = webrtc.AudioData(
+        webrtc.AudioDataInit(
+            format='s16', sample_rate=48000, number_of_frames=480, number_of_channels=1, timestamp=0, data=bytes(960)
+        )
+    )
+    data.close()
+    with pytest.raises(TypeError):
+        await generator.writable.get_writer().write(data)
+    generator.stop()
+
+
+@pytest.mark.asyncio
 async def test_generator_rejects_what_it_cant_send() -> None:
     """A video generator takes open VideoFrames only."""
     generator = webrtc.VideoTrackGenerator()
@@ -303,6 +437,22 @@ async def test_audio_generator_sends_10_ms_frames() -> None:
     with pytest.raises(TypeError):
         await writer.write(video_frame(0))
     generator.stop()
+
+
+@pytest.mark.asyncio
+async def test_stopped_audio_generator_drops_data() -> None:
+    """Data is taken and closed, but not sent."""
+    generator = webrtc.MediaStreamTrackGenerator('audio')
+    writer = generator.writable.get_writer()
+    generator.stop()
+    data = webrtc.AudioData(
+        webrtc.AudioDataInit(
+            format='s16', sample_rate=48000, number_of_frames=480, number_of_channels=1, timestamp=0, data=bytes(960)
+        )
+    )
+    await writer.write(data)
+    assert data.format is None, 'written data is closed'
+    assert generator.ready_state == webrtc.MediaStreamTrackState.ended
 
 
 def test_generator_kinds() -> None:

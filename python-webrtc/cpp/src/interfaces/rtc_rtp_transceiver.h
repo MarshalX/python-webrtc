@@ -67,8 +67,6 @@ namespace python_webrtc {
     // libwebrtc takes the codecs as a mutable view
     void SetCodecPreferences(std::vector<webrtc::RtpCodecCapability> codecs);
 
-    std::vector<webrtc::RtpCodecCapability> GetCodecPreferences();
-
     std::vector<webrtc::RtpHeaderExtensionCapability> GetHeaderExtensionsToNegotiate();
 
     void SetHeaderExtensionsToNegotiate(const std::vector<webrtc::RtpHeaderExtensionCapability> &extensions);

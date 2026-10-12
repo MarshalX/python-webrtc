@@ -139,7 +139,7 @@ namespace python_webrtc {
     ~Completion();
 
     Completion(Completion &&other) noexcept;
-    Completion &operator=(Completion &&other) noexcept;
+    Completion &operator=(Completion &&other) = delete;
     Completion(const Completion &) = delete;
     Completion &operator=(const Completion &) = delete;
 

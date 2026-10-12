@@ -251,3 +251,49 @@ def test_transfer_twice() -> None:
     data = bytearray(8)
     with pytest.raises(webrtc.DataCloneError, match='more than once'):
         audio_data(format='f32', channels=1, frames=2, data=data, transfer=[data, memoryview(data)])
+
+
+def test_transfer_is_a_sequence_of_buffers() -> None:
+    """A single buffer as transfer is a TypeError."""
+    data = bytearray(8)
+    with pytest.raises(TypeError, match='transfer is a sequence of buffers'):
+        audio_data(format='f32', channels=1, frames=2, data=data, transfer=mistyped(data))
+
+
+@pytest.mark.parametrize(
+    ('members', 'error'),
+    [
+        ({'number_of_frames': -1}, 'number_of_frames must be a non-negative integer'),
+        ({'timestamp': 1.5}, 'timestamp is an integer'),
+        ({'data': 7}, 'data must be a bytes-like buffer'),
+    ],
+    ids=['negative frames', 'float timestamp', 'data not a buffer'],
+)
+def test_invalid_init_member(members: dict[str, object], error: str) -> None:
+    """Each invalid member of an init is a TypeError naming it."""
+    init = webrtc.AudioDataInit(
+        format='u8', sample_rate=8000, number_of_frames=1, number_of_channels=1, timestamp=0, data=bytes(1)
+    )
+    for name, value in members.items():
+        setattr(init, name, value)
+    with pytest.raises(TypeError, match=error):
+        webrtc.AudioData(init)
+
+
+def test_negative_copy_option() -> None:
+    """A negative frame offset is a TypeError."""
+    audio = audio_data()
+    with pytest.raises(TypeError, match='frame_offset must be a non-negative integer, not -1'):
+        audio.allocation_size(webrtc.AudioDataCopyToOptions(plane_index=0, frame_offset=-1))
+    audio.close()
+
+
+def test_closed_data_repr_duration_and_clone() -> None:
+    """A closed data has no duration and can't be cloned."""
+    audio = audio_data(frames=80)
+    assert repr(audio) == '<webrtc.AudioData f32-planar 2ch 80 frames 8000 Hz timestamp=1234>'
+    audio.close()
+    assert repr(audio) == '<webrtc.AudioData closed>'
+    assert audio.duration == 0
+    with pytest.raises(webrtc.InvalidStateError, match='closed'):
+        audio.clone()

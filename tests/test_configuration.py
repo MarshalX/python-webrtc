@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import webrtc
-from tests.helpers import exchange_offer, mistyped
+from tests.helpers import exchange_answer, exchange_offer, mistyped
 
 if TYPE_CHECKING:
     from tests.helpers import CreatePC
@@ -83,6 +83,7 @@ def test_set_configuration_of_closed_connection(pc: webrtc.RTCPeerConnection) ->
         'turn:example.org?transport=sctp',
         'stun:example.org:70000',
         'stun:2001:db8::1',
+        'stun:[2001:db8::zz]',
     ],
 )
 def test_invalid_ice_server_urls(url: str) -> None:
@@ -95,6 +96,20 @@ def test_ice_server_needs_credentials() -> None:
     """A TURN server needs a username and a credential."""
     with pytest.raises(webrtc.InvalidAccessError):
         webrtc.RTCPeerConnection(webrtc.RTCConfiguration(ice_servers=[webrtc.RTCIceServer('turn:example.org')]))
+
+
+def test_turn_username_too_long() -> None:
+    """At most 509 bytes, as a STUN USERNAME."""
+    server = webrtc.RTCIceServer('turn:example.org', username='u' * 510, credential='p')
+    with pytest.raises(webrtc.InvalidAccessError, match='longer than 509'):
+        webrtc.RTCPeerConnection(webrtc.RTCConfiguration(ice_servers=[server]))
+
+
+@pytest.mark.parametrize('port_range', [(2, 1), (-1, 10), (0, 65536)])
+def test_invalid_port_range(port_range: tuple[int, int]) -> None:
+    """A port range is two ports, from low to high."""
+    with pytest.raises(ValueError, match='port_range must be two ports from low to high'):
+        webrtc.RTCPeerConnection(webrtc.RTCConfiguration(port_range=port_range))
 
 
 def test_ice_server_needs_urls() -> None:
@@ -172,6 +187,12 @@ def test_configuration_from_json() -> None:
     assert configuration.ice_transport_policy == 'relay'
 
 
+@pytest.mark.parametrize('value', [[('iceTransportPolicy', 'relay')], '{"iceTransportPolicy": "relay"}', None])
+def test_configuration_from_json_takes_a_mapping(value: object) -> None:
+    with pytest.raises(TypeError, match='RTCConfiguration is created from a mapping'):
+        webrtc.RTCConfiguration.from_json(mistyped(value))
+
+
 @pytest.mark.asyncio
 async def test_always_negotiate_data_channels_and_header_encryption(create_pc: CreatePC) -> None:
     """As configured, an offer always has a data section and encrypts header extensions; neither can change."""
@@ -243,6 +264,10 @@ async def test_generate_rsa_certificate() -> None:
             'publicExponent': bytes([3]),
             'hash': {'name': 'SHA-1'},
         }),
+        # below the smallest RSA key libwebrtc generates
+        webrtc.RsaHashedKeyGenParams(
+            'RSASSA-PKCS1-v1_5', modulus_length=512, public_exponent=b'\x01\x00\x01', hash='SHA-256'
+        ),
     ],
 )
 async def test_generate_unsupported_certificate(algorithm: str | webrtc.Algorithm) -> None:
@@ -332,6 +357,52 @@ def test_invalid_ice_candidate() -> None:
     assert invalid.port is None
     with pytest.raises(TypeError):
         webrtc.RTCIceCandidate('candidate:1 1 udp 1 1.2.3.4 5 typ host')
+
+
+@pytest.mark.parametrize(
+    'candidate',
+    [
+        'candidate:1 1 udp 1 1.2.3.4 5 typ',
+        'candidate:1 1 udp 1x 1.2.3.4 5 typ host',
+        'candidate:1 1 udp 0 1.2.3.4 5 typ host',
+        'candidate:1 1 sctp 1 1.2.3.4 5 typ host',
+        'candidate:1 1 udp 1 1.2.3.4 5 typ srflx raddr 10.0.0.1',
+        'candidate:1 1 udp 1 1.2.3.4 5 typ srflx',
+        'candidate:1 1 tcp 1 1.2.3.4 5 typ host tcptype',
+        'candidate:1 1 tcp 1 1.2.3.4 5 typ host',
+        'candidate:1 1 udp 1 1.2.3.4 5 typ host generation',
+    ],
+    ids=[
+        'too few tokens',
+        'priority not a number',
+        'priority zero',
+        'unknown protocol',
+        'related address without port',
+        'srflx without related address',
+        'tcptype without value',
+        'tcp host without tcptype',
+        'extension without value',
+    ],
+)
+def test_ice_candidate_that_does_not_parse(candidate: str) -> None:
+    """A candidate breaking the RFC 8839 grammar has no parsed attributes."""
+    parsed = webrtc.RTCIceCandidate(candidate, sdp_mid='0')
+    assert (parsed.foundation, parsed.priority, parsed.type) == (None, None, None)
+
+
+def test_ice_candidate_priority_relay_protocol_and_repr() -> None:
+    """A relay protocol the enum doesn't have is None."""
+    candidate = webrtc.RTCIceCandidate(
+        'candidate:1 1 udp 2122260223 192.0.2.1 50000 typ host',
+        sdp_mid='0',
+        sdp_m_line_index=0,
+        relay_protocol=mistyped('quic'),
+    )
+    assert candidate.priority == 2122260223
+    assert candidate.relay_protocol is None
+    assert repr(candidate) == (
+        "RTCIceCandidate('candidate:1 1 udp 2122260223 192.0.2.1 50000 typ host', sdp_mid='0', sdp_m_line_index=0)"
+    )
 
 
 @pytest.mark.parametrize('line_break', ['', '\n', '\r\n'])
@@ -435,6 +506,28 @@ async def test_created_descriptions(pc: webrtc.RTCPeerConnection) -> None:
     assert pc.local_description is not None
     assert pc.pending_local_description.type == pc.local_description.type == offer.type
     assert pc.current_local_description is None
+
+
+@pytest.mark.asyncio
+async def test_current_remote_description_and_trickle(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """Trickle ICE is known from the first remote description."""
+    caller.add_transceiver(webrtc.MediaType.audio)
+    assert (callee.current_remote_description, callee.can_trickle_ice_candidates) == (None, None)
+
+    await exchange_offer(caller, callee)
+    assert callee.current_remote_description is None
+    assert callee.pending_remote_description is not None
+    assert (callee.can_trickle_ice_candidates, caller.can_trickle_ice_candidates) == (True, None)
+
+    await exchange_answer(caller, callee)
+    assert callee.pending_remote_description is None
+    assert callee.current_remote_description is not None
+    assert callee.current_remote_description.type == webrtc.RTCSdpType.offer
+    assert caller.current_remote_description is not None
+    assert caller.current_remote_description.type == webrtc.RTCSdpType.answer
+    assert caller.can_trickle_ice_candidates is True
 
 
 @pytest.mark.asyncio

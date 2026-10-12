@@ -8,8 +8,8 @@
 """SFrame transforms of WebRTC Encoded Transform, which encrypt encoded frames end to end with SFrame (RFC 9605).
 
 A key is given as the raw bytes of the RFC 9605 base key together with a key id, in place of a ``CryptoKey``. Whole
-frames are encrypted ("per-frame"). Codecs whose RTP packetization parses the payload, such as H.264 and AV1, can't
-be used. VP8, VP9 and Opus work.
+frames are encrypted ("per-frame"). Video negotiates raw RTP packetization, so every codec works; with a peer that
+doesn't support it, H.264 and AV1 can't be used, and VP8 may recover from a lost key frame slowly.
 """
 
 from __future__ import annotations

@@ -271,10 +271,13 @@ namespace python_webrtc {
 
   void RTCPeerConnection::Adopt(const std::shared_ptr<RTCSctpTransport> &sctp) {
     sctp->Inherit(*this);
-    sctp->SetMaxMessageSizeGetter([weak = weak_from_this()]() -> std::optional<double> {
-      auto self = weak.lock();
-      return self ? self->MaxMessageSize() : std::nullopt;
-    });
+    // [[MaxMessageSize]], kept once the connection drops the transport; on the signaling thread only
+    auto kept = std::make_shared<std::optional<double>>();
+    sctp->SetMaxMessageSizeGetter(
+        [weak = weak_from_this(), transport = sctp->transport().get(), kept]() -> std::optional<double> {
+          auto self = weak.lock();
+          return self ? self->MaxMessageSize(transport, *kept) : std::nullopt;
+        });
   }
 
   namespace {
@@ -588,12 +591,17 @@ namespace python_webrtc {
 
   // As the specification updates the data max message size: the max-message-size of the negotiated remote
   // description (the default without it), limited by what the local side can send, where 0 means no limit
-  std::optional<double> RTCPeerConnection::MaxMessageSize() {
+  std::optional<double> RTCPeerConnection::MaxMessageSize(const webrtc::SctpTransportInterface *transport,
+                                                          std::optional<double> &kept) {
     auto pc = connection();
     if (!pc) {
-      return {};
+      // close() leaves [[MaxMessageSize]] (webrtc-pc)
+      return BlockingCallOn(_factory->signalingThread(), [&kept]() { return kept; });
     }
-    return BlockingCallOn(_factory->signalingThread(), [&pc]() -> std::optional<double> {
+    return BlockingCallOn(_factory->signalingThread(), [&pc, transport, &kept]() -> std::optional<double> {
+      if (pc->GetSctpTransport().get() != transport) {
+        return kept;
+      }
       auto sctpSize = [](const webrtc::SessionDescriptionInterface *description) -> std::optional<int> {
         if (!description) {
           return {};
@@ -610,13 +618,25 @@ namespace python_webrtc {
       // updated once the description is negotiated, when an answer is set
       const double remoteSize = sctpSize(pc->current_remote_description()).value_or(kDefaultRemoteMaxMessageSize);
       if (remoteSize == 0 && canSendSize == 0) {
-        return std::numeric_limits<double>::infinity();
+        kept = std::numeric_limits<double>::infinity();
+      } else if (remoteSize == 0 || canSendSize == 0) {
+        kept = std::max(remoteSize, canSendSize);
+      } else {
+        kept = std::min(remoteSize, canSendSize);
       }
-      if (remoteSize == 0 || canSendSize == 0) {
-        return std::max(remoteSize, canSendSize);
-      }
-      return std::min(remoteSize, canSendSize);
+      return kept;
     });
+  }
+
+  void RTCPeerConnection::UpdateMaxMessageSize() {
+    std::shared_ptr<RTCSctpTransport> sctp;
+    {
+      const TrackedLock lock(_wrappersMutex);
+      sctp = _sctp;
+    }
+    if (sctp) {
+      sctp->GetMaxMessageSize();
+    }
   }
 
   ConfigurationInit RTCPeerConnection::GetConfiguration() {
@@ -672,6 +692,7 @@ namespace python_webrtc {
   }
 
   void RTCPeerConnection::Close() {
+    const auto gathering = GetIceGatheringState();
     // a closed connection, its channels and transports fire nothing more; remote tracks fire ended
     Unbind();
     {
@@ -688,6 +709,7 @@ namespace python_webrtc {
       pc = std::move(_jinglePeerConnection);
       if (pc) {
         _closedConnection = pc;
+        _closedIceGatheringState = gathering;
       }
     }
 
@@ -761,7 +783,8 @@ namespace python_webrtc {
   RTCPeerConnection::IceGatheringState RTCPeerConnection::GetIceGatheringState() {
     auto pc = connection();
     if (!pc) {
-      return IceGatheringState::kIceGatheringComplete;
+      const TrackedLock lock(_connectionMutex);
+      return _closedIceGatheringState;
     }
     return _surfacedIceGatheringState.Shown(IsBound(), pc->ice_gathering_state());
   }

@@ -53,7 +53,6 @@ namespace python_webrtc {
              pybind11::arg("parameters"))
         .def("replaceTrack", &RTCRtpSender::ReplaceTrack, nogil(), pybind11::arg("track"))
         .def("setStreams", &RTCRtpSender::SetStreams, nogil(), pybind11::arg("streamIds"))
-        .def("getStreamIds", &RTCRtpSender::GetStreamIds, nogil())
         .def("getStats", &RTCRtpSender::GetStats, nogil(), pybind11::arg("mailbox"), pybind11::arg("token"))
         .def_static("getCapabilities", &RTCRtpSender::GetCapabilities, nogil(), pybind11::arg("kind"))
         .def_property("transform", nogil_fn(&RTCRtpSender::GetTransform), nogil_fn(&RTCRtpSender::SetTransform))
@@ -233,10 +232,6 @@ namespace python_webrtc {
       throw RTCException(closedError("setStreams", "RTCRtpSender"));
     }
     _sender->SetStreams(streamIds);
-  }
-
-  std::vector<std::string> RTCRtpSender::GetStreamIds() {
-    return _sender->stream_ids();
   }
 
   void RTCRtpSender::GetStats(std::shared_ptr<Mailbox> mailbox, uint64_t token) {

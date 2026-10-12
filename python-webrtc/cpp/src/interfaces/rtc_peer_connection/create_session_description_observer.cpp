@@ -14,6 +14,7 @@ namespace python_webrtc {
   void CreateSessionDescriptionObserver::OnSuccess(webrtc::SessionDescriptionInterface *description) {
     const std::unique_ptr<webrtc::SessionDescriptionInterface> owned(description);
     if (auto peerConnection = _peerConnection.lock()) {
+      peerConnection->PrepareCreatedDescription(*owned);
       peerConnection->SaveCreatedDescription(RTCSessionDescriptionInit::Wrap(owned.get()));
     }
     auto created = RTCSessionDescription::Wrap(owned.get());

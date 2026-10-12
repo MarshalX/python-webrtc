@@ -10,6 +10,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import re
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -17,11 +20,16 @@ import webrtc
 from tests.helpers import (
     connect,
     delivered,
+    exchange_answer,
+    exchange_ice_candidates,
     exchange_offer_answer,
     wait_for_event,
     wait_for_ice_gathering_complete,
     wait_until,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
 
 
 def sctp_transport(pc: webrtc.RTCPeerConnection) -> webrtc.RTCDtlsTransport:
@@ -121,6 +129,67 @@ async def test_remote_close_ends_dtls_only(caller: webrtc.RTCPeerConnection, cal
 
 
 @pytest.mark.asyncio
+async def test_remote_certificates_match_the_signaled_fingerprint(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    caller.create_data_channel('certificates')
+    await caller.set_local_description()
+    dtls = sctp_transport(caller)
+    assert dtls.get_remote_certificates() == []
+
+    await connect(caller, callee)
+    certificates = dtls.get_remote_certificates()
+    assert len(certificates) > 0
+    assert callee.local_description is not None
+    fingerprint = next(
+        line for line in callee.local_description.sdp.split('\r\n') if line.startswith('a=fingerprint:sha-256 ')
+    )
+    digest = hashlib.sha256(certificates[0]).hexdigest().upper()
+    assert fingerprint.split(' ')[1] == ':'.join(digest[i : i + 2] for i in range(0, len(digest), 2))
+
+
+@pytest.mark.asyncio
+async def test_wrong_fingerprint_fails_dtls(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """A mismatched certificate fires a dtls-failure error first."""
+    caller.create_data_channel('dtls')
+    exchange_ice_candidates(caller, callee)
+    offer = await caller.create_offer()
+    await caller.set_local_description(offer)
+    wrong = re.sub(r'(a=fingerprint:sha-256 )\S+', lambda match: match.group(1) + ':'.join(['00'] * 32), offer.sdp)
+    await callee.set_remote_description(webrtc.RTCSessionDescriptionInit('offer', wrong))
+    dtls = sctp_transport(callee)
+    events: list[webrtc.Event] = []
+    dtls.on('error', events.append)
+    failed = wait_for_event(dtls, 'statechange', predicate=lambda _event: dtls.state == 'failed')
+    await exchange_answer(caller, callee)
+    events.append(await failed)
+
+    error_event, state_event = events
+    assert isinstance(error_event, webrtc.RTCErrorEvent)
+    # libwebrtc reports a fingerprint mismatch as any handshake failure
+    assert error_event.error.error_detail == webrtc.RTCErrorDetailType.dtls_failure
+    assert state_event.type == 'statechange'
+
+
+@pytest.mark.asyncio
+async def test_once_handles_the_first_dtls_state_change_only(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    caller.create_data_channel('once')
+    await caller.set_local_description()
+    dtls = sctp_transport(caller)
+    first: list[webrtc.RTCDtlsTransportState] = []
+    every: list[webrtc.RTCDtlsTransportState] = []
+    dtls.once('statechange', lambda _event: first.append(dtls.state))
+    dtls.on('statechange', lambda _event: every.append(dtls.state))
+
+    await connect(caller, callee)
+    await wait_until(lambda: webrtc.RTCDtlsTransportState.connected in every, 'the connected DTLS transport')
+    assert len(every) > 1
+    assert first == every[:1]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('remote_closed', [False, True], ids=['connected', 'remote closed'])
 async def test_dropped_transport_closes(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, *, remote_closed: bool
@@ -196,3 +265,65 @@ def test_transport_events_without_connection_handlers() -> None:
         callee.close()
 
     assert states == ['checking', 'connected']
+
+
+@pytest.mark.asyncio
+async def test_close_leaves_the_gathering_state(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """close() sets the ICE connection state to closed."""
+    callee.close()
+    assert callee.ice_connection_state == webrtc.RTCIceConnectionState.closed
+    assert callee.ice_gathering_state == webrtc.RTCIceGatheringState.new
+
+    caller.add_transceiver('audio')
+    await caller.set_local_description()
+    await wait_for_ice_gathering_complete(caller)
+    caller.close()
+    assert caller.ice_connection_state == webrtc.RTCIceConnectionState.closed
+    assert caller.ice_gathering_state == webrtc.RTCIceGatheringState.complete
+
+
+async def negotiated_without_candidates() -> tuple[
+    webrtc.RTCPeerConnection, webrtc.RTCPeerConnection, webrtc.RTCIceTransport
+]:
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    caller.add_transceiver('audio')
+    # made before gathering, so no candidates
+    offer = await caller.create_offer()
+    await caller.set_local_description(offer)
+    await callee.set_remote_description(offer)
+    answer = await callee.create_answer()
+    await callee.set_local_description(answer)
+    await caller.set_remote_description(answer)
+    await wait_for_ice_gathering_complete(caller)
+    transport = caller.get_transceivers()[0].sender.transport
+    assert transport is not None
+    return caller, callee, transport.ice_transport
+
+
+async def watch_state(ice: webrtc.RTCIceTransport, state: webrtc.RTCIceTransportState) -> Awaitable[webrtc.Event]:  # ruff: ignore[unused-async]
+    return wait_for_event(ice, 'statechange', predicate=lambda _event: ice.state == state)
+
+
+def test_transport_events_reach_their_loop_once_the_connection_loop_is_gone() -> None:
+    first, second = asyncio.new_event_loop(), asyncio.new_event_loop()
+    caller, callee, ice = first.run_until_complete(negotiated_without_candidates())
+    try:
+        connected = second.run_until_complete(watch_state(ice, webrtc.RTCIceTransportState.connected))
+        # no handlers that would bind it to the second loop
+        first.close()
+
+        async def signal_caller() -> None:
+            # the caller learns the callee from its checks
+            for candidate in ice.get_local_candidates():
+                await callee.add_ice_candidate(candidate)
+            await connected
+
+        second.run_until_complete(signal_caller())
+        assert ice.state == webrtc.RTCIceTransportState.connected
+    finally:
+        caller.close()
+        callee.close()
+        first.close()
+        second.close()

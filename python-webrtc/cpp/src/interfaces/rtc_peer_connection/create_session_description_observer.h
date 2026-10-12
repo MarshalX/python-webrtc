@@ -21,7 +21,7 @@ namespace webrtc {
 
 namespace python_webrtc {
 
-  // hands the description to `created` for the implicit answer of setLocalDescription
+  // hands the description to `created` for the implicit description of setLocalDescription
   class CreateSessionDescriptionObserver : public webrtc::CreateSessionDescriptionObserver {
   public:
     CreateSessionDescriptionObserver(std::weak_ptr<RTCPeerConnection> peerConnection,

@@ -20,16 +20,7 @@
 
 namespace py = pybind11;
 
-namespace {
-
-  void ping() {
-    py::print("pong");
-  }
-
-} // namespace
-
 PYBIND11_MODULE(wrtc, m, pybind11::mod_gil_not_used()) {
-  m.def("ping", &ping);
   py::module_::import("atexit").attr("register")(py::cpp_function(&python_webrtc::Dispatcher::StopAtExit));
   // the memory of ASan (its quarantine) and TSan (its shadow) makes resident memory say nothing about leaks
 #ifdef WRTC_SANITIZED

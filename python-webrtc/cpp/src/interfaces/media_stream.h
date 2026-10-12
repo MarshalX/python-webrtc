@@ -58,10 +58,6 @@ namespace python_webrtc {
 
     bool GetActive();
 
-    std::vector<std::shared_ptr<MediaStreamTrack>> GetAudioTracks();
-
-    std::vector<std::shared_ptr<MediaStreamTrack>> GetVideoTracks();
-
     std::vector<std::shared_ptr<MediaStreamTrack>> GetTracks();
 
     std::optional<std::shared_ptr<MediaStreamTrack>> GetTrackById(const std::string &id);

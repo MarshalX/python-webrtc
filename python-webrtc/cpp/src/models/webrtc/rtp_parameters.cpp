@@ -42,9 +42,7 @@ namespace python_webrtc {
     pybind11::class_<webrtc::RtpExtension>(m, "RtpExtension")
         .def(pybind11::init<>())
         .def_readwrite("uri", &webrtc::RtpExtension::uri)
-        .def_property(
-            "id", [](const webrtc::RtpExtension &extension) { return extension.id.value(); },
-            [](webrtc::RtpExtension &extension, int id) { extension.id = webrtc::RtpHeaderExtensionId(id); })
+        .def_property_readonly("id", [](const webrtc::RtpExtension &extension) { return extension.id.value(); })
         .def_readwrite("encrypt", &webrtc::RtpExtension::encrypt);
 
     pybind11::class_<webrtc::RtpHeaderExtensionCapability>(m, "RtpHeaderExtensionCapability")

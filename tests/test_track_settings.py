@@ -15,7 +15,7 @@ import pytest
 from typing_extensions import TypedDict
 
 import webrtc
-from tests.helpers import capture_mode, connect_track, wait_until
+from tests.helpers import capture_mode, connect_track, mistyped, wait_until, write_video, writing
 from tests.isolation import isolated
 
 C = webrtc.MediaTrackConstraints
@@ -67,6 +67,24 @@ async def test_microphone_settings(audio_stream: webrtc.MediaStream) -> None:
 
 
 @pytest.mark.asyncio
+async def test_microphone_settings_are_the_format_of_its_samples(audio_stream: webrtc.MediaStream) -> None:
+    track = audio_stream.get_tracks()[0]
+    before = track.get_settings()
+    reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
+    # the second chunk comes after every sink of the track saw the first
+    for _ in range(2):
+        audio = (await asyncio.wait_for(reader.read(), 5)).value
+        assert isinstance(audio, webrtc.AudioData)
+        sample_rate, channels = audio.sample_rate, audio.number_of_channels
+        audio.close()
+    await reader.cancel()
+
+    settings = track.get_settings()
+    assert (settings.sample_rate, settings.channel_count) == (sample_rate, channels)
+    assert settings == before
+
+
+@pytest.mark.asyncio
 async def test_apply_constraints_to_the_camera(video_stream: webrtc.MediaStream) -> None:
     """Constraints change the size and frame rate of the camera, and are kept by the track."""
     track = video_stream.get_tracks()[0]
@@ -86,6 +104,18 @@ async def test_apply_constraints_to_the_camera(video_stream: webrtc.MediaStream)
     clone = track.clone()
     assert clone.get_settings().device_id == 'synthetic-camera'
     clone.stop()
+
+
+@pytest.mark.asyncio
+async def test_constraints_of_the_current_camera_mode(video_stream: webrtc.MediaStream) -> None:
+    """Constraints the camera's mode already meets keep that mode."""
+    track = video_stream.get_tracks()[0]
+    settings = track.get_settings()
+    assert settings.frame_rate is not None
+    constraints = C(width=settings.width, height=settings.height, frame_rate=settings.frame_rate)
+    await track.apply_constraints(constraints)
+    assert track.get_settings() == settings
+    assert track.get_constraints() == constraints
 
 
 @pytest.mark.asyncio
@@ -119,6 +149,42 @@ async def test_remote_track_settings(
     assert remote.get_capabilities() == webrtc.MediaTrackCapabilities()
     with pytest.raises(webrtc.OverconstrainedError):
         await remote.apply_constraints(C(width=webrtc.ConstrainULongRange(exact=100)))
+    # without capabilities, ranges are checked against the settings
+    await remote.apply_constraints(C(width=webrtc.ConstrainULongRange(min=10, max=10000)))
+    for outside in (webrtc.ConstrainULongRange(min=10000), webrtc.ConstrainULongRange(max=10)):
+        with pytest.raises(webrtc.OverconstrainedError):
+            await remote.apply_constraints(C(width=outside))
+
+
+@pytest.mark.asyncio
+async def test_generated_track_settings_measure_its_frames() -> None:
+    generator = webrtc.VideoTrackGenerator()
+    width, height = 64, 48
+    data = bytes(width * height * 3 // 2)
+    async with writing(write_video, generator, data, (width, height)):
+        await wait_until(lambda: generator.track.get_settings().frame_rate is not None, 'the frame rate')
+        settings = generator.track.get_settings()
+    assert (settings.width, settings.height) == (width, height)
+    assert settings.frame_rate is not None
+    assert settings.frame_rate > 0
+    assert settings.device_id is None
+    generator.track.stop()
+
+
+@pytest.mark.asyncio
+async def test_remote_audio_track_settings(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """A remote audio track has the format of the audio that arrives."""
+    remote = await connect_track(caller, callee, audio_stream.get_tracks()[0])
+    await wait_until(lambda: remote.get_settings().sample_rate is not None, 'audio')
+    settings = remote.get_settings()
+    assert settings.sample_rate is not None
+    assert settings.sample_rate > 0
+    assert settings.channel_count is not None
+    assert settings.channel_count >= 1
+    assert settings.sample_size == 16
+    assert settings.device_id is None
 
 
 def test_content_hint(audio_stream: webrtc.MediaStream, video_stream: webrtc.MediaStream) -> None:
@@ -131,8 +197,14 @@ def test_content_hint(audio_stream: webrtc.MediaStream, video_stream: webrtc.Med
     video.content_hint = 'speech'
     audio.content_hint = 'detail'
     assert (video.content_hint, audio.content_hint) == ('text', 'music')
+    video.content_hint = 'motion'
+    assert video.content_hint == 'motion'
     video.content_hint = ''
     assert video.content_hint == ''
+    audio.content_hint = 'speaking'
+    assert audio.content_hint == 'speaking'
+    audio.content_hint = ''
+    assert audio.content_hint == ''
 
 
 @pytest.mark.asyncio
@@ -167,6 +239,9 @@ async def test_constraints_have_their_webidl_types(
         ({'frame_rate': 10**9}, (640, 480, 120)),
         ({'frame_rate': 0}, (640, 480, 1)),
         ({'frame_rate': webrtc.ConstrainDoubleRange(ideal=-5)}, (640, 480, 1)),
+        # [Clamp]: NaN and -Infinity are 0
+        ({'width': float('nan')}, (1, 480, 30)),
+        ({'width': webrtc.ConstrainULongRange(ideal=mistyped(float('-inf')))}, (1, 480, 30)),
     ],
 )
 async def test_camera_stays_within_its_capabilities(
