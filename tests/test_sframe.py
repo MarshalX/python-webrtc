@@ -12,13 +12,21 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import gc
+import re
 from typing import TYPE_CHECKING, NamedTuple, Union
 
 import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import connect, mistyped, settled_alive, wait_progressing, wait_until
+from tests.helpers import (
+    connect,
+    exchange_offer,
+    mistyped,
+    settled_alive,
+    wait_progressing,
+    wait_until,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -29,6 +37,7 @@ TIMEOUT = 15
 SUITES = list(webrtc.SFrameCipherSuite)
 KEY = bytes(range(16))
 OTHER_KEY = bytes(range(1, 17))
+DEPENDENCY_DESCRIPTOR = 'https://aomediacodec.github.io/av1-rtp-spec/#dependency-descriptor-rtp-header-extension'
 
 Frame = Union[webrtc.RTCEncodedVideoFrame, webrtc.RTCEncodedAudioFrame]
 
@@ -430,19 +439,24 @@ async def local_track(kind: str) -> webrtc.MediaStreamTrack:
 async def encrypted_call(
     caller: webrtc.RTCPeerConnection,
     callee: webrtc.RTCPeerConnection,
-    kind: str,
+    media: str,
     *,
     encryptor: webrtc.RTCRtpSFrameEncryptor,
-    receiver_transform: webrtc.RTCRtpSFrameDecryptor | webrtc.RTCRtpScriptTransform,
+    receiver_transform: webrtc.RTCRtpSFrameDecryptor | webrtc.RTCRtpScriptTransform | None,
 ) -> tuple[webrtc.RTCRtpSender, webrtc.RTCRtpReceiver]:
-    """Sends a track with transforms set before negotiation, and connects."""
-    sender = caller.add_track(await local_track(kind))
+    """Sends a track of a kind or a video MIME type, with transforms set before negotiation, and connects."""
+    kind = media.partition('/')[0]
+    transceiver = caller.add_transceiver(await local_track(kind))
+    if media != kind:
+        transceiver.set_codec_preferences([video_codec(media)])
+    sender = transceiver.sender
     sender.transform = encryptor
     receivers: list[webrtc.RTCRtpReceiver] = []
 
     def on_track(event: webrtc.RTCTrackEvent) -> None:
         receivers.append(event.receiver)
-        event.receiver.transform = receiver_transform
+        if receiver_transform is not None:
+            event.receiver.transform = receiver_transform
 
     callee.on('track', on_track)
     await connect(caller, callee)
@@ -553,6 +567,27 @@ async def test_frames_are_encrypted_on_the_wire(
 
 
 @pytest.mark.asyncio
+async def test_frames_dont_decode_without_a_decryptor(
+    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection],
+) -> None:
+    caller, callee = pair
+    encryptor = sframe_pair()[0]
+    await encryptor.set_encryption_key(KEY, 1)
+    _, receiver = await encrypted_call(caller, callee, 'video', encryptor=encryptor, receiver_transform=None)
+
+    async def inbound() -> webrtc.RTCInboundRtpStreamStats:
+        report = await receiver.get_stats()
+        return next(s for s in report.values() if isinstance(s, webrtc.RTCInboundRtpStreamStats))
+
+    async def frames_received() -> bool:
+        received = (await inbound()).frames_received
+        return received is not None and received >= 5
+
+    await wait_until(frames_received, 'five frames', TIMEOUT)
+    assert (await inbound()).frames_decoded in {None, 0}
+
+
+@pytest.mark.asyncio
 async def test_decryption_errors(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
     caller, callee = pair
     encryptor, decryptor = sframe_pair()
@@ -574,6 +609,118 @@ async def test_decryption_errors(pair: tuple[webrtc.RTCPeerConnection, webrtc.RT
     await decryptor.add_decryption_key(KEY, 2**64 - 1)
     await read_media(receiver.track, 5)
     assert sender.transform == encryptor
+
+
+def counter_of(frame: Frame) -> int:
+    header = wrtc._sframeParseHeader(frame.data)
+    assert header is not None
+    return header[1]
+
+
+def video_codec(mime_type: str) -> webrtc.RTCRtpCodec:
+    """The codec of a MIME type both sent and received here, or a skip."""
+    sent, received = (cls.get_capabilities('video') for cls in (webrtc.RTCRtpSender, webrtc.RTCRtpReceiver))
+    assert sent is not None
+    assert received is not None
+    for codec in sent.codecs:
+        if codec.mime_type == mime_type and any(codec == c for c in received.codecs):
+            return codec
+    pytest.skip(f'{mime_type} is not available here')
+
+
+TWO_BYTE_COUNTER = 256
+
+
+def advance(encryptor: webrtc.RTCRtpSFrameEncryptor, frames: int) -> None:
+    """Moves the frame counter on by encrypting outside the call."""
+    for _ in range(frames):
+        assert encryptor._native_obj.encrypt(b'\0') is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mime_type', ['video/VP8', 'video/VP9', 'video/AV1', 'video/H264'])
+@pytest.mark.parametrize('counter', [0, TWO_BYTE_COUNTER], ids=['one-byte-counter', 'two-byte-counter'])
+async def test_video_recovers_once_decrypted(
+    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection], mime_type: str, counter: int
+) -> None:
+    """A receiver that decrypted nothing yet decodes once it gets the key."""
+    caller, callee = pair
+    encryptor, decryptor = sframe_pair()
+    await encryptor.set_encryption_key(KEY, 1)
+    advance(encryptor, counter)
+    await decryptor.add_decryption_key(OTHER_KEY, 1)
+    errors = Errors(decryptor)
+    _, receiver = await encrypted_call(caller, callee, mime_type, encryptor=encryptor, receiver_transform=decryptor)
+    frame = (await errors.wait()).frame
+    assert isinstance(frame, webrtc.RTCEncodedVideoFrame)
+    assert counter_of(frame) >= counter
+
+    await decryptor.add_decryption_key(KEY, 1)
+    await read_media(receiver.track, 5)
+
+
+@pytest.mark.asyncio
+async def test_video_without_raw_packetization(
+    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection],
+) -> None:
+    """Without raw packetization, the dependency descriptor still tells key frames."""
+    caller, callee = pair
+    encryptor, decryptor = sframe_pair()
+    await encryptor.set_encryption_key(KEY, 1)
+    advance(encryptor, TWO_BYTE_COUNTER)
+    await decryptor.add_decryption_key(KEY, 1)
+    _, receiver = await encrypted_call(caller, callee, 'video', encryptor=encryptor, receiver_transform=None)
+    # after the answer, so it has no raw packetization
+    receiver.transform = decryptor
+
+    (video,) = media_sections(callee.local_description)
+    assert DEPENDENCY_DESCRIPTOR in video
+    assert raw_payload_types(video) == set()
+    await read_media(receiver.track, 5)
+
+
+def media_sections(description: webrtc.RTCSessionDescription | None) -> list[str]:
+    assert description is not None
+    return description.sdp.split('\r\nm=')[1:]
+
+
+def raw_payload_types(section: str) -> set[str]:
+    return set(re.findall(r'^a=packetization:(\d+) raw\r?$', section, re.MULTILINE))
+
+
+def media_payload_types(section: str) -> set[str]:
+    codecs: list[tuple[str, str]] = re.findall(r'^a=rtpmap:(\d+) ([^/]+)/', section, re.MULTILINE)
+    return {pt for pt, name in codecs if name.lower() not in {'rtx', 'red', 'ulpfec', 'flexfec-03'}}
+
+
+@pytest.mark.asyncio
+async def test_sframe_negotiates_raw_packetization(
+    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection],
+) -> None:
+    """Only SFrame video negotiates raw packetization and the dependency descriptor."""
+    caller, callee = pair
+    # plain video first: libwebrtc gives later transceivers the header extensions enabled before
+    caller.add_transceiver('video')
+    caller.add_transceiver('audio').sender.transform = sframe_pair()[0]
+    caller.add_transceiver('video', webrtc.RTCRtpTransceiverInit('recvonly')).receiver.transform = sframe_pair()[1]
+    caller.add_transceiver('video', webrtc.RTCRtpTransceiverInit('sendonly')).sender.transform = sframe_pair()[0]
+    await exchange_offer(caller, callee)
+    _, audio, sending, receiving = callee.get_transceivers()
+    audio.receiver.transform = sframe_pair()[1]
+    sending.sender.transform = sframe_pair()[0]
+    receiving.receiver.transform = sframe_pair()[1]
+    await callee.set_local_description()
+    assert callee.local_description is not None
+    await caller.set_remote_description(callee.local_description)
+
+    for description in (caller.local_description, callee.local_description):
+        plain_video, sframe_audio, *sframe_video = media_sections(description)
+        for section in (plain_video, sframe_audio):
+            assert DEPENDENCY_DESCRIPTOR not in section
+            assert raw_payload_types(section) == set()
+        for section in sframe_video:
+            assert DEPENDENCY_DESCRIPTOR in section
+            assert raw_payload_types(section) == media_payload_types(section) != set()
 
 
 @pytest.mark.asyncio

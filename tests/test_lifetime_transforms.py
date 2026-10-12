@@ -367,6 +367,8 @@ async def test_transforms_replaced_while_media_flows() -> None:
             for part in (*senders, *receivers):
                 await replace_transform(part, index, workers)
             await asyncio.sleep(0.02)
+        # the decryption errors of the rounds go before the first frames of the final transforms
+        await delivered()
         final = [Worker() for _ in (*senders, *receivers)]
         for part, worker in zip((*senders, *receivers), final):
             part.transform = webrtc.RTCRtpScriptTransform(worker)

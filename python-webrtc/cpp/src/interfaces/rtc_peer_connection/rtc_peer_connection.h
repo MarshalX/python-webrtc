@@ -75,6 +75,9 @@ namespace python_webrtc {
 
     void CreateAnswer(std::shared_ptr<Mailbox> mailbox, uint64_t token);
 
+    // gives SFrame video sections raw packetization, on the signaling thread
+    void PrepareCreatedDescription(webrtc::SessionDescriptionInterface &description);
+
     // for the fingerprint check of setLocalDescription
     void SaveCreatedDescription(const RTCSessionDescriptionInit &description);
 
@@ -317,6 +320,11 @@ namespace python_webrtc {
     void SetImplicitAnswer(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, webrtc::SdpType type,
                            std::function<void(webrtc::RTCError)> complete,
                            const std::shared_ptr<Completion> &completion);
+
+    // creates and sets the implicit offer or answer, prepared as createOffer and createAnswer are
+    void SetCreatedDescription(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, webrtc::SdpType type,
+                               std::function<void(webrtc::RTCError)> complete,
+                               const std::shared_ptr<Completion> &completion);
 
     // What completes setLocalDescription (kLocal) or setRemoteDescription (kRemote); created right before the
     // operation starts, as it holds its events
