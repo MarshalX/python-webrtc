@@ -178,6 +178,8 @@ def test_loops_are_collected_with_what_they_had_queued() -> None:
         loop.close()
         refs.extend(weakref.ref(obj) for obj in (loop, held, state, future, state.mailbox))
         del loop, held, state, future
+    # an in-progress Dispatcher collection would skip this one
+    wrtc._testing.dispatcher_idle()
     gc.collect()
 
     assert [ref for ref in refs if ref() is not None] == []
@@ -188,13 +190,19 @@ def test_closed_loop_held_by_the_user_is_released_on_collection() -> None:
     loop = asyncio.new_event_loop()
     state = LoopState.of(loop)
     _, future = state.start(None)
-    state.post(lambda: None)
     # an in-progress Dispatcher collection (--gc-on-emit) would skip this one
     wrtc._testing.dispatcher_idle()
-    loop.close()
-    assert not state.mailbox.closed
+    # no drain scheduled: closing alone releases nothing
+    wrtc._testing.park('dispatcher.wake')
+    try:
+        wrtc._testing.post(state.mailbox, 'event', 1)
+        assert wrtc._testing.parked('dispatcher.wake', 5)
+        loop.close()
+        assert not state.mailbox.closed
 
-    gc.collect()
+        gc.collect()
+    finally:
+        wrtc._testing.release('dispatcher.wake')
     assert state.mailbox.closed
     assert state.mailbox.dropped == 1
     assert state.pending == {}
@@ -366,16 +374,21 @@ def test_release_of_a_closed_loop_drops_what_it_kept() -> None:
         return state, pc
 
     state, pc = loop.run_until_complete(called(keep))
-    # never run: the loop closes first
-    state.post(lambda: None)
     wrtc._testing.dispatcher_idle()
-    loop.close()
-    assert state.active == {target: 'has handlers', pc: 'handlers'}
-    assert len(state._markers) == 1
+    # no drain scheduled: closing alone releases nothing
+    wrtc._testing.park('dispatcher.wake')
+    try:
+        wrtc._testing.post(state.mailbox, 'event', 1)
+        assert wrtc._testing.parked('dispatcher.wake', 5)
+        loop.close()
+        assert state.active == {target: 'has handlers', pc: 'handlers'}
+        assert len(state.mailbox) == 1
 
-    gc.collect()
+        gc.collect()
+    finally:
+        wrtc._testing.release('dispatcher.wake')
     assert state.mailbox.closed
-    assert (state.active, state.tasks, state._markers) == ({}, set(), {})
+    assert (state.active, state.tasks, len(state.mailbox)) == ({}, set(), 0)
     assert pc.listeners('negotiationneeded') == []
     pc.close()
 

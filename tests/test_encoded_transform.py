@@ -488,13 +488,17 @@ async def test_nobody_reading(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPe
     sender.transform = webrtc.RTCRtpScriptTransform(started.append)
     await connect(caller, callee)
 
-    async def queue_overflowed() -> bool:
-        # past the 120 frames a transformer queues, the oldest are dropped
-        stats = (await sender.get_stats()).values()
-        encoded = [s.frames_encoded for s in stats if isinstance(s, webrtc.RTCOutboundRtpStreamStats)]
-        return any(frames is not None and frames > 130 for frames in encoded)
+    encoded = 0
 
-    await wait_until(queue_overflowed, 'more frames than the queue keeps', 30)
+    async def frames_encoded() -> int:
+        nonlocal encoded
+        stats = (await sender.get_stats()).values()
+        outbound = [s.frames_encoded for s in stats if isinstance(s, webrtc.RTCOutboundRtpStreamStats)]
+        encoded = max((frames for frames in outbound if frames is not None), default=0)
+        return encoded
+
+    # past the 120 frames a transformer queues, the oldest are dropped; slow cores encode slower, not never
+    await wait_progressing(frames_encoded, lambda: encoded > 130, 'more frames than the queue keeps')
     assert len(started) == 1
     caller.close()
     callee.close()

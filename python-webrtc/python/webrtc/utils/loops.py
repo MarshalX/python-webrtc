@@ -289,14 +289,14 @@ class LoopState:
             self.release()
             return
         try:
-            _ = loop.call_soon_threadsafe(self.drain)
+            _ = loop.call_soon_threadsafe(_Drain(self))
         except RuntimeError:
             self.release()
 
     def drain(self, deferred: int = 0) -> None:
         """Runs the mailbox records in order on the loop."""
         if self._defers(deferred, resumed=self._resumed):
-            _ = self._live_loop.call_soon(self.drain, deferred + 1)
+            _ = self._live_loop.call_soon(_Drain(self, deferred + 1))
             return
 
         more = True
@@ -313,7 +313,7 @@ class LoopState:
                 more = self._held is not None or len(self.mailbox) > 0
             self._scheduled = more
         if more:
-            _ = self._live_loop.call_soon(self.drain)
+            _ = self._live_loop.call_soon(_Drain(self))
 
     def _run_batch(self) -> bool:
         """Runs items until one must wait; returns whether any are left."""
@@ -413,7 +413,8 @@ class LoopState:
         # copy() holds the deque's lock; iterating races call_soon_threadsafe on free-threaded builds
         handles = cast('collections.deque[object]', ready).copy() if isinstance(ready, collections.deque) else ()
         for handle in handles:
-            owner = getattr(getattr(handle, '_callback', None), '__self__', None)
+            callback = getattr(handle, '_callback', None)
+            owner = callback.state if isinstance(callback, _Drain) else getattr(callback, '__self__', None)
             if isinstance(handle, asyncio.TimerHandle) or owner is self or owner is loop:
                 continue
             return True
@@ -572,6 +573,25 @@ class LoopState:
         loop = self._loop_ref()
         if loop is not None and not sys.is_finalizing():
             _let_go(loop, list(pending.values()), targets)
+
+
+class _Drain:
+    """A scheduled drain that releases the state if its loop closes first."""
+
+    __slots__ = ('_deferred', '_ran', 'state')
+
+    def __init__(self, state: LoopState, deferred: int = 0) -> None:
+        self.state = state
+        self._deferred = deferred
+        self._ran = False
+
+    def __call__(self) -> None:
+        self._ran = True
+        self.state.drain(self._deferred)
+
+    def __del__(self) -> None:
+        if not self._ran:
+            self.state.release()
 
 
 def _let_go(loop: asyncio.AbstractEventLoop, calls: list[_Call], targets: list[EventTarget[Never]]) -> None:

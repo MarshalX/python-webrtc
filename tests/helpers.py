@@ -111,18 +111,24 @@ async def wait_until(predicate: Callable[[], object], what: str, timeout: float 
 
 
 async def wait_progressing(
-    progress: Callable[[], float], done: Callable[[], object], what: str, *, stall: float = 10
+    progress: Callable[[], float | Awaitable[float]],
+    done: Callable[[], object],
+    what: str,
+    *,
+    stall: float = 10,
 ) -> None:
-    """Polls until ``done()`` while ``progress()`` grows: a slow run goes on, one stuck ``stall`` seconds fails.
+    """Polls until ``done()`` while ``progress()`` (a function or a coroutine function) grows.
+
+    A slow run goes on, one stuck ``stall`` seconds fails.
 
     Raises:
         TimeoutError: Nothing progressed for ``stall`` seconds; the message names what it waited for.
     """
     loop = asyncio.get_running_loop()
-    deadline, last = loop.time() + stall, progress()
+    deadline, last = loop.time() + stall, await called(progress)
     while not bool(done()):
         # read before the deadline: one poll may outlast it on a busy loop
-        if (current := progress()) > last:
+        if (current := await called(progress)) > last:
             deadline, last = loop.time() + stall, current
         if loop.time() > deadline:
             msg = f'Timed out waiting for {what}: no progress for {stall} s, at {last}'
