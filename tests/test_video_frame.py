@@ -12,6 +12,7 @@ from __future__ import annotations
 import gc
 import math
 import struct
+import threading
 
 import pytest
 from typing_extensions import TypedDict, Unpack
@@ -211,6 +212,113 @@ async def test_rgb_formats_swap_and_alpha() -> None:
     assert list(out[:4]) == [3, 2, 1, 4]
     await frame.copy_to(out, webrtc.VideoFrameCopyToOptions(format='RGBX'))
     assert list(out[:4]) == [1, 2, 3, 255]
+    frame.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('format', ['RGBA', 'BGRA'])
+@pytest.mark.parametrize(
+    ('full_range', 'yuv'),
+    [(False, (74, 97, 240)), (True, (67, 92, 255))],
+    ids=['limited', 'full'],
+)
+async def test_convert_bt2020_to_rgb(
+    format: webrtc.VideoPixelFormatValue, *, full_range: bool, yuv: tuple[int, int, int]
+) -> None:
+    """BT.2020 frames convert with the BT.2020 matrix in their range."""
+    y, u, v = yuv
+    frame = webrtc.VideoFrame(
+        bytes([y] * 16 + [u] * 4 + [v] * 4),
+        webrtc.VideoFrameBufferInit(
+            format='I420',
+            coded_width=4,
+            coded_height=4,
+            timestamp=0,
+            color_space=webrtc.VideoColorSpaceInit(matrix='bt2020-ncl', full_range=full_range),
+        ),
+    )
+    out = bytearray(64)
+    await frame.copy_to(out, webrtc.VideoFrameCopyToOptions(format=format))
+    r, g, b = out[:3] if format == 'RGBA' else (out[2], out[1], out[0])
+    assert r > 245
+    assert g < 10
+    assert b < 10
+    frame.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('format', ['RGBA', 'BGRA'])
+@pytest.mark.parametrize(
+    ('full_range', 'yuv'),
+    [(False, (63, 102, 240)), (True, (54, 99, 255))],
+    ids=['limited', 'full'],
+)
+async def test_convert_bt709_to_rgb(
+    format: webrtc.VideoPixelFormatValue, *, full_range: bool, yuv: tuple[int, int, int]
+) -> None:
+    """BT.709 frames convert with the BT.709 matrix in their range."""
+    y, u, v = yuv
+    frame = webrtc.VideoFrame(
+        bytes([y] * 16 + [u] * 4 + [v] * 4),
+        webrtc.VideoFrameBufferInit(
+            format='I420',
+            coded_width=4,
+            coded_height=4,
+            timestamp=0,
+            color_space=webrtc.VideoColorSpaceInit(matrix='bt709', full_range=full_range),
+        ),
+    )
+    out = bytearray(64)
+    await frame.copy_to(out, webrtc.VideoFrameCopyToOptions(format=format))
+    r, g, b = out[:3] if format == 'RGBA' else (out[2], out[1], out[0])
+    assert r > 245
+    assert g < 10
+    assert b < 10
+    frame.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('format', ['RGBX', 'BGRX'])
+async def test_convert_nv12_to_rgb(format: webrtc.VideoPixelFormatValue) -> None:
+    """The interleaved chroma is read as U then V."""
+    # pure red in BT.601 limited range: Y 81, U 90, V 240
+    frame = webrtc.VideoFrame(
+        bytes([81] * 8 + [90, 240] * 2),
+        webrtc.VideoFrameBufferInit(
+            format='NV12',
+            coded_width=4,
+            coded_height=2,
+            timestamp=0,
+            color_space=webrtc.VideoColorSpaceInit(matrix='smpte170m', full_range=False),
+        ),
+    )
+    out = bytearray(32)
+    await frame.copy_to(out, webrtc.VideoFrameCopyToOptions(format=format))
+    for pixel in range(8):
+        r, g, b, a = out[pixel * 4 : pixel * 4 + 4]
+        if format == 'BGRX':
+            r, b = b, r
+        assert r > 245
+        assert g < 10
+        assert b < 10
+        assert a == 255
+    frame.close()
+
+
+@pytest.mark.asyncio
+async def test_convert_i422a_to_rgba_keeps_the_alpha() -> None:
+    """The I422A alpha plane becomes the RGBA alpha."""
+    # 4x2 grey: Y 8, U 4, V 4, A 8
+    alpha = [10, 20, 30, 40, 50, 60, 70, 80]
+    frame = webrtc.VideoFrame(
+        bytes([128] * 16 + alpha),
+        webrtc.VideoFrameBufferInit(format='I422A', coded_width=4, coded_height=2, timestamp=0),
+    )
+    out = bytearray(32)
+    await frame.copy_to(out, webrtc.VideoFrameCopyToOptions(format='RGBA'))
+    assert list(out[3::4]) == alpha
+    await frame.copy_to(out, webrtc.VideoFrameCopyToOptions(format='RGBX'))
+    assert list(out[3::4]) == [255] * 8
     frame.close()
 
 
@@ -449,3 +557,118 @@ def test_dom_rect_from_rect_and_to_json() -> None:
         'bottom': 6,
         'left': -2,
     }
+
+
+def test_color_space_to_json() -> None:
+    """toJSON() gives the four members, with fullRange in camelCase."""
+    assert webrtc.VideoColorSpace('bt709', 'iec61966-2-1', 'rgb', full_range=True).to_json() == {
+        'primaries': 'bt709',
+        'transfer': 'iec61966-2-1',
+        'matrix': 'rgb',
+        'fullRange': True,
+    }
+    assert webrtc.VideoColorSpace().toJSON() == {'primaries': None, 'transfer': None, 'matrix': None, 'fullRange': None}
+
+
+def test_discarding_the_alpha_of_rgba() -> None:
+    """Discarding the alpha of an RGB format gives its X format."""
+    for format, opaque in (('RGBA', VideoPixelFormat.RGBX), ('BGRA', VideoPixelFormat.BGRX)):
+        with (
+            webrtc.VideoFrame(
+                bytes(32), webrtc.VideoFrameBufferInit(format=format, coded_width=4, coded_height=2, timestamp=0)
+            ) as frame,
+            webrtc.VideoFrame(frame, webrtc.VideoFrameInit(alpha='discard')) as discarded,
+        ):
+            assert discarded.format == opaque
+
+
+def test_source_must_be_a_buffer_or_a_frame() -> None:
+    """A frame is created from a buffer or a frame, each with its own init."""
+    init = webrtc.VideoFrameBufferInit(format='I420', coded_width=4, coded_height=2, timestamp=0)
+    number: bytes = mistyped(1)
+    with pytest.raises(TypeError, match='from a buffer or a VideoFrame, not int'):
+        webrtc.VideoFrame(number, init)
+    frame_init: webrtc.VideoFrameInit = mistyped(init)
+    with i420_4x2() as frame, pytest.raises(TypeError, match='takes a VideoFrameInit'):
+        webrtc.VideoFrame(frame, frame_init)
+
+
+@pytest.mark.parametrize(
+    ('init', 'error'),
+    [
+        ({'display_width': 0, 'display_height': 0}, 'display size must be positive'),
+        ({'timestamp': 1.5}, 'timestamp is an integer'),
+        ({'metadata': {'rtp_timestamp': 1}}, 'metadata is a VideoFrameMetadata, not dict'),
+    ],
+    ids=['zero display size', 'float timestamp', 'metadata of another type'],
+)
+def test_invalid_buffer_init(init: dict[str, object], error: str) -> None:
+    """Each invalid member of a buffer init is a TypeError naming it."""
+    buffer_init = webrtc.VideoFrameBufferInit(format='I420', coded_width=4, coded_height=2, timestamp=0)
+    for name, value in init.items():
+        setattr(buffer_init, name, value)
+    with pytest.raises(TypeError, match=error):
+        webrtc.VideoFrame(I420_DATA, buffer_init)
+
+
+def test_metadata_that_can_not_be_cloned() -> None:
+    """Metadata that can't be structured-cloned is a DataCloneError."""
+    metadata = webrtc.VideoFrameMetadata(rtp_timestamp=mistyped(threading.Lock()))
+    with pytest.raises(webrtc.DataCloneError, match='lock'):
+        webrtc.VideoFrame(
+            I420_DATA,
+            webrtc.VideoFrameBufferInit(format='I420', coded_width=4, coded_height=2, timestamp=0, metadata=metadata),
+        )
+
+
+@pytest.mark.parametrize(
+    ('rect', 'error'),
+    [
+        (webrtc.DOMRectInit(x=2, y=0, width=4, height=2), 'inside of the coded size'),
+        (webrtc.DOMRectInit(x=0, y=0, width=2.5, height=2), 'integer coordinates'),
+    ],
+    ids=['outside', 'fractional'],
+)
+def test_invalid_visible_rect_of_a_frame(rect: webrtc.DOMRectInit, error: str) -> None:
+    """The visible rect is inside the coded size, with integer coordinates."""
+    with i420_4x2() as frame, pytest.raises(TypeError, match=error):
+        webrtc.VideoFrame(frame, webrtc.VideoFrameInit(visible_rect=rect))
+
+
+def test_display_size_of_a_frame_of_a_frame() -> None:
+    """A display size scaled down to nothing is a TypeError."""
+    init = webrtc.VideoFrameInit(display_width=8, display_height=6)
+    with i420_4x2() as frame, webrtc.VideoFrame(frame, init) as shown:
+        assert (shown.display_width, shown.display_height) == (8, 6)
+    with (
+        webrtc.VideoFrame(
+            bytes(32),
+            webrtc.VideoFrameBufferInit(
+                format='RGBX', coded_width=4, coded_height=2, timestamp=0, display_width=1, display_height=1
+            ),
+        ) as small,
+        pytest.raises(TypeError, match='display size would be zero'),
+    ):
+        webrtc.VideoFrame(small, webrtc.VideoFrameInit(visible_rect=webrtc.DOMRectInit(width=1, height=1)))
+
+
+def test_planes_larger_than_an_unsigned_long() -> None:
+    """Planes ending past the largest unsigned long are a TypeError."""
+    layout = [PlaneLayout(2**32 - 5, 4), PlaneLayout(0, 2), PlaneLayout(4, 2)]
+    with i420_4x2() as frame, pytest.raises(TypeError, match='planes are too large'):
+        frame.allocation_size(webrtc.VideoFrameCopyToOptions(layout=layout))
+
+
+def test_repr_and_closed_coded_rect() -> None:
+    """A closed frame has no coded rect."""
+    frame = i420_4x2(timestamp=42)
+    assert repr(frame) == '<webrtc.VideoFrame I420 4x2 timestamp=42>'
+    frame.close()
+    assert repr(frame) == '<webrtc.VideoFrame closed>'
+    assert frame.coded_rect is None
+
+
+def test_camel_case_alias_sets_the_member() -> None:
+    metadata = webrtc.VideoFrameMetadata()
+    metadata.rtpTimestamp = 9
+    assert metadata.rtp_timestamp == 9

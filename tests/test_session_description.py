@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import webrtc
-from tests.helpers import mistyped
+from tests.helpers import exchange_offer, exchange_offer_answer, mistyped
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -88,3 +88,143 @@ async def test_changed_description_is_set(create_pc: CreatePC) -> None:
     answer.type = webrtc.RTCSdpType.pranswer
     await callee.set_local_description(answer)
     assert callee.signaling_state == webrtc.RTCSignalingState.have_local_pranswer
+
+
+def test_init_repr_shows_the_sdp_length() -> None:
+    """The repr of an init gives the length of its SDP, not the SDP."""
+    assert repr(webrtc.RTCSessionDescriptionInit('offer', 'v=0\r\n')) == (
+        "RTCSessionDescriptionInit(type='offer', sdp=5 characters)"
+    )
+
+
+def test_local_description_init() -> None:
+    """A local description init may have no type."""
+    assert webrtc.RTCLocalSessionDescriptionInit().type is None
+    assert webrtc.RTCLocalSessionDescriptionInit('answer').type == webrtc.RTCSdpType.answer
+    with pytest.raises(ValueError, match='not a valid RTCSdpType'):
+        webrtc.RTCLocalSessionDescriptionInit(mistyped('bogus'))
+    with pytest.raises(TypeError, match='may not be None'):
+        webrtc.RTCLocalSessionDescriptionInit('offer', mistyped(None))
+
+
+@pytest.mark.asyncio
+async def test_set_local_description_of_a_local_init(pc: webrtc.RTCPeerConnection) -> None:
+    """A local init without a type sets the implicit description."""
+    pc.add_transceiver(webrtc.MediaType.audio)
+    with pytest.raises(TypeError, match='type of a description is required'):
+        await pc.set_local_description(webrtc.RTCLocalSessionDescriptionInit(sdp='v=0\r\n'))
+    await pc.set_local_description(webrtc.RTCLocalSessionDescriptionInit())
+    assert pc.signaling_state == webrtc.RTCSignalingState.have_local_offer
+    await pc.set_local_description(webrtc.RTCLocalSessionDescriptionInit('rollback'))
+    assert pc.signaling_state == webrtc.RTCSignalingState.stable
+
+
+@pytest.mark.asyncio
+async def test_descriptions_have_to_be_of_their_types(pc: webrtc.RTCPeerConnection) -> None:
+    """A description of another type is a TypeError."""
+    with pytest.raises(TypeError, match='expected an RTCSessionDescription, not object'):
+        await pc.set_local_description(mistyped(object()))
+    with pytest.raises(TypeError, match='must be an RTCAnswerOptions, not RTCOfferOptions'):
+        await pc.create_answer(mistyped(webrtc.RTCOfferOptions()))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('sdp', 'line'), [('garbage', 1), ('v=0\r\n', None)])
+async def test_unparseable_local_description(pc: webrtc.RTCPeerConnection, sdp: str, line: int | None) -> None:
+    """Unparseable local SDP is an sdp-syntax-error."""
+    with pytest.raises(webrtc.RTCError, match='Failed to parse the session description') as error:
+        await pc.set_local_description(webrtc.RTCSessionDescriptionInit('offer', sdp))
+
+    assert error.value.error_detail == webrtc.RTCErrorDetailType.sdp_syntax_error
+    assert error.value.sdp_line_number == line
+    assert pc.signaling_state == webrtc.RTCSignalingState.stable
+
+
+@pytest.mark.asyncio
+async def test_descriptions_stay_after_close(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """webrtc-pc: close keeps the descriptions."""
+    caller.add_transceiver(webrtc.MediaType.audio)
+    await exchange_offer_answer(caller, callee)
+    await exchange_offer(caller, callee)
+    local, remote = caller.local_description, caller.current_remote_description
+    assert local is not None
+    assert remote is not None
+
+    caller.close()
+
+    def ufrag(description: webrtc.RTCSessionDescription | None) -> tuple[str, str] | None:
+        # candidates gathered meanwhile may come along
+        return None if description is None else (description.type, re.findall(r'a=ice-ufrag:\S+', description.sdp)[0])
+
+    assert ufrag(caller.local_description) == ufrag(caller.pending_local_description) == ufrag(local)
+    assert ufrag(caller.current_remote_description) == ufrag(remote)
+    assert caller.pending_remote_description is None
+
+
+@pytest.mark.asyncio
+async def test_offer_to_receive_adds_a_receiving_transceiver(pc: webrtc.RTCPeerConnection) -> None:
+    """offer_to_receive_audio adds one recvonly transceiver."""
+    options = webrtc.RTCOfferOptions(offer_to_receive_audio=True)
+    offer = await pc.create_offer(options)
+    await pc.create_offer(options)
+
+    assert [(t.receiver.track.kind, t.direction) for t in pc.get_transceivers()] == [
+        (webrtc.MediaType.audio, webrtc.RTCRtpTransceiverDirection.recvonly)
+    ]
+    assert 'm=audio' in offer.sdp
+    assert 'a=recvonly' in offer.sdp
+
+
+@pytest.mark.asyncio
+async def test_offer_not_to_receive_stops_receiving(pc: webrtc.RTCPeerConnection) -> None:
+    """offer_to_receive_video=False stops video transceivers receiving."""
+    directions = webrtc.RTCRtpTransceiverDirection
+    audio = pc.add_transceiver(webrtc.MediaType.audio)
+    sendrecv = pc.add_transceiver(webrtc.MediaType.video)
+    recvonly = pc.add_transceiver(webrtc.MediaType.video, webrtc.RTCRtpTransceiverInit(direction=directions.recvonly))
+    sendonly = pc.add_transceiver(webrtc.MediaType.video, webrtc.RTCRtpTransceiverInit(direction=directions.sendonly))
+
+    await pc.create_offer(webrtc.RTCOfferOptions(offer_to_receive_video=False))
+
+    assert (audio.direction, sendrecv.direction, recvonly.direction, sendonly.direction) == (
+        directions.sendrecv,
+        directions.sendonly,
+        directions.inactive,
+        directions.sendonly,
+    )
+
+
+@pytest.mark.asyncio
+async def test_final_answer_after_a_provisional_one(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """webrtc-pc: a provisional answer can't be rolled back."""
+    caller.add_transceiver(webrtc.MediaType.audio)
+    await exchange_offer(caller, callee)
+    answer = await callee.create_answer()
+    await callee.set_local_description(webrtc.RTCSessionDescriptionInit('pranswer', answer.sdp))
+    await caller.set_remote_description(webrtc.RTCSessionDescriptionInit('pranswer', answer.sdp))
+    assert callee.signaling_state == webrtc.RTCSignalingState.have_local_pranswer
+    assert caller.signaling_state == webrtc.RTCSignalingState.have_remote_pranswer
+
+    # webrtc-pc: no rollback of a provisional answer
+    with pytest.raises(
+        webrtc.InvalidStateError, match='Can not set the local description in the have-local-pranswer signaling state'
+    ):
+        await callee.set_local_description(webrtc.RTCSessionDescriptionInit('rollback'))
+    with pytest.raises(
+        webrtc.InvalidStateError, match='Can not set the remote description in the have-remote-pranswer signaling state'
+    ):
+        await caller.set_remote_description(webrtc.RTCSessionDescriptionInit('rollback'))
+    assert callee.signaling_state == webrtc.RTCSignalingState.have_local_pranswer
+    assert caller.signaling_state == webrtc.RTCSignalingState.have_remote_pranswer
+
+    await callee.set_local_description(webrtc.RTCSessionDescriptionInit('answer', answer.sdp))
+    await caller.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', answer.sdp))
+    assert callee.signaling_state == caller.signaling_state == webrtc.RTCSignalingState.stable
+    assert callee.current_local_description is not None
+    assert callee.current_local_description.type == webrtc.RTCSdpType.answer
+    assert caller.current_remote_description is not None
+    assert caller.current_remote_description.type == webrtc.RTCSdpType.answer

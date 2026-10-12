@@ -51,9 +51,11 @@ namespace python_webrtc {
         set("receiveTime", EpochMs(*time));
       }
       if (auto time = frame.CaptureTime()) {
-        // a received frame has the capture time of the remote clock, since the epoch already
+        // a received frame has the capture time of the remote clock, since the NTP epoch (1900)
         const bool received = frame.GetDirection() == webrtc::TransformableFrameInterface::Direction::kReceiver;
-        set("captureTime", received ? static_cast<double>(time->us()) / kUsPerMs : EpochMs(*time));
+        const auto ntpEpochMs = static_cast<double>(webrtc::kNtpJan1970Millisecs);
+        const double remoteMs = (static_cast<double>(time->us()) / kUsPerMs) - ntpEpochMs;
+        set("captureTime", received ? remoteMs : EpochMs(*time));
       }
       if (auto offset = frame.SenderCaptureTimeOffset()) {
         set("senderCaptureTimeOffset", offset->ms<double>());

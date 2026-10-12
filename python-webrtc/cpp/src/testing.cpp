@@ -9,6 +9,7 @@
 
 #include "exceptions.h"
 #include "interfaces/peer_connection_factory.h"
+#include "media/sframe_transform.h"
 #include "utils/dispatcher.h"
 #include "utils/gil.h"
 #include "utils/libwebrtc_thread.h"
@@ -247,6 +248,11 @@ namespace python_webrtc {
           BlockingCallOn(factory->signalingThread(), []() {});
         },
         nogil(), "Returns once the signaling, worker and signaling threads ran what they queued.");
+    testing.def(
+        "sframe_skip_counters",
+        [](SFrameTransform &transform, uint64_t next) { transform.Context().SkipCounters(next); },
+        pybind11::arg("transform"), pybind11::arg("next"),
+        "Sets the counter of the next frame an SFrame transform encrypts.");
     testing.def(
         "abandon",
         [](std::shared_ptr<Mailbox> mailbox, uint64_t token) {

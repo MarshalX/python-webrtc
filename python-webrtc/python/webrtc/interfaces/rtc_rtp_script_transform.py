@@ -275,7 +275,7 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
         kind = self._native_obj.sourceKind
         if kind is None or not kind[0] or not kind[1]:
             msg = 'generate_key_frame() is for the transform of a video sender'
-            raise webrtc.InvalidStateError(msg)
+            raise self._invalid_state(msg)
         if rid is not None and _RID.fullmatch(rid) is None:
             msg = f'{rid!r} is not a valid rid'
             raise webrtc.NotAllowedError(msg)
@@ -283,7 +283,7 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
         result = self._native_obj.generateKeyFrame(rid)
         if result == _KEY_FRAME_INVALID_STATE:
             msg = 'generate_key_frame() is for the transform of a video sender'
-            raise webrtc.InvalidStateError(msg)
+            raise self._invalid_state(msg)
         if result == _KEY_FRAME_NOT_FOUND:
             msg = f'The sender has no layer of rid {rid!r}'
             raise webrtc.NotFoundError(msg)
@@ -300,7 +300,13 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
         """
         if not self._native_obj.sendKeyFrameRequest():
             msg = 'send_key_frame_request() is for the transform of a video receiver'
-            raise webrtc.InvalidStateError(msg)
+            raise self._invalid_state(msg)
+
+    def _invalid_state(self, message: str) -> webrtc.InvalidStateError:
+        # a removed transform still has its source kind
+        if self._native_obj.state == _DISASSOCIATED:
+            message = 'The transform was removed from its sender or receiver'
+        return webrtc.InvalidStateError(message)
 
     #: Alias for :meth:`generate_key_frame`
     generateKeyFrame = generate_key_frame

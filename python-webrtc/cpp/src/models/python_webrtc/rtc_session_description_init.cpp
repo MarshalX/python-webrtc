@@ -9,8 +9,6 @@
 
 namespace python_webrtc {
 
-  RTCSessionDescriptionInit::RTCSessionDescriptionInit() = default;
-
   RTCSessionDescriptionInit::RTCSessionDescriptionInit(webrtc::SdpType type, std::string sdp)
       : type(type), sdp(std::move(sdp)) {}
 

@@ -227,7 +227,7 @@ async def _race() -> None:
     await asyncio.sleep(0.5)
     race.stop.set()
     await _join(threads)
-    assert errors == []
+    assert errors == [], errors
     assert len(race.natives) > 0, 'no frame was read'
 
 

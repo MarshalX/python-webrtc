@@ -33,7 +33,6 @@ namespace python_webrtc {
                       nogil_fn(&RTCRtpTransceiver::SetDirection))
         .def_property_readonly("currentDirection", nogil_fn(&RTCRtpTransceiver::GetCurrentDirection))
         .def("setCodecPreferences", &RTCRtpTransceiver::SetCodecPreferences, nogil(), pybind11::arg("codecs"))
-        .def("getCodecPreferences", &RTCRtpTransceiver::GetCodecPreferences, nogil())
         .def("getHeaderExtensionsToNegotiate", &RTCRtpTransceiver::GetHeaderExtensionsToNegotiate, nogil())
         .def("setHeaderExtensionsToNegotiate", &RTCRtpTransceiver::SetHeaderExtensionsToNegotiate, nogil(),
              pybind11::arg("extensions"))
@@ -110,10 +109,6 @@ namespace python_webrtc {
     if (!result.ok()) {
       throw RTCException(result);
     }
-  }
-
-  std::vector<webrtc::RtpCodecCapability> RTCRtpTransceiver::GetCodecPreferences() {
-    return _transceiver->codec_preferences();
   }
 
   std::vector<webrtc::RtpHeaderExtensionCapability> RTCRtpTransceiver::GetHeaderExtensionsToNegotiate() {

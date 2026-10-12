@@ -29,6 +29,7 @@ async def test_enumerate_devices() -> None:
         'label': camera.label,
         'groupId': camera.group_id,
     }
+    assert repr(camera) == f"InputDeviceInfo(device_id={camera.device_id!r}, kind='videoinput', label={camera.label!r})"
     stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True, video=True))
     for track, device in zip(stream.get_tracks(), (microphone, camera)):
         assert track.get_capabilities() == device.get_capabilities()

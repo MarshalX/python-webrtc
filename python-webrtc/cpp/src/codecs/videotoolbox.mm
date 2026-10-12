@@ -53,6 +53,7 @@ namespace {
   constexpr int kMaxKeyFrameIntervalSeconds = 240;
 
   constexpr int32_t kMicrosecondsPerSecond = 1'000'000;
+  constexpr int kBitsPerKilobit = 1000;
 
   uint8_t *PlaneData(CVPixelBufferRef pixelBuffer, size_t plane) {
     return static_cast<uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, plane));
@@ -89,7 +90,7 @@ namespace {
   }
 
   webrtc::H264PacketizationMode PacketizationModeOf(const webrtc::SdpVideoFormat &format) {
-    const auto mode = format.parameters.find(webrtc::kH264FmtpPacketizationMode);
+    const auto mode = format.parameters.find(static_cast<const char *>(webrtc::kH264FmtpPacketizationMode));
     const bool nonInterleaved = mode != format.parameters.end() && mode->second == "1";
     return nonInterleaved ? webrtc::H264PacketizationMode::NonInterleaved
                           : webrtc::H264PacketizationMode::SingleNalUnit;
@@ -100,12 +101,12 @@ namespace {
   }
 
   bool IsKeyFrame(CMSampleBufferRef sample) {
-    CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sample, false);
+    CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sample, /*createIfNecessary=*/0);
     if (attachments == nullptr || CFArrayGetCount(attachments) == 0) {
       return false;
     }
-    const auto attachment = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(attachments, 0));
-    return !CFDictionaryContainsKey(attachment, kCMSampleAttachmentKey_NotSync);
+    const auto *const attachment = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(attachments, 0));
+    return CFDictionaryContainsKey(attachment, kCMSampleAttachmentKey_NotSync) == 0;
   }
 
   class VideoToolboxEncoder : public webrtc::VideoEncoder {
@@ -125,7 +126,7 @@ namespace {
       _width = codec->width;
       _height = codec->height;
       _screenshare = codec->mode == webrtc::VideoCodecMode::kScreensharing;
-      _bitrate = codec->startBitrate * 1000;
+      _bitrate = codec->startBitrate * kBitsPerKilobit;
       _framerate = codec->maxFramerate;
       return CreateSession() ? WEBRTC_VIDEO_CODEC_OK : WEBRTC_VIDEO_CODEC_ERROR;
     }
@@ -158,7 +159,11 @@ namespace {
                                           ? @{(__bridge NSString *)kVTEncodeFrameOptionKey_ForceKeyFrame : @YES}
                                           : nil;
         // freed by OnEncoded, which VideoToolbox calls for failed frames too
-        auto *info = new FrameInfo{frame.rtp_timestamp(), frame.render_time_ms(), frame.rotation(), _width, _height};
+        auto *info = new FrameInfo{.rtpTimestamp = frame.rtp_timestamp(),
+                                   .captureTimeMs = frame.render_time_ms(),
+                                   .rotation = frame.rotation(),
+                                   .width = _width,
+                                   .height = _height};
         const OSStatus status = VTCompressionSessionEncodeFrame(
             _session, pixelBuffer, CMTimeMake(frame.timestamp_us(), kMicrosecondsPerSecond), kCMTimeInvalid,
             (__bridge CFDictionaryRef)options, info, nullptr);
@@ -208,6 +213,7 @@ namespace {
 #endif
         // the session's pool then hands out video-range NV12
         NSDictionary *const source = @{
+          // NOLINTNEXTLINE(readability-redundant-parentheses): @() boxes the constant
           (__bridge NSString *)kCVPixelBufferPixelFormatTypeKey : @(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange),
           (__bridge NSString *)kCVPixelBufferWidthKey : @(_width),
           (__bridge NSString *)kCVPixelBufferHeightKey : @(_height),
@@ -224,7 +230,9 @@ namespace {
         SetProperty(kVTCompressionPropertyKey_RealTime, @YES);
         SetProperty(kVTCompressionPropertyKey_ProfileLevel, (__bridge NSString *)_profileLevel);
         SetProperty(kVTCompressionPropertyKey_AllowFrameReordering, @NO);
+        // NOLINTNEXTLINE(readability-redundant-parentheses): @() boxes the constant
         SetProperty(kVTCompressionPropertyKey_MaxKeyFrameInterval, @(kMaxKeyFrameInterval));
+        // NOLINTNEXTLINE(readability-redundant-parentheses): @() boxes the constant
         SetProperty(kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, @(kMaxKeyFrameIntervalSeconds));
         ApplyRates();
         return true;
@@ -301,6 +309,7 @@ namespace {
                                                            status, flags, sample);
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): mirrors VTCompressionOutputCallback
     void Deliver(std::unique_ptr<FrameInfo> info, OSStatus status, VTEncodeInfoFlags flags, CMSampleBufferRef sample) {
       if (status != noErr) {
         RTC_LOG(LS_ERROR) << "VideoToolbox failed to encode an H.264 frame: " << status;
@@ -331,9 +340,11 @@ namespace {
 
       webrtc::CodecSpecificInfo codecInfo;
       codecInfo.codecType = webrtc::kVideoCodecH264;
+      // NOLINTBEGIN(cppcoreguidelines-pro-type-union-access): libwebrtc's CodecSpecificInfo is a union
       codecInfo.codecSpecific.H264.packetization_mode = _packetizationMode;
       codecInfo.codecSpecific.H264.temporal_idx = webrtc::kNoTemporalIdx;
       codecInfo.codecSpecific.H264.idr_frame = key;
+      // NOLINTEND(cppcoreguidelines-pro-type-union-access)
       callback->OnEncodedImage(image, &codecInfo);
     }
 

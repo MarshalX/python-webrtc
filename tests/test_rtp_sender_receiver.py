@@ -16,7 +16,16 @@ from typing import TYPE_CHECKING
 import pytest
 
 import webrtc
-from tests.helpers import connect, exchange_offer_answer, mistyped, next_task, stats_of_type, wait_for_event, wait_until
+from tests.helpers import (
+    connect,
+    exchange_offer,
+    exchange_offer_answer,
+    mistyped,
+    next_task,
+    stats_of_type,
+    wait_for_event,
+    wait_until,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -85,6 +94,70 @@ async def test_send_parameters_with_other_encodings(pc: webrtc.RTCPeerConnection
         await sender.set_parameters(parameters)
 
 
+def flip_reduced_size(parameters: webrtc.RTCRtpSendParameters) -> None:
+    parameters.rtcp.reduced_size = parameters.rtcp.reduced_size is not True
+
+
+def add_header_extension(parameters: webrtc.RTCRtpSendParameters) -> None:
+    parameters.header_extensions.append(webrtc.RTCRtpHeaderExtensionParameters('urn:example', 14))
+
+
+def add_codec(parameters: webrtc.RTCRtpSendParameters) -> None:
+    parameters.codecs.append(webrtc.RTCRtpCodecParameters(96, 'video/VP8', 90000))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change', [flip_reduced_size, add_header_extension, add_codec])
+async def test_send_parameters_keep_what_is_negotiated(
+    pc: webrtc.RTCPeerConnection, change: Callable[[webrtc.RTCRtpSendParameters], None]
+) -> None:
+    """The RTCP parameters, header extensions and codecs can't change."""
+    sender = add_simulcast_sender(pc)
+    parameters = sender.get_parameters()
+    change(parameters)
+    with pytest.raises(webrtc.InvalidModificationError, match='can not be changed'):
+        await sender.set_parameters(parameters)
+
+
+@pytest.mark.asyncio
+async def test_send_parameters_negative_framerate(pc: webrtc.RTCPeerConnection) -> None:
+    sender = add_simulcast_sender(pc)
+    parameters = sender.get_parameters()
+    parameters.encodings[0].max_framerate = -1
+    with pytest.raises(webrtc.InvalidRangeError):
+        await sender.set_parameters(parameters)
+
+
+def test_scale_resolution_down_by_defaults_to_1_once_one_is_set(pc: webrtc.RTCPeerConnection) -> None:
+    encodings = [
+        webrtc.RTCRtpEncodingParameters(rid='hi'),
+        webrtc.RTCRtpEncodingParameters(rid='lo', scale_resolution_down_by=4),
+    ]
+    init = webrtc.RTCRtpTransceiverInit(send_encodings=encodings)
+    sender = pc.add_transceiver(webrtc.MediaType.video, init).sender
+    assert [e.scale_resolution_down_by for e in sender.get_parameters().encodings] == [1.0, 4.0]
+
+
+@pytest.mark.asyncio
+async def test_send_parameters_of_simulcast_negotiated_away(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """Parameters from before simulcast was negotiated away can't be set."""
+    sender = add_simulcast_sender(caller)
+    parameters = sender.get_parameters()
+    await exchange_offer(caller, callee)
+    answer = await callee.create_answer()
+    await callee.set_local_description(answer)
+    # an answerer that doesn't receive simulcast
+    sdp = ''.join(
+        line for line in answer.sdp.splitlines(keepends=True) if not line.startswith(('a=rid:', 'a=simulcast:'))
+    )
+    await caller.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', sdp))
+    with pytest.raises(webrtc.InvalidModificationError, match='encodings of the sender changed'):
+        await sender.set_parameters(parameters)
+    assert [e.rid for e in sender.get_parameters().encodings] == ['hi']
+
+
 @pytest.mark.asyncio
 async def test_parameters_of_an_earlier_task(pc: webrtc.RTCPeerConnection) -> None:
     """The last parameters can be set after their task, but only once."""
@@ -131,10 +204,46 @@ def test_send_encoding_of_an_unknown_codec(pc: webrtc.RTCPeerConnection) -> None
         pc.add_transceiver(webrtc.MediaType.audio, webrtc.RTCRtpTransceiverInit(send_encodings=[unknown]))
 
 
+def test_send_encoding_codec_matches_its_parameters(pc: webrtc.RTCPeerConnection) -> None:
+    """The fmtp parameters match in any order."""
+    capabilities = webrtc.RTCRtpSender.get_capabilities(webrtc.MediaType.audio)
+    assert capabilities is not None
+    opus = next(c for c in capabilities.codecs if c.mime_type == 'audio/opus')
+    assert opus.sdp_fmtp_line == 'minptime=10;useinbandfec=1'
+    reordered = webrtc.RTCRtpCodec('audio/opus', 48000, 2, 'useinbandfec=1; minptime=10')
+    init = webrtc.RTCRtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(codec=reordered)])
+    (encoding,) = pc.add_transceiver(webrtc.MediaType.audio, init).sender.get_parameters().encodings
+    assert encoding.codec == opus
+
+    # a nameless parameter, as RED has, counts too
+    red = webrtc.RTCRtpCodec('audio/red', 48000, 2, '111/111')
+    with pytest.raises(webrtc.OperationError, match='audio/red can not be sent'):
+        pc.add_transceiver(
+            webrtc.MediaType.audio,
+            webrtc.RTCRtpTransceiverInit(send_encodings=[webrtc.RTCRtpEncodingParameters(codec=red)]),
+        )
+
+
+@pytest.mark.asyncio
+async def test_set_parameters_codec_without_a_mime_type(pc: webrtc.RTCPeerConnection) -> None:
+    """A codec that isn't type/subtype matches no codec."""
+    sender = pc.add_transceiver(webrtc.MediaType.audio).sender
+    cases = [
+        (webrtc.RTCRtpCodec('opus', 48000, 2), 'not a valid MIME type'),
+        (webrtc.RTCRtpCodec('audio/x', 8000), 'unsupported codec'),
+    ]
+    for codec, error in cases:
+        parameters = sender.get_parameters()
+        parameters.encodings[0].codec = codec
+        with pytest.raises(webrtc.InvalidModificationError, match=error):
+            await sender.set_parameters(parameters)
+
+
 @pytest.mark.asyncio
 async def test_negotiated_codecs(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
-    """The parameters of senders and receivers list their negotiated codecs."""
+    """Codecs are listed once negotiated, none before."""
     transceiver = caller.add_transceiver(webrtc.MediaType.audio)
+    assert transceiver.receiver.get_parameters().codecs == []
     await exchange_offer_answer(caller, callee)
 
     assert len(transceiver.sender.get_parameters().codecs) > 0
@@ -156,6 +265,29 @@ async def test_replace_track(
     assert sender.track is None
 
 
+@pytest.mark.asyncio
+async def test_replace_track_of_a_stopped_transceiver(pc: webrtc.RTCPeerConnection) -> None:
+    """The track of a stopped transceiver's sender can't be replaced."""
+    transceiver = pc.add_transceiver(webrtc.MediaType.audio)
+    transceiver.stop()
+    with pytest.raises(webrtc.InvalidStateError):
+        await transceiver.sender.replace_track(None)
+
+
+def test_set_streams_on_a_closed_connection(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
+    """A sender of a closed connection can't set its streams."""
+    sender = pc.add_transceiver(webrtc.MediaType.audio).sender
+    sender.set_streams(audio_stream)
+    pc.close()
+    with pytest.raises(webrtc.InvalidStateError):
+        sender.set_streams(audio_stream)
+
+
+def test_receiver_capabilities_of_another_kind() -> None:
+    """Receivers of data have no capabilities."""
+    assert webrtc.RTCRtpReceiver.get_capabilities('data') is None
+
+
 def test_codec_preferences_and_header_extensions(pc: webrtc.RTCPeerConnection) -> None:
     """Codec preferences take supported codecs only, and header extensions to negotiate can be stopped."""
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
@@ -174,6 +306,51 @@ def test_codec_preferences_and_header_extensions(pc: webrtc.RTCPeerConnection) -
     extensions[0].uri = ''
     with pytest.raises(TypeError, match='must not be empty'):
         transceiver.set_header_extensions_to_negotiate(extensions)
+
+
+def test_transceiver_changes_the_engine_refuses(pc: webrtc.RTCPeerConnection) -> None:
+    """Resiliency codecs, header extension changes, and a stopped direction."""
+    transceiver = pc.add_transceiver(webrtc.MediaType.video)
+    capabilities = webrtc.RTCRtpReceiver.get_capabilities('video')
+    assert capabilities is not None
+    rtx = [c for c in capabilities.codecs if c.mime_type == 'video/rtx']
+    with pytest.raises(webrtc.InvalidModificationError, match='non RTX'):
+        transceiver.set_codec_preferences(rtx)
+
+    extensions = transceiver.get_header_extensions_to_negotiate()
+    with pytest.raises(webrtc.InvalidModificationError, match='does not match'):
+        transceiver.set_header_extensions_to_negotiate(extensions[:-1])
+    with pytest.raises(webrtc.InvalidModificationError, match='Reordering'):
+        transceiver.set_header_extensions_to_negotiate(extensions[::-1])
+    # an extension the engine doesn't implement
+    unknown = [*extensions[:-1], webrtc.RTCRtpHeaderExtensionCapability('urn:example:unknown')]
+    with pytest.raises(webrtc.InvalidModificationError):
+        transceiver.set_header_extensions_to_negotiate(unknown)
+
+    transceiver.stop()
+    with pytest.raises(webrtc.InvalidStateError, match='stopping'):
+        transceiver.direction = webrtc.RTCRtpTransceiverDirection.sendrecv
+
+
+@pytest.mark.asyncio
+async def test_negotiated_header_extensions(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """Only offered, non-stopped extensions are negotiated."""
+    transceiver = caller.add_transceiver(webrtc.MediaType.audio)
+    stopped = webrtc.RTCRtpTransceiverDirection.stopped
+    negotiated = transceiver.get_negotiated_header_extensions()
+    assert len(negotiated) > 0
+    assert all(e.direction == stopped for e in negotiated)
+
+    extensions = transceiver.get_header_extensions_to_negotiate()
+    offered = [e for e in extensions if e.direction != stopped]
+    audio_level = next(e for e in offered if e.uri == 'urn:ietf:params:rtp-hdrext:ssrc-audio-level')
+    audio_level.direction = stopped
+    transceiver.set_header_extensions_to_negotiate(extensions)
+    await exchange_offer_answer(caller, callee)
+
+    directions = {e.uri: e.direction for e in transceiver.get_negotiated_header_extensions()}
+    assert directions.pop(audio_level.uri) == stopped
+    assert {directions[e.uri] for e in offered if e is not audio_level} == {webrtc.RTCRtpTransceiverDirection.sendrecv}
 
 
 @pytest.mark.asyncio
@@ -289,6 +466,73 @@ async def test_dtmf(
     assert tones == ['1', 'A', '#', '']
 
 
+def test_dtmf_before_a_negotiation(pc: webrtc.RTCPeerConnection) -> None:
+    """Tones need a negotiated telephone-event codec."""
+    dtmf = pc.add_transceiver(webrtc.MediaType.audio).sender.dtmf
+    assert dtmf is not None
+    assert dtmf.tone_buffer == ''
+    assert not dtmf.can_insert_dtmf
+    with pytest.raises(webrtc.InvalidStateError):
+        dtmf.insert_dtmf('1')
+
+
+@pytest.mark.asyncio
+async def test_dtmf_of_a_transceiver_that_stopped_sending(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """A transceiver negotiated not to send can't send tones."""
+    sender = caller.add_track(audio_stream.get_tracks()[0], audio_stream)
+    await connect(caller, callee)
+    dtmf = sender.dtmf
+    assert dtmf is not None
+    dtmf.insert_dtmf('')
+    assert dtmf.tone_buffer == ''
+
+    [transceiver] = caller.get_transceivers()
+    transceiver.direction = webrtc.RTCRtpTransceiverDirection.recvonly
+    await exchange_offer_answer(caller, callee)
+    assert transceiver.current_direction == webrtc.RTCRtpTransceiverDirection.inactive
+    with pytest.raises(webrtc.InvalidStateError, match="doesn't send"):
+        dtmf.insert_dtmf('1')
+
+    # receiving only, once the callee sends
+    callee.get_transceivers()[0].direction = webrtc.RTCRtpTransceiverDirection.sendrecv
+    await exchange_offer_answer(caller, callee)
+    assert transceiver.current_direction == webrtc.RTCRtpTransceiverDirection.recvonly
+    with pytest.raises(webrtc.InvalidStateError, match="doesn't send"):
+        dtmf.insert_dtmf('1')
+
+    # stopped and negotiated away
+    transceiver.stop()
+    await exchange_offer_answer(caller, callee)
+    assert caller.get_transceivers() == []
+    with pytest.raises(webrtc.InvalidStateError, match='stopped'):
+        dtmf.insert_dtmf('1')
+
+
+@pytest.mark.asyncio
+async def test_dtmf_cancel(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """An empty insertDTMF() cancels the tones not played yet."""
+    sender = caller.add_track(audio_stream.get_tracks()[0], audio_stream)
+    await connect(caller, callee)
+    dtmf = sender.dtmf
+    assert dtmf is not None
+
+    def is_last(event: webrtc.Event) -> bool:
+        assert isinstance(event, webrtc.RTCDTMFToneChangeEvent)
+        return event.tone == ''
+
+    done = wait_for_event(dtmf, 'tonechange', timeout=5, predicate=is_last)
+    dtmf.insert_dtmf('123456789')
+    assert dtmf.tone_buffer == '123456789'
+    dtmf.insert_dtmf('')
+    assert dtmf.tone_buffer == ''
+    await done
+    assert dtmf.tone_buffer == ''
+
+
 def test_dtmf_of_a_stopped_transceiver_checks_the_state_first(pc: webrtc.RTCPeerConnection) -> None:
     """Stopped beats bad tones."""
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
@@ -324,6 +568,24 @@ async def test_synchronization_sources(
     assert 0 <= source.rtp_timestamp < 2**32
     assert source.audio_level is None
     assert receiver.get_contributing_sources() == []
+
+
+@pytest.mark.asyncio
+async def test_synchronization_sources_of_audio_have_its_level(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """The audio level header extension gives the linear level."""
+    caller.add_track(audio_stream.get_tracks()[0], audio_stream)
+    remote_track = wait_for_event(callee, 'track')
+    await connect(caller, callee)
+    track_event = await remote_track
+    assert isinstance(track_event, webrtc.RTCTrackEvent)
+    receiver = track_event.receiver
+
+    await wait_until(receiver.get_synchronization_sources, 'a synchronization source')
+    [source] = receiver.get_synchronization_sources()
+    assert source.audio_level is not None
+    assert 0 <= source.audio_level <= 1
 
 
 @pytest.mark.parametrize(
@@ -380,3 +642,23 @@ def test_jitter_buffer_target_is_a_restricted_double(pc: webrtc.RTCPeerConnectio
     receiver = pc.add_transceiver(webrtc.MediaType.audio).receiver
     with pytest.raises(TypeError):
         receiver.jitter_buffer_target = value
+
+
+def test_jitter_buffer_target_keeps_the_value_set(pc: webrtc.RTCPeerConnection) -> None:
+    """None by default, and kept until set to None."""
+    receiver = pc.add_transceiver(webrtc.MediaType.audio).receiver
+    assert receiver.jitter_buffer_target is None
+    receiver.jitter_buffer_target = 250
+    assert receiver.jitter_buffer_target == 250
+    receiver.jitter_buffer_target = None
+    assert receiver.jitter_buffer_target is None
+
+
+@pytest.mark.parametrize('value', [-1, 4000.5])
+def test_jitter_buffer_target_out_of_range(pc: webrtc.RTCPeerConnection, value: float) -> None:
+    """A target outside 0 to 4000 ms raises InvalidRangeError."""
+    receiver = pc.add_transceiver(webrtc.MediaType.audio).receiver
+    receiver.jitter_buffer_target = 4000
+    with pytest.raises(webrtc.InvalidRangeError):
+        receiver.jitter_buffer_target = value
+    assert receiver.jitter_buffer_target == 4000

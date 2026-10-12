@@ -37,8 +37,6 @@ namespace python_webrtc {
     PeerConnectionFactory(const PeerConnectionFactory &) = delete;
     PeerConnectionFactory &operator=(const PeerConnectionFactory &) = delete;
 
-    static std::shared_ptr<PeerConnectionFactory> Create();
-
     // The factory shared by everything created without an explicit one, alive while anything uses it.
     static std::shared_ptr<PeerConnectionFactory> GetOrCreateDefault();
 

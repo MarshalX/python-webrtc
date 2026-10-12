@@ -94,7 +94,8 @@ namespace python_webrtc {
         return state == SignalingState::kStable || state == SignalingState::kHaveLocalOffer;
       }
       if (type == webrtc::SdpType::kRollback) {
-        return state == SignalingState::kHaveLocalOffer || state == SignalingState::kHaveLocalPrAnswer;
+        // webrtc-pc rejects a rollback of a provisional answer
+        return state == SignalingState::kHaveLocalOffer;
       }
       return state == SignalingState::kHaveRemoteOffer || state == SignalingState::kHaveLocalPrAnswer;
     }
@@ -154,6 +155,7 @@ namespace python_webrtc {
 
     bool hasDependencyDescriptor(const webrtc::MediaContentDescription &media) {
       return std::ranges::any_of(media.rtp_header_extensions(), [](const webrtc::RtpExtension &extension) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay): libwebrtc's URIs are char arrays
         return extension.uri == webrtc::RtpExtension::kDependencyDescriptorUri;
       });
     }
@@ -281,6 +283,7 @@ namespace python_webrtc {
         // the descriptions as the operation left them, before candidates gathered later
         self->_completionSnapshot = self->SnapshotDescriptions();
         auto created = self->WrapTransports();
+        self->UpdateMaxMessageSize();
         self->MarkIceRolesKnown();
         if (remote) {
           self->RecordRemoteDescriptionCandidates();
@@ -406,7 +409,7 @@ namespace python_webrtc {
     const bool answer = init.type == webrtc::SdpType::kAnswer || init.type == webrtc::SdpType::kPrAnswer;
     const bool rollback = init.type == webrtc::SdpType::kRollback;
     if ((answer && state != SignalingState::kHaveLocalOffer && state != SignalingState::kHaveRemotePrAnswer) ||
-        (rollback && state != SignalingState::kHaveRemoteOffer && state != SignalingState::kHaveRemotePrAnswer)) {
+        (rollback && state != SignalingState::kHaveRemoteOffer)) {
       completion.Fail(RTCCallbackException(
           webrtc::RTCErrorType::INVALID_STATE,
           "Failed to execute 'setRemoteDescription' on 'RTCPeerConnection': Called in wrong state: " +
@@ -496,7 +499,11 @@ namespace python_webrtc {
   }
 
   std::shared_ptr<RTCSessionDescription> RTCPeerConnection::GetDescription(DescriptionKind kind) {
+    // close() keeps the descriptions
     auto pc = connection();
+    if (!pc) {
+      pc = closedConnection();
+    }
     if (!pc) {
       return nullptr;
     }

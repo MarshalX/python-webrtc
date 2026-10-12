@@ -87,13 +87,14 @@ namespace python_webrtc {
   public:
     explicit SFrameContext(SFrameCipherSuite suite) : _suite(suite) {}
 
-    [[nodiscard]] SFrameCipherSuite Suite() const { return _suite; }
-
     bool SetEncryptionKey(OctetSpan key, uint64_t keyId);
 
     bool AddDecryptionKey(OctetSpan key, uint64_t keyId);
 
     void RemoveDecryptionKey(uint64_t keyId);
+
+    // for the tests: the counters run out after 2**64 frames
+    void SkipCounters(uint64_t next);
 
     std::optional<Octets> Encrypt(OctetSpan plaintext);
 

@@ -82,8 +82,6 @@ namespace python_webrtc {
         .def_property_readonly("_id", &MediaStream::Id)
         .def_property_readonly("id", nogil_fn(&MediaStream::GetId))
         .def_property_readonly("active", nogil_fn(&MediaStream::GetActive))
-        .def("getAudioTracks", &MediaStream::GetAudioTracks, nogil())
-        .def("getVideoTracks", &MediaStream::GetVideoTracks, nogil())
         .def("getTracks", &MediaStream::GetTracks, nogil())
         .def("getTrackById", &MediaStream::GetTrackById, nogil(), pybind11::arg("id"))
         .def("addTrack", &MediaStream::AddTrack, nogil(), pybind11::arg("track"))
@@ -103,30 +101,6 @@ namespace python_webrtc {
     }
 
     return active;
-  }
-
-  std::vector<std::shared_ptr<MediaStreamTrack>> MediaStream::GetAudioTracks() {
-    auto tracks = std::vector<std::shared_ptr<MediaStreamTrack>>();
-
-    for (const auto &track : SyncTracks()) {
-      if (track->track()->kind() == webrtc::MediaStreamTrackInterface::kAudioKind) {
-        tracks.push_back(track);
-      }
-    }
-
-    return tracks;
-  }
-
-  std::vector<std::shared_ptr<MediaStreamTrack>> MediaStream::GetVideoTracks() {
-    auto tracks = std::vector<std::shared_ptr<MediaStreamTrack>>();
-
-    for (const auto &track : SyncTracks()) {
-      if (track->track()->kind() == webrtc::MediaStreamTrackInterface::kVideoKind) {
-        tracks.push_back(track);
-      }
-    }
-
-    return tracks;
   }
 
   std::vector<std::shared_ptr<MediaStreamTrack>> MediaStream::GetTracks() {

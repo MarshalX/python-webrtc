@@ -22,6 +22,7 @@ import wrtc
 from tests.helpers import (
     connect,
     exchange_offer,
+    exchange_offer_answer,
     mistyped,
     settled_alive,
     wait_progressing,
@@ -175,6 +176,24 @@ def test_truncated_headers() -> None:
     assert wrtc._sframeParseHeader(bytes.fromhex('0f01')) is None
 
 
+def test_malformed_ciphertexts_dont_decrypt() -> None:
+    """No header, or a header without room for the tag, decrypts to nothing."""
+    ciphertext = wrtc._sframeEncrypt(1, VECTOR_BASE_KEY, VECTOR_KID, VECTOR_CTR, b'', b'')
+    header = wrtc._sframeParseHeader(ciphertext)
+    assert header is not None
+    assert wrtc._sframeDecrypt(1, VECTOR_BASE_KEY, b'', ciphertext) == b''
+    assert wrtc._sframeDecrypt(1, VECTOR_BASE_KEY, b'', ciphertext[:-1]) is None
+    assert wrtc._sframeDecrypt(1, VECTOR_BASE_KEY, b'', ciphertext[: header[2]]) is None
+    assert wrtc._sframeDecrypt(1, VECTOR_BASE_KEY, b'', b'') is None
+
+
+@pytest.mark.parametrize('cipher_suite', [0, 9])
+def test_unknown_cipher_suites(cipher_suite: int) -> None:
+    """Only the suites of the RFC derive keys."""
+    with pytest.raises(ValueError, match='Unknown SFrame cipher suite'):
+        wrtc._sframeDerive(cipher_suite, VECTOR_BASE_KEY, VECTOR_KID)
+
+
 def test_the_suites_are_numbered_like_rfc() -> None:
     names = [suite.value for suite in webrtc.SFrameCipherSuite]
     assert names == [
@@ -291,6 +310,22 @@ async def test_encryptor_stream_without_a_key_drops() -> None:
     stream = webrtc.SFrameEncryptorStream(options(webrtc.SFrameCipherSuite.AES_128_GCM_SHA256_128))
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(through(stream, b'clear'), 0.3)
+
+
+@pytest.mark.asyncio
+async def test_encryptor_never_reuses_a_counter() -> None:
+    """No encryption once the last counter is used (RFC 9605 9.4)."""
+    stream = webrtc.SFrameEncryptorStream(options(webrtc.SFrameCipherSuite.AES_128_GCM_SHA256_128))
+    await stream.set_encryption_key(KEY, 0)
+    wrtc._testing.sframe_skip_counters(stream._native_obj, 2**64 - 1)
+    ciphertext = await through(stream, b'last')
+    assert isinstance(ciphertext, bytes)
+    header = wrtc._sframeParseHeader(ciphertext)
+    assert header is not None
+    assert header[:2] == (0, 2**64 - 1)
+    assert stream._native_obj.encrypt(b'more') is None
+    await stream.set_encryption_key(OTHER_KEY, 1)
+    assert stream._native_obj.encrypt(b'more') is None
 
 
 class Probe:
@@ -575,16 +610,18 @@ async def test_frames_dont_decode_without_a_decryptor(
     await encryptor.set_encryption_key(KEY, 1)
     _, receiver = await encrypted_call(caller, callee, 'video', encryptor=encryptor, receiver_transform=None)
 
-    async def inbound() -> webrtc.RTCInboundRtpStreamStats:
+    async def inbound() -> webrtc.RTCInboundRtpStreamStats | None:
         report = await receiver.get_stats()
-        return next(s for s in report.values() if isinstance(s, webrtc.RTCInboundRtpStreamStats))
+        return next((stats for stats in report.values() if isinstance(stats, webrtc.RTCInboundRtpStreamStats)), None)
 
     async def frames_received() -> bool:
-        received = (await inbound()).frames_received
-        return received is not None and received >= 5
+        stats = await inbound()
+        return stats is not None and stats.frames_received is not None and stats.frames_received >= 5
 
     await wait_until(frames_received, 'five frames', TIMEOUT)
-    assert (await inbound()).frames_decoded in {None, 0}
+    stats = await inbound()
+    assert stats is not None
+    assert stats.frames_decoded in {None, 0}
 
 
 @pytest.mark.asyncio
@@ -724,6 +761,19 @@ async def test_sframe_negotiates_raw_packetization(
 
 
 @pytest.mark.asyncio
+async def test_implicit_offer_negotiates_raw_packetization(pc: webrtc.RTCPeerConnection) -> None:
+    pc.add_transceiver('video', webrtc.RTCRtpTransceiverInit('sendonly')).sender.transform = sframe_pair()[0]
+
+    await pc.set_local_description()
+
+    assert pc.local_description is not None
+    assert pc.local_description.type == webrtc.RTCSdpType.offer
+    (video,) = media_sections(pc.local_description)
+    assert DEPENDENCY_DESCRIPTOR in video
+    assert raw_payload_types(video) == media_payload_types(video) != set()
+
+
+@pytest.mark.asyncio
 async def test_key_rotation(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
     caller, callee = pair
     encryptor, decryptor = sframe_pair(webrtc.SFrameCipherSuite.AES_128_CTR_HMAC_SHA256_80)
@@ -792,6 +842,22 @@ def test_transform_attribute_types(pair: tuple[webrtc.RTCPeerConnection, webrtc.
     audio.receiver.transform = None
     assert audio.sender.transform is None
     assert audio.receiver.transform is None
+
+
+@pytest.mark.asyncio
+async def test_encryptor_of_a_removed_transceiver(
+    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection],
+) -> None:
+    """A removed transceiver's sender still takes an encryptor."""
+    caller, callee = pair
+    transceiver = caller.add_transceiver('video')
+    await exchange_offer_answer(caller, callee)
+    transceiver.stop()
+    await exchange_offer_answer(caller, callee)
+    assert caller.get_transceivers() == []
+    encryptor, _ = sframe_pair()
+    transceiver.sender.transform = encryptor
+    assert transceiver.sender.transform == encryptor
 
 
 def released_to(baseline: int) -> bool:

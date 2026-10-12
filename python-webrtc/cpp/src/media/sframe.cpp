@@ -401,6 +401,11 @@ namespace python_webrtc {
     }
   }
 
+  void SFrameContext::SkipCounters(uint64_t next) {
+    const std::scoped_lock lock(_mutex);
+    _counter = next;
+  }
+
   std::optional<Octets> SFrameContext::Encrypt(OctetSpan plaintext) {
     std::shared_ptr<const SFrameKey> key;
     uint64_t counter = 0;

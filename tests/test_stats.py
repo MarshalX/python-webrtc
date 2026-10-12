@@ -146,6 +146,14 @@ async def test_closed_connection_has_stats(
 
 
 @pytest.mark.asyncio
+async def test_report_length_and_repr(pc: webrtc.RTCPeerConnection) -> None:
+    """A report maps its stats ids."""
+    report = await pc.get_stats()
+    assert len(report) == len(list(report)) == len(report.values()) > 0
+    assert repr(report) == f'RTCStatsReport({len(report)} stats)'
+
+
+@pytest.mark.asyncio
 async def test_remote_audio_is_played_out(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
 ) -> None:

@@ -75,10 +75,3 @@ def wrapper_of(native: Native) -> WebRTCObject[object]:
         msg = f'no wrapper class is registered for {type(native).__name__}'
         raise TypeError(msg)
     return wrap(registered._default_wrapper_class(native), native)
-
-
-def alive() -> list[WebRTCObject[object]]:
-    """Returns the live wrappers."""
-    with _lock:
-        refs = wrappers.valuerefs()
-    return [wrapper for ref in refs if (wrapper := ref()) is not None]

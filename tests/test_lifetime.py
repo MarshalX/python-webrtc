@@ -1101,6 +1101,20 @@ def test_the_wrapper_of_a_native_object_gets_the_class_of_its_kind() -> None:
     assert isinstance(lifetime.wrapper_of(wrtc.SFrameTransform(1, encrypting=False)), webrtc.RTCRtpSFrameDecryptor)
     assert isinstance(lifetime.wrapper_of(wrtc.SFrameTransform(1, encrypting=True)), webrtc.RTCRtpSFrameEncryptor)
     assert isinstance(lifetime.wrapper_of(wrtc.TrackGenerator('audio').track), webrtc.MediaStreamTrack)
+    # never reaches Python as an API object
+    with pytest.raises(TypeError, match='no wrapper class is registered for TrackGenerator'):
+        lifetime.wrapper_of(wrtc.TrackGenerator('audio'))
+
+
+def test_wrappers_equal_the_wrappers_of_their_native_object_only() -> None:
+    """Not equal to other objects or to the native object itself."""
+    first, second = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    assert first == webrtc.RTCPeerConnection._wrap(first._native_obj)
+    assert first != second
+    # not a wrapper: NotImplemented, so neither side is equal
+    assert first != first._native_obj
+    first.close()
+    second.close()
 
 
 async def _connected_objects() -> list[object]:

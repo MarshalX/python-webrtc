@@ -79,8 +79,6 @@ namespace python_webrtc {
 
     void SetStreams(const std::vector<std::string> &streamIds);
 
-    std::vector<std::string> GetStreamIds();
-
     void GetStats(std::shared_ptr<Mailbox> mailbox, uint64_t token);
 
     // whether its transceiver is stopping or stopped (or gone), where the sender can't be changed anymore

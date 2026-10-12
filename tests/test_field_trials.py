@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 import webrtc
+import wrtc
 from tests.helpers import ROOT, UdpRelay, connect, wait_for_event, wait_until
 from tests.isolation import isolated
 
@@ -93,6 +94,18 @@ def test_invalid_trial(name: str, group: str, error: type[Exception]) -> None:
     with pytest.raises(error):
         webrtc.field_trials.update({'WebRTC-Bar': 'Enabled', name: group})
     assert dict(webrtc.field_trials) == SNAP
+
+
+@isolated
+@pytest.mark.parametrize(
+    'trials',
+    ['WebRTC-Foo', 'WebRTC-Foo/', 'WebRTC-Foo//', '/Enabled/', 'WebRTC-Foo/Enabled/WebRTC-Foo/Disabled/'],
+)
+def test_engine_rejects_malformed_trials(trials: str) -> None:
+    """A name without a group, an empty part or a repeated name is refused."""
+    # the public mapping refuses these before the engine
+    with pytest.raises(ValueError, match='Invalid field trials'):
+        wrtc._set_field_trials(trials)
 
 
 @isolated

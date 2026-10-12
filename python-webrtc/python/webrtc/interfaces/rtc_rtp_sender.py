@@ -167,6 +167,11 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         kind = self._kind
         # a copy (pybind returns one): changed, then set back
         encodings = last.encodings
+        for encoding in parameters.encodings:
+            # a codec without a valid MIME type matches no negotiated codec
+            if encoding.codec is not None and encoding.codec.mime_type.partition('/')[2] == '':
+                msg = f'{encoding.codec.mime_type!r} is not a valid MIME type of a codec'
+                raise webrtc.InvalidModificationError(msg)
         for native, encoding in zip(encodings, parameters.encodings):
             _ = encoding._for_kind(kind)._apply(native)
         for native, option in zip(encodings, options if options is not None else ()):

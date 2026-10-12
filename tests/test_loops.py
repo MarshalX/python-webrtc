@@ -23,7 +23,7 @@ import wrtc
 from tests.helpers import called, mistyped
 from tests.isolation import isolated
 from webrtc.utils.events import EventTarget
-from webrtc.utils.loops import LoopState
+from webrtc.utils.loops import LoopState, checking_roots
 
 TIMEOUT = 5
 
@@ -434,6 +434,55 @@ def test_release_binds_an_object_to_a_loop_with_handlers_of_it() -> None:
     asyncio.run(called(handle_elsewhere))
 
 
+def test_release_of_another_loop_keeps_the_binding() -> None:
+    """It drops only that loop's handlers."""
+    first = asyncio.new_event_loop()
+
+    def bind() -> tuple[LoopState, webrtc.RTCPeerConnection]:
+        pc = webrtc.RTCPeerConnection()
+        pc.on('negotiationneeded', lambda _event: None)
+        return LoopState.of(asyncio.get_running_loop()), pc
+
+    bound, pc = first.run_until_complete(called(bind))
+
+    def handle_elsewhere() -> LoopState:
+        pc.on('icecandidate', lambda _event: None)
+        assert pc._state() is bound
+        return LoopState.of(asyncio.get_running_loop())
+
+    elsewhere = asyncio.run(called(handle_elsewhere))
+    elsewhere.release()
+    assert pc._state() is bound
+    assert pc.event_names() == {'negotiationneeded'}
+    assert bound.active == {pc: 'handlers'}
+    first.run_until_complete(called(pc.close))
+    assert bound.active == {}
+    first.close()
+
+
+@pytest.mark.asyncio
+async def test_events_without_root_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without WRTC_CHECK_ROOTS, events still reach their handlers."""
+    monkeypatch.setenv('WRTC_CHECK_ROOTS', '0')
+    # the setting is read once per process
+    checking_roots.cache_clear()
+    pc = webrtc.RTCPeerConnection()
+    try:
+        fired: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        pc.on('negotiationneeded', lambda event: fired.set_result(event.type))
+        pc.add_transceiver(webrtc.MediaType.audio)
+        assert await asyncio.wait_for(fired, TIMEOUT) == 'negotiationneeded'
+        state = LoopState.of(asyncio.get_running_loop())
+        assert pc in state.active
+        pc.off()
+        pc.close()
+        assert pc not in state.active
+    finally:
+        pc.close()
+        monkeypatch.undo()
+        checking_roots.cache_clear()
+
+
 @pytest.mark.roots('an _Active bound to no loop')
 def test_an_active_object_bound_to_no_loop_is_a_mismatch() -> None:
     """An active object bound to no loop fails its update and the roots check."""
@@ -568,3 +617,194 @@ def test_update_roots_by_activity() -> None:
         assert state.active == {}
     finally:
         loop.close()
+
+
+class _DictLoop:
+    """A loop collected without a cycle, so no gc sweep sees it go."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def is_closed(self) -> bool:
+        return self.closed
+
+
+def test_a_state_outliving_its_loop_is_released_by_its_next_use() -> None:
+    """Posts and calls are dropped, and new calls fail."""
+    for use in ('post', 'call_soon'):
+        loop = _DictLoop()
+        state = LoopState.of(mistyped(loop))
+        del loop
+        ran: list[str] = []
+        if use == 'post':
+            state.post(lambda ran=ran: ran.append('posted'))
+        else:
+            state.call_soon(lambda ran=ran: ran.append('soon'), dropped=lambda ran=ran: ran.append('dropped'))
+        assert state.mailbox.closed
+        assert state._markers == {}
+        assert ran == ([] if use == 'post' else ['dropped'])
+        with pytest.raises(RuntimeError, match='the loop of the state is gone'):
+            state.start(None)
+
+
+def test_a_post_to_a_closed_loop_releases_its_state() -> None:
+    """Only the drop handler runs."""
+    for use in ('post', 'call_soon'):
+        loop = asyncio.new_event_loop()
+        state = LoopState.of(loop)
+        loop.close()
+        ran: list[str] = []
+        if use == 'post':
+            state.post(lambda ran=ran: ran.append('posted'))
+        else:
+            state.call_soon(lambda ran=ran: ran.append('soon'), dropped=lambda ran=ran: ran.append('dropped'))
+        assert state.mailbox.closed
+        assert ran == ([] if use == 'post' else ['dropped'])
+        assert LoopState.find(state.mailbox.id) is None
+        # released: later posts are dropped right away
+        state.post(lambda ran=ran: ran.append('late'))
+        assert state._markers == {}
+        assert ran == ([] if use == 'post' else ['dropped'])
+
+
+def test_call_soon_released_before_it_runs_runs_the_drop_handler_only() -> None:
+    ran: list[str] = []
+
+    async def release() -> None:
+        state = LoopState.of(asyncio.get_running_loop())
+        state.call_soon(lambda: ran.append('soon'), dropped=lambda: ran.append('dropped'))
+        state.release()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(release())
+    assert ran == ['dropped']
+
+
+@pytest.mark.asyncio
+async def test_completion_of_an_unknown_call_is_skipped() -> None:
+    """The records after it still run."""
+    state = LoopState.of(asyncio.get_running_loop())
+    token, future = state.start(None)
+    _in_thread(lambda: wrtc._testing.complete(state.mailbox, token + 1000, 1))
+    _in_thread(lambda: wrtc._testing.complete(state.mailbox, token, 2))
+    assert await asyncio.wait_for(future, TIMEOUT) == 2
+    assert state.pending == {}
+
+
+def test_released_state_roots_nothing() -> None:
+    loop = asyncio.new_event_loop()
+    state = LoopState.of(loop)
+    target = _Active(state)
+    loop.close()
+    state.release()
+    state.update(target)
+    assert state.active == {}
+
+
+def test_unrooted_connection_re_evaluates_its_children_on_other_loops() -> None:
+    first, second = asyncio.new_event_loop(), asyncio.new_event_loop()
+    try:
+        connection = _Active(LoopState.of(first))
+        child = _Active(LoopState.of(second), connection)
+        LoopState.of(second).update(child)
+        assert LoopState.of(second).active == {child: 'has handlers'}
+        connection.reason = child.reason = None
+        LoopState.of(first).update(connection)
+        assert LoopState.of(second).active == {}
+    finally:
+        first.close()
+        second.close()
+
+
+@pytest.mark.roots('an _Active rooted without activity')
+def test_a_rooted_object_without_activity_is_a_mismatch() -> None:
+    loop = asyncio.new_event_loop()
+    try:
+        state = LoopState.of(loop)
+        target = _Active(state)
+        state.update(target)
+        target.reason = None
+        with pytest.raises(AssertionError, match='_Active is rooted with activity None'):
+            state._check_roots()
+        state.update(target)
+        state._check_roots()
+    finally:
+        loop.close()
+
+
+def test_an_operation_binds_a_connection_whose_loop_closed_unswept() -> None:
+    first, second = asyncio.new_event_loop(), asyncio.new_event_loop()
+    pc = webrtc.RTCPeerConnection()
+    first.run_until_complete(called(lambda: pc.on('negotiationneeded', lambda _event: None)))
+    # its state exists, so binding there sweeps nothing on the way
+    _ = LoopState.of(second)
+    gc.disable()
+    try:
+        first.close()
+        second.run_until_complete(pc.create_offer())
+        assert pc._state() is LoopState.of(second)
+    finally:
+        gc.enable()
+        pc.close()
+        second.close()
+
+
+def test_lookup_of_a_closed_binding_rebinds_to_a_loop_with_handlers() -> None:
+    first, second = asyncio.new_event_loop(), asyncio.new_event_loop()
+    pc = webrtc.RTCPeerConnection()
+
+    def on_icecandidate(_event: webrtc.Event) -> None: ...
+
+    first.run_until_complete(called(lambda: pc.on('negotiationneeded', lambda _event: None)))
+    second.run_until_complete(called(lambda: pc.on('icecandidate', on_icecandidate)))
+    state = LoopState.of(second)
+    assert pc._state() is LoopState.of(first)
+    # no sweep: the lookup itself finds the closed loop
+    gc.disable()
+    try:
+        first.close()
+        assert pc._state() is state
+    finally:
+        gc.enable()
+    assert pc.listeners('negotiationneeded') == []
+    assert pc.listeners('icecandidate') == [on_icecandidate]
+    assert state.active == {pc: 'handlers'}
+    pc.close()
+    second.close()
+
+
+class _Handled(_Active):
+    """An _Active with handlers."""
+
+    __slots__ = ('_handlers',)
+
+    _events = ('ping',)
+
+    def __init__(self, state: LoopState | None) -> None:
+        super().__init__(state)
+        self._handlers = None
+
+
+@pytest.mark.roots('a _Handled neither rooted nor active')
+@pytest.mark.asyncio
+async def test_an_event_handled_while_neither_rooted_nor_active_is_a_mismatch() -> None:
+    """The roots check of a delivery names the handlers that would run."""
+    state = LoopState.of(asyncio.get_running_loop())
+    target = _Handled(state)
+    target.reason = None
+    calls: list[str] = []
+
+    def on_ping(event: webrtc.Event) -> None:
+        calls.append(event.type)
+
+    target._add('ping', on_ping, once=False)
+    with pytest.raises(AssertionError, match=r"neither rooted nor active while 'ping' is handled by .*on_ping"):
+        target._deliver(state, 'ping', ())
+    assert calls == []
+
+    target.reason = 'has handlers'
+    target._update()
+    target._deliver(state, 'ping', ())
+    await asyncio.sleep(0)
+    assert calls == ['ping']
