@@ -29,6 +29,7 @@ import webrtc
 import wrtc
 from tests.helpers import (
     QUIET_PERIOD,
+    called,
     collect,
     connect,
     delivered,
@@ -338,6 +339,17 @@ def test_states_show_the_engine_once_their_loop_is_gone() -> None:
         raise TimeoutError(msg) from e
     caller.close()
     callee.close()
+
+
+def test_a_loop_closed_before_its_drain_runs_is_released() -> None:
+    """No wake comes for the records behind it."""
+
+    def schedule() -> loops.LoopState:
+        state = loops.LoopState.of(asyncio.get_running_loop())
+        state.post(lambda: None)
+        return state
+
+    assert asyncio.run(called(schedule)).mailbox.closed
 
 
 def read_transports(pc: webrtc.RTCPeerConnection) -> None:
