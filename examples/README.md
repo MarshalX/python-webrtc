@@ -16,14 +16,14 @@ without worrying about copyrights.
 
 **Voice chat with OpenAI GPT-Live.** Talks to the model through your microphone and speakers, with live transcripts in the terminal. No server: just an API key. Dependencies are declared inline, so [uv](https://docs.astral.sh/uv/) runs it with nothing to install:
 
-```
+```bash
 OPENAI_API_KEY=sk-... uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/openai_live.py
 ```
 
 ### [janus_streaming.py](janus_streaming.py)
 
-**Watching a live stream in the terminal.** Plays a stream of the public [Janus](https://janus.conf.meetecho.com/) demo server: the video drawn with colored characters, the audio on your speakers. No account or key:
+**Watching a live stream in the terminal.** Plays a stream of the public [Janus](https://janus.conf.meetecho.com/) demo server: the video drawn with colored characters, the audio on your speakers, if there are any, so it runs on a server too. No account or key:
 
-```
+```bash
 uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/janus_streaming.py
 ```

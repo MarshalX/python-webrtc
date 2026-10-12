@@ -15,7 +15,8 @@
     uv run janus_streaming.py --id 1
     uv run janus_streaming.py --id 3  # stereo music
 
-The video is drawn with colored half blocks, so the terminal needs 24-bit color. Press Ctrl+C to stop.
+The video is drawn with colored half blocks, so the terminal needs 24-bit color. Without an audio output, as on
+a server, it plays the video only. Press Ctrl+C to stop.
 """
 
 from __future__ import annotations
@@ -31,10 +32,16 @@ import uuid
 from typing import TYPE_CHECKING, TypedDict
 
 import httpx
-import sounddevice
 from typing_extensions import NotRequired, Required
 
 import webrtc
+
+try:
+    import sounddevice
+except OSError:
+    PORTAUDIO = False
+else:
+    PORTAUDIO = True
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -168,6 +175,17 @@ class Speakers:
             self.stream.close()
 
 
+def speakers_found() -> bool:
+    """Whether audio can be played: servers often lack the PortAudio library or an output device."""
+    if not PORTAUDIO:
+        return False
+    try:
+        sounddevice.query_devices(kind='output')
+    except sounddevice.PortAudioError:
+        return False
+    return True
+
+
 def draw(rgbx: bytes | bytearray, width: int, height: int, *, slot: int, slots: int) -> None:
     """Draws a frame in its slot of the screen with ▀, its foreground is the upper pixel, background the lower one."""
     total, rows = shutil.get_terminal_size()
@@ -289,13 +307,16 @@ async def main(stream_id: int | None) -> None:
     pc = webrtc.RTCPeerConnection()
     tasks: list[asyncio.Future[None]] = []
     videos: list[webrtc.MediaStreamTrack] = []
+    speakers = speakers_found()
+    if not speakers:
+        print('No audio output, playing the video only')
 
     @pc.on('track')
     def on_track(event: webrtc.RTCTrackEvent) -> None:
         if event.track.kind == 'video':
             videos.append(event.track)
             tasks.append(asyncio.ensure_future(watch(event.track, videos)))
-        else:
+        elif speakers:
             tasks.append(asyncio.ensure_future(listen(event.track)))
 
     async with Janus() as janus:
