@@ -29,3 +29,13 @@ docs/build
 # fuzzing (tests/fuzz): crashes and the corpora libFuzzer grows
 /tests/fuzz/crashes/
 /tests/fuzz/corpus/
+
+# benchmarks: the environment of aiortc, the native drivers and libdatachannel's checkout, raw results, media fixtures
+/benchmarks/.venv-aiortc/
+/benchmarks/drivers/pion/bin/
+/benchmarks/drivers/libdatachannel/vendor/
+/benchmarks/drivers/libdatachannel/build/
+/benchmarks/drivers/libdatachannel/bin/
+/benchmarks/drivers/webrtc-rs/target/
+/benchmarks/results/
+/benchmarks/fixtures/

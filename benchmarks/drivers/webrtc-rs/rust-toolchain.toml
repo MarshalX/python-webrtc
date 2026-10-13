@@ -1,0 +1,3 @@
+[toolchain]
+# rtc 0.21 needs Rust 1.91 or newer
+channel = "1.95.0"
