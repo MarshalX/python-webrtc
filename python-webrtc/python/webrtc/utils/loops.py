@@ -362,7 +362,7 @@ class LoopState:
             return
         target._deliver(self, name, args)
         # after handlers, so a terminal event's handlers run before unrooting; fresh wrappers aren't rooted
-        if created or not target._rootable:
+        if created or not target._rootable or not target._changes_activity(name):
             return
         self.update(target)
         if checking_roots():

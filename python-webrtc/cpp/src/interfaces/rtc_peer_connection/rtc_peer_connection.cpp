@@ -8,6 +8,7 @@
 #include "rtc_peer_connection.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -31,12 +32,16 @@ namespace python_webrtc {
     configuration = _configuration.Apply(configuration);
 
     webrtc::PeerConnectionDependencies dependencies(this);
+    dependencies.allocator = _factory->CreatePortAllocator(configuration);
+    auto *allocator = dependencies.allocator.get();
 
     auto result = _factory->factory()->CreatePeerConnectionOrError(configuration, std::move(dependencies));
 
     if (!result.ok()) {
       throw RTCException(result.error());
     }
+    // skips libwebrtc's 50 ms waits between gathering phases with nothing to allocate
+    BlockingCallOn(_factory->workerThread(), [allocator]() { allocator->set_step_delay(0); });
 
     _jinglePeerConnection = result.MoveValue();
   }
@@ -245,8 +250,8 @@ namespace python_webrtc {
     channel->Inherit(*this);
     channel->SetMaxMessageSizeGetter([weak = weak_from_this()]() -> std::optional<double> {
       auto self = weak.lock();
-      auto sctp = self ? self->GetSctp() : std::nullopt;
-      return sctp ? (*sctp)->GetMaxMessageSize() : std::nullopt;
+      auto size = self ? self->_maxMessageSize.load() : std::numeric_limits<double>::quiet_NaN();
+      return std::isnan(size) ? std::nullopt : std::optional<double>(size);
     });
     channel->SetClosedCallback([weak = weak_from_this(), key = channel->channel().get()]() {
       if (auto self = weak.lock()) {
@@ -589,19 +594,10 @@ namespace python_webrtc {
     return _sctp;
   }
 
-  // As the specification updates the data max message size: the max-message-size of the negotiated remote
-  // description (the default without it), limited by what the local side can send, where 0 means no limit
-  std::optional<double> RTCPeerConnection::MaxMessageSize(const webrtc::SctpTransportInterface *transport,
-                                                          std::optional<double> &kept) {
-    auto pc = connection();
-    if (!pc) {
-      // close() leaves [[MaxMessageSize]] (webrtc-pc)
-      return BlockingCallOn(_factory->signalingThread(), [&kept]() { return kept; });
-    }
-    return BlockingCallOn(_factory->signalingThread(), [&pc, transport, &kept]() -> std::optional<double> {
-      if (pc->GetSctpTransport().get() != transport) {
-        return kept;
-      }
+  namespace {
+
+    // the remote max-message-size (or its default), limited by what the local side can send; 0 means no limit
+    double NegotiatedMaxMessageSize(const webrtc::PeerConnectionInterface &pc) {
       auto sctpSize = [](const webrtc::SessionDescriptionInterface *description) -> std::optional<int> {
         if (!description) {
           return {};
@@ -614,29 +610,44 @@ namespace python_webrtc {
         }
         return {};
       };
-      const double canSendSize = sctpSize(pc->current_local_description()).value_or(kLocalMaxMessageSize);
+      const double canSendSize = sctpSize(pc.current_local_description()).value_or(kLocalMaxMessageSize);
       // updated once the description is negotiated, when an answer is set
-      const double remoteSize = sctpSize(pc->current_remote_description()).value_or(kDefaultRemoteMaxMessageSize);
+      const double remoteSize = sctpSize(pc.current_remote_description()).value_or(kDefaultRemoteMaxMessageSize);
       if (remoteSize == 0 && canSendSize == 0) {
-        kept = std::numeric_limits<double>::infinity();
-      } else if (remoteSize == 0 || canSendSize == 0) {
-        kept = std::max(remoteSize, canSendSize);
-      } else {
-        kept = std::min(remoteSize, canSendSize);
+        return std::numeric_limits<double>::infinity();
+      }
+      if (remoteSize == 0 || canSendSize == 0) {
+        return std::max(remoteSize, canSendSize);
+      }
+      return std::min(remoteSize, canSendSize);
+    }
+
+  } // namespace
+
+  std::optional<double> RTCPeerConnection::MaxMessageSize(const webrtc::SctpTransportInterface *transport,
+                                                          std::optional<double> &kept) {
+    auto pc = connection();
+    if (!pc) {
+      // close() leaves [[MaxMessageSize]] (webrtc-pc)
+      return BlockingCallOn(_factory->signalingThread(), [&kept]() { return kept; });
+    }
+    return BlockingCallOn(_factory->signalingThread(), [&pc, transport, &kept]() -> std::optional<double> {
+      if (pc->GetSctpTransport().get() == transport) {
+        kept = NegotiatedMaxMessageSize(*pc);
       }
       return kept;
     });
   }
 
   void RTCPeerConnection::UpdateMaxMessageSize() {
-    std::shared_ptr<RTCSctpTransport> sctp;
-    {
-      const TrackedLock lock(_wrappersMutex);
-      sctp = _sctp;
+    auto pc = connection();
+    if (!pc) {
+      return;
     }
-    if (sctp) {
-      sctp->GetMaxMessageSize();
-    }
+    // read by send() without waiting for the signaling thread
+    _maxMessageSize = BlockingCallOn(_factory->signalingThread(), [&pc]() {
+      return pc->GetSctpTransport() ? NegotiatedMaxMessageSize(*pc) : std::numeric_limits<double>::quiet_NaN();
+    });
   }
 
   ConfigurationInit RTCPeerConnection::GetConfiguration() {
@@ -764,7 +775,7 @@ namespace python_webrtc {
     if (!pc) {
       return SignalingState::kClosed;
     }
-    return _surfacedSignalingState.Shown(IsBound(), pc->signaling_state());
+    return _surfacedSignalingState.Shown(IsBound(), _lastSignalingState.load());
   }
 
   RTCPeerConnection::IceConnectionState RTCPeerConnection::GetIceConnectionState() {
@@ -786,11 +797,11 @@ namespace python_webrtc {
       const TrackedLock lock(_connectionMutex);
       return _closedIceGatheringState;
     }
-    return _surfacedIceGatheringState.Shown(IsBound(), pc->ice_gathering_state());
+    return _surfacedIceGatheringState.ShownOr(IsBound(), [&pc]() { return pc->ice_gathering_state(); });
   }
 
   void RTCPeerConnection::OnSignalingChange(SignalingState newState) {
-    _surfacedSignalingState.Changed(IsBound(), _lastSignalingState);
+    _surfacedSignalingState.Changed(IsBound(), _lastSignalingState.load());
     _lastSignalingState = newState;
     // the descriptions change along with the event
     Emit("signalingstatechange", newState, SnapshotDescriptions());

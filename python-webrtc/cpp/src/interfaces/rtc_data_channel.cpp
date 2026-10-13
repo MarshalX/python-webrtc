@@ -20,24 +20,32 @@ namespace python_webrtc {
       : _factory(std::move(factory)), _channel(std::move(channel)) {
     // open only once the open event is delivered
     _surfacedState.Surface(DataState::kConnecting);
+    // after the datachannel event of an announced channel, which is emitted on the signaling thread
     _factory->signalingThread()->PostTask(Guard([this]() {
-      _lastState = _channel->state();
-      if (_lastState != DataState::kOpen && _lastState != DataState::kConnecting) {
-        _surfacedState.Surface(_lastState);
-      }
-      // messages received meanwhile reach the observer once registered, queued behind the event
-      _channel->RegisterObserver(this);
       registry().SetObserver(_channel.get(), this);
-      // a channel already open (announced or negotiated) fires open once bound
-      if (_lastState == DataState::kOpen) {
-        _surfacedState.Changed(IsBound(), DataState::kConnecting);
-        Emit("open", _lastState);
-      }
+      // where the channel changes state: no change is missed between reading the state and registering
+      _factory->workerThread()->PostTask(Guard([this]() {
+        DataState state{};
+        {
+          const std::scoped_lock lock(_closeMutex);
+          state = _lastState = _channel->state();
+          if (state != DataState::kOpen && state != DataState::kConnecting) {
+            _surfacedState.Surface(state);
+          }
+        }
+        // a channel already open (announced or negotiated) fires open once bound
+        if (state == DataState::kOpen) {
+          _surfacedState.Changed(IsBound(), DataState::kConnecting);
+          Emit("open", state);
+        }
+        // delivers the messages received meanwhile, behind the open event
+        _channel->RegisterObserver(this);
+      }));
     }));
   }
 
   RTCDataChannel::~RTCDataChannel() {
-    // callbacks run on the signaling thread, so after this none of them can be running or start again
+    // unregistering waits for the network thread, where callbacks run: none can be running or start again
     BlockingCallOn(_factory->signalingThread(), [this]() {
       // a newer wrapper of the channel may have taken its single observer slot
       if (registry().TakeObserver(_channel.get(), this)) {
@@ -86,14 +94,13 @@ namespace python_webrtc {
 
   void RTCDataChannel::OnStateChange() {
     auto state = _channel->state();
-    if (state == _lastState) {
-      return;
-    }
-    auto previous = _lastState;
-    _lastState = state;
-
     {
       const std::scoped_lock lock(_closeMutex);
+      if (state == _lastState) {
+        return;
+      }
+      auto previous = _lastState;
+      _lastState = state;
       if (_closeRequested && state == DataState::kClosing) {
         // closing locally has shown the closing state already, and fires no event
         return;
@@ -121,7 +128,7 @@ namespace python_webrtc {
       }
       Emit("close", state);
       if (auto closed = _closedCallback.Get()) {
-        closed();
+        _factory->signalingThread()->PostTask(std::move(closed));
       }
       break;
     }
@@ -212,7 +219,7 @@ namespace python_webrtc {
   }
 
   RTCDataChannel::DataState RTCDataChannel::GetReadyState() {
-    return _surfacedState.Shown(IsBound(), _channel->state());
+    return _surfacedState.ShownOr(IsBound(), [this]() { return _channel->state(); });
   }
 
   void RTCDataChannel::SurfaceState(DataState state) {
@@ -267,7 +274,7 @@ namespace python_webrtc {
 
   } // namespace
 
-  void RTCDataChannel::Send(const std::string &data, bool binary) {
+  bool RTCDataChannel::Send(const std::string &data, bool binary) {
     if (GetReadyState() != DataState::kOpen) {
       throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "RTCDataChannel.readyState is not 'open'");
     }
@@ -282,12 +289,16 @@ namespace python_webrtc {
     if (_bufferedAmount + data.size() > webrtc::DataChannelInterface::MaxSendQueueSize()) {
       throw sendQueueFullError();
     }
-    _bufferedAmount += data.size();
-    auto sent = _channel->Send(webrtc::DataBuffer(webrtc::CopyOnWriteBuffer(data.data(), data.size()), binary));
-    if (!sent && _channel->state() == DataState::kOpen) {
-      _bufferedAmount -= data.size();
-      throw sendQueueFullError();
-    }
+    auto queued = _bufferedAmount.fetch_add(data.size());
+    // queued on the network thread without waiting; a failed send closes the channel
+    _channel->SendAsync(webrtc::DataBuffer(webrtc::CopyOnWriteBuffer(data.data(), data.size()), binary),
+                        [weak = weak_from_this(), size = data.size()](const webrtc::RTCError &error) {
+                          auto self = weak.lock();
+                          if (!error.ok() && self) {
+                            self->DecreaseBufferedAmount(size);
+                          }
+                        });
+    return queued == 0;
   }
 
   void RTCDataChannel::Close() {

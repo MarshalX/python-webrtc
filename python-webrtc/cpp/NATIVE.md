@@ -41,9 +41,11 @@ attached when it posts (`utils/libwebrtc_thread.h`). `tests/test_native_rules.py
 - Don't wait in a constructor: post the setup to its thread instead.
 - Destructors run on the Dispatcher, never on a libwebrtc or Python thread, so they may wait for libwebrtc threads.
 
-A `Registry` constructs its wrappers on the signaling thread, where their observers are registered. Sanitizer builds
-abort on a destructor that runs off the Dispatcher; a constructor that throws is the exception: the half-made object
-is destroyed where it was made. The factory and the ICE, DTLS and SCTP transports still wait in their constructors.
+A `Registry` constructs its wrappers on the signaling thread, where their observers are registered, except a data
+channel's: libwebrtc calls it on the network thread, where it reads the channel's state and registers.
+Sanitizer builds abort on a destructor that runs off the Dispatcher; a constructor that throws is the exception: the
+half-made object is destroyed where it was made. The factory and the ICE, DTLS and SCTP transports still wait in their
+constructors.
 
 ### The Dispatcher and mailboxes
 

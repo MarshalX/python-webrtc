@@ -300,6 +300,12 @@ class EventTarget(Generic[_N_contra]):
         """Why the object is kept alive while unreferenced, or None."""
         return None
 
+    @staticmethod
+    def _changes_activity(name: str) -> bool:
+        """Whether delivering an event may have changed :meth:`_activity`, so its root is updated after it."""
+        del name
+        return True
+
     def _open(self) -> bool:
         """Whether the parent connection, if any, isn't closed."""
         connection = self._connection

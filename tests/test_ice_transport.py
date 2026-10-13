@@ -247,6 +247,25 @@ async def test_candidates_of_blocked_ports_are_ignored(
 
 
 @pytest.mark.asyncio
+async def test_active_tcp_candidates_on_the_discard_port_are_kept(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """An active candidate is never connected to, so its port 9 (RFC 6544) isn't blocked."""
+    active = 'candidate:2 1 tcp 1518280447 192.0.2.2 9 typ host tcptype active'
+    caller.add_transceiver(webrtc.MediaType.audio)
+    offer = await caller.create_offer()
+    offer.sdp = offer.sdp.replace('a=mid:0\r\n', f'a=mid:0\r\na={active}\r\n')
+    await callee.set_remote_description(offer)
+
+    await callee.add_ice_candidate(webrtc.RTCIceCandidateInit(active.replace('192.0.2.2', '192.0.2.3'), sdp_mid='0'))
+
+    remote = callee.remote_description
+    assert remote is not None
+    assert f'a={active}' in remote.sdp
+    assert ' 192.0.2.3 9 typ host tcptype active' in remote.sdp
+
+
+@pytest.mark.asyncio
 async def test_standalone_methods_reject_a_transport_of_a_connection(pc: webrtc.RTCPeerConnection) -> None:
     """Gather, start, stop and remote candidates are standalone-only."""
     pc.create_data_channel('ice')

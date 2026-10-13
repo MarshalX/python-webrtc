@@ -86,6 +86,26 @@ namespace python_webrtc {
       return transports;
     }
 
+    std::map<std::string, std::shared_ptr<RTCIceTransport>>
+    iceTransportsByMid(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
+      std::map<std::string, std::shared_ptr<RTCIceTransport>> byMid;
+      for (const auto *description : {pc->local_description(), pc->remote_description()}) {
+        if (description == nullptr) {
+          continue;
+        }
+        for (const auto &content : description->description()->contents()) {
+          if (byMid.contains(content.mid())) {
+            continue;
+          }
+          auto dtls = pc->LookupDtlsTransportByMid(content.mid());
+          if (auto wrapper = dtls ? RTCDtlsTransport::registry().Find(dtls.get()) : nullptr) {
+            byMid.emplace(content.mid(), wrapper->GetIceTransport());
+          }
+        }
+      }
+      return byMid;
+    }
+
   } // namespace
 
   std::vector<std::shared_ptr<RTCIceTransport>> RTCPeerConnection::IceTransports() {
@@ -105,6 +125,12 @@ namespace python_webrtc {
   }
 
   std::shared_ptr<RTCIceTransport> RTCPeerConnection::IceTransportByMid(const std::string &mid) {
+    {
+      const TrackedLock lock(_wrappersMutex);
+      if (auto it = _iceTransportsByMid.find(mid); it != _iceTransportsByMid.end()) {
+        return it->second;
+      }
+    }
     auto pc = connection();
     auto dtls = pc && !mid.empty() ? pc->LookupDtlsTransportByMid(mid) : nullptr;
     auto wrapper = dtls ? RTCDtlsTransport::registry().Find(dtls.get()) : nullptr;
@@ -140,9 +166,11 @@ namespace python_webrtc {
       }
       _negotiatedTransports.assign(wrappers.begin(), wrappers.end());
     }
+    auto byMid = iceTransportsByMid(pc);
     {
       const TrackedLock lock(_wrappersMutex);
       std::swap(_dtlsTransports, wrappers);
+      std::swap(_iceTransportsByMid, byMid);
     }
     _factory->workerThread()->PostTask([weak = weak_from_this(), dropped = std::move(dropped)]() {
       for (const auto &transport : dropped) {

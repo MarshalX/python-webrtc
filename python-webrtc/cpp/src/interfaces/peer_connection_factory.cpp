@@ -13,10 +13,15 @@
 #include "../utils/dispatcher.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
+#include "../utils/network_socket_server.h"
+#include "../utils/port_allocator.h"
 
+#include <api/audio/builtin_audio_processing_builder.h>
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
-#include <api/create_peerconnection_factory.h>
+#include <api/create_modular_peer_connection_factory.h>
+#include <api/enable_media.h>
+#include <api/environment/environment_factory.h>
 #include <api/make_ref_counted.h>
 #include <api/video_codecs/video_decoder_factory_template.h>
 #include <api/video_codecs/video_decoder_factory_template_dav1d_adapter.h>
@@ -78,23 +83,61 @@ namespace python_webrtc {
     }
   } // namespace
 
+  // webrtc::CreatePeerConnectionFactory without the RTC event log, which keeps every packet's buffer in memory
+  webrtc::PeerConnectionFactoryDependencies PeerConnectionFactory::Dependencies() {
+    webrtc::PeerConnectionFactoryDependencies dependencies;
+    dependencies.network_thread = _workerThread.get();
+    dependencies.worker_thread = _workerThread.get();
+    dependencies.signaling_thread = _signalingThread.get();
+    dependencies.env = webrtc::CreateEnvironment(_fieldTrials.CreateCopy());
+    dependencies.socket_factory = _workerThread->socketserver();
+    dependencies.adm = _audioDeviceModule;
+    dependencies.audio_encoder_factory = webrtc::CreateBuiltinAudioEncoderFactory();
+    dependencies.audio_decoder_factory = webrtc::CreateBuiltinAudioDecoderFactory();
+    dependencies.audio_processing_builder = std::make_unique<webrtc::BuiltinAudioProcessingBuilder>();
+    dependencies.video_encoder_factory = std::make_unique<VideoEncoderFactory>();
+    dependencies.video_decoder_factory = std::make_unique<VideoDecoderFactory>();
+    webrtc::EnableMedia(dependencies);
+    return dependencies;
+  }
+
+  std::unique_ptr<webrtc::PortAllocator>
+  PeerConnectionFactory::CreatePortAllocator(const webrtc::PeerConnectionInterface::RTCConfiguration &configuration) {
+    std::unique_ptr<webrtc::PortAllocator> allocator;
+    BlockingCallOn(_workerThread, [&]() {
+      allocator = python_webrtc::CreatePortAllocator(webrtc::CreateEnvironment(_fieldTrials.CreateCopy()),
+                                                     _networkManager, _packetSocketFactory);
+    });
+    // as libwebrtc's factory does
+    allocator->SetPortRange(configuration.port_allocator_config.min_port, configuration.port_allocator_config.max_port);
+    allocator->set_flags(configuration.port_allocator_config.flags);
+    return allocator;
+  }
+
   PeerConnectionFactory::PeerConnectionFactory()
       : _fieldTrials(_trials), _networkIgnoreMask(_loopbackAllowed ? 0 : webrtc::kDefaultNetworkIgnoreMask) {
-    _workerThread = Started(webrtc::Thread::CreateWithSocketServer(), "PeerConnectionFactory:workerThread");
+    _workerThread = Started(std::make_unique<webrtc::Thread>(std::make_unique<NetworkSocketServer>()),
+                            "PeerConnectionFactory:workerThread");
     _signalingThread = Started(webrtc::Thread::Create(), "PeerConnectionFactory:signalingThread");
     // sanitizer builds check that these threads never enter Python
     _workerThread->PostTask(&TagNativeThread);
     _signalingThread->PostTask(&TagNativeThread);
 
-    BlockingCallOn(_workerThread, [this]() { _audioDeviceModule = webrtc::make_ref_counted<PlayoutAudioDevice>(); });
+    BlockingCallOn(_workerThread, [this]() {
+      _audioDeviceModule = webrtc::make_ref_counted<PlayoutAudioDevice>();
+      auto *sockets = _workerThread->socketserver();
+      _networkManager =
+          std::make_unique<webrtc::BasicNetworkManager>(webrtc::CreateEnvironment(_fieldTrials.CreateCopy()), sockets);
+      _packetSocketFactory = std::make_shared<webrtc::BasicPacketSocketFactory>(sockets);
+    });
 
-    _factory = webrtc::CreatePeerConnectionFactory(
-        _workerThread.get(), _workerThread.get(), _signalingThread.get(), _audioDeviceModule,
-        webrtc::CreateBuiltinAudioEncoderFactory(), webrtc::CreateBuiltinAudioDecoderFactory(),
-        std::make_unique<VideoEncoderFactory>(), std::make_unique<VideoDecoderFactory>(), nullptr, nullptr, nullptr,
-        _fieldTrials.CreateCopy());
+    _factory = webrtc::CreateModularPeerConnectionFactory(Dependencies());
     if (!_factory) {
-      BlockingCallOn(_workerThread, [this]() { _audioDeviceModule = nullptr; });
+      BlockingCallOn(_workerThread, [this]() {
+        _audioDeviceModule = nullptr;
+        _packetSocketFactory = nullptr;
+        _networkManager = nullptr;
+      });
       throw RTCException(webrtc::RTCErrorType::INTERNAL_ERROR, "Failed to create the peer connection factory");
     }
 
@@ -106,7 +149,11 @@ namespace python_webrtc {
   PeerConnectionFactory::~PeerConnectionFactory() {
     _factory = nullptr;
 
-    BlockingCallOn(_workerThread, [this]() { this->_audioDeviceModule = nullptr; });
+    BlockingCallOn(_workerThread, [this]() {
+      this->_audioDeviceModule = nullptr;
+      _packetSocketFactory = nullptr;
+      _networkManager = nullptr;
+    });
 
     _workerThread->Stop();
     _signalingThread->Stop();

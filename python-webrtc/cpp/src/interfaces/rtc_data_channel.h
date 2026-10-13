@@ -57,7 +57,9 @@ namespace python_webrtc {
 
     webrtc::scoped_refptr<webrtc::DataChannelInterface> channel() { return _channel; }
 
-    // DataChannelObserver, called on the signaling thread
+    // DataChannelObserver on the network thread, skipping libwebrtc's hop to the signaling thread
+    bool IsOkToCallOnTheNetworkThread() override { return true; }
+
     void OnStateChange() override;
 
     void OnMessage(const webrtc::DataBuffer &buffer) override;
@@ -110,7 +112,8 @@ namespace python_webrtc {
     // whether bufferedAmount dropped to the threshold
     bool DecreaseBufferedAmount(uint64_t sent);
 
-    void Send(const std::string &data, bool binary);
+    // whether the message is the only one queued: the channel's activity changes only then
+    bool Send(const std::string &data, bool binary);
 
     void Close();
 
@@ -124,7 +127,7 @@ namespace python_webrtc {
     // bytes passed to send() and not reported sent yet, as Python sees it: it grows in send()
     // and drops when the event of sent bytes is delivered (see DecreaseBufferedAmount)
     std::atomic<uint64_t> _bufferedAmount{0};
-    // on the signaling thread
+    // under _closeMutex
     DataState _lastState = DataState::kConnecting;
 
     Surfaced<DataState> _surfacedState;

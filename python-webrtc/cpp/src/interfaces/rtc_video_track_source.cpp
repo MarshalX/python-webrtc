@@ -89,7 +89,7 @@ namespace python_webrtc {
   void RTCVideoTrackSource::PushFrame(const webrtc::VideoFrame &frame) {
     _width = frame.width();
     _height = frame.height();
-    _broadcaster.OnFrame(frame);
+    Broadcast(frame);
     constexpr int64_t blackIntervalMs = 1000;
     auto now = webrtc::TimeMillis();
     auto last = _lastBlackMs.load();
@@ -97,6 +97,32 @@ namespace python_webrtc {
         _lastBlackMs.compare_exchange_strong(last, now)) {
       _blackBroadcaster.OnFrame(frame);
     }
+  }
+
+  void RTCVideoTrackSource::Broadcast(const webrtc::VideoFrame &frame) {
+    if (!_broadcaster.frame_wanted()) {
+      return;
+    }
+    int croppedWidth = 0;
+    int croppedHeight = 0;
+    int width = 0;
+    int height = 0;
+    // timed by arrival, as generator frames carry the application's timestamps
+    if (!_adapter.AdaptFrameResolution(frame.width(), frame.height(), webrtc::TimeNanos(), &croppedWidth,
+                                       &croppedHeight, &width, &height)) {
+      _broadcaster.OnDiscardedFrame();
+      return;
+    }
+    if (width == frame.width() && height == frame.height()) {
+      _broadcaster.OnFrame(frame);
+      return;
+    }
+    webrtc::VideoFrame adapted = frame;
+    adapted.set_video_frame_buffer(frame.video_frame_buffer()->CropAndScale(
+        (frame.width() - croppedWidth) / 2, (frame.height() - croppedHeight) / 2, croppedWidth, croppedHeight, width,
+        height));
+    adapted.clear_update_rect();
+    _broadcaster.OnFrame(adapted);
   }
 
   void RTCVideoTrackSource::End() {
@@ -123,6 +149,7 @@ namespace python_webrtc {
       it->second = wants.black_frames;
     }
     (wants.black_frames ? _blackBroadcaster : _broadcaster).AddOrUpdateSink(sink, wants);
+    _adapter.OnSinkWants(_broadcaster.wants());
   }
 
   void RTCVideoTrackSource::RemoveSink(webrtc::VideoSinkInterface<webrtc::VideoFrame> *sink) {
@@ -133,6 +160,7 @@ namespace python_webrtc {
     }
     (it->second ? _blackBroadcaster : _broadcaster).RemoveSink(sink);
     _sinks.erase(it);
+    _adapter.OnSinkWants(_broadcaster.wants());
   }
 
 } // namespace python_webrtc

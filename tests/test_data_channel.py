@@ -268,6 +268,28 @@ async def test_closed_in_the_datachannel_handler_never_opens(
 
 
 @pytest.mark.asyncio
+async def test_messages_sent_on_open_reach_a_handler_added_on_datachannel(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """Messages that arrive before the remote channel is announced follow its datachannel event, in order."""
+    channel = caller.create_data_channel('burst')
+    count = 50
+    channel.on('open', lambda _event: [channel.send(str(number)) for number in range(count)])
+    received: list[str | bytes | webrtc.Blob] = []
+    done: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+    def on_message(event: webrtc.MessageEvent) -> None:
+        received.append(event.data)
+        if len(received) == count:
+            done.set_result(None)
+
+    callee.on('datachannel', lambda event: event.channel.on('message', on_message))
+    await connect(caller, callee)
+    await asyncio.wait_for(done, 10)
+    assert received == [str(number) for number in range(count)]
+
+
+@pytest.mark.asyncio
 async def test_once_handles_the_first_message_only(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:

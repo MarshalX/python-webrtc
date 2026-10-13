@@ -17,7 +17,7 @@ from typing import cast
 import pytest
 
 import webrtc
-from tests.helpers import connect_track, write_video, writing
+from tests.helpers import connect, connect_track, wait_for_event, write_video, writing
 
 TIMEOUT = 20
 WIDTH, HEIGHT = 320, 240
@@ -100,6 +100,61 @@ async def test_video_through_a_connection(caller: webrtc.RTCPeerConnection, call
     assert b < 25
     assert a == 255
     assert timestamps == sorted(set(timestamps))
+
+
+#: frames read to check their size
+FRAMES = 10
+
+
+async def received_widths(
+    caller: webrtc.RTCPeerConnection,
+    callee: webrtc.RTCPeerConnection,
+    *,
+    preference: webrtc.RTCDegradationPreference,
+) -> list[int]:
+    """The widths of frames received of 640x480 video sent at 100 kbps, too low a bitrate for its size."""
+    generator = webrtc.VideoTrackGenerator()
+    init = webrtc.RTCRtpTransceiverInit(
+        direction='sendonly', send_encodings=[webrtc.RTCRtpEncodingParameters(max_bitrate=100_000)]
+    )
+    sender = caller.add_transceiver(generator.track, init).sender
+    parameters = sender.get_parameters()
+    parameters.degradation_preference = preference
+    await sender.set_parameters(parameters)
+    received = wait_for_event(callee, 'track', TIMEOUT)
+    async with writing(write_video, generator, bytes(640 * 480 * 3 // 2), (640, 480)):
+        await connect(caller, callee, TIMEOUT)
+        event = await received
+        assert isinstance(event, webrtc.RTCTrackEvent)
+        reader = webrtc.MediaStreamTrackProcessor(
+            webrtc.MediaStreamTrackProcessorInit(event.track, max_buffer_size=5)
+        ).readable.get_reader()
+        widths: list[int] = []
+        while len(widths) < FRAMES:
+            frame = (await asyncio.wait_for(reader.read(), TIMEOUT)).value
+            assert isinstance(frame, webrtc.VideoFrame)
+            widths.append(frame.coded_width)
+            frame.close()
+        await reader.cancel()
+    generator.track.stop()
+    return widths
+
+
+@pytest.mark.asyncio
+async def test_a_generator_scales_down_for_the_encoder(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """Under maintain-framerate, the source sends the smaller frames the encoder asks for at a low bitrate."""
+    widths = await received_widths(caller, callee, preference=webrtc.RTCDegradationPreference.maintain_framerate)
+    assert all(width < 640 for width in widths)
+
+
+@pytest.mark.asyncio
+async def test_a_generator_keeps_its_size_under_maintain_resolution(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    widths = await received_widths(caller, callee, preference=webrtc.RTCDegradationPreference.maintain_resolution)
+    assert widths == [640] * FRAMES
 
 
 @pytest.mark.asyncio

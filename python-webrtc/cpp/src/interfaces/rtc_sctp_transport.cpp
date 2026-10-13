@@ -88,7 +88,7 @@ namespace python_webrtc {
   }
 
   webrtc::SctpTransportState RTCSctpTransport::GetState() {
-    return _surfacedState.Shown(IsBound(), Information().state());
+    return _surfacedState.ShownOr(IsBound(), [this]() { return Information().state(); });
   }
 
   void RTCSctpTransport::SurfaceState(webrtc::SctpTransportState state) {
