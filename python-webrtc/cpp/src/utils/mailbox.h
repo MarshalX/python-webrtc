@@ -39,8 +39,23 @@ namespace python_webrtc {
   class Mailbox : public std::enable_shared_from_this<Mailbox> {
   public:
     Mailbox();
+    ~Mailbox();
+
+    Mailbox(const Mailbox &) = delete;
+    Mailbox &operator=(const Mailbox &) = delete;
 
     [[nodiscard]] uint64_t Id() const { return _id; }
+
+    struct WakeEnds {
+      int read;
+      int write;
+    };
+
+    std::optional<int> EnableWake();
+
+    bool AckWake();
+
+    void DisableWake();
 
     void Post(Record record);
 
@@ -60,11 +75,16 @@ namespace python_webrtc {
     static void Init(pybind11::module &m);
 
   private:
+    [[nodiscard]] const WakeEnds *WakeLocked() const;
+    void CloseWakeLocked();
+
     const uint64_t _id;
     mutable std::mutex _mutex;
     std::deque<Record> _records;
     bool _closed = false;
     uint64_t _dropped = 0;
+    std::optional<WakeEnds> _wake;
+    int _wakeForks = 0;
   };
 
   class Binding {

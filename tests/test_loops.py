@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import sys
 import threading
 import weakref
 from typing import Callable
@@ -391,6 +392,65 @@ def test_release_of_a_closed_loop_drops_what_it_kept() -> None:
     assert (state.active, state.tasks, len(state.mailbox)) == ({}, set(), 0)
     assert pc.listeners('negotiationneeded') == []
     pc.close()
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='no wake pipe on Windows')
+@pytest.mark.skipif(not LoopState.watches_pipe, reason='every loop is woken through the Dispatcher')
+def test_a_watching_loop_is_woken_through_its_mailbox_pipe_until_released(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After its first drain, a loop is woken without the Dispatcher; a release stops watching the pipe."""
+
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        state = LoopState.of(loop)
+        token, first = state.start(None)
+        _in_thread(lambda: wrtc._testing.complete(state.mailbox, token, 1))
+        assert await asyncio.wait_for(first, TIMEOUT) == 1
+        fd = state._wake_fd
+        assert fd is not None
+
+        # a Dispatcher wake would do nothing now
+        monkeypatch.setattr(state, '_schedule', lambda: None)
+        token, second = state.start(None)
+        _in_thread(lambda: wrtc._testing.complete(state.mailbox, token, 2))
+        assert await asyncio.wait_for(second, TIMEOUT) == 2
+        monkeypatch.undo()
+
+        state.release()
+        assert state._wake_fd is None
+        assert not loop.remove_reader(fd)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='no wake pipe on Windows')
+@pytest.mark.skipif(not LoopState.watches_pipe, reason='every loop is woken through the Dispatcher')
+def test_a_record_posted_as_a_drain_finishes_wakes_the_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The pipe is emptied before a drain takes records, so a post after its last take isn't swallowed."""
+
+    async def scenario() -> None:
+        state = LoopState.of(asyncio.get_running_loop())
+        token, first = state.start(None)
+        _in_thread(lambda: wrtc._testing.complete(state.mailbox, token, 1))
+        assert await asyncio.wait_for(first, TIMEOUT) == 1
+        finish = state._finish
+        last, posted = state.start(None)
+
+        def finish_then_post(*, more: bool) -> None:
+            finish(more=more)
+            if not more and not posted.done():
+                # into the empty mailbox, once the drain no longer looks at it
+                _in_thread(lambda: wrtc._testing.complete(state.mailbox, last, 3))
+
+        # a Dispatcher wake would do nothing now
+        monkeypatch.setattr(state, '_schedule', lambda: None)
+        monkeypatch.setattr(state, '_finish', finish_then_post)
+        token, second = state.start(None)
+        _in_thread(lambda: wrtc._testing.complete(state.mailbox, token, 2))
+        assert await asyncio.wait_for(second, TIMEOUT) == 2
+        assert await asyncio.wait_for(posted, TIMEOUT) == 3
+        monkeypatch.undo()
+
+    asyncio.run(scenario())
 
 
 def test_release_of_a_running_loop_cancels_its_calls() -> None:

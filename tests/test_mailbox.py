@@ -281,6 +281,55 @@ def test_blocking_on_a_libwebrtc_thread_while_attached_aborts() -> None:
     assert 'while attached to Python' in result.stderr, result.stderr
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='no wake pipe on Windows')
+def test_a_post_into_an_empty_mailbox_writes_to_its_pipe_until_it_closes() -> None:
+    mailbox = wrtc.Mailbox()
+    fd = mailbox.enableWake()
+    assert fd is not None
+    assert mailbox.enableWake() == fd
+    wrtc._testing.post(mailbox, 'event', 1)
+    assert not _pipe_empty(fd)
+    wrtc._testing.post(mailbox, 'event', 2)
+    # only a post into an empty mailbox wakes
+    assert _pipe_empty(fd)
+    assert mailbox.ackWake()
+
+    mailbox.close()
+    assert not mailbox.ackWake()
+    assert mailbox.enableWake() is None
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='a wake pipe on POSIX')
+def test_a_mailbox_has_no_pipe_on_windows() -> None:
+    mailbox = wrtc.Mailbox()
+    assert mailbox.enableWake() is None
+    assert not mailbox.ackWake()
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='no wake pipe on Windows')
+def test_a_parked_dispatcher_wake_holds_the_pipe_wakes_too() -> None:
+    mailbox = wrtc.Mailbox()
+    fd = mailbox.enableWake()
+    assert fd is not None
+    wrtc._testing.park('dispatcher.wake')
+    try:
+        wrtc._testing.post(mailbox, 'event', 1)
+        assert wrtc._testing.parked('dispatcher.wake', 5)
+        assert _pipe_empty(fd)
+    finally:
+        wrtc._testing.release('dispatcher.wake')
+    wrtc._testing.dispatcher_idle()
+
+
+def _pipe_empty(fd: int) -> bool:
+    """Reads a wake fd empty; whether nothing was written to it since the last read."""
+    try:
+        # a pipe's bytes, or an eventfd's 8-byte count
+        return os.read(fd, 64) == b''
+    except BlockingIOError:
+        return True
+
+
 def test_parking_point_holds_a_posting_thread() -> None:
     mailbox = wrtc.Mailbox()
     wrtc._testing.park('mailbox.post')
@@ -318,6 +367,31 @@ def _child_restarts_the_dispatcher(parent: list[object]) -> bool:
         and wrtc._testing.dispatcher_threads() == 1
         and wrtc._testing.alive_counts()['Counted'] == 1
     )
+
+
+def _child_wakes_through_the_dispatcher(mailbox: wrtc.Mailbox) -> bool:
+    """Whether the child leaves its parent's wake pipe alone."""
+    wrtc._testing.post(mailbox, 'child', 1)
+    wrtc._testing.dispatcher_idle()
+    return mailbox.enableWake() is None and not mailbox.ackWake()
+
+
+@pytest.mark.skipif(not hasattr(os, 'fork'), reason='no fork')
+@pytest.mark.skipif(wrtc._thread_sanitized, reason='a thread started after a fork ends the child under ThreadSanitizer')
+@isolated(timeout=60)
+def test_forked_child_doesnt_wake_through_the_pipe_of_its_parent() -> None:
+    warnings.simplefilter('ignore', DeprecationWarning)  # fork with threads
+    mailbox = wrtc.Mailbox()
+    fd = mailbox.enableWake()
+    assert fd is not None
+    pid = os.fork()
+    if pid == 0:
+        sys.exit(0 if _child_wakes_through_the_dispatcher(mailbox) else 1)
+
+    assert exit_code_within(pid, 30) == 0
+    assert _pipe_empty(fd)
+    wrtc._testing.post(mailbox, 'parent', 2)
+    assert not _pipe_empty(fd)
 
 
 @pytest.mark.skipif(not hasattr(os, 'fork'), reason='no fork')

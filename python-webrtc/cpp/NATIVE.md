@@ -3,9 +3,10 @@
 ## Threads
 
 Native threads never run Python. libwebrtc's signaling and worker threads, and the media threads (capture, decoders,
-the audio device, frame transformers), only post records to the mailbox of an event loop. One thread, the
-Dispatcher, enters Python, only to wake a loop, which then converts the records and runs the handlers. Python code
-and the garbage collector therefore only run on Python threads.
+the audio device, frame transformers), only post records to the mailbox of an event loop. A post wakes the loop
+through the mailbox's wake fd, or through the Dispatcher, the one thread that enters Python, only to wake a loop. The
+loop then converts the records and runs the handlers. Python code and the garbage collector therefore only run on
+Python threads.
 
 The extension doesn't need the GIL (`mod_gil_not_used`): on a free-threaded build, Python threads call one wrapper
 at once, so every member a bound method touches is immutable after construction, atomic, or guarded by the
@@ -59,6 +60,11 @@ constructors.
 - `Mailbox` (`utils/mailbox.h`): one event loop's record queue. Native threads post events, completions and markers
   under its leaf mutex; a post into an empty mailbox wakes the loop. The loop takes records in order and converts
   them there. Closing drops queued and later records.
+- Direct wake: from its first drain, a loop that can `add_reader` (not on Windows) watches the mailbox's wake fd
+  (`enableWake`: an eventfd on Linux, a pipe elsewhere). A wake writes to it under the mutex instead of waking the
+  Dispatcher. The loop empties it (`ackWake`) before taking records, so a later post's wake isn't lost. `Close`
+  closes it under the same mutex, after Python removes the reader, so no post writes to a closed or reused fd. A
+  forked child, a parked `dispatcher.wake` and `LoopState.watches_pipe = False` (tests) wake through the Dispatcher.
 - A method that completes later (`createOffer`, `getStats`...) takes `(mailbox, token)` from `loops.call_native`
   and wraps them in a `Completion` first thing. It's settled once with `Succeed(...)` or `Fail`; destroyed unsettled
   (e.g. a callback libwebrtc drops), it fails with `InvalidStateError`. At exit, `loops._exit` cancels calls in

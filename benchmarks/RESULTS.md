@@ -2,7 +2,15 @@
 
 Medians; % columns are of aiortc's. How: [README](README.md#method).
 
-2026-10-13, 3 runs a case, Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.1, commit 3ed4d51 with uncommitted changes.
+| Suite | Libraries | Date | Runs | Machine | Commit |
+| --- | --- | --- | --- | --- | --- |
+| setup | aiortc, pion, libdatachannel, webrtc-rs | 2026-10-13 | 3 | Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.1 | 3ed4d51 with uncommitted changes |
+| setup | wrtc | 2026-10-14 | 3 | Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.1 | ab9ed88 with uncommitted changes |
+| datachannel | aiortc, pion, libdatachannel, webrtc-rs | 2026-10-13 | 3 | Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.1 | 3ed4d51 with uncommitted changes |
+| datachannel | wrtc | 2026-10-13 | 3 | Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.1 | ab9ed88 with uncommitted changes |
+| memory | wrtc, aiortc, pion, libdatachannel, webrtc-rs | 2026-10-13 | 3 | Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.1 | 3ed4d51 with uncommitted changes |
+| media | aiortc | 2026-10-13 | 3 | Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.1 | 3ed4d51 with uncommitted changes |
+| media | wrtc | 2026-10-13 | 3 | Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.1 | ab9ed88 with uncommitted changes |
 
 ## Connection setup
 
@@ -13,7 +21,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | Create | Offer created | Gathered | ICE connected | Connected | Data channel open | Open, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| wrtc 0.0.2 | 0.6 / 0.7 | 0.2 / 0.3 | 1.3 / 1.5 | 3.5 / 3.9 | 4.3 / 4.9 | 4.5 / 5.2 | 16% |
+| wrtc 0.0.2 | 0.6 / 0.6 | 0.2 / 0.3 | 1.3 / 1.5 | 2.7 / 3.7 | 4.1 / 4.6 | 4.3 / 4.8 | 15% |
 | aiortc 1.15.0 | 0.3 / 0.3 | 0.1 / 0.1 | 2.1 / 2.6 | 26.8 / 27.6 | 28.2 / 28.9 | 29.1 / 30.0 | 100% |
 | pion v4.2.23 | 0.8 / 1.2 | 1.9 / 2.7 | 3.7 / 4.6 | 37.5 / 117.9 | 40.3 / 121.1 | 40.9 / 122.0 | 140% |
 | libdatachannel 0.24.6 | 0.0 / 0.0 | 0.2 / 0.2 | 0.2 / 0.3 | 1.0 / 1.4 | 2.1 / 2.6 | 2.2 / 2.8 | 8% |
@@ -23,7 +31,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | Create | Offer created | Gathered | ICE connected | Connected | Data channel open | Open, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| wrtc 0.0.2 | 1.7 / 1.7 | 0.3 / 0.3 | 1.7 / 1.7 | 4.3 / 4.7 | 5.0 / 5.3 | 5.3 / 5.6 | 16% |
+| wrtc 0.0.2 | 1.7 / 3.9 | 0.3 / 0.3 | 1.6 / 1.9 | 4.2 / 4.7 | 4.9 / 5.3 | 5.1 / 5.7 | 15% |
 | aiortc 1.15.0 | 3.5 / 17.4 | 0.1 / 0.1 | 2.3 / 2.6 | 27.5 / 27.6 | 32.8 / 38.3 | 33.9 / 39.2 | 100% |
 | pion v4.2.23 | 0.7 / 3.4 | 1.2 / 3.5 | 2.2 / 6.8 | 25.3 / 37.5 | 27.3 / 39.2 | 27.7 / 39.7 | 82% |
 | libdatachannel 0.24.6 | 0.8 / 1.6 | 2.6 / 4.8 | 2.7 / 4.8 | 4.2 / 7.3 | 5.9 / 10.0 | 6.1 / 10.3 | 18% |
@@ -33,7 +41,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | Create | Offer created | Gathered | ICE connected | Connected | Data channel open | Open, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| wrtc 0.0.2 | 0.6 / 0.8 | 0.2 / 0.3 | 1.1 / 1.5 | 4.0 / 9.4 | 5.1 / 10.2 | 5.3 / 10.8 | 18% |
+| wrtc 0.0.2 | 0.6 / 0.7 | 0.2 / 0.2 | 1.1 / 1.3 | 3.9 / 4.7 | 5.1 / 5.8 | 5.2 / 5.9 | 18% |
 | aiortc 1.15.0 | 0.3 / 0.3 | 0.1 / 0.1 | 2.1 / 2.6 | 26.8 / 27.4 | 28.2 / 28.8 | 29.1 / 31.1 | 100% |
 | pion v4.2.23 | 0.8 / 1.4 | 1.9 / 2.7 | 3.7 / 4.6 | 49.7 / 51.1 | 51.5 / 52.9 | 52.2 / 53.8 | 179% |
 | libdatachannel 0.24.6 | 0.0 / 0.0 | 0.2 / 0.4 | 0.2 / 0.3 | 1.1 / 2.9 | 2.3 / 5.0 | 2.4 / 5.4 | 8% |
@@ -43,7 +51,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | Create | Offer created | Gathered | ICE connected | Connected | Data channel open | Open, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| wrtc 0.0.2 | 1.7 / 1.8 | 0.3 / 0.3 | 1.5 / 1.5 | 5.0 / 5.2 | 6.2 / 6.4 | 6.3 / 6.5 | 19% |
+| wrtc 0.0.2 | 1.7 / 2.2 | 0.3 / 0.3 | 1.5 / 1.7 | 5.0 / 5.7 | 6.1 / 6.9 | 6.3 / 7.0 | 19% |
 | aiortc 1.15.0 | 3.5 / 3.6 | 0.1 / 0.1 | 2.3 / 2.3 | 27.3 / 27.6 | 32.5 / 33.0 | 33.5 / 34.0 | 100% |
 | pion v4.2.23 | 0.4 / 0.8 | 0.8 / 1.5 | 1.3 / 2.5 | 25.7 / 35.1 | 26.6 / 36.3 | 27.3 / 36.9 | 80% |
 | libdatachannel 0.24.6 | 0.8 / 1.6 | 2.7 / 5.2 | 2.7 / 5.2 | 4.3 / 7.8 | 5.9 / 10.4 | 6.1 / 10.7 | 18% |
@@ -53,7 +61,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | CPU, both (ms) | Peak RSS, offerer (MB) | Loop lag p95 (ms) | Failed trials |
 | --- | --- | --- | --- | --- |
-| wrtc 0.0.2 | 15.2 | 55 | 0.6 | 0 |
+| wrtc 0.0.2 | 14.5 | 55 | 0.5 | 0 |
 | aiortc 1.15.0 | 11.6 | 70 | 0.7 | 0 |
 | pion v4.2.23 | 96.2 | 23 | - | 0 |
 | libdatachannel 0.24.6 | 4.3 | 11 | - | 0 |
@@ -67,27 +75,27 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Flood | wrtc 0.0.2 | aiortc 1.15.0 | pion v4.2.23 | libdatachannel 0.24.6 | webrtc-rs 0.21.1 | wrtc, % of aiortc | pion, % of aiortc | libdatachannel, % of aiortc | webrtc-rs, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ordered 1 KB x1 | 691 | 91 | 490 | 448 | 1187 | 760% | 539% | 494% | 1307% |
-| ordered 1 KB x10 | 649 | 93 | 990 | 1026 | 1261 | 697% | 1064% | 1103% | 1355% |
-| ordered 64 KB x1 | 976 | 197 | 532 | 622 | 705 | 497% | 271% | 317% | 358% |
-| ordered 64 KB x10 | 1049 | 173 | 1135 | 1158 | 1429 | 607% | 657% | 670% | 827% |
-| unordered 1 KB x1 | 661 | 89 | 492 | 441 | 818 | 743% | 553% | 495% | 920% |
-| unordered 1 KB x10 | 655 | 93 | 1023 | 1035 | 721 | 703% | 1097% | 1111% | 774% |
-| unordered 64 KB x1 | 1005 | 176 | 533 | 625 | 839 | 572% | 303% | 356% | 477% |
-| unordered 64 KB x10 | 995 | 245 | 1143 | 1194 | 680 | 406% | 466% | 487% | 277% |
+| ordered 1 KB x1 | 812 | 91 | 490 | 448 | 1187 | 894% | 539% | 494% | 1307% |
+| ordered 1 KB x10 | 745 | 93 | 990 | 1026 | 1261 | 801% | 1064% | 1103% | 1355% |
+| ordered 64 KB x1 | 1084 | 197 | 532 | 622 | 705 | 551% | 271% | 317% | 358% |
+| ordered 64 KB x10 | 1110 | 173 | 1135 | 1158 | 1429 | 642% | 657% | 670% | 827% |
+| unordered 1 KB x1 | 759 | 89 | 492 | 441 | 818 | 853% | 553% | 495% | 920% |
+| unordered 1 KB x10 | 727 | 93 | 1023 | 1035 | 721 | 780% | 1097% | 1111% | 774% |
+| unordered 64 KB x1 | 1100 | 176 | 533 | 625 | 839 | 626% | 303% | 356% | 477% |
+| unordered 64 KB x10 | 1105 | 245 | 1143 | 1194 | 680 | 451% | 466% | 487% | 277% |
 
 ### Message rate (messages/s)
 
 | Flood | wrtc 0.0.2 | aiortc 1.15.0 | pion v4.2.23 | libdatachannel 0.24.6 | webrtc-rs 0.21.1 | wrtc, % of aiortc | pion, % of aiortc | libdatachannel, % of aiortc | webrtc-rs, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ordered 1 KB x1 | 84306 | 11086 | 59782 | 54721 | 144848 | 760% | 539% | 494% | 1307% |
-| ordered 1 KB x10 | 79238 | 11361 | 120850 | 125260 | 153925 | 697% | 1064% | 1103% | 1355% |
-| ordered 64 KB x1 | 1862 | 375 | 1015 | 1187 | 1344 | 497% | 271% | 317% | 358% |
-| ordered 64 KB x10 | 2001 | 330 | 2165 | 2210 | 2725 | 607% | 657% | 670% | 827% |
-| unordered 1 KB x1 | 80716 | 10864 | 60066 | 53800 | 99905 | 743% | 553% | 495% | 920% |
-| unordered 1 KB x10 | 79948 | 11377 | 124819 | 126374 | 88016 | 703% | 1097% | 1111% | 774% |
-| unordered 64 KB x1 | 1918 | 335 | 1017 | 1192 | 1600 | 572% | 303% | 356% | 477% |
-| unordered 64 KB x10 | 1897 | 468 | 2179 | 2277 | 1298 | 406% | 466% | 487% | 277% |
+| ordered 1 KB x1 | 99113 | 11086 | 59782 | 54721 | 144848 | 894% | 539% | 494% | 1307% |
+| ordered 1 KB x10 | 90983 | 11361 | 120850 | 125260 | 153925 | 801% | 1064% | 1103% | 1355% |
+| ordered 64 KB x1 | 2067 | 375 | 1015 | 1187 | 1344 | 551% | 271% | 317% | 358% |
+| ordered 64 KB x10 | 2118 | 330 | 2165 | 2210 | 2725 | 642% | 657% | 670% | 827% |
+| unordered 1 KB x1 | 92678 | 10864 | 60066 | 53800 | 99905 | 853% | 553% | 495% | 920% |
+| unordered 1 KB x10 | 88691 | 11377 | 124819 | 126374 | 88016 | 780% | 1097% | 1111% | 774% |
+| unordered 64 KB x1 | 2098 | 335 | 1017 | 1192 | 1600 | 626% | 303% | 356% | 477% |
+| unordered 64 KB x10 | 2107 | 468 | 2179 | 2277 | 1298 | 451% | 466% | 487% | 277% |
 
 ### CPU per MB delivered, both processes (ms)
 
@@ -95,20 +103,20 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Flood | wrtc 0.0.2 | aiortc 1.15.0 | pion v4.2.23 | libdatachannel 0.24.6 | webrtc-rs 0.21.1 | wrtc, % of aiortc | pion, % of aiortc | libdatachannel, % of aiortc | webrtc-rs, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ordered 1 KB x1 | 36 | 130 | 85 | 67 | 12 | 28% | 65% | 52% | 9% |
-| ordered 1 KB x10 | 38 | 131 | 55 | 53 | 34 | 29% | 42% | 41% | 26% |
-| ordered 64 KB x1 | 17 | 74 | 74 | 44 | 10 | 24% | 101% | 60% | 14% |
-| ordered 64 KB x10 | 16 | 81 | 51 | 46 | 31 | 20% | 62% | 56% | 38% |
-| unordered 1 KB x1 | 38 | 132 | 86 | 69 | 14 | 29% | 65% | 53% | 11% |
-| unordered 1 KB x10 | 38 | 130 | 54 | 53 | 59 | 29% | 41% | 40% | 45% |
-| unordered 64 KB x1 | 17 | 80 | 75 | 43 | 12 | 21% | 94% | 53% | 15% |
-| unordered 64 KB x10 | 17 | 92 | 50 | 44 | 72 | 19% | 54% | 48% | 78% |
+| ordered 1 KB x1 | 30 | 130 | 85 | 67 | 12 | 23% | 65% | 52% | 9% |
+| ordered 1 KB x10 | 32 | 131 | 55 | 53 | 34 | 24% | 42% | 41% | 26% |
+| ordered 64 KB x1 | 15 | 74 | 74 | 44 | 10 | 21% | 101% | 60% | 14% |
+| ordered 64 KB x10 | 15 | 81 | 51 | 46 | 31 | 18% | 62% | 56% | 38% |
+| unordered 1 KB x1 | 32 | 132 | 86 | 69 | 14 | 24% | 65% | 53% | 11% |
+| unordered 1 KB x10 | 33 | 130 | 54 | 53 | 59 | 25% | 41% | 40% | 45% |
+| unordered 64 KB x1 | 15 | 80 | 75 | 43 | 12 | 19% | 94% | 53% | 15% |
+| unordered 64 KB x10 | 15 | 92 | 50 | 44 | 72 | 16% | 54% | 48% | 78% |
 
 ### Round trip of 1 KB messages at 100 a second
 
 | Library | RTT p50 / p95 (ms) | Lost | p50, % of aiortc |
 | --- | --- | --- | --- |
-| wrtc 0.0.2 | 0.8 / 1.4 | 0 | 84% |
+| wrtc 0.0.2 | 0.7 / 1.3 | 0 | 73% |
 | aiortc 1.15.0 | 1.0 / 1.3 | 0 | 100% |
 | pion v4.2.23 | 0.4 / 0.7 | 0 | 44% |
 | libdatachannel 0.24.6 | 0.4 / 0.5 | 0 | 38% |
@@ -181,18 +189,18 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Case | ffmpeg CPU/frame (ms) | wrtc decoder | wrtc fps | wrtc kbps | wrtc CPU/frame (ms) | aiortc decoder | aiortc fps | aiortc kbps | aiortc CPU/frame (ms) | wrtc, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| VP8 720p30 2.5 Mbps | 1.1 | libvpx | 29.9 | 2391 | 5.9 | libvpx | 30.0 | 2391 | 5.9 | 99% |
-| VP8 1080p30 5 Mbps | 2.3 | libvpx | 30.0 | 4796 | 8.6 | libvpx | 30.0 | 4793 | 9.2 | 93% |
-| VP8 1080p60 8 Mbps | 2.1 | libvpx | 60.0 | 7655 | 6.1 | libvpx | 60.0 | 7651 | 6.0 | 102% |
-| VP8 2160p30 20 Mbps | 7.8 | libvpx | 29.9 | 19186 | 12.5 | libvpx | 29.5 | 19220 | 14.5 | 87% |
-| H264 720p30 2.5 Mbps | 0.6 | VideoToolbox | 30.0 | 2477 | 4.8 | FFmpeg h264 | 30.1 | 2475 | 5.0 | 97% |
-| H264 1080p30 5 Mbps | 1.3 | VideoToolbox | 30.0 | 4969 | 6.2 | FFmpeg h264 | 30.0 | 4942 | 7.4 | 84% |
-| H264 1080p60 8 Mbps | 1.4 | VideoToolbox | 60.0 | 7994 | 4.5 | FFmpeg h264 | 60.0 | 7979 | 5.5 | 82% |
-| H264 2160p30 20 Mbps | 5.4 | VideoToolbox | 29.9 | 20060 | 11.4 | FFmpeg h264 | 0.0 | 20043 | - | - |
-| H264-High 720p30 2.5 Mbps | 1.2 | VideoToolbox | 30.0 | 2480 | 4.9 | - | - | - | - | - |
-| H264-High 1080p30 5 Mbps | 2.3 | VideoToolbox | 30.0 | 4928 | 6.4 | - | - | - | - | - |
-| H264-High 1080p60 8 Mbps | 2.2 | VideoToolbox | 60.0 | 8043 | 4.5 | - | - | - | - | - |
-| H264-High 2160p30 20 Mbps | 9.3 | VideoToolbox | 29.9 | 19887 | 11.2 | - | - | - | - | - |
+| VP8 720p30 2.5 Mbps | 1.1 | libvpx | 29.9 | 2392 | 5.6 | libvpx | 30.0 | 2391 | 5.9 | 94% |
+| VP8 1080p30 5 Mbps | 2.3 | libvpx | 30.0 | 4795 | 8.5 | libvpx | 30.0 | 4793 | 9.2 | 92% |
+| VP8 1080p60 8 Mbps | 2.1 | libvpx | 60.0 | 7654 | 6.0 | libvpx | 60.0 | 7651 | 6.0 | 101% |
+| VP8 2160p30 20 Mbps | 7.8 | libvpx | 29.9 | 19177 | 12.3 | libvpx | 29.5 | 19220 | 14.5 | 85% |
+| H264 720p30 2.5 Mbps | 0.7 | VideoToolbox | 30.0 | 2476 | 4.9 | FFmpeg h264 | 30.1 | 2475 | 5.0 | 98% |
+| H264 1080p30 5 Mbps | 1.4 | libopus | 30.0 | 4961 | 6.4 | FFmpeg h264 | 30.0 | 4942 | 7.4 | 86% |
+| H264 1080p60 8 Mbps | 1.4 | VideoToolbox | 60.0 | 7986 | 4.3 | FFmpeg h264 | 60.0 | 7979 | 5.5 | 79% |
+| H264 2160p30 20 Mbps | 5.5 | VideoToolbox | 29.9 | 20060 | 11.1 | FFmpeg h264 | 0.0 | 20043 | - | - |
+| H264-High 720p30 2.5 Mbps | 1.2 | VideoToolbox | 30.0 | 2480 | 4.8 | - | - | - | - | - |
+| H264-High 1080p30 5 Mbps | 2.4 | VideoToolbox | 30.0 | 4928 | 6.2 | - | - | - | - | - |
+| H264-High 1080p60 8 Mbps | 2.2 | VideoToolbox | 60.0 | 8041 | 4.4 | - | - | - | - | - |
+| H264-High 2160p30 20 Mbps | 9.3 | VideoToolbox | 29.9 | 19888 | 11.1 | - | - | - | - | - |
 
 ### Video send
 
@@ -200,14 +208,14 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Case | wrtc encoder | wrtc fps | wrtc kbps | wrtc CPU/frame (ms) | aiortc encoder | aiortc fps | aiortc kbps | aiortc CPU/frame (ms) | wrtc, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| H264 720p30 2.5 Mbps | VideoToolbox | 30.0 | 2258 | 2.8 | libx264 | 30.0 | 2509 | 29.5 | 10% |
-| VP8 720p30 1.5 Mbps | libvpx | 30.0 | 1333 | 12.5 | libvpx | 30.0 | 1509 | 12.0 | 104% |
-| VP8 1080p30 1.5 Mbps | libvpx | 15.9 | 1113 | 25.0 | libvpx | 30.0 | 1787 | 19.1 | 131% |
-| VP8 1080p60 1.5 Mbps | libvpx | 9.2 | 752 | 33.7 | libvpx | 60.0 | 3610 | 12.5 | 270% |
-| VP8 2160p30 1.5 Mbps | libvpx | 3.1 | 854 | 94.7 | libvpx | 30.0 | 7482 | 34.4 | 275% |
-| H264 1080p30 3 Mbps | VideoToolbox | 30.0 | 2738 | 3.6 | libx264 | 30.0 | 3017 | 35.5 | 10% |
-| H264 1080p60 3 Mbps | VideoToolbox | 60.0 | 2625 | 2.7 | libx264 | 60.0 | 6003 | 27.3 | 10% |
-| H264 2160p30 3 Mbps | VideoToolbox | 18.2 | 2810 | 7.8 | libx264 | 30.0 | 3001 | 63.6 | 12% |
+| H264 720p30 2.5 Mbps | VideoToolbox | 30.0 | 2254 | 2.9 | libx264 | 30.0 | 2509 | 29.5 | 10% |
+| VP8 720p30 1.5 Mbps | libvpx | 30.0 | 1328 | 12.9 | libvpx | 30.0 | 1509 | 12.0 | 107% |
+| VP8 1080p30 1.5 Mbps | libvpx | 16.0 | 1087 | 26.0 | libvpx | 30.0 | 1787 | 19.1 | 136% |
+| VP8 1080p60 1.5 Mbps | libvpx | 8.8 | 740 | 34.7 | libvpx | 60.0 | 3610 | 12.5 | 277% |
+| VP8 2160p30 1.5 Mbps | libvpx | 3.3 | 920 | 96.9 | libvpx | 30.0 | 7482 | 34.4 | 282% |
+| H264 1080p30 3 Mbps | VideoToolbox | 30.0 | 2736 | 3.6 | libx264 | 30.0 | 3017 | 35.5 | 10% |
+| H264 1080p60 3 Mbps | VideoToolbox | 60.0 | 2622 | 2.9 | libx264 | 60.0 | 6003 | 27.3 | 11% |
+| H264 2160p30 3 Mbps | VideoToolbox | 18.2 | 2803 | 7.9 | libx264 | 30.0 | 3001 | 63.6 | 12% |
 
 ### Video call
 
@@ -215,14 +223,14 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Case | wrtc decoder | wrtc fps | wrtc kbps | wrtc latency p50 / p95 (ms) | wrtc receiver / sender CPU/frame (ms) | aiortc decoder | aiortc fps | aiortc kbps | aiortc latency p50 / p95 (ms) | aiortc receiver / sender CPU/frame (ms) | wrtc, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| VP8 720p30 2.5 Mbps | libvpx | 30.0 | 2505 | 21.6 / 23.7 | 5.0 / 10.1 | libvpx | 30.0 | 1471 | 42.7 / 45.0 | 3.9 / 10.2 | 128% |
-| VP8 1080p30 5 Mbps | libvpx | 30.1 | 4999 | 21.7 / 23.2 | 5.3 / 12.5 | libvpx | 30.1 | 1789 | 43.3 / 45.3 | 4.3 / 14.0 | 124% |
-| H264 720p30 2.5 Mbps | VideoToolbox | 30.0 | 2513 | 24.8 / 26.6 | 5.3 / 2.9 | FFmpeg h264 | 30.0 | 2339 | 43.4 / 45.3 | 3.1 / 26.9 | 168% |
-| H264 1080p30 5 Mbps | VideoToolbox | 30.0 | 5007 | 30.3 / 32.7 | 6.3 / 3.2 | FFmpeg h264 | 30.0 | 2264 | 43.5 / 45.2 | 3.9 / 33.3 | 162% |
-| VP9 720p30 2.5 Mbps | libvpx | 30.0 | 2509 | 21.0 / 23.2 | 5.5 / 16.7 | - | - | - | - | - | - |
-| VP9 1080p30 5 Mbps | libvpx | 30.0 | 5007 | 21.0 / 22.9 | 8.6 / 18.5 | - | - | - | - | - | - |
-| AV1 720p30 2.5 Mbps | dav1d | 30.1 | 2502 | 24.2 / 26.3 | 6.3 / 18.3 | - | - | - | - | - | - |
-| AV1 1080p30 5 Mbps | dav1d | 30.0 | 4991 | 25.8 / 27.5 | 6.2 / 20.5 | - | - | - | - | - | - |
+| VP8 720p30 2.5 Mbps | libvpx | 30.0 | 2506 | 21.2 / 23.1 | 4.9 / 10.3 | libvpx | 30.0 | 1471 | 42.7 / 45.0 | 3.9 / 10.2 | 125% |
+| VP8 1080p30 5 Mbps | libvpx | 30.1 | 5002 | 21.4 / 23.1 | 5.3 / 12.5 | libvpx | 30.1 | 1789 | 43.3 / 45.3 | 4.3 / 14.0 | 125% |
+| H264 720p30 2.5 Mbps | VideoToolbox | 30.0 | 2520 | 24.0 / 25.7 | 5.2 / 3.0 | FFmpeg h264 | 30.0 | 2339 | 43.4 / 45.3 | 3.1 / 26.9 | 166% |
+| H264 1080p30 5 Mbps | VideoToolbox | 30.0 | 5009 | 30.0 / 32.1 | 6.3 / 3.3 | FFmpeg h264 | 30.0 | 2264 | 43.5 / 45.2 | 3.9 / 33.3 | 162% |
+| VP9 720p30 2.5 Mbps | libvpx | 30.0 | 2509 | 21.1 / 23.0 | 5.4 / 16.8 | - | - | - | - | - | - |
+| VP9 1080p30 5 Mbps | libvpx | 30.0 | 5013 | 21.2 / 23.3 | 8.5 / 18.7 | - | - | - | - | - | - |
+| AV1 720p30 2.5 Mbps | dav1d | 30.1 | 2500 | 24.2 / 26.5 | 6.2 / 18.0 | - | - | - | - | - | - |
+| AV1 1080p30 5 Mbps | dav1d | 30.0 | 4988 | 26.2 / 28.2 | 6.0 / 20.4 | - | - | - | - | - | - |
 
 ### Audio receive
 
@@ -230,9 +238,9 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Case | wrtc CPU per stream (% of a core) | wrtc delivered | wrtc loop lag p95 (ms) | aiortc CPU per stream (% of a core) | aiortc delivered | aiortc loop lag p95 (ms) | wrtc, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 stream | 6.07 | 100% | 1.4 | 6.98 | 100% | 1.4 | 87% |
-| 10 streams | 2.47 | 100% | 1.4 | 4.13 | 100% | 1.4 | 60% |
-| 50 streams | 0.97 | 100% | 1.3 | 1.95 | 100% | 3.5 | 50% |
+| 1 stream | 5.26 | 100% | 0.7 | 6.98 | 100% | 1.4 | 75% |
+| 10 streams | 2.31 | 100% | 0.7 | 4.13 | 100% | 1.4 | 56% |
+| 50 streams | 0.96 | 100% | 0.8 | 1.95 | 100% | 3.5 | 49% |
 
 ### Audio send
 
@@ -240,7 +248,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Case | wrtc CPU per stream (% of a core) | wrtc delivered | wrtc loop lag p95 (ms) | aiortc CPU per stream (% of a core) | aiortc delivered | aiortc loop lag p95 (ms) | wrtc, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 stream | 6.19 | 101% | 1.4 | 17.52 | 100% | 1.4 | 35% |
-| 10 streams | 2.71 | 101% | 1.4 | 11.45 | 100% | 1.8 | 24% |
-| 50 streams | 1.47 | 101% | 1.4 | 6.22 | 100% | 6.4 | 24% |
+| 1 stream | 6.58 | 101% | 1.4 | 17.52 | 100% | 1.4 | 38% |
+| 10 streams | 2.59 | 101% | 0.9 | 11.45 | 100% | 1.8 | 23% |
+| 50 streams | 1.38 | 101% | 1.4 | 6.22 | 100% | 6.4 | 22% |
 

@@ -104,6 +104,9 @@ Prebuilt wheels for Linux, macOS and Windows, including free-threaded Python. No
 | VP9 and AV1                                         | ✅                   | ❌             | ✅                        | ✅                  |
 | `pip install` on Linux, macOS and Windows           | ✅                   | ✅             | ✅                        | ❌ system packages  |
 
+Against aiortc, it opens connections 5–7x faster, moves 4.5–9x more data through a data channel and spends less CPU on
+audio. See the [benchmarks](benchmarks.md), which also measure Pion, libdatachannel and webrtc-rs.
+
 ## Where to start
 
 ::::{grid} 1 2 2 3
@@ -179,6 +182,7 @@ Elsewhere, pip builds it from sources. See [Installation](quickstart.md#installa
 
 quickstart
 examples/index
+benchmarks
 ```
 
 ```{toctree}

@@ -232,6 +232,18 @@ def _mode(title: str, data: dict[str, Results], libraries: dict[str, Hello]) -> 
     ]
 
 
+def libraries(data: dict[Mode, dict[str, Results]]) -> list[str]:
+    """The libraries in the results of a run."""
+    return list(dict.fromkeys(name for results in data.values() for name in results))
+
+
+def merge(
+    older: dict[Mode, dict[str, Results]], newer: dict[Mode, dict[str, Results]]
+) -> dict[Mode, dict[str, Results]]:
+    """The results of two runs, a library's from the newer one if it has them."""
+    return {mode: {**older.get(mode, {}), **newer.get(mode, {})} for mode in MODES}
+
+
 def render(data: dict[Mode, dict[str, Results]], libraries: dict[str, Hello]) -> list[str]:
     """The tables of the results: trickle first, then complete descriptions, then the cost of trickle."""
     no_trickle = [name for name in data['trickle'] if not libraries[name]['trickle']]
