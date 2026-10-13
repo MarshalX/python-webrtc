@@ -116,8 +116,12 @@ async def test_connections_set_up_and_closed_repeatedly(create_pc: CreatePC) -> 
 
 
 @pytest.mark.asyncio
-async def test_gathering_runs_its_phases_without_waiting_between_them(create_pc: CreatePC) -> None:
+async def test_gathering_runs_its_phases_without_waiting_between_them(
+    create_pc: CreatePC, pytestconfig: pytest.Config
+) -> None:
     """A description sent without trickle doesn't wait for the empty relay and TCP phases."""
+    if pytestconfig.getoption('--gc-on-emit'):
+        pytest.skip('a wall-clock limit, and --gc-on-emit collects garbage on every event')
     pc = create_pc()
     pc.create_data_channel('gather')
     started = time.perf_counter()
