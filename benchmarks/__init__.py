@@ -5,4 +5,4 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Benchmarks of media processing: run with ``python -m benchmarks`` (``--help`` for options)."""
+"""Benchmarks of python-webrtc, aiortc, Pion, libdatachannel and webrtc-rs: ``python -m benchmarks --help``."""
