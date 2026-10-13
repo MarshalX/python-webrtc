@@ -72,10 +72,7 @@ class DriverError(Exception):
 def _aiortc_python() -> pathlib.Path:
     scripts = AIORTC_VENV / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
     if not scripts.exists():
-        msg = (
-            f'no aiortc environment at {AIORTC_VENV}: uv venv {AIORTC_VENV} && '
-            f'uv pip install --python {scripts} -r benchmarks/requirements-aiortc.txt'
-        )
+        msg = f'no aiortc environment at {AIORTC_VENV}: benchmarks/run.sh sets it up'
         raise DriverError(msg)
     return scripts
 

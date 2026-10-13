@@ -68,7 +68,7 @@ dev = [
     "coverage>=7.10",
     { include-group = "benchmarks" },
 ]
-benchmarks = ["psutil>=7.2", "types-psutil>=7.2"]
+benchmarks = ["psutil>=7.2", "types-psutil>=7.2", "matplotlib>=3.8", "seaborn>=0.13"]
 wpt = [
     "pytest-xdist>=3.8.0",
     "pythonmonkey>=1.3.2",
@@ -225,8 +225,8 @@ permissive-ignores = false
 type-ignore-unknown-tag-behavior = "no-effect"
 # optional modules of the fuzzers, examples and benchmarks, not installed with the project
 ignore-missing-imports = [
-    "aioice", "aioice.*", "aiortc", "aiortc.*", "atheris", "av", "av.*", "httpx", "matplotlib", "matplotlib.*",
-    "pytgcalls", "pytgcalls.*", "pyrogram", "pyrogram.*", "seaborn", "sounddevice",
+    "aioice", "aioice.*", "aiortc", "aiortc.*", "atheris", "av", "av.*", "httpx", "pytgcalls", "pytgcalls.*",
+    "pyrogram", "pyrogram.*", "sounddevice",
 ]
 
 # like WebIDL, the library converts what callers pass (bool(), int(), str()), whatever the annotations say

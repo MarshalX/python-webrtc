@@ -81,7 +81,8 @@ def _annotate(ax: Axes, figure: Figure, *, categories: list[str], libraries: lis
             continue
         labels: list[str] = []
         for bar in container.patches:
-            category = categories[round(bar.get_x() + bar.get_width() / 2)]
+            center: float = bar.get_x() + bar.get_width() / 2
+            category = categories[round(center)]
             labels.append(figure.notes.get(category, {}).get(library, ''))
         ax.bar_label(container, labels=labels, fontsize=8, padding=2)
 

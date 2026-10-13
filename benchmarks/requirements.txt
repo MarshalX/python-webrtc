@@ -1,4 +1,0 @@
-# the runner and the charts: uv pip install -r benchmarks/requirements.txt
-psutil>=7.2
-matplotlib>=3.8
-seaborn>=0.13

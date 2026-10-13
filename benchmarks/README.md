@@ -18,7 +18,7 @@ Run on an idle machine.
 | Driver | Pinned |
 | --- | --- |
 | `drivers/wrtc/` | the working tree |
-| `drivers/aiortc/` | `aiortc==1.15.0` |
+| `drivers/aiortc/` | `aiortc==1.15.0`, `run.sh` |
 | `drivers/pion/` | v4.2.23, `go.sum` |
 | `drivers/libdatachannel/` | v0.24.6, `runner.py` |
 | `drivers/webrtc-rs/` | 0.21.1, `Cargo.lock` |

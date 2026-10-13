@@ -24,12 +24,12 @@ done
 [[ -d .venv ]] || { echo 'run.sh: no .venv, set up the development environment first (make dev)' >&2; exit 1; }
 
 echo '== environments' >&2
-uv pip install --quiet --python .venv -r benchmarks/requirements.txt
+uv sync --quiet --inexact --no-install-project --group benchmarks
 python -c 'import webrtc' >/dev/null
 if [[ ! -d benchmarks/.venv-aiortc ]]; then
     uv venv --quiet --python "$(python -c 'import platform; print(platform.python_version())')" benchmarks/.venv-aiortc
 fi
-uv pip install --quiet --python benchmarks/.venv-aiortc -r benchmarks/requirements-aiortc.txt
+uv pip install --quiet --python benchmarks/.venv-aiortc aiortc==1.15.0
 
 echo '== native drivers' >&2
 python -c 'from benchmarks.runner import build_drivers; build_drivers()'
