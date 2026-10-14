@@ -612,7 +612,6 @@ class LoopState:
     def _release(self) -> None:
         detached = self._detach()
         if detached is None:
-
             self.mailbox.close()
             return
 
