@@ -593,10 +593,12 @@ class LoopState:
             return self.changes == 0 and self.generation == generation
 
     def release(self) -> None:
-        """Drops records, pending calls, roots and handlers once the loop is closed or gone."""
+        """Drops records, pending calls, roots and handlers once the loop is closed or gone; closes the mailbox."""
         # unlocked check: a gc sweep mustn't wait for a release in progress
         if self._released:
+            self.mailbox.close()
             return
+
         others: list[LoopState] = [] if sys.is_finalizing() else _states_elsewhere(self._loop_ref())
         # their roots checks wait while its objects are rebound
         for other in others:
@@ -608,9 +610,31 @@ class LoopState:
                 other.changing(-1)
 
     def _release(self) -> None:
+        detached = self._detach()
+        if detached is None:
+
+            self.mailbox.close()
+            return
+
+        pending, dropped, targets = detached
+        if not sys.is_finalizing():
+            self._unwatch()
+
+        self.mailbox.close()
+        if not sys.is_finalizing():
+            for drop in dropped:
+                _ = drop()
+
+        loop = self._loop_ref()
+        if loop is not None and not sys.is_finalizing():
+            _let_go(loop, list(pending.values()), targets)
+
+    def _detach(self) -> tuple[dict[int, _Call], list[Callable[[], object]], list[EventTarget[Never]]] | None:
+        """Marks the state released and takes what it holds, under the lock; None if it already was."""
         with _acquired(self._lock) as acquired:
             if not acquired or self._released:
-                return
+                return None
+
             self._released = True
             self._scheduled = False
             pending = self.pending
@@ -623,16 +647,8 @@ class LoopState:
             self.active.clear()
             targets = list(self.targets)
             self.targets.clear()
-        if not sys.is_finalizing():
-            self._unwatch()
-        # outside the lock: native calls may never return once exit starts
-        self.mailbox.close()
-        if not sys.is_finalizing():
-            for drop in dropped:
-                _ = drop()
-        loop = self._loop_ref()
-        if loop is not None and not sys.is_finalizing():
-            _let_go(loop, list(pending.values()), targets)
+
+            return pending, dropped, targets
 
 
 class _Drain:
