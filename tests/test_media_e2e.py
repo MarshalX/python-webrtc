@@ -11,13 +11,15 @@ from __future__ import annotations
 
 import array
 import asyncio
+import gc
 import math
+import weakref
 from typing import cast
 
 import pytest
 
 import webrtc
-from tests.helpers import connect, connect_track, wait_for_event, write_video, writing
+from tests.helpers import CreatePC, connect, connect_track, wait_for_event, write_video, writing
 
 TIMEOUT = 20
 WIDTH, HEIGHT = 320, 240
@@ -100,6 +102,65 @@ async def test_video_through_a_connection(caller: webrtc.RTCPeerConnection, call
     assert b < 25
     assert a == 255
     assert timestamps == sorted(set(timestamps))
+
+
+async def sender_reports(pc: webrtc.RTCPeerConnection) -> int:
+    report = await pc.get_stats()
+    return sum(
+        stats.reports_sent
+        for stats in report.values()
+        if isinstance(stats, webrtc.RTCRemoteOutboundRtpStreamStats) and stats.reports_sent is not None
+    )
+
+
+@pytest.mark.asyncio
+async def test_relayed_video_outlasts_the_sender_reports(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, create_pc: CreatePC
+) -> None:
+    """A remote video track sent on another connection keeps sending once its RTCP sender reports arrive."""
+    relay, sink = create_pc(), create_pc()
+    generator = webrtc.VideoTrackGenerator()
+    async with writing(write_video, generator, solid_i420(128, 128, 128), (WIDTH, HEIGHT)):
+        remote = await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
+        relayed = await connect_track(relay, sink, remote, timeout=TIMEOUT)
+        reader = webrtc.MediaStreamTrackProcessor(
+            webrtc.MediaStreamTrackProcessorInit(relayed, max_buffer_size=5)
+        ).readable.get_reader()
+        deadline = asyncio.get_running_loop().time() + TIMEOUT
+        # the second report gives the receiver an NTP estimate of the frames
+        while await sender_reports(callee) < 2:
+            assert asyncio.get_running_loop().time() < deadline, 'no RTCP sender reports arrived'
+            for _ in range(10):
+                cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), TIMEOUT)).value).close()
+        # a second of frames past it
+        for _ in range(30):
+            cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), 1)).value).close()
+        await reader.cancel()
+    generator.track.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_remote_video_track_has_one_sender_a_connection(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, create_pc: CreatePC
+) -> None:
+    """Adding a remote video track again is refused, also through a new wrapper of it."""
+    generator = webrtc.VideoTrackGenerator()
+    remote = await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
+    relay = create_pc()
+    clone = remote.clone()
+    sender = relay.add_track(clone)
+    with pytest.raises(webrtc.InvalidAccessError):
+        relay.add_track(clone)
+
+    wrapper = weakref.ref(clone)
+    del clone
+    _ = gc.collect()
+    assert wrapper() is None
+    again = sender.track
+    assert again is not None
+    with pytest.raises(webrtc.InvalidAccessError):
+        relay.add_track(again)
+    generator.track.stop()
 
 
 #: frames read to check their size

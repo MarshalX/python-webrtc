@@ -10,6 +10,7 @@
 #include <cmath>
 #include <rtc_base/crypto_random.h>
 
+#include "../media/relayed_video_track.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
 #include "rtc_video_track_source.h"
@@ -418,6 +419,17 @@ namespace python_webrtc {
       clonedMediaStreamTrack->Stop();
     }
     return clonedMediaStreamTrack;
+  }
+
+  webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> MediaStreamTrack::SentTrack() {
+    if (_track->kind() != webrtc::MediaStreamTrackInterface::kVideoKind) {
+      return _track;
+    }
+    webrtc::scoped_refptr<webrtc::VideoTrackInterface> video(static_cast<webrtc::VideoTrackInterface *>(_track.get()));
+    if (!video->GetSource()->remote()) {
+      return _track;
+    }
+    return webrtc::make_ref_counted<RelayedVideoTrack>(std::move(video));
   }
 
   MediaStreamTrack::operator webrtc::scoped_refptr<webrtc::AudioTrackInterface>() {

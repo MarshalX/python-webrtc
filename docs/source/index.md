@@ -16,6 +16,11 @@ asyncio. Talk to browsers, servers, SFUs and AI agents peer-to-peer, with no ven
 pip install wrtc
 ```
 
+:::{tip}
+Coming from aiortc? Install `wrtc[aiortc]`, change `from aiortc` to `from webrtc.aiortc`, and your code runs on Chrome's
+engine. See [Migrating from aiortc](guides/aiortc.md).
+:::
+
 ## If you know it in JavaScript, you know it in Python
 
 ::::{tab-set}
@@ -196,6 +201,7 @@ guides/events
 guides/media
 guides/h264
 guides/field-trials
+guides/aiortc
 ```
 
 ```{toctree}

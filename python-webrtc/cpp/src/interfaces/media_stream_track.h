@@ -137,6 +137,8 @@ namespace python_webrtc {
 
     webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track() { return _track; }
 
+    webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> SentTrack();
+
     explicit operator webrtc::scoped_refptr<webrtc::AudioTrackInterface>();
 
     explicit operator webrtc::scoped_refptr<webrtc::VideoTrackInterface>();

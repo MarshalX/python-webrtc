@@ -439,7 +439,7 @@ namespace python_webrtc {
         _descriptions;
     // bumped by the events that change descriptions (see RefreshDescriptions)
     uint64_t _descriptionsGeneration = 0;
-    uint64_t _descriptionsCachedGeneration = 0;
+    std::array<uint64_t, kDescriptionKinds> _descriptionsCachedGeneration{};
     std::map<uint64_t, DescriptionsSnapshot> _snapshots;
     uint64_t _lastSnapshot = 0;
     std::optional<DescriptionsSnapshot> _shown;

@@ -14,6 +14,7 @@
 #include <pybind11/stl.h>
 
 #include "../enums/enums.h"
+#include "../media/relayed_video_track.h"
 #include "../utils/gil.h"
 #include "rtc_peer_connection/rtc_peer_connection.h"
 
@@ -90,6 +91,9 @@ namespace python_webrtc {
 
   std::optional<std::shared_ptr<MediaStreamTrack>> RTCRtpSender::GetTrack() {
     auto track = _sender->track();
+    if (auto *relayed = dynamic_cast<RelayedVideoTrack *>(track.get())) {
+      track = relayed->track();
+    }
     // wrapped out of the lock: wrapping may wait for the signaling thread
     auto wrapper = MediaStreamTrack::registry().GetOrCreate(_factory, track);
 
@@ -223,7 +227,7 @@ namespace python_webrtc {
   }
 
   bool RTCRtpSender::ReplaceTrack(std::optional<std::reference_wrapper<MediaStreamTrack>> track) {
-    return _sender->SetTrack(track ? track->get().track().get() : nullptr);
+    return _sender->SetTrack(track ? track->get().SentTrack().get() : nullptr);
   }
 
   void RTCRtpSender::SetStreams(const std::vector<std::string> &streamIds) {
