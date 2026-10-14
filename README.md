@@ -28,6 +28,9 @@ stats. Talk to browsers, servers, SFUs and AI agents peer-to-peer, with no vendo
 pip install wrtc
 ```
 
+> **Coming from aiortc?** Install `wrtc[aiortc]`, change `from aiortc` to `from webrtc.aiortc`, and your code runs on
+> Chrome's engine. See [Migrating from aiortc](https://wrtc.marshal.dev/guides/aiortc/).
+
 ## If you know it in JavaScript, you know it in Python
 
 <table>

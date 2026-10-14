@@ -15,6 +15,7 @@
 #include <pc/rtp_media_utils.h>
 #include <pc/session_description.h>
 
+#include "../../media/relayed_video_track.h"
 #include "../../utils/gil.h"
 #include "../../utils/libwebrtc_thread.h"
 #include "../peer_connection_factory.h"
@@ -425,6 +426,17 @@ namespace python_webrtc {
     });
   }
 
+  namespace {
+
+    bool RelaysTrack(webrtc::PeerConnectionInterface &pc, const webrtc::MediaStreamTrackInterface *track) {
+      return std::ranges::any_of(pc.GetSenders(), [track](const auto &sender) {
+        const auto *relayed = dynamic_cast<const RelayedVideoTrack *>(sender->track().get());
+        return relayed != nullptr && relayed->track().get() == track;
+      });
+    }
+
+  } // namespace
+
   std::shared_ptr<RTCRtpSender> RTCPeerConnection::AddTrack(MediaStreamTrack &mediaStreamTrack,
                                                             const std::vector<MediaStream *> &mediaStreams) {
     auto pc = connection();
@@ -438,7 +450,12 @@ namespace python_webrtc {
       streamIds.emplace_back(stream->stream()->id());
     }
 
-    auto result = pc->AddTrack(mediaStreamTrack.track(), streamIds);
+    auto track = mediaStreamTrack.track();
+    auto sent = mediaStreamTrack.SentTrack();
+    if (sent != track && RelaysTrack(*pc, track.get())) {
+      throw RTCException(webrtc::RTCErrorType::INVALID_PARAMETER, "Sender already exists for track " + track->id());
+    }
+    auto result = pc->AddTrack(sent, streamIds);
     if (!result.ok()) {
       throw RTCException(result.error());
     }
@@ -503,7 +520,8 @@ namespace python_webrtc {
     if (!pc) {
       throw RTCException(closedError("addTransceiver"));
     }
-    return AddedTransceiver(init ? pc->AddTransceiver(track.track(), init->get()) : pc->AddTransceiver(track.track()));
+    return AddedTransceiver(init ? pc->AddTransceiver(track.SentTrack(), init->get())
+                                 : pc->AddTransceiver(track.SentTrack()));
   }
 
   std::shared_ptr<RTCRtpTransceiver> RTCPeerConnection::AddedTransceiver(

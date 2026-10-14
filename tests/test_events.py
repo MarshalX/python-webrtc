@@ -328,6 +328,23 @@ async def test_ice_candidates_and_end_of_candidates(pc: webrtc.RTCPeerConnection
 
 
 @pytest.mark.asyncio
+async def test_reading_one_description_refreshes_only_its_own(create_pc: CreatePC) -> None:
+    """Reading the remote description leaves the local one to show the candidates gathered since."""
+    pc = create_pc()
+    pc.on('icegatheringstatechange', lambda _event: None)
+    pc.on('connectionstatechange', lambda _event: None)
+    pc.add_transceiver(webrtc.MediaType.audio)
+    await pc.set_local_description()
+    assert pc.remote_description is None
+    assert pc.local_description is not None
+    await wait_for_ice_gathering_complete(pc)
+    assert pc.remote_description is None
+
+    assert pc.local_description is not None
+    assert 'a=candidate:' in pc.local_description.sdp
+
+
+@pytest.mark.asyncio
 async def test_descriptions_change_with_signaling_events(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:

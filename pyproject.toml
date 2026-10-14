@@ -57,6 +57,9 @@ Tracker = "https://github.com/MarshalX/python-webrtc/issues"
 Changelog = "https://wrtc.marshal.dev/change_log/"
 Author = "https://github.com/MarshalX"
 
+[project.optional-dependencies]
+aiortc = ["pyee>=13,<15", "av>=14,<18"]
+
 [dependency-groups]
 test = ["pytest>=8", "pytest-asyncio>=0.24", "pytest-timeout>=2.3"]
 dev = [
@@ -143,7 +146,13 @@ include = [
     "python-webrtc/python/webrtc/**/*.py", "tests/**/*.py", "examples/**/*.py", "benchmarks/**/*.py", "cmake/**/*.py",
     "docs/**/*.py", "scripts/**/*.py",
 ]
-extend-exclude = ["*.pyi"]
+# copied from aiortc, kept verbatim
+extend-exclude = [
+    "*.pyi", "python-webrtc/python/webrtc/aiortc/sdp.py", "python-webrtc/python/webrtc/aiortc/mediastreams.py",
+    "python-webrtc/python/webrtc/aiortc/contrib/media.py", "python-webrtc/python/webrtc/aiortc/contrib/signaling.py",
+    "python-webrtc/python/webrtc/aiortc/rtcconfiguration.py", "python-webrtc/python/webrtc/aiortc/rtcrtpparameters.py",
+    "python-webrtc/python/webrtc/aiortc/rtcsessiondescription.py", "python-webrtc/python/webrtc/aiortc/stats.py",
+]
 
 [tool.ruff.format]
 quote-style = "single"
@@ -158,11 +167,15 @@ ignore = [
     "DOC502",  # exceptions raised by native calls and helpers are documented too
     "PLC1901",  # pyrefly's implicit-bool wants explicit comparisons, like != ''
 ]
+# the aiortc layer logs through one logger, shared by its modules
+logger-objects = ["webrtc.aiortc._utils.logger"]
 
 [tool.ruff.lint.per-file-ignores]
 # camelCase aliases of the W3C names; spec internal slots shared between the classes of the package
 "python-webrtc/python/webrtc/**" = ["N815", "N816", "SLF001"]
 "python-webrtc/python/webrtc/interfaces/rtc_peer_connection.py" = ["PLR0904"]  # the W3C interface
+# aiortc's names and signatures; its docs document the API
+"python-webrtc/python/webrtc/aiortc/**" = ["D1", "RUF067", "PLC0414", "N802", "N803", "FBT001", "FBT002", "PLR0913", "PLR0917"]
 # user callbacks error the stream, as the specification says; handler errors go to the loop's exception handler
 "python-webrtc/python/webrtc/{streams.py,utils/events.py}" = ["BLE001"]
 # native leak counters and queues have no public API; chaos replays a seeded random
@@ -204,6 +217,7 @@ max-bool-expr = 3
 max-public-methods = 20
 
 [tool.ruff.lint.isort]
+combine-as-imports = true
 required-imports = ["from __future__ import annotations"]
 known-first-party = ["webrtc", "wrtc", "tests", "benchmarks", "scripts"]
 
@@ -214,6 +228,13 @@ project-includes = [
     "python-webrtc/python/webrtc/**/*.py", "tests/**/*.py", "examples/**/*.py", "benchmarks/**/*.py", "cmake/**/*.py",
     "scripts/**/*.py", "stubs/**/*.pyi",
 ]
+# copied from aiortc, kept verbatim
+project-excludes = [
+    "python-webrtc/python/webrtc/aiortc/sdp.py", "python-webrtc/python/webrtc/aiortc/mediastreams.py",
+    "python-webrtc/python/webrtc/aiortc/contrib/media.py", "python-webrtc/python/webrtc/aiortc/contrib/signaling.py",
+    "python-webrtc/python/webrtc/aiortc/rtcconfiguration.py", "python-webrtc/python/webrtc/aiortc/rtcrtpparameters.py",
+    "python-webrtc/python/webrtc/aiortc/rtcsessiondescription.py", "python-webrtc/python/webrtc/aiortc/stats.py",
+]
 # tests/fuzz runs with its directory on PYTHONPATH (.github/scripts/fuzz.sh)
 search-path = ["python-webrtc/python", "stubs", ".", "tests/fuzz"]
 python-version = "3.9"
@@ -223,11 +244,16 @@ strict-callable-subtyping = true
 infer-with-first-use = false
 permissive-ignores = false
 type-ignore-unknown-tag-behavior = "no-effect"
-# optional modules of the fuzzers, examples and benchmarks, not installed with the project
+# optional modules of the fuzzers, examples, benchmarks and the aiortc extra, not installed with the project
 ignore-missing-imports = [
-    "aioice", "aioice.*", "aiortc", "aiortc.*", "atheris", "av", "av.*", "httpx", "pytgcalls", "pytgcalls.*",
-    "pyrogram", "pyrogram.*", "sounddevice",
+    "aioice", "aioice.*", "aiortc", "aiortc.*", "atheris", "av", "av.*", "httpx", "pyee", "pyee.*", "pytgcalls",
+    "pytgcalls.*", "pyrogram", "pyrogram.*", "sounddevice",
 ]
+
+# aiortc's events are emitted and their handlers registered for the effect
+[[tool.pyrefly.sub-config]]
+matches = "python-webrtc/python/webrtc/aiortc/**"
+errors = { unnecessary-type-conversion = false, unused-call-result = false }
 
 # like WebIDL, the library converts what callers pass (bool(), int(), str()), whatever the annotations say
 [[tool.pyrefly.sub-config]]

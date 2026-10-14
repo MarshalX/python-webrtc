@@ -35,3 +35,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Binary distributions of this software include WebRTC and other third-party
 libraries. These libraries and licenses are documented in
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+The aiortc compatibility layer contains files copied from [aiortc](https://github.com/aiortc/aiortc) under
+its BSD 3-Clause license. They keep its notice in their headers and are listed in
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

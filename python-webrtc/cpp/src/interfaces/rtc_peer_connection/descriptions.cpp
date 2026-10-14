@@ -530,8 +530,9 @@ namespace python_webrtc {
 
     const std::scoped_lock lock(_descriptionsMutex);
     // while events are delivered, a description only changes with them; without events it's always current
-    const bool refresh = shown || !IsBound() || _descriptionsCachedGeneration != _descriptionsGeneration;
-    _descriptionsCachedGeneration = _descriptionsGeneration;
+    auto &cached = _descriptionsCachedGeneration[static_cast<size_t>(kind)];
+    const bool refresh = shown || !IsBound() || cached != _descriptionsGeneration;
+    cached = _descriptionsGeneration;
     return FindOrCreateDescription(view, live, refresh);
   }
 
