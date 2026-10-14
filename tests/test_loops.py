@@ -14,6 +14,7 @@ import gc
 import sys
 import threading
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
 import pytest
@@ -23,10 +24,22 @@ import webrtc
 import wrtc
 from tests.helpers import called, mistyped
 from tests.isolation import isolated
+from webrtc.utils import loops
 from webrtc.utils.events import EventTarget
 from webrtc.utils.loops import LoopState, checking_roots
 
 TIMEOUT = 5
+
+
+def _handled_on(loop: asyncio.AbstractEventLoop) -> tuple[LoopState, webrtc.RTCPeerConnection]:
+    """A connection with a handler on the loop, bound there."""
+
+    def bind() -> tuple[LoopState, webrtc.RTCPeerConnection]:
+        pc = webrtc.RTCPeerConnection()
+        pc.on('negotiationneeded', lambda _event: None)
+        return LoopState.of(asyncio.get_running_loop()), pc
+
+    return loop.run_until_complete(called(bind))
 
 
 def _in_thread(target: Callable[[], None]) -> None:
@@ -485,13 +498,7 @@ def test_only_the_loop_of_an_object_roots_it() -> None:
 def test_release_binds_an_object_to_a_loop_with_handlers_of_it() -> None:
     """A released loop's object is bound to a loop with handlers of it."""
     first = asyncio.new_event_loop()
-
-    def bind() -> tuple[LoopState, webrtc.RTCPeerConnection]:
-        pc = webrtc.RTCPeerConnection()
-        pc.on('negotiationneeded', lambda _event: None)
-        return LoopState.of(asyncio.get_running_loop()), pc
-
-    released, pc = first.run_until_complete(called(bind))
+    released, pc = _handled_on(first)
 
     def handle_elsewhere() -> None:
         pc.on('icecandidate', lambda _event: None)
@@ -510,13 +517,7 @@ def test_release_binds_an_object_to_a_loop_with_handlers_of_it() -> None:
 def test_release_of_another_loop_keeps_the_binding() -> None:
     """It drops only that loop's handlers."""
     first = asyncio.new_event_loop()
-
-    def bind() -> tuple[LoopState, webrtc.RTCPeerConnection]:
-        pc = webrtc.RTCPeerConnection()
-        pc.on('negotiationneeded', lambda _event: None)
-        return LoopState.of(asyncio.get_running_loop()), pc
-
-    bound, pc = first.run_until_complete(called(bind))
+    bound, pc = _handled_on(first)
 
     def handle_elsewhere() -> LoopState:
         pc.on('icecandidate', lambda _event: None)
@@ -611,6 +612,48 @@ def test_a_pending_operation_binds_a_connection_bound_to_no_loop() -> None:
         asyncio.run(operate())
     finally:
         pc.close()
+
+
+def test_a_loop_made_while_another_is_released_never_sees_its_objects_active_and_unbound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A loop whose state is made after a release began sees that loop's objects orphaned, not unbound."""
+    first = asyncio.new_event_loop()
+    released, pc = _handled_on(first)
+    swept, detached = threading.Event(), threading.Event()
+    sweep, unwatch = loops._sweep, LoopState._unwatch
+
+    def sweep_then_wait() -> None:
+        sweep()
+        if threading.current_thread().name.startswith('checker') and not swept.is_set():
+            swept.set()
+            _ = detached.wait(TIMEOUT)
+
+    def unwatch_after_the_check(self: LoopState) -> None:
+        if self is released:
+            # between marking the state released and closing its mailbox
+            detached.set()
+            _ = checked.exception(TIMEOUT)
+
+        unwatch(self)
+
+    monkeypatch.setattr(loops, '_sweep', sweep_then_wait)
+    monkeypatch.setattr(LoopState, '_unwatch', unwatch_after_the_check)
+    with ThreadPoolExecutor(1, thread_name_prefix='checker') as pool:
+        # its state is made after its sweep, so the release doesn't hold its checks
+        checked = pool.submit(asyncio.run, called(lambda: loops.check_bound(pc)))
+        assert swept.wait(TIMEOUT)
+
+        first.close()
+        released.release()
+        monkeypatch.undo()
+
+        checked.result(TIMEOUT)
+
+    assert detached.is_set()
+    assert pc.event_names() == set()
+
+    pc.close()
 
 
 def test_handlers_bind_an_object_bound_to_a_closed_loop_not_swept_yet() -> None:

@@ -450,6 +450,41 @@ def test_connection_bound_by_its_child_is_unrooted_by_a_close_from_another_threa
     asyncio.run(root_a_child())
 
 
+@pytest.mark.parametrize('target', ['connection', 'channel'])
+def test_a_closing_connection_and_its_children_end_their_activity_before_unbinding(target: str) -> None:
+    """A loop made while a close runs never sees the connection or a child active and unbound."""
+    pc = webrtc.RTCPeerConnection()
+    channel = pc.create_data_channel('closing') if target == 'channel' else None
+    handled = pc if channel is None else channel
+
+    async def check_on_a_new_loop() -> None:  # ruff: ignore[unused-async]
+        # made after the close began, this loop's checks don't wait for it
+        loops.check_bound(handled)
+
+    async def close_while_handled() -> None:
+        if channel is None:
+            _ = pc.on('negotiationneeded', lambda _event: None)
+        else:
+            _ = channel.on('open', lambda _event: None)
+
+        assert handled._activity() is not None
+
+        closer = threading.Thread(target=pc.close)
+        wrtc._testing.park('connection.close')
+
+        try:
+            closer.start()
+            assert wrtc._testing.parked('connection.close', 10)
+            await asyncio.get_running_loop().run_in_executor(None, asyncio.run, check_on_a_new_loop())
+        finally:
+            wrtc._testing.release('connection.close')
+            closer.join(10)
+
+        assert pc.signaling_state == webrtc.RTCSignalingState.closed
+
+    asyncio.run(close_while_handled())
+
+
 def test_close_unbinding_a_child_while_its_loop_roots_it(monkeypatch: pytest.MonkeyPatch) -> None:
     """A child rooted while another thread's close unbinds it ends up unrooted."""
     pc = webrtc.RTCPeerConnection()
