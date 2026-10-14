@@ -188,8 +188,7 @@ namespace python_webrtc {
     return created;
   }
 
-  void RTCPeerConnection::UnbindTransports() {
-    auto pc = connection();
+  void RTCPeerConnection::UnbindTransports(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
     if (!pc) {
       return;
     }

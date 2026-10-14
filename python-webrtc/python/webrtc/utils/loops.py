@@ -215,13 +215,16 @@ class LoopState:
         """Returns the state of a mailbox id if its loop is open, else None, releasing a closed loop's state."""
         if mailbox_id is None:
             return None
+
         with _states_lock:
             state = _states.get(mailbox_id)
-        if state is None or state._released:
+        if state is None:
             return None
+
         loop = state._loop_ref()
-        if loop is not None and not loop.is_closed():
+        if not state._released and loop is not None and not loop.is_closed():
             return state
+
         state.release()
         return None
 
