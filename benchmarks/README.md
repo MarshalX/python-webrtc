@@ -39,6 +39,7 @@ Run on an idle machine.
 - Host candidates on loopback, no STUN or TURN; library defaults otherwise.
 - Pion is the media peer: it sends pre-encoded files and counts what it receives.
 - Each case runs 3 times in fresh processes, shuffled; tables show medians.
+- `RESULTS.md` and the charts take each library's newest run, so `--libs wrtc` refreshes Python WebRTC alone.
 
 ## Caveats
 

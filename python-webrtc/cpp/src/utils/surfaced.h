@@ -53,6 +53,21 @@ namespace python_webrtc {
       return _value ? *_value : current;
     }
 
+    // like Shown, but reads the current value (a call to libwebrtc's thread) only when it's shown
+    template <typename Current>
+    T ShownOr(bool bound, Current current) {
+      {
+        const std::scoped_lock lock(_mutex);
+        if (bound && _value) {
+          return *_value;
+        }
+        if (!bound) {
+          _value.reset();
+        }
+      }
+      return current();
+    }
+
   private:
     std::mutex _mutex;
     std::optional<T> _value;

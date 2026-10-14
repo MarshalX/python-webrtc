@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "wrtc"  # "webrtc" isn't allowed on PyPI
-version = "0.0.1"
+version = "0.0.2"
 description = "Chrome's WebRTC engine (libwebrtc M152), with the browser API, in Python"
 readme = "README.md"
 license = "BSD-3-Clause"

@@ -344,10 +344,22 @@ namespace pybind11::detail {
     }
 
     static handle cast(T src, return_value_policy /*unused*/, handle /*unused*/) {
-      for (const auto &[member, memberValue] : Enum::values) {
-        if (member == src) {
-          // looked up when converting, as webrtc.enums may be imported after this module
-          return module_::import("webrtc.enums").attr(Enum::name.text)(memberValue).release();
+      using Members = std::array<object, Enum::values.size()>;
+      PYBIND11_CONSTINIT static gil_safe_call_once_and_store<Members> storage;
+      // looked up on the first conversion, as webrtc.enums may be imported after this module
+      const auto &members = storage
+                                .call_once_and_store_result([]() {
+                                  auto type = module_::import("webrtc.enums").attr(Enum::name.text);
+                                  Members result;
+                                  for (size_t i = 0; i < Enum::values.size(); ++i) {
+                                    result[i] = type(Enum::values[i].second);
+                                  }
+                                  return result;
+                                })
+                                .get_stored();
+      for (size_t i = 0; i < Enum::values.size(); ++i) {
+        if (Enum::values[i].first == src) {
+          return members[i].inc_ref();
         }
       }
       throw value_error(std::string(Enum::name.text) + " has no member for " + std::to_string(static_cast<int>(src)));

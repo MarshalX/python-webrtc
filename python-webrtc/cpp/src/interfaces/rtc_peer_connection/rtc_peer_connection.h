@@ -11,6 +11,7 @@
 #include <array>
 #include <atomic>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -426,7 +427,8 @@ namespace python_webrtc {
     Surfaced<IceGatheringState> _surfacedIceGatheringState;
     Surfaced<PeerConnectionState> _surfacedConnectionState;
     // the states libwebrtc reported last, on the signaling thread
-    SignalingState _lastSignalingState = SignalingState::kStable;
+    // as libwebrtc reported it: read without waiting for the signaling thread
+    std::atomic<SignalingState> _lastSignalingState{SignalingState::kStable};
     IceGatheringState _lastIceGatheringState = IceGatheringState::kIceGatheringNew;
     std::mutex _connectionStatesMutex;
     IceConnectionState _lastIceConnectionState = IceConnectionState::kIceConnectionNew;
@@ -444,6 +446,8 @@ namespace python_webrtc {
     uint64_t _shownGeneration = 0;
     // the snapshot of the operation that completed last
     std::atomic<uint64_t> _completionSnapshot{0};
+    // [[MaxMessageSize]] of the current SCTP transport as the last applied description set it, NaN without one
+    std::atomic<double> _maxMessageSize{std::numeric_limits<double>::quiet_NaN()};
 
     // media sections of the remote description the remote peer ended the candidates of
     std::mutex _remoteEndOfCandidatesMutex;
@@ -464,6 +468,8 @@ namespace python_webrtc {
     Wrappers<RTCRtpReceiver, webrtc::RtpReceiverInterface> _receivers;
     std::shared_ptr<RTCSctpTransport> _sctp;
     std::vector<std::shared_ptr<RTCDtlsTransport>> _dtlsTransports;
+    // each section's ICE transport, as libwebrtc's lookup waits for the network thread on every candidate
+    std::map<std::string, std::shared_ptr<RTCIceTransport>> _iceTransportsByMid;
     // in use at the last stable state; signaling thread
     std::vector<std::weak_ptr<RTCDtlsTransport>> _negotiatedTransports;
     // kept until closed

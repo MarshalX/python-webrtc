@@ -724,9 +724,6 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
 
         async with self._operation():
             self._check_state('add an ICE candidate')
-            if self.remote_description is None:
-                msg = 'A candidate can only be added once there is a remote description'
-                raise webrtc.InvalidStateError(msg)
             await later()
             await call_native(self._native_obj.addIceCandidate, candidate_str, sdp_mid, sdp_m_line_index, ufrag)
 

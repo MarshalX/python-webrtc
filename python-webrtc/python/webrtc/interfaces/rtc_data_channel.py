@@ -245,6 +245,13 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannel
         return 'data queued' if self.buffered_amount > 0 else None
 
     @override
+    def _changes_activity(self, name: str) -> bool:
+        # only a sent message that empties the queue changes activity
+        if name == 'message':
+            return False
+        return name != '_sent' or self.buffered_amount == 0
+
+    @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
         if name in {'open', 'message'} and self.ready_state != RTCDataChannelState.open:
             # discarded: closed before open, or a message once closing
@@ -391,14 +398,21 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannel
             webrtc.InvalidStateError: If the channel isn't open.
             webrtc.OperationError: If the send queue is full.
         """
-        with self._changing():
-            if isinstance(data, str):
-                self._native_obj.send(usv_string(data).encode(), binary=False)
-            elif isinstance(data, (bytes, bytearray, memoryview, Blob)):
-                self._native_obj.send(bytes(data), binary=True)
-            else:
-                msg = f'data must be str, bytes-like or Blob, not {type(data).__name__}'
-                raise TypeError(msg)
+        if isinstance(data, str):
+            message, binary = usv_string(data).encode(), False
+        elif isinstance(data, (bytes, bytearray, memoryview, Blob)):
+            message, binary = bytes(data), True
+        else:
+            msg = f'data must be str, bytes-like or Blob, not {type(data).__name__}'
+            raise TypeError(msg)
+        native = self._native_obj
+        # only the first queued message changes activity ('data queued')
+        if native.bufferedAmount == 0:
+            with self._changing():
+                _ = native.send(message, binary=binary)
+        elif native.send(message, binary=binary):
+            # the queue emptied meanwhile, on another thread
+            self._update()
 
     def close(self) -> None:
         """Starts closing the channel, but messages queued before are still sent.

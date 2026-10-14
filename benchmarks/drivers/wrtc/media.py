@@ -17,7 +17,7 @@ from benchmarks.drivers import frames
 from benchmarks.protocol import now
 
 AUDIO_RATE = 48_000
-AUDIO_FRAMES = 480
+AUDIO_FRAMES = 960
 #: the MIME type and the parts of the fmtp line of each codec name of the protocol
 CODECS: dict[str, tuple[str, tuple[str, ...]]] = {
     'VP8': ('video/VP8', ()),
@@ -29,7 +29,7 @@ CODECS: dict[str, tuple[str, tuple[str, ...]]] = {
 
 
 class ToneSource:
-    """A tone, 10 ms chunks of 48 kHz mono written in real time to a generator: one track for every connection."""
+    """A tone, 20 ms chunks of 48 kHz mono written in real time to a generator: one track for every connection."""
 
     def __init__(self) -> None:
         self.track = webrtc.MediaStreamTrackGenerator('audio')
@@ -46,14 +46,14 @@ class ToneSource:
                 sample_rate=AUDIO_RATE,
                 number_of_frames=AUDIO_FRAMES,
                 number_of_channels=1,
-                timestamp=written * 10_000,
+                timestamp=written * 20_000,
                 data=chunk,
             )
             await writer.write(webrtc.AudioData(init))
             written += 1
 
-            # the next chunk is due 10 ms after the last
-            await asyncio.sleep(max(0.0, start + written / 100 - loop.time()))
+            # the next chunk is due 20 ms after the last
+            await asyncio.sleep(max(0.0, start + written / 50 - loop.time()))
 
 
 class VideoSource:

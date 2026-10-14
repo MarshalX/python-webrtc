@@ -289,6 +289,28 @@ async def channel_with_data_buffered_and_no_handlers() -> Scene:
     return Scene([tracked], [caller, callee], end, ends_by_itself=True)
 
 
+async def channel_with_messages_queued_behind_others() -> Scene:
+    """Channel kept until the last of several queued messages is sent."""
+    caller, callee = pair()
+    channel = caller.create_data_channel('queued')
+    opened = wait_for_event(channel, 'open', TIMEOUT)
+    await connect(caller, callee)
+    await opened
+    for _ in range(20):
+        channel.send(bytes(20_000))
+    assert channel.buffered_amount > 0
+    tracked = track(channel)
+
+    async def end() -> None:
+        def drained() -> bool:
+            item = tracked.ref()
+            return item is None or not isinstance(item, webrtc.RTCDataChannel) or item.buffered_amount == 0
+
+        await wait_until(drained, 'the buffer to drain', TIMEOUT)
+
+    return Scene([tracked], [caller, callee], end, ends_by_itself=True)
+
+
 async def remote_track_with_an_ended_handler() -> Scene:
     """Remote track with an ended handler."""
     caller, callee = pair()
@@ -461,6 +483,7 @@ ROWS: list[Builder] = [
     channel_open_with_a_message_handler,
     channel_closed_after_its_close_handler_ran,
     channel_with_data_buffered_and_no_handlers,
+    channel_with_messages_queued_behind_others,
     remote_track_with_an_ended_handler,
     generator_track_with_an_ended_handler('audio'),
     generator_track_with_an_ended_handler('video'),

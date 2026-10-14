@@ -58,6 +58,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help='collect garbage before every record a loop drains, and on the Dispatcher thread on every wake',
     )
     parser.addoption('--stress', action='store_true', help='run the long stress tests too')
+    parser.addoption(
+        '--dispatcher-wake',
+        action='store_true',
+        help='wake every loop through the Dispatcher, as on Windows (isolated tests keep the default)',
+    )
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -83,6 +88,8 @@ def pytest_configure(config: pytest.Config) -> None:
     webrtc.allow_loopback()
     _ = os.environ.setdefault('WRTC_CHECK_ROOTS', '1')
     _record_wrappers()
+    if config.getoption('--dispatcher-wake'):
+        loops.LoopState.watches_pipe = False
     if not config.getoption('--gc-on-emit'):
         return
     # gc can run on any thread with the GIL, Dispatcher wakes included: releases must block neither

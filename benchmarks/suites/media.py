@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Generic, Literal, TypedDict, TypeVar
 
 from benchmarks import fixtures, markdown
-from benchmarks.figures import Figure
+from benchmarks.figures import Detail, Figure
 from benchmarks.fixtures import Video
 from benchmarks.markdown import BASELINE
 from benchmarks.runner import MEDIA_LIBRARIES, DriverError, pair
@@ -49,7 +49,7 @@ CODECS: dict[str, dict[str, tuple[str, ...]]] = {
 }
 #: the codecs of the files Pion sends
 PION_CODECS = sorted({codec for codecs in CODECS['video_receive'].values() for codec in codecs})
-#: the most aiortc's encoders send (it has no API for a cap), so the send cases cap both libraries there
+#: the most aiortc's encoders target (it has no API for a cap), so the send cases cap both libraries there
 SEND_CAPS = {'VP8': 1_500_000, 'H264': 3_000_000}
 
 
@@ -443,6 +443,14 @@ def _median_of(values: Iterable[float | None]) -> float:
     return median([value for value in values if value is not None])
 
 
+def _kbps(runs: list[VideoRun]) -> float:
+    return _median_of(run['kbps'] for run in runs)
+
+
+def _fps(runs: list[VideoRun]) -> float:
+    return _median_of(run['fps'] for run in runs)
+
+
 def _cpu(runs: list[VideoRun]) -> float:
     return _median_of(run['cpu_ms_per_frame'] for run in runs)
 
@@ -455,12 +463,12 @@ def _implementation(runs: list[VideoRun]) -> str:
     return runs[0]['implementation'] if len(runs) != 0 else '-'
 
 
-def _fps(runs: list[VideoRun]) -> str:
-    return markdown.number(_median_of(run['fps'] for run in runs))
+def _fps_cell(runs: list[VideoRun]) -> str:
+    return markdown.number(_fps(runs))
 
 
-def _kbps(runs: list[VideoRun]) -> str:
-    return markdown.number(_median_of(run['kbps'] for run in runs), 0)
+def _kbps_cell(runs: list[VideoRun]) -> str:
+    return markdown.number(_kbps(runs), 0)
 
 
 def _latency(runs: list[VideoRun]) -> str:
@@ -474,7 +482,7 @@ def _cpus(runs: list[VideoRun]) -> str:
 
 def _columns(codec: str) -> list[Column[VideoRun]]:
     """The columns of a video kind: its codec's implementation, the frame rate and the bitrate."""
-    return [Column(codec, _implementation), Column('fps', _fps), Column('kbps', _kbps)]
+    return [Column(codec, _implementation), Column('fps', _fps_cell), Column('kbps', _kbps_cell)]
 
 
 VIDEO_COLUMNS: dict[str, list[Column[VideoRun]]] = {
@@ -545,6 +553,20 @@ def _video(data: MediaResults, kind: str, reference: dict[str, float] | None = N
 
 def _audio_table(data: MediaResults, kind: str) -> list[str]:
     return _table(_audio_runs(data, kind), data['order'], columns=AUDIO_COLUMNS, compare=_audio_cpu)
+
+
+def libraries(data: MediaResults) -> list[str]:
+    """The measured libraries in the results of a run."""
+    return list(data['libraries'])
+
+
+def merge(older: MediaResults, newer: MediaResults) -> MediaResults:
+    """The results of two runs, a library's from the newer one if it has them."""
+    return {
+        'libraries': {**older['libraries'], **newer['libraries']},
+        'reference_ms': {**older['reference_ms'], **newer['reference_ms']},
+        'order': list(dict.fromkeys(older['order'] + newer['order'])),
+    }
 
 
 def render(data: MediaResults, libraries: dict[str, Hello]) -> list[str]:
@@ -622,10 +644,27 @@ def _audio_values(data: MediaResults) -> dict[str, dict[str, float]]:
     return values
 
 
-def _kbps_notes(data: MediaResults, kind: str) -> dict[str, dict[str, str]]:
-    """The bitrate of each bar, as each library sets its own: CPU per frame compares only with it."""
-    values = _video_values(data, kind, lambda runs: _median_of(run['kbps'] for run in runs))
-    return {case: {name: f'{kbps:.0f} kbps' for name, kbps in by.items()} for case, by in values.items()}
+def _videos(kind: str) -> dict[str, Video]:
+    """The video of each case of a kind in either plan, by case name: a send's bitrate is its cap."""
+    videos: dict[str, Video] = {}
+    for plan in (QUICK, FULL):
+        for video in plan.call_videos if kind == 'video_call' else plan.videos:
+            for codec in {codec for codecs in CODECS[kind].values() for codec in codecs}:
+                case = _case(kind, '', codec=codec, video=video)
+                videos[case.name] = case.video
+    return videos
+
+
+def _of_target(
+    data: MediaResults, kind: str, *, metric: Callable[[list[VideoRun]], float], target: Callable[[Video], float]
+) -> dict[str, dict[str, float]]:
+    """A metric of each case over its target, like the fps sent over the source's."""
+    videos = _videos(kind)
+    return {
+        case: {name: value / target(videos[case]) for name, value in by.items()}
+        for case, by in _video_values(data, kind, metric).items()
+        if case in videos
+    }
 
 
 def _latency_p50(runs: list[VideoRun]) -> float:
@@ -645,11 +684,22 @@ def figures(data: MediaResults) -> list[Figure]:
         ),
         Figure(
             'media-video-send',
-            'Video send: CPU per frame, at the bitrate each library sent',
+            'Video send: CPU per frame, under a bitrate cap',
             cpu,
             lower_is_better=True,
             values=_video_values(data, 'video_send', _cpu),
-            notes=_kbps_notes(data, 'video_send'),
+            details=(
+                Detail(
+                    'fps / source',
+                    _of_target(data, 'video_send', metric=_fps, target=lambda video: video.fps),
+                    of_target=True,
+                ),
+                Detail(
+                    'kbps / cap',
+                    _of_target(data, 'video_send', metric=_kbps, target=lambda video: video.bitrate / 1000),
+                    of_target=True,
+                ),
+            ),
         ),
         Figure(
             'media-video-call',
@@ -657,7 +707,7 @@ def figures(data: MediaResults) -> list[Figure]:
             cpu,
             lower_is_better=True,
             values=_video_values(data, 'video_call', _cpu),
-            notes=_kbps_notes(data, 'video_call'),
+            details=(Detail('kbps', _video_values(data, 'video_call', _kbps)),),
         ),
         Figure(
             'media-video-latency',

@@ -11,6 +11,7 @@
 #include <string_view>
 #include <utility>
 
+#include <api/candidate.h>
 #include <pc/session_description.h>
 
 namespace python_webrtc {
@@ -48,7 +49,10 @@ namespace python_webrtc {
         123,  135,  137,  139,  143,  161,  179,  389,  427,  465,  512,  513,  514,  515,  526,  530,  531,
         532,  540,  548,  554,  556,  563,  587,  601,  636,  989,  990,  993,  995,  1719, 1720, 1723, 2049,
         3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080};
-    return candidate.protocol() == "tcp" && badPorts.contains(candidate.address().port());
+    // an active candidate is never connected to; its port is the discard port (RFC 6544 section 4.5)
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay): libwebrtc's TCP types are char arrays
+    return candidate.protocol() == "tcp" && candidate.tcptype() != webrtc::TCPTYPE_ACTIVE_STR &&
+           badPorts.contains(candidate.address().port());
   }
 
   void removeBlockedCandidates(webrtc::SessionDescriptionInterface &description) {
@@ -159,7 +163,8 @@ namespace python_webrtc {
                                                         const std::optional<std::string> &usernameFragment,
                                                         std::set<std::string> &mids) {
     if (remote == nullptr) {
-      return RTCCallbackException(webrtc::RTCErrorType::INVALID_STATE, "The remote description was null");
+      return RTCCallbackException(webrtc::RTCErrorType::INVALID_STATE,
+                                  "A candidate can only be added once there is a remote description");
     }
     const auto *session = remote->description();
     const auto &contents = session->contents();

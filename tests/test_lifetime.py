@@ -630,6 +630,8 @@ async def test_stream_tracks_read_while_they_change(
 
 def _collect_on_dispatcher_wakes() -> None:
     gc.disable()
+    # isolated: every wake goes through the Dispatcher
+    loops.LoopState.watches_pipe = False
     collections: list[threading.Thread] = []
 
     def wake(mailbox_id: int) -> None:

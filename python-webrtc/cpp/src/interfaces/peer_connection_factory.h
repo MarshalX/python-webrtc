@@ -15,6 +15,9 @@
 #include <api/peer_connection_interface.h>
 #include <api/scoped_refptr.h>
 #include <modules/audio_device/include/audio_device.h>
+#include <p2p/base/basic_packet_socket_factory.h>
+#include <p2p/base/port_allocator.h>
+#include <rtc_base/network.h>
 #include <rtc_base/thread.h>
 
 #include <pybind11/pybind11.h>
@@ -60,9 +63,17 @@ namespace python_webrtc {
 
     [[nodiscard]] int networkIgnoreMask() const { return _networkIgnoreMask; }
 
+    std::unique_ptr<webrtc::PortAllocator>
+    CreatePortAllocator(const webrtc::PeerConnectionInterface::RTCConfiguration &configuration);
+
   private:
+    webrtc::PeerConnectionFactoryDependencies Dependencies();
+
     std::unique_ptr<webrtc::Thread> _signalingThread;
     std::unique_ptr<webrtc::Thread> _workerThread;
+    // shared by every connection's allocator; network thread
+    std::shared_ptr<webrtc::BasicNetworkManager> _networkManager;
+    std::shared_ptr<webrtc::BasicPacketSocketFactory> _packetSocketFactory;
 
     const FieldTrials _fieldTrials;
     const int _networkIgnoreMask;

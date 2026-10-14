@@ -37,6 +37,17 @@ namespace python_webrtc {
       point.parked--;
     }
 
+    // whether a point is held, without parking there
+    static bool Holds(const char *name) {
+      if (Held().load(std::memory_order_acquire) == 0) {
+        return false;
+      }
+      auto &state = State();
+      const std::scoped_lock lock(state.mutex);
+      auto it = state.points.find(name);
+      return it != state.points.end() && it->second.held;
+    }
+
     static void Park(const std::string &name) {
       auto &state = State();
       const std::scoped_lock lock(state.mutex);

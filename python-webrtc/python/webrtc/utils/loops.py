@@ -129,6 +129,8 @@ class LoopState:
     MAX_BATCH = 100
     #: set at exit: completions stop, so new calls fail
     exiting: ClassVar[bool] = False
+    #: False wakes every loop through the Dispatcher, as on Windows; for tests
+    watches_pipe: ClassVar[bool] = True
 
     def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
         # weak: the loop holds the state
@@ -159,6 +161,10 @@ class LoopState:
         # the last item resumed code that runs before the next one
         self._resumed = False
         self._held: _Item | None = None
+        # the mailbox's wake fd while the loop watches it
+        self._wake_fd: int | None = None
+        # _watch ran: the fd is tried once
+        self._watched = False
         with _states_lock:
             _states[self.mailbox.id] = self
         # closing the mailbox stops queued records pinning their sources
@@ -278,12 +284,18 @@ class LoopState:
         self._next_key += 1
         return self._next_key
 
-    def _schedule(self) -> None:
-        """Schedules one drain from any thread; releases the state if the loop is closed."""
+    def _claim(self) -> bool:
+        """Marks a drain scheduled; False if one already is or the state is released."""
         with self._lock:
             if self._scheduled or self._released:
-                return
+                return False
             self._scheduled = True
+            return True
+
+    def _schedule(self) -> None:
+        """Schedules one drain from any thread; releases the state if the loop is closed."""
+        if not self._claim():
+            return
         loop = self._loop_ref()
         if loop is None:
             self.release()
@@ -293,8 +305,54 @@ class LoopState:
         except RuntimeError:
             self.release()
 
+    def _watch(self) -> None:
+        """Has posts wake the loop through the mailbox's fd instead of the Dispatcher, if the loop can watch it."""
+        loop = self._live_loop
+        with self._lock:
+            if self._watched or self._released:
+                return
+            self._watched = True
+
+            fd = self.mailbox.enableWake() if LoopState.watches_pipe else None
+            if fd is None:
+                return
+            try:
+                loop.add_reader(fd, self._on_wake)
+            except NotImplementedError:
+                # this drain's finish takes what a post wrote to the fd meanwhile
+                self.mailbox.disableWake()
+                return
+            self._wake_fd = fd
+
+    def _unwatch(self) -> None:
+        """Stops watching the wake fd, before the mailbox closes it."""
+        with self._lock:
+            fd, self._wake_fd = self._wake_fd, None
+
+        loop = self._loop_ref()
+        if fd is None or loop is None or loop.is_closed():
+            return
+        if loop.is_running() and loop is not _current_loop():
+            # selectors aren't thread-safe; only exit releases a loop running elsewhere
+            with contextlib.suppress(RuntimeError):
+                _ = loop.call_soon_threadsafe(loop.remove_reader, fd)
+            return
+        _ = loop.remove_reader(fd)
+
+    def _on_wake(self) -> None:
+        """Empties the wake fd, then drains as a scheduled drain would."""
+        if not self.mailbox.ackWake():
+            # closed, or a forked child's: the Dispatcher wakes it from now on
+            self._unwatch()
+
+        if self._claim():
+            self.drain()
+
     def drain(self, deferred: int = 0) -> None:
         """Runs the mailbox records in order on the loop."""
+        if not self._watched:
+            self._watch()
+
         if self._defers(deferred, resumed=self._resumed):
             _ = self._live_loop.call_soon(_Drain(self, deferred + 1))
             return
@@ -362,7 +420,7 @@ class LoopState:
             return
         target._deliver(self, name, args)
         # after handlers, so a terminal event's handlers run before unrooting; fresh wrappers aren't rooted
-        if created or not target._rootable:
+        if created or not target._rootable or not target._changes_activity(name):
             return
         self.update(target)
         if checking_roots():
@@ -535,10 +593,12 @@ class LoopState:
             return self.changes == 0 and self.generation == generation
 
     def release(self) -> None:
-        """Drops records, pending calls, roots and handlers once the loop is closed or gone."""
+        """Drops records, pending calls, roots and handlers once the loop is closed or gone; closes the mailbox."""
         # unlocked check: a gc sweep mustn't wait for a release in progress
         if self._released:
+            self.mailbox.close()
             return
+
         others: list[LoopState] = [] if sys.is_finalizing() else _states_elsewhere(self._loop_ref())
         # their roots checks wait while its objects are rebound
         for other in others:
@@ -550,9 +610,30 @@ class LoopState:
                 other.changing(-1)
 
     def _release(self) -> None:
+        detached = self._detach()
+        if detached is None:
+            self.mailbox.close()
+            return
+
+        pending, dropped, targets = detached
+        if not sys.is_finalizing():
+            self._unwatch()
+
+        self.mailbox.close()
+        if not sys.is_finalizing():
+            for drop in dropped:
+                _ = drop()
+
+        loop = self._loop_ref()
+        if loop is not None and not sys.is_finalizing():
+            _let_go(loop, list(pending.values()), targets)
+
+    def _detach(self) -> tuple[dict[int, _Call], list[Callable[[], object]], list[EventTarget[Never]]] | None:
+        """Marks the state released and takes what it holds, under the lock; None if it already was."""
         with _acquired(self._lock) as acquired:
             if not acquired or self._released:
-                return
+                return None
+
             self._released = True
             self._scheduled = False
             pending = self.pending
@@ -565,14 +646,8 @@ class LoopState:
             self.active.clear()
             targets = list(self.targets)
             self.targets.clear()
-        # outside the lock: native calls may never return once exit starts
-        self.mailbox.close()
-        if not sys.is_finalizing():
-            for drop in dropped:
-                _ = drop()
-        loop = self._loop_ref()
-        if loop is not None and not sys.is_finalizing():
-            _let_go(loop, list(pending.values()), targets)
+
+            return pending, dropped, targets
 
 
 class _Drain:

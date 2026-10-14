@@ -17,6 +17,7 @@
 
 #include <api/media_stream_interface.h>
 #include <api/notifier.h>
+#include <api/video/video_adapter.h>
 #include <api/video/video_broadcaster.h>
 #include <api/video/video_frame.h>
 
@@ -76,9 +77,13 @@ namespace python_webrtc {
   private:
     void DrawFrame(int width, int height, uint32_t frame);
 
+    // to the sinks of enabled tracks
+    void Broadcast(const webrtc::VideoFrame &frame);
+
     const bool _isScreencast;
     const std::optional<bool> _needsDenoising;
     webrtc::VideoBroadcaster _broadcaster;
+    webrtc::VideoAdapter _adapter;
     // sinks of disabled or ended tracks: a black frame a second
     webrtc::VideoBroadcaster _blackBroadcaster;
     std::mutex _sinksMutex;

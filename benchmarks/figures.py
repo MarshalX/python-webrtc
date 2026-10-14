@@ -9,7 +9,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Detail:
+    """A panel under a chart: each library's own value in each category, not relative to the baseline."""
+
+    #: the y axis, like ``kbps``
+    label: str
+    #: by category, then library
+    values: dict[str, dict[str, float]]
+    #: the values are fractions of a target, drawn as ``1x`` with a line at it
+    of_target: bool = False
 
 
 @dataclass(frozen=True)
@@ -25,5 +37,5 @@ class Figure:
     lower_is_better: bool
     #: by category, then library
     values: dict[str, dict[str, float]]
-    #: a label drawn on a bar, by category, then library, like the bitrate a library chose
-    notes: dict[str, dict[str, str]] = field(default_factory=dict)
+    #: panels of absolute values under the bars, like the frame rate each library sent
+    details: tuple[Detail, ...] = ()

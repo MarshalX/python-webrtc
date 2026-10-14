@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Bar charts of the newest run of each suite, every library relative to the baseline (1x), higher is better.
+"""Bar charts of each library's newest results, relative to the baseline (1x), higher is better.
 
 python -m benchmarks.charts  # writes benchmarks/charts/*.png
 """
@@ -30,10 +30,11 @@ if TYPE_CHECKING:
     import pathlib
 
     from matplotlib.axes import Axes
+    from matplotlib.figure import Figure as MplFigure
 
-    from benchmarks.figures import Figure
+    from benchmarks.figures import Detail, Figure
     from benchmarks.protocol import Hello
-    from benchmarks.report import Manifest
+    from benchmarks.report import Newest
 
 CHARTS = BENCHMARKS / 'charts'
 
@@ -61,71 +62,112 @@ def _label(library: str, versions: dict[str, Hello]) -> str:
     return library if hello is None else f'{library} {hello["version"]}'
 
 
-def _footer(manifest: Manifest) -> str:
-    """The machine and the conditions of a run, for the foot of its charts."""
+def _footer(found: Newest) -> str:
+    """The machine and the conditions of the runs, for the foot of their charts."""
+    manifest = found.sources[-1][0]
     go = f', {manifest["go"]}' if manifest['go'] is not None else ''
-    runs = 'a quick run, not results' if manifest['quick'] else f'median of {manifest["repeat"]} runs'
-    return f'{manifest["machine"]}{go}; {manifest["date"][:10]}; {runs}; loopback, both peers on one machine'
+    dates = sorted({source['date'][:10] for source, _ in found.sources})
+    if any(source['quick'] for source, _ in found.sources):
+        runs = 'a quick run, not results'
+    elif len(found.sources) > 1:
+        runs = f'median of {manifest["repeat"]} runs, newest per library'
+    else:
+        runs = f'median of {manifest["repeat"]} runs'
+    return f'{manifest["machine"]}{go}; {", ".join(dates)}; {runs}; loopback, both peers on one machine'
 
 
 def _times(value: float, _: int | None) -> str:
     return f'{value:g}x'
 
 
-def _annotate(ax: Axes, figure: Figure, *, categories: list[str], libraries: list[str]) -> None:
-    """Draws the notes of a figure on its bars: a container a library, in legend order; a bar's x is its category."""
-    if len(figure.notes) == 0:
-        return
-    for container, library in zip(ax.containers, libraries, strict=False):
-        if not isinstance(container, BarContainer):
-            continue
-        labels: list[str] = []
-        for bar in container.patches:
-            center: float = bar.get_x() + bar.get_width() / 2
-            category = categories[round(center)]
-            labels.append(figure.notes.get(category, {}).get(library, ''))
-        ax.bar_label(container, labels=labels, fontsize=8, padding=2)
+def _detail(ax: Axes, detail: Detail, *, categories: list[str], legend: dict[str, str]) -> None:
+    """Draws a panel of absolute values under a chart, its bars in the chart's categories and colors."""
+    rows = [
+        (category, legend[library], value)
+        for category in categories
+        for library, value in detail.values.get(category, {}).items()
+        if library in legend and math.isfinite(value)
+    ]
+    sns.barplot(
+        x=[row[0] for row in rows],
+        y=[row[2] for row in rows],
+        hue=[row[1] for row in rows],
+        hue_order=list(legend.values()),
+        order=categories,
+        ax=ax,
+        legend=False,
+    )
+    ax.set_ylabel(detail.label)
+    if detail.of_target:
+        ax.axhline(1.0, color='gray', linestyle='--', linewidth=1)
+        ax.yaxis.set_major_formatter(FuncFormatter(_times))
+    else:
+        for container in ax.containers:
+            if isinstance(container, BarContainer):
+                ax.bar_label(container, fmt='%.0f', fontsize=8, padding=2)
 
 
-def plot(figure: Figure, manifest: Manifest, path: pathlib.Path) -> None:
-    """Draws a figure into a PNG file, skipping one without a value."""
+def _subplots(figure: Figure, columns: list[str]) -> tuple[MplFigure, list[Axes]]:
+    """The chart's axes on top and a shorter one for each of its panels, all over the same categories."""
+    sns.set_theme(style='darkgrid')
+    heights = [6, *(2.5 for _ in figure.details)]
+    fig, axes = plt.subplots(
+        len(heights),
+        figsize=(max(8, 1.6 * len(columns)), sum(heights)),
+        sharex=True,
+        squeeze=False,
+        gridspec_kw={'height_ratios': heights},
+    )
+    return fig, list(axes[:, 0])
+
+
+def plot(figure: Figure, found: Newest, path: pathlib.Path) -> None:
+    """Draws a figure and its panels into a PNG file, skipping one without a value."""
     categories, libraries, relative = _relative(figure)
     if len(relative) == 0:
         return
 
-    versions = manifest['libraries']
+    versions = found.libraries
     order = [library for library in LIBRARIES if library in libraries]
-    labels = [_label(library, versions) for library in libraries]
-    legend = [_label(library, versions) for library in order]
+    legend = {library: _label(library, versions) for library in order}
+    columns = list(dict.fromkeys(categories))
 
-    sns.set_theme(style='darkgrid')
-    fig, ax = plt.subplots(figsize=(max(8, 1.6 * len(set(categories))), 6))
+    fig, axes = _subplots(figure, columns)
+    ax = axes[0]
 
-    # the bars, their notes and the baseline at 1x
-    sns.barplot(x=categories, y=relative, hue=labels, hue_order=legend, ax=ax)
-    _annotate(ax, figure, categories=list(dict.fromkeys(categories)), libraries=order)
+    # the bars and the baseline at 1x
+    sns.barplot(
+        x=categories,
+        y=relative,
+        hue=[_label(library, versions) for library in libraries],
+        hue_order=list(legend.values()),
+        order=columns,
+        ax=ax,
+    )
     ax.axhline(1.0, color='gray', linestyle='--', linewidth=1)
+    for detail, panel in zip(figure.details, axes[1:], strict=True):
+        _detail(panel, detail, categories=columns, legend=legend)
 
     # the text around them
     ax.set_title(figure.title)
     ax.set_ylabel(f'{figure.measure} relative to {BASELINE}, higher is better')
     ax.yaxis.set_major_formatter(FuncFormatter(_times))
-    ax.tick_params(axis='x', labelrotation=20)
+    axes[-1].tick_params(axis='x', labelrotation=20)
     ax.legend(title='library')
-    fig.text(0.5, 0.01, _footer(manifest), ha='center', fontsize=8, color='gray')
+    fig.text(0.5, 0.01, _footer(found), ha='center', fontsize=8, color='gray', wrap=True)
 
-    fig.tight_layout(rect=(0, 0.03, 1, 1))
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
     fig.savefig(path, dpi=150)
     plt.close(fig)
 
 
 def main() -> None:
-    """Draws every figure of the newest run of each suite into ``benchmarks/charts``."""
+    """Draws every figure of each library's newest results into ``benchmarks/charts``."""
     mpl.use('Agg')
     CHARTS.mkdir(exist_ok=True)
-    for suite, run in report.newest_runs(RESULTS.glob('*.json')).items():
-        for figure in SUITES[suite].figures(run['suites'][suite]):
-            plot(figure, run['manifest'], CHARTS / f'{figure.name}.png')
+    for suite, found in report.newest(RESULTS.glob('*.json')).items():
+        for figure in SUITES[suite].figures(found.data):
+            plot(figure, found, CHARTS / f'{figure.name}.png')
             print(f'wrote {figure.name}.png')
 
 

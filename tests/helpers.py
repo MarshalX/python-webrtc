@@ -243,17 +243,39 @@ async def _add_ice_candidate(pc: webrtc.RTCPeerConnection, candidate: webrtc.RTC
             raise
 
 
+def _start_adding(pc: webrtc.RTCPeerConnection, candidate: webrtc.RTCIceCandidate) -> None:
+    task = asyncio.ensure_future(_add_ice_candidate(pc, candidate))
+    _adding_candidates.add(task)
+    task.add_done_callback(_adding_candidates.discard)
+
+
+def _trickle(pc: webrtc.RTCPeerConnection, other: webrtc.RTCPeerConnection) -> None:
+    """Adds the candidates of a connection to the other one, holding them until it has a remote description."""
+    held: list[webrtc.RTCIceCandidate] = []
+
+    def on_candidate(event: webrtc.RTCPeerConnectionIceEvent) -> None:
+        if event.candidate is None:
+            return
+        # as signaling would: a candidate before the offer or answer is rejected
+        if other.remote_description is None:
+            held.append(event.candidate)
+        else:
+            _start_adding(other, event.candidate)
+
+    def on_signaling_state(_event: webrtc.Event) -> None:
+        if other.remote_description is not None:
+            for candidate in held:
+                _start_adding(other, candidate)
+            held.clear()
+
+    pc.on('icecandidate', on_candidate)
+    other.on('signalingstatechange', on_signaling_state)
+
+
 def exchange_ice_candidates(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
     """Trickles the candidates of each connection to the other one."""
-    for pc, other in ((caller, callee), (callee, caller)):
-
-        def on_candidate(event: webrtc.RTCPeerConnectionIceEvent, other: webrtc.RTCPeerConnection = other) -> None:
-            if event.candidate is not None:
-                task = asyncio.ensure_future(_add_ice_candidate(other, event.candidate))
-                _adding_candidates.add(task)
-                task.add_done_callback(_adding_candidates.discard)
-
-        pc.on('icecandidate', on_candidate)
+    _trickle(caller, callee)
+    _trickle(callee, caller)
 
 
 async def connect(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, timeout: float = 10) -> None:
