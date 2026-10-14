@@ -1,5 +1,44 @@
 # Change Log
 
+## Version 0.0.2
+
+**14.10.2026**
+
+**🔄 Coming from aiortc? Install `wrtc[aiortc]`, change `from aiortc` to `from webrtc.aiortc`, and your code runs on Chrome's engine. See the [migration guide](https://wrtc.marshal.dev/guides/aiortc/)**
+
+**⚡ Data channels 14x faster (57 to 812 Mbps), 47x over 10 connections, with 88% less CPU per MB**
+
+**🪶 80% less memory per audio connection, 27% less per data channel connection, 1450 connections instead of 200**
+
+**📊 [Benchmarks](https://wrtc.marshal.dev/benchmarks/) against aiortc, Pion, libdatachannel and webrtc-rs: against aiortc, connections open 5–7x faster, a data channel moves 4.5–9x more data, and audio costs less CPU**
+
+**🧪 Test coverage up to 93.4% for C++ and 99.0% for Python, with the bugs it found fixed**
+
+* Add an aiortc compatibility layer with a migration guide by [@MarshalX](https://github.com/MarshalX) in [#245](https://github.com/MarshalX/python-webrtc/pull/245)
+* Add benchmarks against four WebRTC libraries, with results and charts by [@MarshalX](https://github.com/MarshalX) in [#242](https://github.com/MarshalX/python-webrtc/pull/242)
+* Add a benchmarks page to the docs, linked from the README and the docs home by [@MarshalX](https://github.com/MarshalX) in [#243](https://github.com/MarshalX/python-webrtc/pull/243)
+* Speed up data channels: callbacks run on the network thread, every queued UDP datagram is read on a read event by [@MarshalX](https://github.com/MarshalX) in [#243](https://github.com/MarshalX/python-webrtc/pull/243)
+* Wake event loops through the mailbox's eventfd or pipe instead of the Dispatcher thread: a native event reaches Python in 45 instead of 84 µs (p50), the Dispatcher stays for Windows by [@MarshalX](https://github.com/MarshalX) in [#243](https://github.com/MarshalX/python-webrtc/pull/243)
+* Wait with kqueue on macOS by [@MarshalX](https://github.com/MarshalX) in [#243](https://github.com/MarshalX/python-webrtc/pull/243)
+* Skip empty gathering phases: setup without trickle takes 5 instead of 125 ms by [@MarshalX](https://github.com/MarshalX) in [#243](https://github.com/MarshalX/python-webrtc/pull/243)
+* Drop the RTC event log, share one receive buffer per thread, stop listening on TCP and regathering by [@MarshalX](https://github.com/MarshalX) in [#243](https://github.com/MarshalX/python-webrtc/pull/243)
+* Cut audio CPU per stream by 41–47% by [@MarshalX](https://github.com/MarshalX) in [#243](https://github.com/MarshalX/python-webrtc/pull/243)
+* Play Janus streams without an audio output, as on servers by [@MarshalX](https://github.com/MarshalX) in [#239](https://github.com/MarshalX/python-webrtc/pull/239)
+* Fix `balanced` and `maintain-framerate` never lowering the resolution by [@MarshalX](https://github.com/MarshalX) in [#243](https://github.com/MarshalX/python-webrtc/pull/243)
+* Fix active TCP candidates rejected as a bad port by [@MarshalX](https://github.com/MarshalX) in [#243](https://github.com/MarshalX/python-webrtc/pull/243)
+* Fix data channel messages arriving before the channel is announced, and a channel released before its last message is sent by [@MarshalX](https://github.com/MarshalX) in [#243](https://github.com/MarshalX/python-webrtc/pull/243)
+* Fix SFrame video recovery, and H.264 and AV1 with raw packetization by [@MarshalX](https://github.com/MarshalX) in [#240](https://github.com/MarshalX/python-webrtc/pull/240)
+* Fix descriptions lost and `iceGatheringState` reading `complete` after `close()` by [@MarshalX](https://github.com/MarshalX) in [#240](https://github.com/MarshalX/python-webrtc/pull/240)
+* Fix key frame requests of a removed script transform never settling by [@MarshalX](https://github.com/MarshalX) in [#240](https://github.com/MarshalX/python-webrtc/pull/240)
+* Fix the received `captureTime` counted from the NTP epoch by [@MarshalX](https://github.com/MarshalX) in [#240](https://github.com/MarshalX/python-webrtc/pull/240)
+* Fix rollback allowed in the pranswer states by [@MarshalX](https://github.com/MarshalX) in [#240](https://github.com/MarshalX/python-webrtc/pull/240)
+* Fix a `ValueError` in `set_parameters` for a codec without a MIME type by [@MarshalX](https://github.com/MarshalX) in [#240](https://github.com/MarshalX/python-webrtc/pull/240)
+* Fix `maxMessageSize` of a dropped or closed SCTP transport by [@MarshalX](https://github.com/MarshalX) in [#240](https://github.com/MarshalX/python-webrtc/pull/240)
+* Fix remote video sent on to another connection, and a local description missing the candidates gathered after the remote one was read by [@MarshalX](https://github.com/MarshalX) in [#245](https://github.com/MarshalX/python-webrtc/pull/245)
+* Fix a loop closed while its drain was scheduled never being released by [@MarshalX](https://github.com/MarshalX) in [#241](https://github.com/MarshalX/python-webrtc/pull/241)
+* Fix a closing connection and its channels being active but unbound, and loop release by [@MarshalX](https://github.com/MarshalX) in [#244](https://github.com/MarshalX/python-webrtc/pull/244)
+* Fix flaky waits in tests on free-threaded builds and slow cores by [@MarshalX](https://github.com/MarshalX) in [#241](https://github.com/MarshalX/python-webrtc/pull/241)
+
 ## Version 0.0.1
 
 **12.10.2026**
