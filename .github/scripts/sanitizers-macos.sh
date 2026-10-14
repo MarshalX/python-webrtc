@@ -54,7 +54,7 @@ if [ "$MODE" != exec ]; then
         codesign -s - -f --entitlements "$SRC/scripts/debug/cores.entitlements" "$BUILD/venv/bin/python"
     fi
     uv pip install -q --python "$BUILD/venv/bin/python" cmake ninja "pybind11>=3.1" "typing_extensions>=4.10" \
-        pytest pytest-asyncio pytest-timeout
+        --group "$SRC/pyproject.toml:test"
     if [ "$COVERAGE" = ON ]; then
         uv pip install -q --python "$BUILD/venv/bin/python" "coverage>=7.10"
     fi

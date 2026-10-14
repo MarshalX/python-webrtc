@@ -320,7 +320,7 @@ class LoopState:
             if fd is None:
                 return
             try:
-                loop.add_reader(fd, self._on_wake)
+                loop.add_reader(fd, _Wake(self))
             except NotImplementedError:
                 # this drain's finish takes what a post wrote to the fd meanwhile
                 self.mailbox.disableWake()
@@ -475,7 +475,7 @@ class LoopState:
         handles = cast('collections.deque[object]', ready).copy() if isinstance(ready, collections.deque) else ()
         for handle in handles:
             callback = getattr(handle, '_callback', None)
-            owner = callback.state if isinstance(callback, _Drain) else getattr(callback, '__self__', None)
+            owner = callback.state if isinstance(callback, _Callback) else getattr(callback, '__self__', None)
             if isinstance(handle, asyncio.TimerHandle) or owner is self or owner is loop:
                 continue
             return True
@@ -653,23 +653,41 @@ class LoopState:
             return pending, dropped, targets
 
 
-class _Drain:
-    """A scheduled drain that releases the state if its loop closes first."""
+class _Callback:
+    """Releases the state if its loop closes or goes while holding it."""
 
-    __slots__ = ('_deferred', '_ran', 'state')
+    __slots__ = ('state',)
 
-    def __init__(self, state: LoopState, deferred: int = 0) -> None:
+    def __init__(self, state: LoopState) -> None:
         self.state = state
-        self._deferred = deferred
-        self._ran = False
-
-    def __call__(self) -> None:
-        self._ran = True
-        self.state.drain(self._deferred)
 
     def __del__(self) -> None:
-        if not self._ran:
+        # an open loop drops it once run or unwatched
+        loop = self.state._loop_ref()
+        if loop is None or loop.is_closed():
             self.state.release()
+
+
+class _Drain(_Callback):
+    """A scheduled drain."""
+
+    __slots__ = ('_deferred',)
+
+    def __init__(self, state: LoopState, deferred: int = 0) -> None:
+        super().__init__(state)
+        self._deferred = deferred
+
+    def __call__(self) -> None:
+        self.state.drain(self._deferred)
+
+
+class _Wake(_Callback):
+    """The reader of a watched wake fd."""
+
+    __slots__ = ()
+
+    def __call__(self) -> None:
+        self.state._on_wake()
 
 
 def _let_go(loop: asyncio.AbstractEventLoop, calls: list[_Call], targets: list[EventTarget[Never]]) -> None:

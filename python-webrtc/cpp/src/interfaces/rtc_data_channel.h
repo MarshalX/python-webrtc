@@ -9,6 +9,7 @@
 #define PYTHON_WEBRTC_INTERFACES_RTC_DATA_CHANNEL_H_
 
 #include <atomic>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -118,6 +119,10 @@ namespace python_webrtc {
     void Close();
 
   private:
+    void SendNow(webrtc::DataBuffer buffer);
+
+    void SetStateLocked(DataState state);
+
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::DataChannelInterface> _channel;
 
@@ -129,6 +134,8 @@ namespace python_webrtc {
     std::atomic<uint64_t> _bufferedAmount{0};
     // under _closeMutex
     DataState _lastState = DataState::kConnecting;
+    // sent before libwebrtc opens an announced channel; under _closeMutex
+    std::deque<webrtc::DataBuffer> _held;
 
     Surfaced<DataState> _surfacedState;
     // closing locally sets the state to closing right away, without a closing event; guards the state changes

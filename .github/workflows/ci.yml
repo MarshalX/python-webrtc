@@ -69,7 +69,7 @@ jobs:
       UV_HTTP_RETRIES: 10
       CIBW_ENVIRONMENT_PASS_LINUX: UV_HTTP_RETRIES
       # --gc-on-emit not on tags
-      CIBW_TEST_COMMAND: ${{ github.event_name != 'push' && 'pytest {project}/tests && pytest {project}/tests --gc-on-emit' || 'pytest {project}/tests' }}
+      CIBW_TEST_COMMAND: ${{ github.event_name != 'push' && 'pytest -n auto {project}/tests && pytest -n auto {project}/tests --gc-on-emit' || 'pytest -n auto {project}/tests' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -132,7 +132,7 @@ jobs:
         with:
           path: .wrtc-cache
           key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/libwebrtc.cmake', 'cmake/libcxx/*.sha256', 'cmake/openh264.*') }}
-      - run: .github/scripts/sanitizers.sh ${{ matrix.args }}
+      - run: .github/scripts/sanitizers.sh -n auto ${{ matrix.args }}
 
   sanitizers-macos:
     name: sanitizers (ASan + UBSan, macOS, ${{ matrix.pass }})
@@ -154,7 +154,7 @@ jobs:
           path: .wrtc-cache
           key: libwebrtc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/libwebrtc.cmake', 'cmake/libcxx/*.sha256', 'cmake/openh264.*') }}
       - uses: astral-sh/setup-uv@v7
-      - run: .github/scripts/sanitizers-macos.sh ${{ matrix.args }}
+      - run: .github/scripts/sanitizers-macos.sh -n auto ${{ matrix.args }}
 
   # branch protection check
   ci:

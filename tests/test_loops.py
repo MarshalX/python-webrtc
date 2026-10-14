@@ -435,6 +435,42 @@ def test_a_watching_loop_is_woken_through_its_mailbox_pipe_until_released(monkey
     asyncio.run(scenario())
 
 
+async def _watching() -> LoopState:
+    state = LoopState.of(asyncio.get_running_loop())
+    token, first = state.start(None)
+    _in_thread(lambda: wrtc._testing.complete(state.mailbox, token, 1))
+    assert await asyncio.wait_for(first, TIMEOUT) == 1
+    assert state._wake_fd is not None
+    return state
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='no wake pipe on Windows')
+@pytest.mark.skipif(not LoopState.watches_pipe, reason='every loop is woken through the Dispatcher')
+def test_a_watching_loop_is_released_by_its_close() -> None:
+    """Posts after its close only write to the pipe: the close releases it, not a later collection."""
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        state = asyncio.run(_watching())
+        assert state.mailbox.closed
+    finally:
+        if enabled:
+            gc.enable()
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='no wake pipe on Windows')
+@pytest.mark.skipif(not LoopState.watches_pipe, reason='every loop is woken through the Dispatcher')
+def test_a_loop_that_stops_watching_stays_bound() -> None:
+    """Dropping the pipe's reader from an open loop releases nothing."""
+
+    async def scenario() -> None:
+        state = await _watching()
+        state._unwatch()
+        assert not state.mailbox.closed
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.skipif(sys.platform == 'win32', reason='no wake pipe on Windows')
 @pytest.mark.skipif(not LoopState.watches_pipe, reason='every loop is woken through the Dispatcher')
 def test_a_record_posted_as_a_drain_finishes_wakes_the_loop(monkeypatch: pytest.MonkeyPatch) -> None:

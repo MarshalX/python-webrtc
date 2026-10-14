@@ -17,10 +17,12 @@
 #include "utils/native_object.h"
 #include "utils/parking.h"
 #include "utils/registry.h"
+#include "utils/task_queue_factory.h"
 
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -114,6 +116,46 @@ namespace python_webrtc {
       return names->insert(name).first->c_str();
     }
 
+    // deletes its queue when destroyed, as a transform delegate does
+    struct QueueOwner {
+      std::unique_ptr<webrtc::TaskQueueBase, webrtc::TaskQueueDeleter> queue;
+      std::promise<void> *deleted;
+
+      QueueOwner(std::unique_ptr<webrtc::TaskQueueBase, webrtc::TaskQueueDeleter> queue, std::promise<void> *deleted)
+          : queue(std::move(queue)), deleted(deleted) {}
+
+      QueueOwner(const QueueOwner &) = delete;
+      QueueOwner &operator=(const QueueOwner &) = delete;
+
+      ~QueueOwner() {
+        queue = nullptr;
+        deleted->set_value();
+      }
+    };
+
+    // true if a task posted before the queue's deletion from its own task still ran
+    bool DeleteQueueFromItsTask(bool byCaptures) {
+      auto factory = CreateTaskQueueFactory();
+      std::atomic<bool> later{false};
+      std::promise<void> deleted;
+      auto owner = std::make_unique<QueueOwner>(
+          factory->CreateTaskQueue("wrtc-testing", webrtc::TaskQueueFactory::Priority::kNormal), &deleted);
+      auto *queue = owner->queue.get();
+      auto postLater = [&later]() { webrtc::TaskQueueBase::Current()->PostTask([&later]() { later = true; }); };
+      if (byCaptures) {
+        queue->PostTask([postLater, owner = std::move(owner)]() { postLater(); });
+      } else {
+        queue->PostTask([postLater, &owner]() {
+          postLater();
+          owner = nullptr;
+        });
+      }
+      deleted.get_future().wait();
+      // the Dispatcher joins the queue's thread
+      Dispatcher::Idle();
+      return later;
+    }
+
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): mirrors post_from_threads(mailbox, threads, count)
     void PostFromThreads(Mailbox &mailbox, int threads, int count) {
       std::vector<std::thread> posting;
@@ -139,6 +181,8 @@ namespace python_webrtc {
                 "The Dispatcher threads started by this process: at most one.");
     testing.def("dispatcher_idle", &Dispatcher::Idle, nogil(),
                 "Blocks until the Dispatcher has nothing queued nor running; returns at once if it never started.");
+    testing.def("delete_queue_from_its_task", &DeleteQueueFromItsTask, nogil(), pybind11::arg("by_captures"),
+                "Deletes a task queue from its own task; whether a later task still ran.");
     testing.def("park", &Parking::Park, pybind11::arg("name"),
                 "Holds a parking point: the next native thread reaching it blocks until release(name).");
     testing.def("release", &Parking::Release, pybind11::arg("name"), "Lets the threads parked at a point go on.");

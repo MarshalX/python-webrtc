@@ -12,11 +12,13 @@ from __future__ import annotations
 import asyncio
 import math
 import re
+from typing import cast
 
 import pytest
 from typing_extensions import TypedDict, Unpack
 
 import webrtc
+import wrtc
 from tests.helpers import connect, mistyped, stats_of_type, wait_for_event, wait_until
 
 #: The most a channel queues to send, in bytes
@@ -287,6 +289,35 @@ async def test_messages_sent_on_open_reach_a_handler_added_on_datachannel(
     await connect(caller, callee)
     await asyncio.wait_for(done, 10)
     assert received == [str(number) for number in range(count)]
+
+
+@pytest.mark.asyncio
+async def test_sent_from_the_datachannel_handler_before_libwebrtc_opens_it(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """A send from the datachannel handler arrives, though libwebrtc opens the channel later."""
+    await open_pair(caller, callee)
+    sent: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+    def send(event: webrtc.RTCDataChannelEvent) -> None:
+        event.channel.send('early')
+        sent.set_result(None)
+
+    async def received() -> bool:
+        report = await caller.get_stats()
+        channels = cast('list[webrtc.RTCDataChannelStats]', stats_of_type(report, 'data-channel'))
+        return any(stats.label == 'early' and stats.messages_received == 1 for stats in channels)
+
+    callee.on('datachannel', send)
+    wrtc._testing.park('connection.datachannel')
+    try:
+        # off the loop: creating it waits for the parked signaling thread too
+        creating = asyncio.ensure_future(asyncio.to_thread(caller.create_data_channel, 'early'))
+        await asyncio.wait_for(sent, 10)
+    finally:
+        wrtc._testing.release('connection.datachannel')
+    await creating
+    await wait_until(received, 'the message')
 
 
 @pytest.mark.asyncio

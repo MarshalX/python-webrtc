@@ -15,6 +15,7 @@
 #include "../utils/libwebrtc_thread.h"
 #include "../utils/network_socket_server.h"
 #include "../utils/port_allocator.h"
+#include "../utils/task_queue_factory.h"
 
 #include <api/audio/builtin_audio_processing_builder.h>
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
@@ -89,7 +90,7 @@ namespace python_webrtc {
     dependencies.network_thread = _workerThread.get();
     dependencies.worker_thread = _workerThread.get();
     dependencies.signaling_thread = _signalingThread.get();
-    dependencies.env = webrtc::CreateEnvironment(_fieldTrials.CreateCopy());
+    dependencies.env = webrtc::CreateEnvironment(_fieldTrials.CreateCopy(), CreateTaskQueueFactory());
     dependencies.socket_factory = _workerThread->socketserver();
     dependencies.adm = _audioDeviceModule;
     dependencies.audio_encoder_factory = webrtc::CreateBuiltinAudioEncoderFactory();

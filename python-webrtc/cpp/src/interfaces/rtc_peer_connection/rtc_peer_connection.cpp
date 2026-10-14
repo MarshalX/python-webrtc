@@ -874,6 +874,7 @@ namespace python_webrtc {
     auto channel = Wrap(_channels, dataChannel);
     channel->OnAnnounced();
     Emit("datachannel", channel);
+    Parking::At("connection.datachannel");
   }
 
   void RTCPeerConnection::OnAddStream(webrtc::scoped_refptr<webrtc::MediaStreamInterface> /*unused*/) {}
