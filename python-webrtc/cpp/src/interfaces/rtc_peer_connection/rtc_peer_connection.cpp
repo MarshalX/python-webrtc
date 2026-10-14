@@ -17,6 +17,7 @@
 
 #include "../../utils/gil.h"
 #include "../../utils/libwebrtc_thread.h"
+#include "../../utils/parking.h"
 #include "../peer_connection_factory.h"
 
 namespace python_webrtc {
@@ -704,16 +705,6 @@ namespace python_webrtc {
 
   void RTCPeerConnection::Close() {
     const auto gathering = GetIceGatheringState();
-    // a closed connection, its channels and transports fire nothing more; remote tracks fire ended
-    Unbind();
-    {
-      const TrackedLock lock(_wrappersMutex);
-      for (auto &channel : _channels) {
-        channel.second->OnPeerConnectionClosed();
-      }
-    }
-    UnbindTransports();
-
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
     {
       const TrackedLock lock(_connectionMutex);
@@ -723,6 +714,17 @@ namespace python_webrtc {
         _closedIceGatheringState = gathering;
       }
     }
+
+    Parking::At("connection.close");
+    // a closed connection, its channels and transports fire nothing more; remote tracks fire ended
+    Unbind();
+    {
+      const TrackedLock lock(_wrappersMutex);
+      for (auto &channel : _channels) {
+        channel.second->OnPeerConnectionClosed();
+      }
+    }
+    UnbindTransports(pc);
 
     if (pc) {
       pc->Close();

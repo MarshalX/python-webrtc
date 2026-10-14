@@ -106,10 +106,12 @@ One direction: Python → C++ → libwebrtc.
 
 Python decides what an unreferenced object's lifetime is, per event loop (`webrtc/utils/loops.py`): an object stays
 alive while it can still fire an event that has a handler, following the WebRTC specifications (each class's
-`_activity()`). Only the bound loop roots an object, so whatever makes it active binds it first. A closed or
-collected loop releases what it kept: its mailbox closes and its queued records are dropped, pending operations are
-cancelled, a callback queued into it with `call_soon` runs its drop handler instead, and its handlers are removed.
-Its objects with handlers left on another loop are bound to that loop. Everything else is plain Python garbage.
+`_activity()`). Only the bound loop roots an object, so whatever makes it active binds it first, and whatever unbinds
+it ends its activity first (`close()`) or orphans it (a release): an active object is bound or orphaned at every
+instant. A closed or collected loop releases what it kept: its mailbox closes and its queued records are dropped,
+pending operations are cancelled, a callback queued into it with `call_soon` runs its drop handler instead, and its
+handlers are removed. Its objects with handlers left on another loop are bound to that loop. Everything else is plain
+Python garbage.
 
 - Every change of binding or activity ends in an update of the root on the loop that holds it. A change made from
   Python goes through `_changing()` (a spent `once` handler too), so roots checks on other loops wait for it. An

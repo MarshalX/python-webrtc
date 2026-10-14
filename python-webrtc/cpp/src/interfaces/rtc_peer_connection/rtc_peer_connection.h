@@ -362,7 +362,7 @@ namespace python_webrtc {
     std::vector<std::shared_ptr<RTCIceTransport>> WrapTransports();
 
     // the transports of a closed connection fire no events
-    void UnbindTransports();
+    void UnbindTransports(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc);
 
     // with the ICE connection state it changes, in one task; network thread
     template <typename T, typename State>
