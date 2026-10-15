@@ -102,7 +102,7 @@ One direction: Python → C++ → libwebrtc.
   unregistered is ended by `Disarm()` at the start of the destructor, which then waits for the callback's thread once.
 - Raw pointers never own: they point to libwebrtc observers and callbacks, or into C APIs. A raw pointer libwebrtc
   hands over to own (`OnSuccess(SessionDescriptionInterface *)`) goes into a `std::unique_ptr` right away.
-- An event's arguments are native values copied at `Emit`; they're converted to Python on the loop thread.
+- An event's arguments are native values copied or moved at `Emit`; they're converted to Python on the loop thread.
 - Registries and the Dispatcher are leaked on purpose (`static auto *x = new ...`, `ForkLocal`): native threads can
   outlive static destructors at exit.
 

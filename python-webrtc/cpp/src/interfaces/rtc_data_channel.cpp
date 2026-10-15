@@ -14,6 +14,7 @@
 #include "../exceptions.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
+#include "../utils/parking.h"
 
 namespace python_webrtc {
 
@@ -61,12 +62,13 @@ namespace python_webrtc {
   void RTCDataChannel::Init(pybind11::module &m) {
     pybind11::class_<DataChannelMessage>(m, "DataChannelMessage")
         .def_property_readonly("data", [](const DataChannelMessage &message) -> pybind11::object {
+          const auto *data = message.data.cdata<char>();
           if (message.binary) {
-            return pybind11::bytes(message.data);
+            return pybind11::bytes(data, message.data.size());
           }
           // the upper layers verify UTF-8, as libwebrtc doesn't
           return pybind11::reinterpret_steal<pybind11::object>(
-              PyUnicode_DecodeUTF8(message.data.data(), static_cast<Py_ssize_t>(message.data.size()), "replace"));
+              PyUnicode_DecodeUTF8(data, static_cast<Py_ssize_t>(message.data.size()), "replace"));
         });
 
     DefineBinding(pybind11::class_<RTCDataChannel, Binding, std::shared_ptr<RTCDataChannel>>(m, "RTCDataChannel"))
@@ -84,7 +86,15 @@ namespace python_webrtc {
         .def_property("bufferedAmountLowThreshold", nogil_fn(&RTCDataChannel::GetBufferedAmountLowThreshold),
                       nogil_fn(&RTCDataChannel::SetBufferedAmountLowThreshold))
         .def_property("binaryType", nogil_fn(&RTCDataChannel::GetBinaryType), nogil_fn(&RTCDataChannel::SetBinaryType))
-        .def("send", &RTCDataChannel::Send, nogil(), pybind11::arg("data"), pybind11::arg("binary"))
+        .def(
+            "send",
+            // only bytes: the view must outlive the call without the GIL, which a bytearray's resize breaks
+            [](RTCDataChannel &self, const pybind11::bytes &data, bool binary) {
+              const std::string_view view = data;
+              const gil_release release;
+              return self.Send(view, binary);
+            },
+            pybind11::arg("data"), pybind11::arg("binary"))
         .def("close", &RTCDataChannel::Close, nogil())
         .def("_surfaceState", &RTCDataChannel::SurfaceState, nogil(), pybind11::arg("state"))
         .def("_decreaseBufferedAmount", &RTCDataChannel::DecreaseBufferedAmount, nogil(), pybind11::arg("sent"));
@@ -116,17 +126,22 @@ namespace python_webrtc {
       Emit("open", state);
       break;
     case DataState::kClosing:
+      Parking::At("datachannel.closing");
       Emit("closing", state);
       break;
     case DataState::kClosed: {
       auto error = _channel->error();
-      // closing locally isn't an error, even if queued messages couldn't be sent
       bool closedLocally = false;
       {
         const std::scoped_lock lock(_closeMutex);
         closedLocally = _closeRequested;
       }
-      if (!error.ok() && !closedLocally) {
+      const bool detailed = error.error_detail() != webrtc::RTCErrorDetailType::NONE;
+      // closing locally isn't an error
+      if (!error.ok() && (detailed || !closedLocally)) {
+        if (!detailed) {
+          error.set_error_detail(webrtc::RTCErrorDetailType::DATA_CHANNEL_FAILURE);
+        }
         Emit("error", RTCCallbackException(std::move(error)));
       }
       Emit("close", state);
@@ -141,8 +156,7 @@ namespace python_webrtc {
   }
 
   void RTCDataChannel::OnMessage(const webrtc::DataBuffer &buffer) {
-    Emit("message",
-         DataChannelMessage{.data = std::string(buffer.data.cdata<char>(), buffer.size()), .binary = buffer.binary});
+    Emit("message", DataChannelMessage{.data = buffer.data, .binary = buffer.binary});
   }
 
   void RTCDataChannel::OnBufferedAmountChange(uint64_t sentDataSize) {
@@ -277,7 +291,7 @@ namespace python_webrtc {
 
   } // namespace
 
-  bool RTCDataChannel::Send(const std::string &data, bool binary) {
+  bool RTCDataChannel::Send(std::string_view data, bool binary) {
     if (GetReadyState() != DataState::kOpen) {
       throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "RTCDataChannel.readyState is not 'open'");
     }
@@ -307,14 +321,8 @@ namespace python_webrtc {
   }
 
   void RTCDataChannel::SendNow(webrtc::DataBuffer buffer) {
-    auto size = buffer.size();
-    // posted to the network thread, in call order; a failed send closes the channel
-    _channel->SendAsync(std::move(buffer), [weak = weak_from_this(), size](const webrtc::RTCError &error) {
-      auto self = weak.lock();
-      if (!error.ok() && self) {
-        self->DecreaseBufferedAmount(size);
-      }
-    });
+    // posted in call order; libwebrtc reports a failed send's bytes through OnBufferedAmountChange too
+    _channel->SendAsync(std::move(buffer), nullptr);
   }
 
   void RTCDataChannel::SetStateLocked(DataState state) {
