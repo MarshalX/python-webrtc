@@ -2,6 +2,9 @@
 
 # pinned to the clang-tidy of .github/scripts/tidy.sh
 CLANG_FORMAT := uvx clang-format==22.1.8
+# pinned so a new release can't break lint; bump together with .github/workflows/ci.yml
+RUFF := uvx ruff==0.17.1
+PYREFLY := uvx pyrefly==1.3.2
 CPP_SRC = $(shell find python-webrtc/cpp/src -name '*.cpp' -o -name '*.h' -o -name '*.mm')
 
 # editable install; the extension is rebuilt automatically on import after C++ changes
@@ -50,15 +53,15 @@ stacks:
 	uv run --no-sync python -m scripts.debug.stacks $(PID) $(O)
 
 lint: format-check
-	uvx ruff check
-	uvx ruff format --check
+	$(RUFF) check
+	$(RUFF) format --check
 
 typecheck:
-	uvx pyrefly check
+	$(PYREFLY) check
 
 format:
-	uvx ruff check --fix
-	uvx ruff format
+	$(RUFF) check --fix
+	$(RUFF) format
 	$(CLANG_FORMAT) -i $(CPP_SRC)
 
 format-check:
