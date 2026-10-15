@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import array
 import asyncio
+import contextlib
+import dataclasses
 import gc
 import math
 import weakref
@@ -24,6 +26,8 @@ from tests.helpers import (
     available_outgoing_bitrate,
     connect,
     connect_track,
+    exchange_ice_candidates,
+    exchange_offer,
     stats_of_type,
     wait_for_event,
     wait_until,
@@ -233,6 +237,86 @@ async def test_a_generator_keeps_its_size_under_maintain_resolution(
 ) -> None:
     widths = await received_widths(caller, callee, preference=webrtc.RTCDegradationPreference.maintain_resolution)
     assert widths == [640] * FRAMES
+
+
+#: the rids of three layers of 720p, lowest first, and their sizes
+LAYERS = {'q': (320, 180), 'h': (640, 360), 'f': (1280, 720)}
+
+
+@dataclasses.dataclass
+class _Layer:
+    codec: str | None
+    size: tuple[int | None, int | None]
+
+
+async def sent_layers(caller: webrtc.RTCPeerConnection) -> dict[str, _Layer]:
+    """The codec and frame size of each outbound layer that encoded a frame."""
+    report = await caller.get_stats()
+    layers: dict[str, _Layer] = {}
+    for stats in stats_of_type(report, 'outbound-rtp'):
+        assert isinstance(stats, webrtc.RTCOutboundRtpStreamStats)
+        if stats.rid is None or stats.frames_encoded in {None, 0} or stats.codec_id is None:
+            continue
+        codec = report[stats.codec_id]
+        assert isinstance(codec, webrtc.RTCCodecStats)
+        layers[stats.rid] = _Layer(codec.mime_type, (stats.frame_width, stats.frame_height))
+    return layers
+
+
+async def send_simulcast(
+    caller: webrtc.RTCPeerConnection,
+    callee: webrtc.RTCPeerConnection,
+    track: webrtc.MediaStreamTrack,
+    *,
+    mime_type: str,
+) -> None:
+    """Negotiates sending the track in the layers, in the codec only."""
+    capabilities = webrtc.RTCRtpSender.get_capabilities('video')
+    assert capabilities is not None
+    codecs = [c for c in capabilities.codecs if c.mime_type == mime_type]
+    if len(codecs) == 0:
+        pytest.skip(f'no {mime_type} encoder')
+    # without a scalability mode, libwebrtc sends VP9 and AV1 layers as one stream
+    mode = 'L1T1' if mime_type in {'video/VP9', 'video/AV1'} else None
+    encodings = [
+        webrtc.RTCRtpEncodingParameters(rid=rid, scale_resolution_down_by=1280 / width, scalability_mode=mode)
+        for rid, (width, _) in LAYERS.items()
+    ]
+    init = webrtc.RTCRtpTransceiverInit(direction='sendonly', send_encodings=encodings)
+    transceiver = caller.add_transceiver(track, init)
+    transceiver.set_codec_preferences(codecs)
+    exchange_ice_candidates(caller, callee)
+    await exchange_offer(caller, callee)
+    answer = await callee.create_answer()
+    await callee.set_local_description(answer)
+    # libwebrtc doesn't announce receiving the layers by itself
+    simulcast = ''.join(f'a=rid:{rid} recv\r\n' for rid in LAYERS) + f'a=simulcast:recv {";".join(LAYERS)}\r\n'
+    await caller.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', answer.sdp + simulcast))
+    parameters = transceiver.sender.get_parameters()
+    # the start bitrate would make libwebrtc scale the frames down
+    parameters.degradation_preference = 'maintain-resolution'
+    await transceiver.sender.set_parameters(parameters)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mime_type', ['video/VP8', 'video/VP9', 'video/AV1', 'video/H264'])
+async def test_simulcast_sends_every_layer(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, mime_type: str
+) -> None:
+    """Each rid is a stream of the negotiated codec, at its scaled size, whether or not its encoder does simulcast."""
+    generator = webrtc.VideoTrackGenerator()
+    await send_simulcast(caller, callee, generator.track, mime_type=mime_type)
+
+    async def all_sent() -> bool:
+        return len(await sent_layers(caller)) == len(LAYERS)
+
+    async with writing(write_video, generator, bytes(1280 * 720 * 3 // 2), (1280, 720)):
+        with contextlib.suppress(TimeoutError):
+            await wait_until(all_sent, 'every layer encoded', TIMEOUT)
+        layers = await sent_layers(caller)
+    generator.track.stop()
+
+    assert layers == {rid: _Layer(mime_type, size) for rid, size in LAYERS.items()}
 
 
 @pytest.mark.asyncio

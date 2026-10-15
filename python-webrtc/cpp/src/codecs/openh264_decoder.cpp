@@ -51,6 +51,8 @@ namespace python_webrtc {
       return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
     }
 
+    _qpParser.ParseBitstream(image);
+
     std::array<unsigned char *, 3> planes{};
     SBufferInfo info{};
     const auto state = _decoder->DecodeFrameNoDelay(image.data(), static_cast<int>(image.size()), planes.data(), &info);
@@ -71,7 +73,8 @@ namespace python_webrtc {
                      .set_rtp_timestamp(image.RtpTimestamp())
                      .set_color_space(image.ColorSpace())
                      .build();
-    _callback->Decoded(frame, std::nullopt, std::nullopt);
+    const auto sliceQp = _qpParser.GetLastSliceQp();
+    _callback->Decoded(frame, std::nullopt, sliceQp ? std::optional(static_cast<uint8_t>(*sliceQp)) : std::nullopt);
     return WEBRTC_VIDEO_CODEC_OK;
   }
 

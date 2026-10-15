@@ -6,8 +6,7 @@
 //
 
 #include "peer_connection_factory.h"
-#include "../codecs/openh264.h"
-#include "../codecs/videotoolbox.h"
+#include "../codecs/video_codec_factories.h"
 #include "../exceptions.h"
 #include "../media/playout_audio_device.h"
 #include "../utils/dispatcher.h"
@@ -23,14 +22,6 @@
 #include <api/enable_media.h>
 #include <api/environment/environment_factory.h>
 #include <api/make_ref_counted.h>
-#include <api/video_codecs/video_decoder_factory_template.h>
-#include <api/video_codecs/video_decoder_factory_template_dav1d_adapter.h>
-#include <api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h>
-#include <api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template.h>
-#include <api/video_codecs/video_encoder_factory_template_libaom_av1_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h>
 #include <rtc_base/network.h>
 #include <rtc_base/ssl_adapter.h>
 
@@ -42,29 +33,6 @@
 #endif
 
 namespace python_webrtc {
-
-#ifdef __APPLE__
-  // the OS's H.264 first, it wins the formats both offer
-  using VideoEncoderFactory = webrtc::VideoEncoderFactoryTemplate<
-      webrtc::LibvpxVp8EncoderTemplateAdapter, webrtc::LibvpxVp9EncoderTemplateAdapter,
-      webrtc::LibaomAv1EncoderTemplateAdapter, VideoToolboxEncoderAdapter, OpenH264EncoderAdapter>;
-
-  using VideoDecoderFactory =
-      webrtc::VideoDecoderFactoryTemplate<webrtc::LibvpxVp8DecoderTemplateAdapter,
-                                          webrtc::LibvpxVp9DecoderTemplateAdapter, webrtc::Dav1dDecoderTemplateAdapter,
-                                          VideoToolboxDecoderAdapter, OpenH264DecoderAdapter>;
-#else
-  // H.264 only once Cisco's OpenH264 binary is loaded (the prebuilts have none)
-  using VideoEncoderFactory =
-      webrtc::VideoEncoderFactoryTemplate<webrtc::LibvpxVp8EncoderTemplateAdapter,
-                                          webrtc::LibvpxVp9EncoderTemplateAdapter,
-                                          webrtc::LibaomAv1EncoderTemplateAdapter, OpenH264EncoderAdapter>;
-
-  using VideoDecoderFactory =
-      webrtc::VideoDecoderFactoryTemplate<webrtc::LibvpxVp8DecoderTemplateAdapter,
-                                          webrtc::LibvpxVp9DecoderTemplateAdapter, webrtc::Dav1dDecoderTemplateAdapter,
-                                          OpenH264DecoderAdapter>;
-#endif
 
   std::weak_ptr<PeerConnectionFactory> PeerConnectionFactory::_default{};
   std::mutex PeerConnectionFactory::_mutex{};
@@ -94,8 +62,8 @@ namespace python_webrtc {
     dependencies.adm = _audioDeviceModule;
     dependencies.audio_encoder_factory = webrtc::CreateBuiltinAudioEncoderFactory();
     dependencies.audio_decoder_factory = webrtc::CreateBuiltinAudioDecoderFactory();
-    dependencies.video_encoder_factory = std::make_unique<VideoEncoderFactory>();
-    dependencies.video_decoder_factory = std::make_unique<VideoDecoderFactory>();
+    dependencies.video_encoder_factory = CreateVideoEncoderFactory();
+    dependencies.video_decoder_factory = CreateVideoDecoderFactory();
     webrtc::EnableMedia(dependencies);
     return dependencies;
   }

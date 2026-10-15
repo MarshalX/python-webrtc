@@ -74,6 +74,7 @@ class _Received:
     encoder: str | None
     decoder: str | None
     decoded: int | None
+    qp_sum: int | None
 
 
 def _track(event: webrtc.Event) -> webrtc.MediaStreamTrack:
@@ -127,6 +128,7 @@ async def _received(
         encoder=outbound.encoder_implementation,
         decoder=inbound.decoder_implementation,
         decoded=inbound.frames_decoded,
+        qp_sum=inbound.qp_sum,
     )
 
 
@@ -173,6 +175,26 @@ def test_h264_through_a_connection() -> None:
     assert g < 25
     assert b < 25
     assert a == 255
+
+
+@isolated(timeout=seconds(120))
+def _received_red_in_software() -> _Received:
+    # libwebrtc's trial makes a decoder with a software fallback start on it
+    webrtc.field_trials['WebRTC-Video-ForcedSwDecoderFallback'] = 'Enabled'
+    return asyncio.run(_send_red())
+
+
+def test_decodes_in_software_with_qp() -> None:
+    """OpenH264 decodes (on macOS, taking over from VideoToolbox) and reports the QP of what it decodes."""
+    result = _received_red_in_software()
+
+    assert result.decoder == ('OpenH264 (fallback from: VideoToolbox)' if sys.platform == 'darwin' else 'OpenH264')
+    assert result.decoded is not None
+    assert result.decoded >= 10
+    assert result.qp_sum is not None
+    assert result.qp_sum > 0
+    assert result.size == (320, 240)
+    assert result.center[0] > 230
 
 
 @dataclasses.dataclass

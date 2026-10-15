@@ -6,10 +6,12 @@
 //
 
 #include "videotoolbox.h"
+#include "openh264.h"
 
 #include <api/video/encoded_image.h>
 #include <api/video/i420_buffer.h>
 #include <api/video_codecs/h264_profile_level_id.h>
+#include <api/video_codecs/video_decoder_software_fallback_wrapper.h>
 #include <common_video/h264/h264_bitstream_parser.h>
 #import <components/video_codec/RTCVideoDecoderFactoryH264.h>
 #import <components/video_codec/nalu_rewriter.h>
@@ -44,9 +46,9 @@ namespace {
   constexpr unsigned kChromaRange = 224;
   constexpr unsigned kFullRange = 255;
 
-  // the SDK encoder's QP thresholds, for libwebrtc's quality scaler
-  constexpr int kLowQpThreshold = 28;
-  constexpr int kHighQpThreshold = 39;
+  // libwebrtc's own H.264 QP thresholds, which its quality scaling applies over an encoder's by default
+  constexpr int kLowQpThreshold = 24;
+  constexpr int kHighQpThreshold = 37;
 
   // key frames come on request, so the periodic ones are rare
   constexpr int kMaxKeyFrameInterval = 7200;
@@ -146,16 +148,24 @@ namespace {
         if (_session == nullptr || _callback.load() == nullptr) {
           return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
         }
+        // a frame failed after VideoToolbox took it: a new session starts with a key frame
+        const bool restart = _failed.load();
+        if (restart && !RestartSession()) {
+          return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
+        }
         const auto i420 = frame.video_frame_buffer()->ToI420();
-        if (i420 == nullptr || !FitSession(i420->width(), i420->height())) {
+        if (i420 == nullptr) {
           return WEBRTC_VIDEO_CODEC_ERROR;
+        }
+        if (!FitSession(i420->width(), i420->height())) {
+          return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
         }
         CVPixelBufferRef pixelBuffer = PoolBufferOf(*i420);
         if (pixelBuffer == nullptr) {
           return WEBRTC_VIDEO_CODEC_ERROR;
         }
 
-        NSDictionary *const options = IsKeyFrameRequested(types)
+        NSDictionary *const options = restart || IsKeyFrameRequested(types)
                                           ? @{(__bridge NSString *)kVTEncodeFrameOptionKey_ForceKeyFrame : @YES}
                                           : nil;
         // freed by OnEncoded, which VideoToolbox calls for failed frames too
@@ -173,7 +183,7 @@ namespace {
         if (status == kVTInvalidSessionErr || status == kVTVideoEncoderMalfunctionErr) {
           RTC_LOG(LS_WARNING) << "VideoToolbox lost its H.264 session (" << status << "), starting a new one";
           DestroySession();
-          return CreateSession() ? WEBRTC_VIDEO_CODEC_NO_OUTPUT : WEBRTC_VIDEO_CODEC_ERROR;
+          return CreateSession() ? WEBRTC_VIDEO_CODEC_NO_OUTPUT : WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
         }
         return status == noErr ? WEBRTC_VIDEO_CODEC_OK : WEBRTC_VIDEO_CODEC_ERROR;
       }
@@ -219,6 +229,8 @@ namespace {
           (__bridge NSString *)kCVPixelBufferHeightKey : @(_height),
           (__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey : @{},
         };
+        _failed = false;
+        _encoded = false;
         const OSStatus status = VTCompressionSessionCreate(
             nullptr, _width, _height, kCMVideoCodecType_H264, (__bridge CFDictionaryRef)specification,
             (__bridge CFDictionaryRef)source, nullptr, &OnEncoded, this, &_session);
@@ -247,6 +259,16 @@ namespace {
         CFRelease(_session);
         _session = nullptr;
       }
+    }
+
+    bool RestartSession() {
+      DestroySession();
+      if (!_encoded.load()) {
+        RTC_LOG(LS_ERROR) << "VideoToolbox can't encode this H.264 stream";
+        return false;
+      }
+      RTC_LOG(LS_WARNING) << "VideoToolbox starts a new H.264 session";
+      return CreateSession();
     }
 
     // a session is made for one size
@@ -313,6 +335,7 @@ namespace {
     void Deliver(std::unique_ptr<FrameInfo> info, OSStatus status, VTEncodeInfoFlags flags, CMSampleBufferRef sample) {
       if (status != noErr) {
         RTC_LOG(LS_ERROR) << "VideoToolbox failed to encode an H.264 frame: " << status;
+        _failed = true;
         return;
       }
       auto *callback = _callback.load();
@@ -346,6 +369,7 @@ namespace {
       codecInfo.codecSpecific.H264.idr_frame = key;
       // NOLINTEND(cppcoreguidelines-pro-type-union-access)
       callback->OnEncodedImage(image, &codecInfo);
+      _encoded = true;
     }
 
     const CFStringRef _profileLevel;
@@ -358,6 +382,9 @@ namespace {
     bool _screenshare = false;
     uint32_t _bitrate = 0;
     double _framerate = 0;
+    // of the current session, set on VideoToolbox's thread
+    std::atomic<bool> _failed = false;
+    std::atomic<bool> _encoded = false;
     // VideoToolbox's thread only
     webrtc::H264BitstreamParser _qpParser;
   };
@@ -488,7 +515,15 @@ namespace python_webrtc {
   std::unique_ptr<webrtc::VideoDecoder>
   VideoToolboxDecoderAdapter::CreateDecoder(const webrtc::Environment &env, const webrtc::SdpVideoFormat &format) {
     auto decoder = DecoderFactory().Create(env, format);
-    return decoder ? std::make_unique<VideoRangeDecoder>(std::move(decoder)) : nullptr;
+    if (decoder == nullptr) {
+      return nullptr;
+    }
+    std::unique_ptr<webrtc::VideoDecoder> videoToolbox = std::make_unique<VideoRangeDecoder>(std::move(decoder));
+    auto fallback = OpenH264::Enabled() ? OpenH264DecoderAdapter::CreateDecoder(env, format) : nullptr;
+    if (fallback == nullptr) {
+      return videoToolbox;
+    }
+    return webrtc::CreateVideoDecoderSoftwareFallbackWrapper(env, std::move(fallback), std::move(videoToolbox));
   }
 
 } // namespace python_webrtc
