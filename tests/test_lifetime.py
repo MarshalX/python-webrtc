@@ -39,6 +39,7 @@ from tests.helpers import (
     wait_until,
 )
 from tests.isolation import isolated
+from tests.timing import seconds
 from webrtc.utils import events, lifetime, loops
 
 if TYPE_CHECKING:
@@ -305,7 +306,7 @@ async def test_transports_outlive_closed_connection(
     assert ice_transport.state == webrtc.RTCIceTransportState.closed
 
 
-@isolated(timeout=60)
+@isolated(timeout=seconds(60))
 def test_states_show_the_engine_once_their_loop_is_gone() -> None:
     """Loop closed with queued changes shows engine state."""
 
@@ -320,7 +321,7 @@ def test_states_show_the_engine_once_their_loop_is_gone() -> None:
         wrtc._testing.park('dispatcher.wake')
         # a parked wake makes the close's state changes queue behind it
         wrtc._testing.post(wrtc.Mailbox(), 'event', 1)
-        assert wrtc._testing.parked('dispatcher.wake', 5)
+        assert wrtc._testing.parked('dispatcher.wake', seconds(5))
         remote.close()
         return caller, callee, channel
 
@@ -389,7 +390,7 @@ def test_getters_while_connection_is_closed_and_dropped(audio_stream: webrtc.Med
 
         # raises what a reader raised, or TimeoutError if it's stuck
         for reader in readers:
-            reader.result(timeout=10)
+            reader.result(timeout=seconds(10))
         executor.shutdown()
         collect()
 
@@ -415,7 +416,7 @@ def test_handlers_referencing_their_connection_keep_it_until_close_or_loop_relea
     async def scenario() -> weakref.ref[webrtc.RTCPeerConnection]:
         delivered = asyncio.get_running_loop().create_future()
         ref = connection_with_a_handler_referencing_it(delivered)
-        await asyncio.wait_for(delivered, 5)
+        await asyncio.wait_for(delivered, seconds(5))
         collect()
         pc = ref()
         assert pc is not None
@@ -474,11 +475,11 @@ def test_a_closing_connection_and_its_children_end_their_activity_before_unbindi
 
         try:
             closer.start()
-            assert wrtc._testing.parked('connection.close', 10)
+            assert wrtc._testing.parked('connection.close', seconds(10))
             await asyncio.get_running_loop().run_in_executor(None, asyncio.run, check_on_a_new_loop())
         finally:
             wrtc._testing.release('connection.close')
-            closer.join(10)
+            closer.join(seconds(10))
 
         assert pc.signaling_state == webrtc.RTCSignalingState.closed
 
@@ -498,7 +499,7 @@ def test_close_unbinding_a_child_while_its_loop_roots_it(monkeypatch: pytest.Mon
             # the close runs between this read and the store
             closer = threading.Thread(target=lambda: (pc.close(), closed.set()))
             closer.start()
-            closer.join(10)
+            closer.join(seconds(10))
         return reason
 
     async def root_while_closed() -> None:  # ruff: ignore[unused-async]
@@ -625,7 +626,7 @@ def test_process_exits_after_connecting() -> None:
     # from the root of the project, which has the tests package (pytest may run from elsewhere, like cibuildwheel)
     root = pathlib.Path(pathlib.Path(pathlib.Path(__file__).resolve()).parent).parent
     result = subprocess.run(
-        [sys.executable, '-c', script], capture_output=True, text=True, timeout=60, cwd=root, check=False
+        [sys.executable, '-c', script], capture_output=True, text=True, timeout=seconds(60), cwd=root, check=False
     )
     assert 'connected' in result.stdout, result.stderr[-2000:]
     assert result.returncode == 0, result.stderr[-2000:]
@@ -651,15 +652,16 @@ async def test_stream_tracks_read_while_they_change(
     reader = threading.Thread(target=read, daemon=True)
     reader.start()
     try:
+        # unbounded: a deadlock hits the suite's timeout, which dumps the stacks
         for _ in range(10):
             # removing and adding the track back changes the tracks of the remote stream
             caller.remove_track(sender)
-            await asyncio.wait_for(exchange_offer_answer(caller, callee), 5)
+            await exchange_offer_answer(caller, callee)
             sender = caller.add_track(audio, audio_stream)
-            await asyncio.wait_for(exchange_offer_answer(caller, callee), 5)
+            await exchange_offer_answer(caller, callee)
     finally:
         stop.set()
-        reader.join(5)
+        reader.join(seconds(5))
     assert not reader.is_alive()
 
 
@@ -694,7 +696,7 @@ def _collect_on_dispatcher_wakes() -> None:
 
         transport.on('icecandidate', on_candidate)
         transport.gather()
-        await asyncio.wait_for(done, 10)
+        await asyncio.wait_for(done, seconds(10))
         transport.stop()
         return ref
 
@@ -705,7 +707,7 @@ def _collect_on_dispatcher_wakes() -> None:
     assert threading.main_thread() not in collections
 
 
-@isolated(timeout=60)
+@isolated(timeout=seconds(60))
 def test_collected_on_the_dispatcher_thread() -> None:
     """GC on the Dispatcher releases a connection."""
     _collect_on_dispatcher_wakes()
@@ -945,7 +947,7 @@ async def test_a_session_releases_every_native_object() -> None:
                 webrtc.VideoFrameBufferInit(format='RGBA', coded_width=64, coded_height=48, timestamp=0),
             )
         )
-        frame = (await asyncio.wait_for(reader.read(), 5)).value
+        frame = (await asyncio.wait_for(reader.read(), seconds(5))).value
         assert frame is not None
         frame.close()
         await caller.get_stats()
@@ -958,7 +960,7 @@ async def test_a_session_releases_every_native_object() -> None:
     await session()
     # the deadline only bounds a failing run: a slow machine releases later, not never
     with contextlib.suppress(TimeoutError):
-        await wait_until(lambda: alive_objects() == baseline, 'every native object released', timeout=30)
+        await wait_until(lambda: alive_objects() == baseline, 'every native object released', timeout=seconds(30))
 
     assert alive_objects() == baseline
 

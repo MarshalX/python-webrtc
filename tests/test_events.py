@@ -30,6 +30,7 @@ from tests.helpers import (
     wait_for_ice_gathering_complete,
     wait_until,
 )
+from tests.timing import seconds
 from webrtc.utils.loops import LoopState
 
 if TYPE_CHECKING:
@@ -37,7 +38,7 @@ if TYPE_CHECKING:
 
     from tests.helpers import CreatePC
 
-TIMEOUT = 5
+TIMEOUT = seconds(5)
 
 
 @pytest.mark.asyncio
@@ -444,7 +445,7 @@ def _loop_in_a_thread() -> Generator[asyncio.AbstractEventLoop, None, None]:
         yield loop
     finally:
         loop.call_soon_threadsafe(loop.stop)
-        thread.join(5)
+        thread.join(seconds(5))
         loop.close()
 
 

@@ -24,6 +24,7 @@ import webrtc
 import wrtc
 from tests.helpers import connect, wait_until
 from tests.isolation import isolated
+from tests.timing import seconds
 
 KEY = bytes(range(16))
 SUITE = webrtc.SFrameCipherSuite.AES_128_CTR_HMAC_SHA256_80
@@ -231,7 +232,7 @@ async def _race() -> None:
     assert len(race.natives) > 0, 'no frame was read'
 
 
-@isolated(timeout=90)
+@isolated(timeout=seconds(90))
 def test_threads_race_transforms_keys_and_frames() -> None:
     """Transforms set and removed, keys rotated, frames read and written and the connections closed, all at once."""
     asyncio.run(_race())

@@ -17,6 +17,7 @@ from typing_extensions import TypedDict
 import webrtc
 from tests.helpers import capture_mode, connect_track, mistyped, wait_until, write_video, writing
 from tests.isolation import isolated
+from tests.timing import seconds
 
 C = webrtc.MediaTrackConstraints
 
@@ -73,7 +74,7 @@ async def test_microphone_settings_are_the_format_of_its_samples(audio_stream: w
     reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
     # the second chunk comes after every sink of the track saw the first
     for _ in range(2):
-        audio = (await asyncio.wait_for(reader.read(), 5)).value
+        audio = (await asyncio.wait_for(reader.read(), seconds(5))).value
         assert isinstance(audio, webrtc.AudioData)
         sample_rate, channels = audio.sample_rate, audio.number_of_channels
         audio.close()
@@ -266,7 +267,7 @@ async def test_camera_settings_are_its_mode_while_old_frames_are_recent(video_st
     track = video_stream.get_tracks()[0]
     reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
     for _ in range(3):
-        frame = (await asyncio.wait_for(reader.read(), 10)).value
+        frame = (await asyncio.wait_for(reader.read(), seconds(10))).value
         assert isinstance(frame, webrtc.VideoFrame)
         frame.close()
     await track.apply_constraints(C(frame_rate=1))

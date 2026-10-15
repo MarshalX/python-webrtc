@@ -19,6 +19,7 @@ import pytest
 from typing_extensions import override
 
 import webrtc
+from tests.timing import seconds
 from webrtc.aiortc import (
     AudioStreamTrack,
     MediaStreamTrack,
@@ -41,7 +42,7 @@ from webrtc.aiortc.rtcrtpreceiver import RemoteStreamTrack
 if TYPE_CHECKING:
     from pathlib import Path
 
-TIMEOUT = 10
+TIMEOUT = seconds(10)
 #: no STUN server, so gathering is local
 CONFIGURATION = RTCConfiguration(iceServers=[])
 
@@ -229,7 +230,7 @@ async def test_native_relay_carries_video() -> None:
         await negotiate(relay_out, sink)
         relayed = await next_track(outgoing)
 
-        frames = [await asyncio.wait_for(relayed.recv(), 1) for _ in range(90)]
+        frames = [await asyncio.wait_for(relayed.recv(), seconds(1)) for _ in range(90)]
 
         assert len(frames) == 90
     finally:

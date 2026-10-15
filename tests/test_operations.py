@@ -20,6 +20,7 @@ import pytest
 import webrtc
 from tests.helpers import QUIET_PERIOD, generate_answer, wait_for_event
 from tests.isolation import isolated
+from tests.timing import seconds
 from webrtc.utils.loops import LoopState
 from webrtc.utils.operations import OperationsChain
 
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
 
 #: More unapplied descriptions than a connection keeps (32)
 NEGOTIATIONS = 10
-TIMEOUT = 10
+TIMEOUT = seconds(10)
 
 
 @pytest.mark.asyncio
@@ -53,7 +54,7 @@ async def test_cancelled_waiting_operation_leaves_the_running_one() -> None:
     await asyncio.sleep(0)
 
     release.set()
-    await asyncio.wait_for(asyncio.gather(first, third), 5)
+    await asyncio.wait_for(asyncio.gather(first, third), seconds(5))
     with pytest.raises(asyncio.CancelledError):
         await waiting
     assert order == ['first', 'third']
@@ -82,7 +83,7 @@ async def test_operations_of_a_closed_chain_run_at_once() -> None:
     release.set()
     # the running one is aborted once it ends
     with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(held, 5)
+        await asyncio.wait_for(held, seconds(5))
 
 
 def test_operations_stranded_by_a_closed_loop_end_quietly() -> None:
@@ -117,7 +118,7 @@ def test_operation_waiting_for_one_of_another_loop_resumes() -> None:
 
     other = threading.Thread(target=asyncio.run, args=(first(),))
     other.start()
-    assert started.wait(5)
+    assert started.wait(seconds(5))
 
     async def second() -> None:
         async def operation() -> None:
@@ -127,10 +128,10 @@ def test_operation_waiting_for_one_of_another_loop_resumes() -> None:
         waiting = asyncio.ensure_future(operation())
         await asyncio.sleep(0)
         release.set()
-        await asyncio.wait_for(waiting, 5)
+        await asyncio.wait_for(waiting, seconds(5))
 
     asyncio.run(second())
-    other.join(5)
+    other.join(seconds(5))
     assert not chain.busy
 
 
@@ -150,7 +151,7 @@ def test_operation_waiting_in_a_closed_loop_lets_the_chain_go_on(caplog: pytest.
 
     other = threading.Thread(target=asyncio.run, args=(first(),))
     other.start()
-    assert started.wait(5)
+    assert started.wait(seconds(5))
 
     async def operation() -> None:
         async with chain.operation():
@@ -161,7 +162,7 @@ def test_operation_waiting_in_a_closed_loop_lets_the_chain_go_on(caplog: pytest.
     loop.run_until_complete(asyncio.sleep(0))
     loop.close()
     release.set()
-    other.join(5)
+    other.join(seconds(5))
     assert not chain.busy
     # collected later, its code may end the operation again (3.10+)
     del waiting

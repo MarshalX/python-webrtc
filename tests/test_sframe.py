@@ -20,6 +20,7 @@ import pytest
 import webrtc
 import wrtc
 from tests.helpers import (
+    QUIET_PERIOD,
     connect,
     exchange_offer,
     exchange_offer_answer,
@@ -28,13 +29,14 @@ from tests.helpers import (
     wait_progressing,
     wait_until,
 )
+from tests.timing import seconds
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from typing_extensions import Buffer
 
-TIMEOUT = 15
+TIMEOUT = seconds(15)
 SUITES = list(webrtc.SFrameCipherSuite)
 KEY = bytes(range(16))
 OTHER_KEY = bytes(range(1, 17))
@@ -309,7 +311,7 @@ async def test_stream_errors_on_other_chunks() -> None:
 async def test_encryptor_stream_without_a_key_drops() -> None:
     stream = webrtc.SFrameEncryptorStream(options(webrtc.SFrameCipherSuite.AES_128_GCM_SHA256_128))
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(through(stream, b'clear'), 0.3)
+        await asyncio.wait_for(through(stream, b'clear'), QUIET_PERIOD)
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,7 @@ import webrtc
 from tests import chaos
 from tests.helpers import ROOT
 from tests.isolation import HUNTING
+from tests.timing import seconds
 
 
 def run_chaos(seed: int, steps: int, timeout: float, *, transforms: bool = False) -> None:
@@ -71,24 +72,24 @@ async def test_sender_steps_survive_a_close_from_another_worker(step: str, monke
 
 @pytest.mark.parametrize('seed', range(2))
 def test_chaos(seed: int) -> None:
-    run_chaos(seed, steps=150, timeout=120)
+    run_chaos(seed, steps=150, timeout=seconds(120))
 
 
 @pytest.mark.parametrize('seed', range(2))
 def test_chaos_of_transforms(seed: int) -> None:
     """Transforms, SFrame keys and encoded frames, on connections sending media."""
-    run_chaos(seed, steps=150, timeout=120, transforms=True)
+    run_chaos(seed, steps=150, timeout=seconds(120), transforms=True)
 
 
 @pytest.mark.stress
 @pytest.mark.timeout(900)
 @pytest.mark.parametrize('seed', range(100, 120))
 def test_chaos_long(seed: int) -> None:
-    run_chaos(seed, steps=1000, timeout=600)
+    run_chaos(seed, steps=1000, timeout=seconds(600))
 
 
 @pytest.mark.stress
 @pytest.mark.timeout(900)
 @pytest.mark.parametrize('seed', range(200, 210))
 def test_chaos_of_transforms_long(seed: int) -> None:
-    run_chaos(seed, steps=1000, timeout=600, transforms=True)
+    run_chaos(seed, steps=1000, timeout=seconds(600), transforms=True)

@@ -31,12 +31,13 @@ from tests.helpers import (
     wait_for_event,
     wait_until,
 )
+from tests.timing import seconds
 from webrtc.utils.events import EventTarget, UniformEventTarget
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Sequence
 
-TIMEOUT = 10
+TIMEOUT = seconds(10)
 SUITE = webrtc.SFrameCipherSuite.AES_128_GCM_SHA256_128
 KEY = bytes(range(16))
 OTHER_KEY = bytes(range(1, 17))

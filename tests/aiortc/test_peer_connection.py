@@ -15,6 +15,7 @@ import functools
 import pytest
 
 from tests.helpers import mistyped
+from tests.timing import seconds
 from webrtc.aiortc import (
     InvalidStateError,
     RTCConfiguration,
@@ -29,7 +30,7 @@ from webrtc.aiortc import (
 )
 from webrtc.aiortc.sdp import candidate_from_sdp
 
-TIMEOUT = 10
+TIMEOUT = seconds(10)
 #: no STUN server, so gathering is local
 CONFIGURATION = RTCConfiguration(iceServers=[])
 

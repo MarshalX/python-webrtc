@@ -27,6 +27,7 @@ from tests.helpers import (
     wait_for_ice_gathering_complete,
     wait_until,
 )
+from tests.timing import seconds
 
 #: The most a channel queues to send, in bytes
 SEND_QUEUE_LIMIT = 16 * 1024 * 1024
@@ -97,7 +98,7 @@ async def test_messages_both_ways(
     channel.send('text')
     channel.send(b'\x00\x01')
     channel.send(bytearray(b'\x02'))
-    await asyncio.wait_for(got_all, 5)
+    await asyncio.wait_for(got_all, seconds(5))
     assert received == ['text', b'\x00\x01', b'\x02']
 
 
@@ -294,7 +295,7 @@ async def test_messages_sent_on_open_reach_a_handler_added_on_datachannel(
 
     callee.on('datachannel', lambda event: event.channel.on('message', on_message))
     await connect(caller, callee)
-    await asyncio.wait_for(done, 10)
+    await asyncio.wait_for(done, seconds(10))
     assert received == [str(number) for number in range(count)]
 
 
@@ -333,7 +334,7 @@ async def test_sent_from_the_datachannel_handler_before_libwebrtc_opens_it(
     try:
         # off the loop: creating it waits for the parked signaling thread too
         creating = asyncio.ensure_future(asyncio.to_thread(caller.create_data_channel, 'early'))
-        await asyncio.wait_for(sent, 10)
+        await asyncio.wait_for(sent, seconds(10))
     finally:
         wrtc._testing.release('connection.datachannel')
     await creating

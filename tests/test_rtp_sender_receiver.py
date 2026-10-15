@@ -26,6 +26,7 @@ from tests.helpers import (
     wait_for_event,
     wait_until,
 )
+from tests.timing import seconds
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -419,7 +420,7 @@ async def test_set_parameters_after_rollback(pc: webrtc.RTCPeerConnection) -> No
     await pc.set_local_description()
     await pc.set_local_description(webrtc.RTCSessionDescriptionInit('rollback'))
     with pytest.raises(webrtc.InvalidStateError):
-        await asyncio.wait_for(sender.set_parameters(sender.get_parameters()), 5)
+        await asyncio.wait_for(sender.set_parameters(sender.get_parameters()), seconds(5))
 
 
 @pytest.mark.asyncio
@@ -456,7 +457,7 @@ async def test_dtmf(
         return event.tone == ''
 
     dtmf.on('tonechange', on_tone_change)
-    done = wait_for_event(dtmf, 'tonechange', timeout=5, predicate=is_last)
+    done = wait_for_event(dtmf, 'tonechange', timeout=seconds(5), predicate=is_last)
 
     with pytest.raises(webrtc.InvalidCharacterError):
         dtmf.insert_dtmf('12X')
@@ -524,7 +525,7 @@ async def test_dtmf_cancel(
         assert isinstance(event, webrtc.RTCDTMFToneChangeEvent)
         return event.tone == ''
 
-    done = wait_for_event(dtmf, 'tonechange', timeout=5, predicate=is_last)
+    done = wait_for_event(dtmf, 'tonechange', timeout=seconds(5), predicate=is_last)
     dtmf.insert_dtmf('123456789')
     assert dtmf.tone_buffer == '123456789'
     dtmf.insert_dtmf('')
@@ -558,7 +559,7 @@ async def test_synchronization_sources(
     receiver = track_event.receiver
 
     # sources are known once media is decoded (audio is only played out by a real audio device)
-    await wait_until(receiver.get_synchronization_sources, 'a synchronization source', timeout=5)
+    await wait_until(receiver.get_synchronization_sources, 'a synchronization source', timeout=seconds(5))
     [source] = receiver.get_synchronization_sources()
     inbound = stats_of_type(await receiver.get_stats(), 'inbound-rtp')[0]
     assert isinstance(inbound, webrtc.RTCInboundRtpStreamStats)

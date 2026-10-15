@@ -13,8 +13,9 @@ import pytest
 
 import webrtc
 from tests.helpers import wait_for_ice_gathering_complete, wait_until
+from tests.timing import seconds
 
-TIMEOUT = 20
+TIMEOUT = seconds(20)
 
 
 async def set_local_and_gather(

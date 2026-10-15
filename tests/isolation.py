@@ -22,10 +22,15 @@ from unittest import mock
 import pytest
 from typing_extensions import ParamSpec
 
+from tests.timing import seconds
+
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
 
     from typing_extensions import TypeAlias
+
+#: how long an isolated test may run, stretched on slow builds
+LIMIT = seconds(60)
 
 _T = TypeVar('_T')
 _P = ParamSpec('_P')
@@ -91,7 +96,7 @@ def _run(
         receiver.close()
 
     if stuck:
-        pytest.fail(f'still running after {timeout} s', pytrace=False)
+        pytest.fail(f'still running after {timeout:g} s', pytrace=False)
     if process.exitcode != 0:
         pytest.fail(f'exit code {process.exitcode}, see its output', pytrace=False)
     if outcome is not None and outcome[0] == 'skipped':
@@ -104,11 +109,11 @@ def isolated(test: Callable[_P, _T], /) -> Callable[_P, _T]: ...
 
 
 @overload
-def isolated(*, timeout: float = 60) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]: ...
+def isolated(*, timeout: float = LIMIT) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]: ...
 
 
 def isolated(
-    test: Callable[_P, _T] | None = None, /, *, timeout: float = 60
+    test: Callable[_P, _T] | None = None, /, *, timeout: float = LIMIT
 ) -> Callable[_P, _T] | Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """Runs a function of the top of a module in a fresh interpreter, which must exit within the timeout."""
 

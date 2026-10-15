@@ -67,7 +67,8 @@ jobs:
       WRTC_CACHE_DIR: ${{ github.workspace }}/.wrtc-cache
       WRTC_ARCHIVE_DIR: ${{ matrix.os == 'windows-latest' && format('{0}/.wrtc-cache/archives', github.workspace) || '' }}
       UV_HTTP_RETRIES: 10
-      CIBW_ENVIRONMENT_PASS_LINUX: UV_HTTP_RETRIES
+      WRTC_TEST_TIME_SCALE: ${{ endsWith(matrix.python, 't') && 2 || 1 }}
+      CIBW_ENVIRONMENT_PASS_LINUX: UV_HTTP_RETRIES WRTC_TEST_TIME_SCALE
       # --gc-on-emit not on tags
       CIBW_TEST_COMMAND: ${{ github.event_name != 'push' && 'pytest -n auto {project}/tests && pytest -n auto {project}/tests --gc-on-emit' || 'pytest -n auto {project}/tests' }}
     steps:
@@ -124,6 +125,8 @@ jobs:
           - { pass: plain, args: "" }
           - { pass: gc-on-emit, args: --gc-on-emit }
           - { pass: stress, args: --stress -k "stress or chaos" }
+    env:
+      WRTC_TEST_TIME_SCALE: 3
     steps:
       - uses: actions/checkout@v7
       # github.workspace is the host's path
@@ -147,6 +150,7 @@ jobs:
           - { pass: gc-on-emit, args: --gc-on-emit }
     env:
       WRTC_CACHE_DIR: ${{ github.workspace }}/.wrtc-cache
+      WRTC_TEST_TIME_SCALE: 3
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v6

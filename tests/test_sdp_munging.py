@@ -25,8 +25,9 @@ from tests.helpers import (
     write_video,
     writing,
 )
+from tests.timing import seconds
 
-TIMEOUT = 20
+TIMEOUT = seconds(20)
 OPUS = 'opus/48000/2'
 VP8 = 'VP8/90000'
 

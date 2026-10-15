@@ -22,6 +22,7 @@ import pytest
 
 import webrtc
 from tests.helpers import NamedEvents, connect, settled_alive, wait_for_event
+from tests.timing import seconds
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -33,7 +34,7 @@ THREADS = 8
 CONNECTIONS = 20
 ROUNDS = 300
 #: longer is a deadlock
-TIMEOUT = 60
+TIMEOUT = seconds(60)
 #: each collection stops every thread; back to back they'd starve the others
 COLLECT_INTERVAL = 0.01
 

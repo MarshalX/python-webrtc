@@ -29,8 +29,11 @@ from tests.helpers import (
     write_video,
     writing,
 )
+from tests.timing import seconds
 
-TIMEOUT = 20
+TIMEOUT = seconds(20)
+#: no frame for this long means frames stopped; exact, as it defines the assertion
+QUIET = 0.5
 WIDTH, HEIGHT = 320, 240
 
 
@@ -143,7 +146,7 @@ async def test_relayed_video_outlasts_the_sender_reports(
                 cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), TIMEOUT)).value).close()
         # a second of frames past it
         for _ in range(30):
-            cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), 1)).value).close()
+            cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), seconds(1))).value).close()
         await reader.cancel()
     generator.track.stop()
 
@@ -291,7 +294,7 @@ async def test_stopped_camera_track_stops_sending(
     drained = 0
     while drained < 100:
         try:
-            cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), 0.5)).value).close()
+            cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), QUIET)).value).close()
         except asyncio.TimeoutError:
             break
         drained += 1

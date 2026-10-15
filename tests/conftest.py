@@ -23,6 +23,7 @@ import pytest
 import webrtc
 import wrtc
 from tests.helpers import register_stack_dump, release_stranded_candidates, settled_alive
+from tests.timing import seconds
 from webrtc.utils import loops
 
 if TYPE_CHECKING:
@@ -74,12 +75,16 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(skip)
 
 
+@pytest.hookimpl(tryfirst=True)
 def pytest_configure(config: pytest.Config) -> None:
     register_stack_dump()
     if sysconfig.get_config_var('Py_GIL_DISABLED') == 1:
         # an extension not marked GIL-free silently re-enables the GIL on import
         gil_enabled = getattr(sys, '_is_gil_enabled', lambda: True)
         assert not gil_enabled(), 'the GIL was enabled by an import on a free-threaded build'
+    # before pytest-timeout reads it: its per-test limit stretches like every wait, unless set otherwise
+    if config.getvalue('timeout') is None and 'PYTEST_TIMEOUT' not in os.environ:
+        config.option.timeout = seconds(float(config.getini('timeout')))
     config.addinivalue_line('markers', 'stress: a long stress test, run with --stress')
     config.addinivalue_line('markers', 'leaks(reason): the test leaks, the reason names the leak class')
     config.addinivalue_line('markers', 'roots(reason): the test fails a roots check, the reason names the class')

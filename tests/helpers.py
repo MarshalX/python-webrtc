@@ -27,6 +27,7 @@ from typing_extensions import Never, override
 
 import webrtc
 import wrtc
+from tests.timing import seconds
 from webrtc.utils import loops
 
 if TYPE_CHECKING:
@@ -98,6 +99,9 @@ async def generate_answer(offer: webrtc.RTCSessionDescriptionInit) -> webrtc.RTC
     return answer
 
 
+#: How long helpers wait by default, stretched on slow builds
+WAIT = seconds(10)
+
 #: How long a test waits to see that something doesn't happen
 QUIET_PERIOD = 0.3
 
@@ -108,7 +112,7 @@ async def called(function: Callable[[], _T | Awaitable[_T]]) -> _T:
     return await result if inspect.isawaitable(result) else result
 
 
-async def wait_until(predicate: Callable[[], object], what: str, timeout: float = 10) -> None:
+async def wait_until(predicate: Callable[[], object], what: str, timeout: float = WAIT) -> None:
     """Polls until the predicate (a function or a coroutine function) is true.
 
     Raises:
@@ -163,7 +167,7 @@ async def delivered() -> None:
     await next_task()
 
 
-async def wait_for_ice_gathering_complete(pc: webrtc.RTCPeerConnection, timeout: float = 10) -> None:
+async def wait_for_ice_gathering_complete(pc: webrtc.RTCPeerConnection, timeout: float = WAIT) -> None:
     await wait_until(lambda: pc.ice_gathering_state == webrtc.RTCIceGatheringState.complete, 'ICE gathering', timeout)
 
 
@@ -178,7 +182,7 @@ class NamedEvents(Protocol):
 def wait_for_event(
     target: webrtc.EventTarget[Never],
     name: str,
-    timeout: float = 10,
+    timeout: float = WAIT,
     *,
     predicate: Callable[[webrtc.Event], bool] | None = None,
 ) -> Awaitable[webrtc.Event]:
@@ -291,7 +295,7 @@ def exchange_ice_candidates(caller: webrtc.RTCPeerConnection, callee: webrtc.RTC
     _trickle(callee, caller)
 
 
-async def connect(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, timeout: float = 10) -> None:
+async def connect(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, timeout: float = WAIT) -> None:
     """Negotiates and waits until both connections are connected."""
     exchange_ice_candidates(caller, callee)
     await exchange_offer_answer(caller, callee)
@@ -302,7 +306,7 @@ async def connect(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnec
     await wait_until(connected, 'both connections to connect', timeout)
 
 
-async def wait_until_unmuted(track: webrtc.MediaStreamTrack, timeout: float = 10) -> None:
+async def wait_until_unmuted(track: webrtc.MediaStreamTrack, timeout: float = WAIT) -> None:
     """Waits until media arrives on a remote track, which may take longer than connecting."""
     if track.muted:
         await wait_for_event(track, 'unmute', timeout)
@@ -319,7 +323,7 @@ async def connect_track(
     callee: webrtc.RTCPeerConnection,
     track: webrtc.MediaStreamTrack,
     *,
-    timeout: float = 10,
+    timeout: float = WAIT,
 ) -> webrtc.MediaStreamTrack:
     """Sends a track from the caller, connects, and returns the remote track of the callee."""
     caller.add_track(track)
@@ -362,7 +366,7 @@ async def writing(write: Callable[..., Awaitable[None]], *args: object, **kwargs
         yield
     finally:
         stop.set()
-        await asyncio.wait_for(task, 10)
+        await asyncio.wait_for(task, seconds(10))
 
 
 #: seconds for native counts to settle, and the polling interval

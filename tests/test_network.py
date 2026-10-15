@@ -19,6 +19,7 @@ import pytest
 
 import webrtc
 from tests.helpers import connect, wait_for_event, wait_for_ice_gathering_complete, wait_until
+from tests.timing import seconds
 
 if TYPE_CHECKING:
     from tests.helpers import CreatePC
@@ -102,7 +103,7 @@ async def test_idle_connections_leave_the_process_idle(create_pc: CreatePC) -> N
     started = time.process_time()
     await asyncio.sleep(1)
 
-    assert time.process_time() - started < 0.5
+    assert time.process_time() - started < seconds(0.5)
 
 
 @pytest.mark.asyncio
@@ -129,4 +130,4 @@ async def test_gathering_runs_its_phases_without_waiting_between_them(
     await wait_for_ice_gathering_complete(pc)
 
     # libwebrtc's default waits 50 ms between its three phases
-    assert time.perf_counter() - started < 0.1
+    assert time.perf_counter() - started < seconds(0.1)

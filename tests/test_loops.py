@@ -25,11 +25,12 @@ import webrtc
 import wrtc
 from tests.helpers import called, mistyped
 from tests.isolation import isolated
+from tests.timing import seconds
 from webrtc.utils import loops
 from webrtc.utils.events import EventTarget
 from webrtc.utils.loops import LoopState, checking_roots
 
-TIMEOUT = 5
+TIMEOUT = seconds(5)
 
 
 def _handled_on(loop: asyncio.AbstractEventLoop) -> tuple[LoopState, webrtc.RTCPeerConnection]:
@@ -211,7 +212,7 @@ def test_closed_loop_held_by_the_user_is_released_on_collection() -> None:
     wrtc._testing.park('dispatcher.wake')
     try:
         wrtc._testing.post(state.mailbox, 'event', 1)
-        assert wrtc._testing.parked('dispatcher.wake', 5)
+        assert wrtc._testing.parked('dispatcher.wake', seconds(5))
         loop.close()
         assert not state.mailbox.closed
 
@@ -233,7 +234,7 @@ def test_closed_loop_held_by_the_user_is_released_on_collection() -> None:
         other.close()
 
 
-@isolated(timeout=60)
+@isolated(timeout=seconds(60))
 def test_collections_under_the_locks_of_the_states_do_not_wait_for_them() -> None:
     """GC sweeps under the state locks without waiting."""
     thresholds = gc.get_threshold()
@@ -394,7 +395,7 @@ def test_release_of_a_closed_loop_drops_what_it_kept() -> None:
     wrtc._testing.park('dispatcher.wake')
     try:
         wrtc._testing.post(state.mailbox, 'event', 1)
-        assert wrtc._testing.parked('dispatcher.wake', 5)
+        assert wrtc._testing.parked('dispatcher.wake', seconds(5))
         loop.close()
         assert state.active == {target: 'has handlers', pc: 'handlers'}
         assert len(state.mailbox) == 1

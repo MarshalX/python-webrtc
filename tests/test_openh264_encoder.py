@@ -24,6 +24,7 @@ import webrtc
 from tests.h264 import HEIGHT, LUMA, SIZE, WIDTH, Encoded, Recorder, h264_codecs
 from tests.helpers import connect, writing
 from tests.isolation import isolated
+from tests.timing import seconds
 
 DECODED = 90
 SAMPLES = range(10, DECODED, 10)
@@ -113,7 +114,7 @@ async def _send(ffmpeg: str, ffprobe: str) -> _Sent:
     sender = _openh264_sender(caller, recorder, builtin)
     async with writing(recorder.write):
         await connect(caller, callee, 20)
-        await asyncio.wait_for(recorder.frames(DECODED), 20)
+        await asyncio.wait_for(recorder.frames(DECODED), seconds(20))
         stream = recorder.encoded[:DECODED]
         key_frames = await _key_frames(sender, recorder)
         capped = await _bitrate_capped_at(sender, recorder, 100_000)
@@ -135,7 +136,7 @@ async def _send(ffmpeg: str, ffprobe: str) -> _Sent:
     )
 
 
-@isolated(timeout=180)
+@isolated(timeout=seconds(180))
 def _sent(ffmpeg: str, ffprobe: str) -> _Sent:
     return asyncio.run(_send(ffmpeg, ffprobe))
 

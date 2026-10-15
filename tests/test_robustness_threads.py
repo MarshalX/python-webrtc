@@ -23,11 +23,12 @@ import webrtc
 import wrtc
 from tests.helpers import connect, exchange_offer_answer, settled_alive, wait_for_event
 from tests.isolation import isolated
+from tests.timing import seconds
 
 
 def _join(threads: list[threading.Thread]) -> None:
     for thread in threads:
-        thread.join(20)
+        thread.join(seconds(20))
         assert not thread.is_alive(), 'stuck'
 
 
@@ -47,7 +48,7 @@ async def _open_channel(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeer
     return channel
 
 
-@isolated(timeout=90)
+@isolated(timeout=seconds(90))
 def test_constructors_from_many_threads() -> None:
     """Constructors register their Python object with the GIL: pybind11's registry was corrupted."""
     track = asyncio.run(webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=True))).get_tracks()[0]
@@ -97,7 +98,7 @@ async def _release_while_the_signaling_thread_waits(kind: str) -> None:
 
 
 @pytest.mark.parametrize('kind', ['video generator', 'audio generator', 'processor'])
-@isolated(timeout=30)
+@isolated(timeout=seconds(30))
 def test_released_while_libwebrtc_threads_wait_for_the_gil(kind: str) -> None:
     """A track's proxy released with the GIL deadlocked with the signaling thread."""
     asyncio.run(_release_while_the_signaling_thread_waits(kind))
@@ -158,7 +159,7 @@ async def _negotiate_while_transceivers_are_wrapped() -> None:
         caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
         for track in stream.get_tracks():
             caller.add_transceiver(track)
-        await asyncio.wait_for(exchange_offer_answer(caller, callee), 10)
+        await asyncio.wait_for(exchange_offer_answer(caller, callee), seconds(10))
         caller.close()
         callee.close()
     stop.set()
@@ -233,7 +234,7 @@ def _watched_on_a_loop() -> tuple[asyncio.AbstractEventLoop, webrtc.RTCPeerConne
     return loop, pc, gatherer
 
 
-@isolated(timeout=60)
+@isolated(timeout=seconds(60))
 def test_wrappers_made_and_collected_while_a_libwebrtc_thread_posts() -> None:
     """GC while signaling is parked mid-post."""
     gc.disable()
@@ -252,7 +253,7 @@ def test_wrappers_made_and_collected_while_a_libwebrtc_thread_posts() -> None:
     wrtc._testing.park('mailbox.post')
     try:
         _start(create_channel)
-        assert wrtc._testing.parked('mailbox.post', 5)
+        assert wrtc._testing.parked('mailbox.post', seconds(5))
         _start(create)
         _start(gatherer.gather)
         time.sleep(0.3)
@@ -260,14 +261,14 @@ def test_wrappers_made_and_collected_while_a_libwebrtc_thread_posts() -> None:
         gc.collect()
     finally:
         wrtc._testing.release('mailbox.post')
-    assert created.wait(10), 'stuck'
+    assert created.wait(seconds(10)), 'stuck'
     gatherer.stop()
     pc.close()
     loop.call_soon_threadsafe(loop.stop)
     wrtc._testing.dispatcher_idle()
 
 
-@isolated(timeout=60)
+@isolated(timeout=seconds(60))
 def test_dispatcher_parked_while_objects_go_and_their_loop_closes() -> None:
     """Loop closes while the Dispatcher is parked."""
     baseline = settled_alive()
@@ -280,7 +281,7 @@ def test_dispatcher_parked_while_objects_go_and_their_loop_closes() -> None:
         wrtc._testing.park('dispatcher.wake')
         # a parked wake makes later events queue behind it
         wrtc._testing.post(wrtc.Mailbox(), 'event', 1)
-        assert wrtc._testing.parked('dispatcher.wake', 5)
+        assert wrtc._testing.parked('dispatcher.wake', seconds(5))
         channel.send(b'parked')
         callee.close()
 
