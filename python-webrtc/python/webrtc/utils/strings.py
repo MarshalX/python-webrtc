@@ -17,3 +17,11 @@ def usv_string(value: str) -> str:
     except UnicodeEncodeError:
         return value.encode('utf-16-le', 'surrogatepass').decode('utf-16-le', 'replace')
     return value
+
+
+def usv_utf8(value: str) -> bytes:
+    """Encodes a USVString in UTF-8, encoding only once unless there are lone surrogates."""
+    try:
+        return value.encode()
+    except UnicodeEncodeError:
+        return usv_string(value).encode()

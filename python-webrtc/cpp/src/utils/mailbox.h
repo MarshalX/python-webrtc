@@ -130,8 +130,9 @@ namespace python_webrtc {
   template <typename T>
   class Emitter : public Binding {
   protected:
+    // an rvalue argument is moved into the record, and from it into Python
     template <typename... Args>
-    void Emit(const char *name, const Args &...args) {
+    void Emit(const char *name, Args &&...args) {
       CheckNativeThreadDetached("Emitter::Emit");
       if (!IsBound()) {
         return;
@@ -141,8 +142,12 @@ namespace python_webrtc {
       if (!self) {
         return;
       }
-      Post(Record{.source = self, .target = self->Id(), .name = name, .args = [self, args...]() {
-                    return pybind11::make_tuple(self, args...);
+      // Take converts a record once
+      Post(Record{.source = self,
+                  .target = self->Id(),
+                  .name = name,
+                  .args = [self, ... args = std::forward<Args>(args)]() mutable {
+                    return pybind11::make_tuple(self, std::move(args)...);
                   }});
     }
 

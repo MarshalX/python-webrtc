@@ -15,8 +15,10 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include <api/data_channel_interface.h>
+#include <rtc_base/copy_on_write_buffer.h>
 
 #include <pybind11/pybind11.h>
 
@@ -32,7 +34,8 @@ namespace python_webrtc {
 
   // A received message, converted to str or bytes by Python
   struct DataChannelMessage {
-    std::string data;
+    // refcounted and only read, so it's shared across threads without a copy
+    webrtc::CopyOnWriteBuffer data;
     bool binary;
   };
 
@@ -113,8 +116,8 @@ namespace python_webrtc {
     // whether bufferedAmount dropped to the threshold
     bool DecreaseBufferedAmount(uint64_t sent);
 
-    // whether the message is the only one queued: the channel's activity changes only then
-    bool Send(const std::string &data, bool binary);
+    // whether the message is the only one queued: the channel's activity changes only then; data is copied
+    bool Send(std::string_view data, bool binary);
 
     void Close();
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import math
 import re
+import sys
 from typing import cast
 
 import pytest
@@ -164,6 +165,124 @@ async def test_remote_connection_closed_fires_error(
     assert repr(error_event).startswith("RTCErrorEvent(type='error', error=RTCError(")
     assert close_event.type == 'close'
     assert channel.ready_state == webrtc.RTCDataChannelState.closed
+
+
+def send_racing_remote_close(
+    channel: webrtc.RTCDataChannel, remote: webrtc.RTCDataChannel, messages: list[str | bytes]
+) -> None:
+    """Sends once libwebrtc has the channel closing by the remote end, before its closing event is emitted."""
+    wrtc._testing.park('datachannel.closing')
+    try:
+        remote.close()
+        assert wrtc._testing.parked('datachannel.closing', seconds(10))
+        # still open for Python, so libwebrtc fails these sends
+        for message in messages:
+            channel.send(message)
+    finally:
+        wrtc._testing.release('datachannel.closing')
+
+
+@pytest.mark.asyncio
+async def test_send_racing_a_remote_close_fires_error(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A send libwebrtc fails as the remote end closes fires error with data-channel-failure, then close."""
+    channel, remote = await open_pair(caller, callee)
+    unraisable: list[sys.UnraisableHookArgs] = []
+    monkeypatch.setattr(sys, 'unraisablehook', unraisable.append)
+    loop = asyncio.get_running_loop()
+    reported: list[dict[str, object]] = []
+    loop.set_exception_handler(lambda _loop, context: reported.append(context))
+    try:
+        events: list[webrtc.Event] = []
+        channel.on('error', events.append)
+        closed = wait_for_event(channel, 'close')
+
+        send_racing_remote_close(channel, remote, ['late'])
+        events.append(await closed)
+    finally:
+        loop.set_exception_handler(None)
+
+    error_event, close_event = events
+    assert isinstance(error_event, webrtc.RTCErrorEvent)
+    assert isinstance(error_event.error, webrtc.RTCError)
+    assert error_event.error.error_detail == webrtc.RTCErrorDetailType.data_channel_failure
+    assert close_event.type == 'close'
+    assert channel.ready_state == webrtc.RTCDataChannelState.closed
+    assert reported == []
+    assert unraisable == []
+
+
+@pytest.mark.asyncio
+async def test_buffered_amount_when_sends_race_a_remote_close(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """The bytes of sends libwebrtc fails stay in bufferedAmount, which libwebrtc never reports sent."""
+    channel, remote = await open_pair(caller, callee)
+    channel.send(b'drained')
+    await wait_for_event(channel, 'bufferedamountlow')
+    assert channel.buffered_amount == 0
+
+    observed: list[tuple[str, int]] = []
+
+    def observe(event: webrtc.Event) -> None:
+        observed.append((event.type, channel.buffered_amount))
+
+    for name in ('bufferedamountlow', 'closing', 'error'):
+        channel.on(name, observe)
+    closed = wait_for_event(channel, 'close')
+    messages: list[str | bytes] = ['late', bytes(1000), 'é']
+    pending = len('late') + 1000 + len('é'.encode())
+
+    send_racing_remote_close(channel, remote, messages)
+    assert channel.buffered_amount == pending
+    observe(await closed)
+
+    assert observed == [('closing', pending), ('error', pending), ('close', pending)]
+
+
+@pytest.mark.asyncio
+async def test_native_send_takes_only_bytes(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """The native send reads its data without the GIL, so it refuses a bytearray that could be resized meanwhile."""
+    channel, _ = await open_pair(caller, callee)
+    native = channel._native_obj
+    for data in (bytearray(b'data'), 'data'):
+        with pytest.raises(TypeError):
+            native.send(data, binary=True)  # pyrefly: ignore[bad-argument-type]
+
+
+@pytest.mark.asyncio
+async def test_messages_round_trip(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+    """Text and binary messages arrive unchanged, empty and as large as the SCTP transport takes."""
+    channel, remote = await open_pair(caller, callee)
+    assert caller.sctp is not None
+    large = 256 * 1024
+    max_message_size = caller.sctp.max_message_size
+    assert max_message_size is not None
+    assert max_message_size >= large
+    messages: list[str | bytes] = [
+        '',
+        b'',
+        'héllo, мир, 世界 🎉',
+        bytes(range(256)) * (large // 256),
+        'é' * (large // 2),
+        '\x00text',
+    ]
+    received: list[str | bytes | webrtc.Blob] = []
+    got_all = asyncio.get_running_loop().create_future()
+
+    @remote.on('message')
+    def on_message(event: webrtc.MessageEvent) -> None:
+        received.append(event.data)
+        if len(received) == len(messages) + 1 and not got_all.done():
+            got_all.set_result(None)
+
+    for message in messages:
+        channel.send(message)
+    # a lone surrogate becomes U+FFFD
+    channel.send('a\ud800b')
+    await asyncio.wait_for(got_all, seconds(10))
+    assert received == [*messages, 'a\ufffdb']
 
 
 @pytest.mark.parametrize(
