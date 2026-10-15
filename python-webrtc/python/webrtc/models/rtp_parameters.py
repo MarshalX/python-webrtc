@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 _NativeCodecT = TypeVar('_NativeCodecT', bound='wrtc.RtpCodec')
 
-# the bitrate priorities of libwebrtc for RTCRtpEncodingParameters.priority, as Chromium maps them
+# libwebrtc's bitrate priorities for RTCRtpEncodingParameters.priority, doubling per level from low (the default) at 1.0
 _BITRATE_PRIORITY = {
     RTCPriorityType.very_low: 0.5,
     RTCPriorityType.low: 1.0,

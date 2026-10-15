@@ -22,7 +22,7 @@ namespace python_webrtc {
 
   namespace {
 
-    // only what setParameters may change, as in Chromium
+    // only the encoding members setParameters may change, the rest keep their current values
     void applySettable(const webrtc::RtpEncodingParameters &requested, webrtc::RtpEncodingParameters &current) {
       current.active = requested.active;
       current.request_key_frame = requested.request_key_frame;

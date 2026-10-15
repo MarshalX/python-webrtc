@@ -212,7 +212,7 @@ class RTCError(OperationError):
 
 
 _BY_RTC_ERROR_TYPE = {
-    # the same mapping as Chromium's
+    # the W3C error names for libwebrtc's RTCErrorType values
     'UNSUPPORTED_OPERATION': OperationError,
     'UNSUPPORTED_PARAMETER': InvalidAccessError,
     'INVALID_PARAMETER': InvalidAccessError,

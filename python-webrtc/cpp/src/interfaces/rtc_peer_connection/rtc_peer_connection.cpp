@@ -32,6 +32,8 @@ namespace python_webrtc {
     auto configuration = webrtc::PeerConnectionInterface::RTCConfiguration();
     configuration.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
     configuration = _configuration.Apply(configuration);
+    // renders each decoded frame at once, without a smoothing queue per video receiver
+    configuration.set_prerenderer_smoothing(false);
 
     webrtc::PeerConnectionDependencies dependencies(this);
     dependencies.allocator = _factory->CreatePortAllocator(configuration);
