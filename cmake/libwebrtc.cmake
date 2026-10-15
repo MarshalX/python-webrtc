@@ -69,6 +69,37 @@ function(_fetch_pinned manifest base_url dest)
   endforeach()
 endfunction()
 
+# Downloads a file of libwebrtc at LIBWEBRTC_COMMIT; googlesource serves files only base64-encoded
+function(_fetch_webrtc path sha256 dest)
+  set(_encoded "${dest}.b64")
+  foreach(_attempt RANGE 1 4)
+    file(DOWNLOAD "https://webrtc.googlesource.com/src/+/${LIBWEBRTC_COMMIT}/${path}?format=TEXT"
+        "${_encoded}" STATUS _status TLS_VERIFY ON)
+    list(GET _status 0 _code)
+    if(_code EQUAL 0)
+      execute_process(
+          COMMAND "${Python_EXECUTABLE}" -c
+              "import base64, pathlib, sys; p = pathlib.Path(sys.argv[2]); p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(base64.b64decode(pathlib.Path(sys.argv[1]).read_bytes()))"
+              "${_encoded}" "${dest}"
+          RESULT_VARIABLE _decoded)
+      if(_decoded EQUAL 0)
+        file(SHA256 "${dest}" _actual)
+        if(_actual STREQUAL sha256)
+          file(REMOVE "${_encoded}")
+          return()
+        endif()
+        set(_status "SHA256 mismatch: ${_actual}")
+      else()
+        set(_status "can't decode it")
+      endif()
+    endif()
+    if(_attempt EQUAL 4)
+      message(FATAL_ERROR "Failed to fetch ${path} at ${LIBWEBRTC_COMMIT}: ${_status}")
+    endif()
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep ${_attempt})
+  endforeach()
+endfunction()
+
 # Header directories (relative to include/) needed to compile against the public API.
 set(LIBWEBRTC_HEADER_DIRS
     api audio call common_audio common_video logging media modules net p2p pc

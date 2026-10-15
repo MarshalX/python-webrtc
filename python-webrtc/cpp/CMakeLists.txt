@@ -9,7 +9,10 @@ endif()
 set_source_files_properties("${OPENH264_ENCODER_SRC}" src/codecs/openh264.cpp
     PROPERTIES COMPILE_DEFINITIONS WEBRTC_USE_H264)
 
-pybind11_add_module(${MODULE} ${MODULE_SRC} "${OPENH264_ENCODER_SRC}")
+# their file-local helpers would clash in a unity batch
+set_source_files_properties(${LIBWEBRTC_WINDOWS_SRC} PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+
+pybind11_add_module(${MODULE} ${MODULE_SRC} "${OPENH264_ENCODER_SRC}" ${LIBWEBRTC_WINDOWS_SRC})
 
 target_include_directories(${MODULE} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"

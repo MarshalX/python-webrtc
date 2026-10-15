@@ -33,5 +33,8 @@ find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
 
 include(cmake/openh264.cmake)
+if(WIN32)
+  include(cmake/libwebrtc_windows.cmake)
+endif()
 
 add_subdirectory(python-webrtc/cpp)

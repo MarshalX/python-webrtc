@@ -71,20 +71,21 @@ namespace python_webrtc {
       }
 
     private:
-      // OpenH264 takes over from VideoToolbox when it fails; the other encoders are software already
-      webrtc::VideoEncoderFactory *FallbackFor([[maybe_unused]] const webrtc::SdpVideoFormat &format) {
 #ifdef __APPLE__
+      // OpenH264 takes over from VideoToolbox when it fails; the other encoders are software already
+      webrtc::VideoEncoderFactory *FallbackFor(const webrtc::SdpVideoFormat &format) {
         if (OpenH264::Enabled() && format.IsCodecInList(VideoToolboxEncoderAdapter::SupportedFormats())) {
           return &_fallback;
         }
-#endif
         return nullptr;
       }
 
-      Encoders _encoders;
-#ifdef __APPLE__
       webrtc::VideoEncoderFactoryTemplate<OpenH264EncoderAdapter> _fallback;
+#else
+      static webrtc::VideoEncoderFactory *FallbackFor(const webrtc::SdpVideoFormat & /*format*/) { return nullptr; }
 #endif
+
+      Encoders _encoders;
     };
 
   } // namespace
