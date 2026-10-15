@@ -13,6 +13,7 @@ import asyncio
 import gc
 import sys
 import threading
+import time
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
@@ -771,6 +772,14 @@ def test_update_roots_by_activity() -> None:
         loop.close()
 
 
+def _swept(done: Callable[[], bool]) -> None:
+    """Waits for what a gc sweep on another thread may hold or release a moment later."""
+    deadline = time.monotonic() + TIMEOUT
+    while not done():
+        assert time.monotonic() < deadline
+        time.sleep(0)
+
+
 class _DictLoop:
     """A loop collected without a cycle, so no gc sweep sees it go."""
 
@@ -781,22 +790,24 @@ class _DictLoop:
         return self.closed
 
 
-def test_a_state_outliving_its_loop_is_released_by_its_next_use() -> None:
+@pytest.mark.parametrize('use', ['post', 'call_soon'])
+def test_a_state_outliving_its_loop_is_released_by_its_next_use(use: str) -> None:
     """Posts and calls are dropped, and new calls fail."""
-    for use in ('post', 'call_soon'):
-        loop = _DictLoop()
-        state = LoopState.of(mistyped(loop))
-        del loop
-        ran: list[str] = []
-        if use == 'post':
-            state.post(lambda ran=ran: ran.append('posted'))
-        else:
-            state.call_soon(lambda ran=ran: ran.append('soon'), dropped=lambda ran=ran: ran.append('dropped'))
-        assert state.mailbox.closed
-        assert state._markers == {}
-        assert ran == ([] if use == 'post' else ['dropped'])
-        with pytest.raises(RuntimeError, match='the loop of the state is gone'):
-            state.start(None)
+    loop = _DictLoop()
+    state = LoopState.of(mistyped(loop))
+    gone = weakref.ref(loop)
+    del loop
+    _swept(lambda: gone() is None)
+    ran: list[str] = []
+    if use == 'post':
+        state.post(lambda: ran.append('posted'))
+    else:
+        state.call_soon(lambda: ran.append('soon'), dropped=lambda: ran.append('dropped'))
+    expected: list[str] = [] if use == 'post' else ['dropped']
+    _swept(lambda: state.mailbox.closed and ran == expected)
+    assert state._markers == {}
+    with pytest.raises(RuntimeError, match='the loop of the state is gone'):
+        state.start(None)
 
 
 def test_a_post_to_a_closed_loop_releases_its_state() -> None:
