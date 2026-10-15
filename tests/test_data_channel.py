@@ -19,7 +19,14 @@ from typing_extensions import TypedDict, Unpack
 
 import webrtc
 import wrtc
-from tests.helpers import connect, mistyped, stats_of_type, wait_for_event, wait_until
+from tests.helpers import (
+    connect,
+    mistyped,
+    stats_of_type,
+    wait_for_event,
+    wait_for_ice_gathering_complete,
+    wait_until,
+)
 
 #: The most a channel queues to send, in bytes
 SEND_QUEUE_LIMIT = 16 * 1024 * 1024
@@ -296,7 +303,20 @@ async def test_sent_from_the_datachannel_handler_before_libwebrtc_opens_it(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:
     """A send from the datachannel handler arrives, though libwebrtc opens the channel later."""
-    await open_pair(caller, callee)
+    opened = wait_for_event(caller.create_data_channel('setup'), 'open')
+    announced = wait_for_event(callee, 'datachannel')
+    for local, remote in ((caller, callee), (callee, caller)):
+        await local.set_local_description()
+        await wait_for_ice_gathering_complete(local)
+        description = local.local_description
+        assert description is not None
+        await remote.set_remote_description(description)
+
+    await asyncio.gather(opened, announced)
+
+    # answered on the signaling thread, so it's past the setup channel's announcement
+
+    await callee.get_stats()
     sent: asyncio.Future[None] = asyncio.get_running_loop().create_future()
 
     def send(event: webrtc.RTCDataChannelEvent) -> None:
