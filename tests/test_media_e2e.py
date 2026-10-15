@@ -19,7 +19,16 @@ from typing import cast
 import pytest
 
 import webrtc
-from tests.helpers import CreatePC, connect, connect_track, wait_for_event, write_video, writing
+from tests.helpers import (
+    CreatePC,
+    available_outgoing_bitrate,
+    connect,
+    connect_track,
+    wait_for_event,
+    wait_until,
+    write_video,
+    writing,
+)
 
 TIMEOUT = 20
 WIDTH, HEIGHT = 320, 240
@@ -183,8 +192,10 @@ async def received_widths(
     parameters.degradation_preference = preference
     await sender.set_parameters(parameters)
     received = wait_for_event(callee, 'track', TIMEOUT)
+    await connect(caller, callee, TIMEOUT)
+    # libwebrtc drops frames too large for the bitrate only if it knows the bitrate before the first frame
+    await wait_until(lambda: available_outgoing_bitrate(caller), 'a bandwidth estimate', TIMEOUT)
     async with writing(write_video, generator, bytes(640 * 480 * 3 // 2), (640, 480)):
-        await connect(caller, callee, TIMEOUT)
         event = await received
         assert isinstance(event, webrtc.RTCTrackEvent)
         reader = webrtc.MediaStreamTrackProcessor(

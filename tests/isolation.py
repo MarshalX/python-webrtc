@@ -13,6 +13,7 @@ import functools
 import multiprocessing
 import multiprocessing.context
 import os
+import signal
 import sys
 import time
 from typing import TYPE_CHECKING, Callable, Literal, TypeVar, Union, cast, overload
@@ -52,6 +53,16 @@ def _child(
         raise AssertionError('the roots checks failed:\n' + '\n'.join(mismatches))
 
 
+def _end(process: multiprocessing.context.SpawnProcess, timeout: float | None) -> None:
+    """Ends a stuck child, with SIGABRT where it can catch it: its faulthandler prints every thread's stack."""
+    if sys.platform != 'win32' and process.pid is not None:
+        os.kill(process.pid, signal.SIGABRT)
+        process.join(timeout)
+    if process.exitcode is None:
+        process.kill()
+        process.join()
+
+
 def _run(
     function: Callable[..., object], args: tuple[object, ...], kwargs: dict[str, object], *, timeout: float | None
 ) -> object:
@@ -76,8 +87,7 @@ def _run(
         stuck = process.exitcode is None
     finally:
         if process.exitcode is None:
-            process.kill()
-            process.join()
+            _end(process, timeout)
         receiver.close()
 
     if stuck:

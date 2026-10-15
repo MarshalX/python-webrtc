@@ -773,7 +773,7 @@ def test_update_roots_by_activity() -> None:
 
 
 def _swept(done: Callable[[], bool]) -> None:
-    """Waits for what a gc sweep on another thread may hold or release a moment later."""
+    """Waits for what another thread (a Dispatcher wake, a gc sweep) may hold or release a moment later."""
     deadline = time.monotonic() + TIMEOUT
     while not done():
         assert time.monotonic() < deadline
@@ -810,24 +810,24 @@ def test_a_state_outliving_its_loop_is_released_by_its_next_use(use: str) -> Non
         state.start(None)
 
 
-def test_a_post_to_a_closed_loop_releases_its_state() -> None:
+@pytest.mark.parametrize('use', ['post', 'call_soon'])
+def test_a_post_to_a_closed_loop_releases_its_state(use: str) -> None:
     """Only the drop handler runs."""
-    for use in ('post', 'call_soon'):
-        loop = asyncio.new_event_loop()
-        state = LoopState.of(loop)
-        loop.close()
-        ran: list[str] = []
-        if use == 'post':
-            state.post(lambda ran=ran: ran.append('posted'))
-        else:
-            state.call_soon(lambda ran=ran: ran.append('soon'), dropped=lambda ran=ran: ran.append('dropped'))
-        assert state.mailbox.closed
-        assert ran == ([] if use == 'post' else ['dropped'])
-        assert LoopState.find(state.mailbox.id) is None
-        # released: later posts are dropped right away
-        state.post(lambda ran=ran: ran.append('late'))
-        assert state._markers == {}
-        assert ran == ([] if use == 'post' else ['dropped'])
+    loop = asyncio.new_event_loop()
+    state = LoopState.of(loop)
+    loop.close()
+    ran: list[str] = []
+    if use == 'post':
+        state.post(lambda: ran.append('posted'))
+    else:
+        state.call_soon(lambda: ran.append('soon'), dropped=lambda: ran.append('dropped'))
+    expected: list[str] = [] if use == 'post' else ['dropped']
+    _swept(lambda: state.mailbox.closed and ran == expected)
+    assert LoopState.find(state.mailbox.id) is None
+    # released: later posts are dropped right away
+    state.post(lambda: ran.append('late'))
+    assert state._markers == {}
+    assert ran == expected
 
 
 def test_call_soon_released_before_it_runs_runs_the_drop_handler_only() -> None:

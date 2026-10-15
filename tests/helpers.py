@@ -43,6 +43,19 @@ def stats_of_type(report: webrtc.RTCStatsReport, stats_type: str) -> list[webrtc
     return [stats for stats in report.values() if stats.type == stats_type]
 
 
+async def available_outgoing_bitrate(pc: webrtc.RTCPeerConnection) -> float | None:
+    """The bandwidth estimate of the selected candidate pair, the only one that has it."""
+    report = await pc.get_stats()
+    for transport in stats_of_type(report, 'transport'):
+        assert isinstance(transport, webrtc.RTCTransportStats)
+        if transport.selected_candidate_pair_id is None:
+            continue
+        pair = report[transport.selected_candidate_pair_id]
+        assert isinstance(pair, webrtc.RTCIceCandidatePairStats)
+        return pair.available_outgoing_bitrate
+    return None
+
+
 def copy_frame(
     frame: webrtc.RTCEncodedVideoFrame | webrtc.RTCEncodedAudioFrame,
 ) -> webrtc.RTCEncodedVideoFrame | webrtc.RTCEncodedAudioFrame:

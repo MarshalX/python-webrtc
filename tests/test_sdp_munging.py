@@ -17,7 +17,14 @@ from collections.abc import Callable
 import pytest
 
 import webrtc
-from tests.helpers import exchange_ice_candidates, stats_of_type, wait_until, write_video, writing
+from tests.helpers import (
+    available_outgoing_bitrate,
+    exchange_ice_candidates,
+    stats_of_type,
+    wait_until,
+    write_video,
+    writing,
+)
 
 TIMEOUT = 20
 OPUS = 'opus/48000/2'
@@ -130,19 +137,6 @@ async def outbound_rtp(pc: webrtc.RTCPeerConnection) -> webrtc.RTCOutboundRtpStr
 
 async def target_bitrate(pc: webrtc.RTCPeerConnection) -> float | None:
     return (await outbound_rtp(pc)).target_bitrate
-
-
-async def available_outgoing_bitrate(pc: webrtc.RTCPeerConnection) -> float | None:
-    """The bandwidth estimate of the selected candidate pair, the only one that has it."""
-    report = await pc.get_stats()
-    for transport in stats_of_type(report, 'transport'):
-        assert isinstance(transport, webrtc.RTCTransportStats)
-        if transport.selected_candidate_pair_id is None:
-            continue
-        pair = report[transport.selected_candidate_pair_id]
-        assert isinstance(pair, webrtc.RTCIceCandidatePairStats)
-        return pair.available_outgoing_bitrate
-    return None
 
 
 async def write_stereo(generator: webrtc.MediaStreamTrackGenerator, *, stop: asyncio.Event) -> None:
