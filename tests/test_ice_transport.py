@@ -13,12 +13,16 @@ The ones of their own (the WebRTC ICE extension) gather, start and connect witho
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import re
+import socket
+import time
 
 import pytest
 
 import webrtc
-from tests.helpers import connect, wait_for_event, wait_until
+from tests.helpers import connect, exchange_answer, exchange_offer, wait_for_event, wait_until
+from tests.timing import seconds
 
 
 def local_parameters(transport: webrtc.RTCIceTransport) -> webrtc.RTCIceParameters:
@@ -117,7 +121,8 @@ async def test_two_transports_connect() -> None:
     connected = [wait_for_event(t, 'statechange') for t in (local, remote)]
     local.gather()
     remote.gather()
-    assert local.gathering_state == webrtc.RTCIceGathererState.gathering
+    # read live: host candidates may all be gathered already
+    assert local.gathering_state != webrtc.RTCIceGathererState.new
     # both take the controlling role: one of them switches
     local.start(local_parameters(remote), 'controlling')
     remote.start(local_parameters(local), 'controlling')
@@ -221,6 +226,32 @@ async def test_candidate_rejected_with_operation_error(
 
 
 @pytest.mark.asyncio
+async def test_end_of_candidates_is_for_one_remote_description(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """Remote descriptions after an ICE restart don't show the end of candidates of an earlier one."""
+    caller.add_transceiver(webrtc.MediaType.audio)
+    await exchange_offer(caller, callee)
+    await callee.add_ice_candidate()
+    await exchange_answer(caller, callee)
+    # the answer makes the offer current, which keeps it
+    current = callee.current_remote_description
+    assert current is not None
+    assert 'a=end-of-candidates' in current.sdp
+    # later descriptions may take the address of a freed one
+    for _ in range(20):
+        caller.restart_ice()
+        await exchange_offer(caller, callee)
+        pending = callee.pending_remote_description
+        assert pending is not None
+        assert 'a=end-of-candidates' not in pending.sdp
+        await exchange_answer(caller, callee)
+        current = callee.current_remote_description
+        assert current is not None
+        assert 'a=end-of-candidates' not in current.sdp
+
+
+@pytest.mark.asyncio
 async def test_candidate_without_media_section_is_a_type_error(pc: webrtc.RTCPeerConnection) -> None:
     """Checked before the state."""
     with pytest.raises(TypeError, match='sdp_mid and sdp_m_line_index are both None'):
@@ -291,6 +322,44 @@ def test_gather_once_and_with_a_known_role() -> None:
     with pytest.raises(ValueError, match='controlling or controlled'):
         transport.start(webrtc.RTCIceParameters('abcd', 'p' * 22), webrtc.RTCIceRole.unknown)
     transport.stop()
+
+
+def has_usable_ipv6() -> bool:
+    """A route to the global IPv6 internet from an address libwebrtc gathers on (not link-local nor MAC-based)."""
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as probe:
+            # a documentation address: picks the source of the default route, sends nothing
+            probe.connect(('2001:db8::1', 9))
+            host: str = probe.getsockname()[0]
+        address = ipaddress.IPv6Address(host.split('%', maxsplit=1)[0])
+    except (OSError, ValueError):
+        return False
+    # RFC 4291 appendix A: an interface ID from a MAC has ff:fe in its middle
+    mac_based = address.packed[11:13] == b'\xff\xfe'
+    return not (address.is_link_local or address.is_loopback or address.is_unspecified or mac_based)
+
+
+@pytest.mark.asyncio
+async def test_gathers_like_a_connection() -> None:
+    """Without the 1 s waits between phases or passive TCP candidates, with IPv6 where the host has it."""
+    transport = webrtc.RTCIceTransport()
+
+    def complete(_: webrtc.Event) -> bool:
+        return transport.gathering_state == webrtc.RTCIceGathererState.complete
+
+    gathered = wait_for_event(transport, 'gatheringstatechange', predicate=complete)
+    start = time.monotonic()
+    transport.gather()
+    await gathered
+    elapsed = time.monotonic() - start
+    candidates = transport.get_local_candidates()
+    transport.stop()
+
+    assert elapsed < seconds(1), elapsed
+    assert any(c.protocol == webrtc.RTCIceProtocol.udp for c in candidates), candidates
+    assert all(c.tcp_type in {None, webrtc.RTCIceTcpCandidateType.active} for c in candidates), candidates
+    if has_usable_ipv6():
+        assert any(c.address is not None and ':' in c.address for c in candidates), candidates
 
 
 def test_remote_candidate_from_a_dictionary() -> None:

@@ -665,6 +665,15 @@ async def test_stream_tracks_read_while_they_change(
     assert not reader.is_alive()
 
 
+def _closed_connection_in_a_cycle() -> weakref.ref[webrtc.RTCPeerConnection]:
+    """A closed connection in a cycle with its handler."""
+    pc = webrtc.RTCPeerConnection()
+    pc.add_transceiver(webrtc.MediaType.audio)
+    pc.on('connectionstatechange', lambda _event, _pc=pc: None)
+    pc.close()
+    return weakref.ref(pc)
+
+
 def _collect_on_dispatcher_wakes() -> None:
     gc.disable()
     # isolated: every wake goes through the Dispatcher
@@ -678,14 +687,8 @@ def _collect_on_dispatcher_wakes() -> None:
         loops._wake(mailbox_id)
 
     async def main() -> weakref.ref[webrtc.RTCPeerConnection]:
-        # a closed connection in a cycle with its handler
-        pc = webrtc.RTCPeerConnection()
-        pc.add_transceiver(webrtc.MediaType.audio)
-        pc.on('connectionstatechange', lambda _event, _pc=pc: None)
-        pc.close()
-        ref = weakref.ref(pc)
-        del pc
-
+        ref = _closed_connection_in_a_cycle()
+        await delivered()
         wrtc._set_wake(wake)
         transport = webrtc.RTCIceTransport()
         done = asyncio.get_running_loop().create_future()

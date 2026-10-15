@@ -7,8 +7,6 @@
 
 #include "rtc_dtmf_sender.h"
 
-#include <algorithm>
-
 #include "../exceptions.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
@@ -93,11 +91,7 @@ namespace python_webrtc {
       const std::scoped_lock lock(_bufferMutex);
       ++_insertions;
     }
-    // libwebrtc takes longer tones and gaps than the specification
-    constexpr int minDuration = 70;
-    constexpr int minInterToneGap = 50;
-    if (!_dtmf->InsertDtmf(tones, std::max(duration, minDuration), std::max(interToneGap, minInterToneGap)) &&
-        !tones.empty()) {
+    if (!_dtmf->InsertDtmf(tones, duration, interToneGap) && !tones.empty()) {
       throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "The DTMF sender can't send tones yet");
     }
     const std::scoped_lock lock(_bufferMutex);

@@ -280,6 +280,12 @@ namespace python_webrtc {
       if (!self || self->IsClosed()) {
         completion->Fail(RTCCallbackException(closedError(remote ? "setRemoteDescription" : "setLocalDescription")));
       } else if (error.ok()) {
+        if (remote) {
+          // a new remote description may reuse the address of the one the end of candidates was for
+          const std::scoped_lock lock(self->_remoteEndOfCandidatesMutex);
+          self->_remoteEndOfCandidates.clear();
+          self->_remoteEndOfCandidatesDescription = nullptr;
+        }
         // the descriptions as the operation left them, before candidates gathered later
         self->_completionSnapshot = self->SnapshotDescriptions();
         auto created = self->WrapTransports();

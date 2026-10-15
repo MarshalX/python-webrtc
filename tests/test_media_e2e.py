@@ -24,6 +24,7 @@ from tests.helpers import (
     available_outgoing_bitrate,
     connect,
     connect_track,
+    stats_of_type,
     wait_for_event,
     wait_until,
     write_video,
@@ -34,6 +35,8 @@ from tests.timing import seconds
 TIMEOUT = seconds(20)
 #: no frame for this long means frames stopped; exact, as it defines the assertion
 QUIET = 0.5
+#: a send pause, seconds
+PAUSE = 1.5
 WIDTH, HEIGHT = 320, 240
 
 
@@ -259,6 +262,63 @@ async def test_audio_through_a_connection(caller: webrtc.RTCPeerConnection, call
 
     assert max(samples) > 0.1, 'the sine arrived, not silence'
     assert abs(dominant_frequency(samples, 48000) - 440) < 5
+
+
+async def inbound_rtp(receiver: webrtc.RTCRtpReceiver) -> webrtc.RTCInboundRtpStreamStats | None:
+    stats = stats_of_type(await receiver.get_stats(), 'inbound-rtp')
+    if len(stats) == 0:
+        return None
+    assert isinstance(stats[0], webrtc.RTCInboundRtpStreamStats)
+    return stats[0]
+
+
+async def packets_received(receiver: webrtc.RTCRtpReceiver) -> int:
+    stats = await inbound_rtp(receiver)
+    return 0 if stats is None or stats.packets_received is None else stats.packets_received
+
+
+async def set_active(sender: webrtc.RTCRtpSender, *, active: bool) -> None:
+    parameters = sender.get_parameters()
+    parameters.encodings[0].active = active
+    await sender.set_parameters(parameters)
+
+
+@pytest.mark.asyncio
+async def test_audio_resumes_after_a_send_pause(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """After a pause the RTP timestamps skip ahead with the capture time, so the jitter doesn't jump."""
+    generator = webrtc.MediaStreamTrackGenerator('audio')
+    async with writing(write_sine, generator, 440):
+        await connect_track(caller, callee, generator, timeout=TIMEOUT)
+        (sender,) = caller.get_senders()
+        (receiver,) = callee.get_receivers()
+
+        async def arriving() -> bool:
+            return await packets_received(receiver) > 0
+
+        await wait_until(arriving, 'packets to arrive', TIMEOUT)
+        # stops and restarts the send stream, unlike replacing the track
+        await set_active(sender, active=False)
+        await asyncio.sleep(PAUSE)
+        paused = await packets_received(receiver)
+        await set_active(sender, active=True)
+
+        # RFC 3550 jitter takes 1/16 of a transit jump: PAUSE / 16 without the skip, before it decays
+        jitters: list[float] = []
+
+        async def resumed() -> bool:
+            stats = await inbound_rtp(receiver)
+            assert stats is not None
+            assert stats.jitter is not None
+            assert stats.packets_received is not None
+            jitters.append(stats.jitter)
+            # half a second of 20 ms packets
+            return stats.packets_received > paused + 25
+
+        await wait_until(resumed, 'packets after the pause', TIMEOUT)
+        assert max(jitters) < PAUSE / 16 / 2, jitters
+    generator.stop()
 
 
 @pytest.mark.asyncio
