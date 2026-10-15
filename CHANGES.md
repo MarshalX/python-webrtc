@@ -2,7 +2,7 @@
 
 ## Version 0.0.2
 
-**14.10.2026**
+**15.10.2026**
 
 **🔄 Coming from aiortc? Install `wrtc[aiortc]`, change `from aiortc` to `from webrtc.aiortc`, and your code runs on Chrome's engine. See the [migration guide](https://wrtc.marshal.dev/guides/aiortc/)**
 
@@ -27,6 +27,7 @@
 * Fix `balanced` and `maintain-framerate` never lowering the resolution by [@MarshalX](https://github.com/MarshalX) in [#243](https://github.com/MarshalX/python-webrtc/pull/243)
 * Fix active TCP candidates rejected as a bad port by [@MarshalX](https://github.com/MarshalX) in [#243](https://github.com/MarshalX/python-webrtc/pull/243)
 * Fix data channel messages arriving before the channel is announced, and a channel released before its last message is sent by [@MarshalX](https://github.com/MarshalX) in [#243](https://github.com/MarshalX/python-webrtc/pull/243)
+* Fix sends from the `datachannel` handler lost before the channel opens by [@MarshalX](https://github.com/MarshalX) in [#247](https://github.com/MarshalX/python-webrtc/pull/247)
 * Fix SFrame video recovery, and H.264 and AV1 with raw packetization by [@MarshalX](https://github.com/MarshalX) in [#240](https://github.com/MarshalX/python-webrtc/pull/240)
 * Fix descriptions lost and `iceGatheringState` reading `complete` after `close()` by [@MarshalX](https://github.com/MarshalX) in [#240](https://github.com/MarshalX/python-webrtc/pull/240)
 * Fix key frame requests of a removed script transform never settling by [@MarshalX](https://github.com/MarshalX) in [#240](https://github.com/MarshalX/python-webrtc/pull/240)
@@ -37,7 +38,10 @@
 * Fix remote video sent on to another connection, and a local description missing the candidates gathered after the remote one was read by [@MarshalX](https://github.com/MarshalX) in [#245](https://github.com/MarshalX/python-webrtc/pull/245)
 * Fix a loop closed while its drain was scheduled never being released by [@MarshalX](https://github.com/MarshalX) in [#241](https://github.com/MarshalX/python-webrtc/pull/241)
 * Fix a closing connection and its channels being active but unbound, and loop release by [@MarshalX](https://github.com/MarshalX) in [#244](https://github.com/MarshalX/python-webrtc/pull/244)
+* Fix a watched loop's state never released after the loop closes by [@MarshalX](https://github.com/MarshalX) in [#247](https://github.com/MarshalX/python-webrtc/pull/247)
+* Fix an abort when a task queue is deleted from its own task by [@MarshalX](https://github.com/MarshalX) in [#247](https://github.com/MarshalX/python-webrtc/pull/247)
 * Fix flaky waits in tests on free-threaded builds and slow cores by [@MarshalX](https://github.com/MarshalX) in [#241](https://github.com/MarshalX/python-webrtc/pull/241)
+* Run tests in parallel and fix the test races it exposes by [@MarshalX](https://github.com/MarshalX) in [#247](https://github.com/MarshalX/python-webrtc/pull/247)
 
 ## Version 0.0.1
 
