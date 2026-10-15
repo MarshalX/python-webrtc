@@ -167,6 +167,11 @@ async def test_remote_connection_closed_fires_error(
     assert channel.ready_state == webrtc.RTCDataChannelState.closed
 
 
+races_remote_close = pytest.mark.skipif(
+    sys.platform == 'win32', reason="libwebrtc's Windows socket server runs posted tasks after pending socket events"
+)
+
+
 def send_racing_remote_close(
     channel: webrtc.RTCDataChannel, remote: webrtc.RTCDataChannel, messages: list[str | bytes]
 ) -> None:
@@ -182,6 +187,7 @@ def send_racing_remote_close(
         wrtc._testing.release('datachannel.closing')
 
 
+@races_remote_close
 @pytest.mark.asyncio
 async def test_send_racing_a_remote_close_fires_error(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, monkeypatch: pytest.MonkeyPatch
@@ -213,6 +219,7 @@ async def test_send_racing_a_remote_close_fires_error(
     assert unraisable == []
 
 
+@races_remote_close
 @pytest.mark.asyncio
 async def test_buffered_amount_when_sends_race_a_remote_close(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection

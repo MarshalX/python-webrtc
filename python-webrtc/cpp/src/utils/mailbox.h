@@ -146,6 +146,7 @@ namespace python_webrtc {
       Post(Record{.source = self,
                   .target = self->Id(),
                   .name = name,
+                  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks): the analyzer loses a moved shared_ptr
                   .args = [self, ... args = std::forward<Args>(args)]() mutable {
                     return pybind11::make_tuple(self, std::move(args)...);
                   }});
