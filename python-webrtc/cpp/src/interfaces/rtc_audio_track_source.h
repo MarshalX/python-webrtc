@@ -9,6 +9,7 @@
 #define PYTHON_WEBRTC_INTERFACES_RTC_AUDIO_TRACK_SOURCE_H_
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -35,7 +36,8 @@ namespace python_webrtc {
 
     bool remote() const override;
 
-    void PushSamples(const void *samples, int bitsPerSample, int sampleRate, size_t channels, size_t frames);
+    void PushSamples(const void *samples, int bitsPerSample, int sampleRate, size_t channels, size_t frames,
+                     int64_t captureTimeMs);
 
     // ends the tracks of the source; must be called on the signaling thread, where they observe it
     void End();

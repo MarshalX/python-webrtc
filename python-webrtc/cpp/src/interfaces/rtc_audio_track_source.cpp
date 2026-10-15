@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <vector>
 
+#include <rtc_base/time_utils.h>
+
 namespace python_webrtc {
 
   webrtc::MediaSourceInterface::SourceState RTCAudioTrackSource::state() const {
@@ -42,10 +44,10 @@ namespace python_webrtc {
   }
 
   void RTCAudioTrackSource::PushSamples(const void *samples, int bitsPerSample, int sampleRate, size_t channels,
-                                        size_t frames) {
+                                        size_t frames, int64_t captureTimeMs) {
     const std::scoped_lock lock(_sinkMutex);
     for (auto *sink : _sinks) {
-      sink->OnData(samples, bitsPerSample, sampleRate, channels, frames, std::nullopt);
+      sink->OnData(samples, bitsPerSample, sampleRate, channels, frames, captureTimeMs);
     }
   }
 
@@ -65,7 +67,7 @@ namespace python_webrtc {
         seed = (seed * multiplier) + increment;
         sample = static_cast<int16_t>((static_cast<int32_t>(seed >> seedShift) % (2 * amplitude)) - amplitude);
       }
-      PushSamples(samples.data(), bitsPerSample, sampleRate, 1, frames);
+      PushSamples(samples.data(), bitsPerSample, sampleRate, 1, frames, webrtc::TimeMillis());
     };
     _control = std::make_shared<SourceControl>();
     _control->microphone = true;

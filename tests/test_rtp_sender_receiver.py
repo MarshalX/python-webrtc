@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import statistics
 import time
 from typing import TYPE_CHECKING
 
@@ -465,6 +466,40 @@ async def test_dtmf(
     assert dtmf.tone_buffer == '1A#'
     await done
     assert tones == ['1', 'A', '#', '']
+
+
+async def tone_spacing(dtmf: webrtc.RTCDTMFSender, duration: int, inter_tone_gap: int) -> float:
+    """The median time between tonechange events, robust to a late one."""
+    times: list[float] = []
+
+    def on_tone_change(_: webrtc.RTCDTMFToneChangeEvent) -> None:
+        times.append(time.monotonic())
+
+    def is_last(event: webrtc.Event) -> bool:
+        assert isinstance(event, webrtc.RTCDTMFToneChangeEvent)
+        return event.tone == ''
+
+    dtmf.on('tonechange', on_tone_change)
+    done = wait_for_event(dtmf, 'tonechange', timeout=seconds(5), predicate=is_last)
+    dtmf.insert_dtmf('1234567890', duration=duration, inter_tone_gap=inter_tone_gap)
+    await done
+    dtmf.off('tonechange', on_tone_change)
+    return statistics.median(b - a for a, b in zip(times, times[1:]))
+
+
+@pytest.mark.asyncio
+async def test_dtmf_shortest_tones_and_gaps(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """Tones of 40 ms with gaps of 30 ms, the spec's minimums, are 50 ms shorter than 70/50 ones."""
+    sender = caller.add_track(audio_stream.get_tracks()[0], audio_stream)
+    await connect(caller, callee)
+    dtmf = sender.dtmf
+    assert dtmf is not None
+    shortest = await tone_spacing(dtmf, 40, 30)
+    longer = await tone_spacing(dtmf, 70, 50)
+    # relative: a loaded machine delays every tone alike; equal if 40/30 were raised to 70/50
+    assert longer - shortest > 0.05 / 2, (shortest, longer)
 
 
 def test_dtmf_before_a_negotiation(pc: webrtc.RTCPeerConnection) -> None:

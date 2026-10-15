@@ -66,6 +66,11 @@ namespace python_webrtc {
     std::unique_ptr<webrtc::PortAllocator>
     CreatePortAllocator(const webrtc::PeerConnectionInterface::RTCConfiguration &configuration);
 
+    [[nodiscard]] std::shared_ptr<webrtc::BasicNetworkManager> networkManager() const { return _networkManager; }
+    [[nodiscard]] std::shared_ptr<webrtc::BasicPacketSocketFactory> packetSocketFactory() const {
+      return _packetSocketFactory;
+    }
+
   private:
     webrtc::PeerConnectionFactoryDependencies Dependencies();
 

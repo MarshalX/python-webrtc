@@ -8,36 +8,49 @@
 #include "rtc_ice_transport.h"
 
 #include <algorithm>
+#include <cstdint>
 
 #include <api/environment/environment_factory.h>
-#include <p2p/base/basic_packet_socket_factory.h>
 #include <p2p/base/p2p_constants.h>
 #include <p2p/base/p2p_transport_channel.h>
-#include <p2p/client/basic_port_allocator.h>
+#include <p2p/base/port_allocator.h>
 #include <pc/ice_server_parsing.h>
 #include <pc/ice_transport.h>
 #include <rtc_base/crypto_random.h>
-#include <rtc_base/network.h>
 
 #include <pybind11/stl.h>
 
 #include "../exceptions.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
+#include "../utils/port_allocator.h"
 
 namespace python_webrtc {
 
+  namespace {
+    // what libwebrtc gives a connection's allocator, on the network thread
+    std::unique_ptr<webrtc::PortAllocator> CreateStandalonePortAllocator(const webrtc::Environment &env,
+                                                                         PeerConnectionFactory &factory) {
+      auto allocator = CreatePortAllocator(env, factory.networkManager(), factory.packetSocketFactory());
+      allocator->Initialize();
+      uint32_t flags =
+          allocator->flags() | webrtc::PORTALLOCATOR_ENABLE_SHARED_SOCKET | webrtc::PORTALLOCATOR_ENABLE_IPV6_ON_WIFI;
+      if (!env.field_trials().IsDisabled("WebRTC-IPv6Default")) {
+        flags |= webrtc::PORTALLOCATOR_ENABLE_IPV6;
+      }
+      allocator->set_flags(flags);
+      // like our connections: no waits between gathering phases
+      allocator->set_step_delay(0);
+      allocator->SetNetworkIgnoreMask(factory.networkIgnoreMask());
+      return allocator;
+    }
+  } // namespace
+
   // Owned by the transport, created and destroyed on the network thread, after the ICE transport that uses it
   struct StandaloneIce {
-    StandaloneIce(webrtc::Thread *networkThread, const PeerConnectionFactory &factory)
+    explicit StandaloneIce(PeerConnectionFactory &factory)
         : env(webrtc::CreateEnvironment(factory.fieldTrials().CreateCopy())),
-          networkManager(std::make_unique<webrtc::BasicNetworkManager>(env, networkThread->socketserver())),
-          socketFactory(std::make_unique<webrtc::BasicPacketSocketFactory>(networkThread->socketserver())),
-          allocator(std::make_unique<webrtc::BasicPortAllocator>(env, networkManager.get(), socketFactory.get())) {
-      allocator->Initialize();
-      // like the connections of the factory
-      allocator->SetNetworkIgnoreMask(factory.networkIgnoreMask());
-    }
+          allocator(CreateStandalonePortAllocator(env, factory)) {}
 
     ~StandaloneIce() {
       if (transport) {
@@ -50,9 +63,7 @@ namespace python_webrtc {
     StandaloneIce &operator=(const StandaloneIce &) = delete;
 
     webrtc::Environment env;
-    std::unique_ptr<webrtc::BasicNetworkManager> networkManager;
-    std::unique_ptr<webrtc::BasicPacketSocketFactory> socketFactory;
-    std::unique_ptr<webrtc::BasicPortAllocator> allocator;
+    std::unique_ptr<webrtc::PortAllocator> allocator;
     std::unique_ptr<webrtc::P2PTransportChannel> channel;
     webrtc::scoped_refptr<webrtc::IceTransportWithPointer> transport;
   };
@@ -83,7 +94,7 @@ namespace python_webrtc {
         _subscribed->RemoveGatheringStateCallback(this);
       }
       if (_standalone) {
-        // on the network thread, before what it uses
+        // on the network thread, before the factory whose network manager it shares
         _transport = nullptr;
         _standalone = nullptr;
       }
@@ -422,7 +433,7 @@ namespace python_webrtc {
     std::pair<std::string, std::string> parameters(webrtc::CreateRandomString(webrtc::ICE_UFRAG_LENGTH),
                                                    webrtc::CreateRandomString(webrtc::ICE_PWD_LENGTH));
     BlockingCallOn(factory->workerThread(), [&]() {
-      standalone = std::make_shared<StandaloneIce>(factory->workerThread(), *factory);
+      standalone = std::make_shared<StandaloneIce>(*factory);
       webrtc::IceTransportInit init(standalone->env);
       init.set_port_allocator(standalone->allocator.get());
       standalone->channel = webrtc::P2PTransportChannel::Create("", 1, std::move(init));
