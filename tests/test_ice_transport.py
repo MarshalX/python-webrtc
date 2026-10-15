@@ -121,7 +121,8 @@ async def test_two_transports_connect() -> None:
     connected = [wait_for_event(t, 'statechange') for t in (local, remote)]
     local.gather()
     remote.gather()
-    assert local.gathering_state == webrtc.RTCIceGathererState.gathering
+    # read live: host candidates may all be gathered already
+    assert local.gathering_state != webrtc.RTCIceGathererState.new
     # both take the controlling role: one of them switches
     local.start(local_parameters(remote), 'controlling')
     remote.start(local_parameters(local), 'controlling')
