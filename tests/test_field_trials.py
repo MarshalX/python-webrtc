@@ -23,6 +23,7 @@ import webrtc
 import wrtc
 from tests.helpers import ROOT, UdpRelay, connect, wait_for_event, wait_until
 from tests.isolation import isolated
+from tests.timing import seconds
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection, PipeConnection
@@ -148,7 +149,7 @@ def test_malformed_environment_variable(value: str) -> None:
         [sys.executable, '-c', 'import webrtc'],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=seconds(60),
         cwd=ROOT,
         env={**os.environ, 'WRTC_FIELD_TRIALS': value, 'PYTHON_COLORS': '0'},
         check=False,
@@ -254,7 +255,7 @@ def _interop(offerer_trials: dict[str, str], answerer_trials: dict[str, str]) ->
         for pipe in pipes:
             pipe.send('done')
         for peer in peers:
-            peer.join(30)
+            peer.join(seconds(30))
             assert peer.exitcode == 0
     finally:
         for peer in peers:

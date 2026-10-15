@@ -21,6 +21,7 @@ import pytest
 
 import webrtc
 from tests.helpers import connect, exchange_offer_answer, wait_for_event, wait_for_ice_gathering_complete, wait_until
+from tests.timing import seconds
 
 if TYPE_CHECKING:
     from tests.helpers import CreatePC
@@ -122,5 +123,5 @@ async def test_refused_tcp_connects_neither_spin_nor_leak(create_pc: CreatePC) -
     started = time.process_time()
     await asyncio.sleep(1)
 
-    assert time.process_time() - started < 0.5
+    assert time.process_time() - started < seconds(0.5)
     assert _descriptors() <= descriptors

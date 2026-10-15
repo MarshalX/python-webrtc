@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Callable
 import pytest
 
 from tests.isolation import isolated
+from tests.timing import seconds
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -29,7 +30,7 @@ async def _settles(operation: Callable[[], Awaitable[object]]) -> bool:
     import webrtc
 
     try:
-        await asyncio.wait_for(operation(), 20)
+        await asyncio.wait_for(operation(), seconds(20))
     except asyncio.TimeoutError:
         return False
     except webrtc.InvalidStateError:
@@ -77,7 +78,7 @@ def _change_activity_while_a_thread_is_parked_in_a_release() -> None:
     # before 3.14, a thread never returns from a native call once exit starts
     wrtc._testing.park('gil.exit')
     threading.Thread(target=state.release, daemon=True).start()
-    parked = wrtc._testing.parked('gil.exit', 10)
+    parked = wrtc._testing.parked('gil.exit', seconds(10))
     # an activity change visits every other state: it hung on the parked thread's lock
     pc = webrtc.RTCPeerConnection()
     pc.close()
@@ -88,7 +89,7 @@ def _change_activity_while_a_thread_is_parked_in_a_release() -> None:
 
 
 @pytest.mark.skipif(sys.version_info >= (3, 14), reason='from 3.14 on, a thread entering Python at exit ends there')
-@isolated(timeout=30)
+@isolated(timeout=seconds(30))
 def test_activity_changed_at_exit_after_a_state_released_there() -> None:
     """Daemon release at exit doesn't block later handlers."""
     assert 'webrtc' not in sys.modules

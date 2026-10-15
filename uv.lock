@@ -4561,6 +4561,7 @@ dev = [
     { name = "pytest-asyncio", version = "1.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "pytest-asyncio", version = "1.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "pytest-timeout" },
+    { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "scikit-build-core" },
     { name = "seaborn" },
@@ -4579,11 +4580,13 @@ docs = [
     { name = "typing-extensions" },
 ]
 test = [
+    { name = "psutil" },
     { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "pytest", version = "9.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "pytest-asyncio", version = "1.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "pytest-asyncio", version = "1.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "pytest-timeout" },
+    { name = "pytest-xdist" },
 ]
 wpt = [
     { name = "pytest-xdist" },
@@ -4614,6 +4617,7 @@ dev = [
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "pytest-timeout", specifier = ">=2.3" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.9" },
     { name = "scikit-build-core", specifier = ">=0.11" },
     { name = "seaborn", specifier = ">=0.13" },
@@ -4631,9 +4635,11 @@ docs = [
     { name = "typing-extensions", specifier = ">=4.10" },
 ]
 test = [
+    { name = "psutil", specifier = ">=7.2" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "pytest-timeout", specifier = ">=2.3" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
 ]
 wpt = [
     { name = "pytest-xdist", specifier = ">=3.8.0" },

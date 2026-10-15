@@ -80,6 +80,10 @@ constructors.
   which `webrtc.utils.lifetime` keys one Python wrapper on. A `Registry` (`utils/registry.h`) keeps one wrapper per
   libwebrtc object. `wrtc._testing` exposes these plus parking points (`utils/parking.h`) that stop a native thread
   where a test needs it.
+- Task queues (`utils/task_queue_factory.h`): libwebrtc's default ones, deletable from their own task, as a transform
+  delegate's last reference does. Later tasks don't run; the Dispatcher joins the thread.
+- libwebrtc announces a remote data channel (`OnDataChannel`) before opening it. Sends in between are held until it
+  opens, or dropped if it closes.
 
 ## Ownership
 

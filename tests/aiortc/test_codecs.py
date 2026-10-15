@@ -24,6 +24,7 @@ from tests.aiortc.test_media import (
     received_tracks,
     recv_video,
 )
+from tests.helpers import wait_until
 from webrtc.aiortc import (
     AudioStreamTrack,
     RTCPeerConnection,
@@ -40,6 +41,10 @@ OPUS_FMTP = re.compile(r'a=rtpmap:(\d+) opus/.*?a=fmtp:\1 ([^\r\n]*)', re.DOTALL
 async def outbound(pc: RTCPeerConnection, kind: str) -> webrtc.RTCOutboundRtpStreamStats:
     stats = (await pc._native.get_stats()).values()
     return next(s for s in stats if isinstance(s, webrtc.RTCOutboundRtpStreamStats) and s.kind == kind)
+
+
+async def target_bitrate(pc: RTCPeerConnection) -> float | None:
+    return (await outbound(pc, 'video')).target_bitrate
 
 
 async def sent_codec(pc: RTCPeerConnection, kind: str) -> str:
@@ -126,7 +131,8 @@ async def test_changed_bitrate_constants_cap_video(monkeypatch: pytest.MonkeyPat
         assert 'x-google-max-bitrate=200' in applied.sdp
         assert 'x-google-start-bitrate' not in applied.sdp
         assert 'x-google' not in remote.sdp
-        target = (await outbound(caller, 'video')).target_bitrate
+        await wait_until(lambda: target_bitrate(caller), 'the encoder')
+        target = await target_bitrate(caller)
         assert target is not None
         assert 0 < target <= 200_000
     finally:

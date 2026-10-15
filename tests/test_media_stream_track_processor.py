@@ -18,8 +18,9 @@ import pytest
 
 import webrtc
 from tests.helpers import mistyped, wait_for_event, wait_until
+from tests.timing import seconds
 
-TIMEOUT = 10
+TIMEOUT = seconds(10)
 I420_4X2 = bytes(range(1, 13))
 
 
@@ -104,7 +105,7 @@ async def test_wakeup_sent_before_the_listeners_is_not_lost(
     init = webrtc.MediaStreamTrackProcessorInit(audio_stream.get_tracks()[0], max_buffer_size=1)
     reader = webrtc.MediaStreamTrackProcessor(init).readable.get_reader()
     for _ in range(5):
-        chunk = (await asyncio.wait_for(reader.read(), 5)).value
+        chunk = (await asyncio.wait_for(reader.read(), seconds(5))).value
         assert isinstance(chunk, webrtc.AudioData)
         chunk.close()
     await reader.cancel()
@@ -544,5 +545,5 @@ async def test_clone_of_a_stopped_generator_track_gets_frames() -> None:
     writer = generator.writable.get_writer()
     for timestamp in range(3):
         await writer.write(video_frame(timestamp))
-    as_video_frame((await asyncio.wait_for(reader.read(), 5)).value).close()
+    as_video_frame((await asyncio.wait_for(reader.read(), seconds(5))).value).close()
     clone.stop()

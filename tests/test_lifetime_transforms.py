@@ -29,11 +29,12 @@ from tests.helpers import (
     wait_until,
 )
 from tests.test_lifetime import alive_factories, alive_objects
+from tests.timing import seconds
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
 
-TIMEOUT = 15
+TIMEOUT = seconds(15)
 KEY = bytes(range(16))
 OTHER_KEY = bytes(range(1, 17))
 SUITE = webrtc.SFrameCipherSuite.AES_128_GCM_SHA256_128

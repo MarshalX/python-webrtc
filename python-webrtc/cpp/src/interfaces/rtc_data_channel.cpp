@@ -7,6 +7,8 @@
 
 #include "rtc_data_channel.h"
 
+#include <utility>
+
 #include <pybind11/stl.h>
 
 #include "../exceptions.h"
@@ -28,7 +30,8 @@ namespace python_webrtc {
         DataState state{};
         {
           const std::scoped_lock lock(_closeMutex);
-          state = _lastState = _channel->state();
+          state = _channel->state();
+          SetStateLocked(state);
           if (state != DataState::kOpen && state != DataState::kConnecting) {
             _surfacedState.Surface(state);
           }
@@ -100,7 +103,7 @@ namespace python_webrtc {
         return;
       }
       auto previous = _lastState;
-      _lastState = state;
+      SetStateLocked(state);
       if (_closeRequested && state == DataState::kClosing) {
         // closing locally has shown the closing state already, and fires no event
         return;
@@ -290,15 +293,42 @@ namespace python_webrtc {
       throw sendQueueFullError();
     }
     auto queued = _bufferedAmount.fetch_add(data.size());
-    // queued on the network thread without waiting; a failed send closes the channel
-    _channel->SendAsync(webrtc::DataBuffer(webrtc::CopyOnWriteBuffer(data.data(), data.size()), binary),
-                        [weak = weak_from_this(), size = data.size()](const webrtc::RTCError &error) {
-                          auto self = weak.lock();
-                          if (!error.ok() && self) {
-                            self->DecreaseBufferedAmount(size);
-                          }
-                        });
+    webrtc::DataBuffer buffer(webrtc::CopyOnWriteBuffer(data.data(), data.size()), binary);
+    {
+      const std::scoped_lock lock(_closeMutex);
+      // announced, not yet opened by libwebrtc
+      if (_lastState == DataState::kConnecting) {
+        _held.push_back(std::move(buffer));
+        return queued == 0;
+      }
+    }
+    SendNow(std::move(buffer));
     return queued == 0;
+  }
+
+  void RTCDataChannel::SendNow(webrtc::DataBuffer buffer) {
+    auto size = buffer.size();
+    // posted to the network thread, in call order; a failed send closes the channel
+    _channel->SendAsync(std::move(buffer), [weak = weak_from_this(), size](const webrtc::RTCError &error) {
+      auto self = weak.lock();
+      if (!error.ok() && self) {
+        self->DecreaseBufferedAmount(size);
+      }
+    });
+  }
+
+  void RTCDataChannel::SetStateLocked(DataState state) {
+    _lastState = state;
+    if (state == DataState::kConnecting) {
+      return;
+    }
+    for (auto &buffer : std::exchange(_held, {})) {
+      if (state == DataState::kOpen) {
+        SendNow(std::move(buffer));
+      } else {
+        DecreaseBufferedAmount(buffer.size());
+      }
+    }
   }
 
   void RTCDataChannel::Close() {

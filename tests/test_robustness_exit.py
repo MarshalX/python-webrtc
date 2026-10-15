@@ -27,6 +27,7 @@ import webrtc
 import wrtc
 from tests.helpers import connect, exit_code_within
 from tests.isolation import isolated
+from tests.timing import seconds
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -59,14 +60,14 @@ async def _keep_busy_objects() -> None:
 
 
 @pytest.mark.parametrize('_attempt', range(5))
-@isolated(timeout=30)
+@isolated(timeout=seconds(30))
 def test_exit_while_objects_are_busy(_attempt: int) -> None:
     """Wrappers released by the last collection must not block on threads hung in the GIL."""
     asyncio.run(_keep_busy_objects())
 
 
 @pytest.mark.parametrize('_attempt', range(5))
-@isolated(timeout=30)
+@isolated(timeout=seconds(30))
 def test_exit_while_operations_are_pending(_attempt: int) -> None:
     """Completions at exit never run on libwebrtc threads."""
     pc = webrtc.RTCPeerConnection()
@@ -88,9 +89,9 @@ async def _use() -> None:
     caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
     track = (await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=True))).get_tracks()[0]
     caller.add_track(track)
-    await asyncio.wait_for(connect(caller, callee), 10)
+    await asyncio.wait_for(connect(caller, callee), seconds(10))
     reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
-    frame = (await asyncio.wait_for(reader.read(), 5)).value
+    frame = (await asyncio.wait_for(reader.read(), seconds(5))).value
     assert frame is not None
     frame.close()
     track.stop()
@@ -110,7 +111,7 @@ def _forked_child_works() -> bool:
 
 
 @pytest.mark.skipif(not hasattr(os, 'fork'), reason='no fork')
-@isolated(timeout=60)
+@isolated(timeout=seconds(60))
 def test_forked_child_leaves_the_objects_of_its_parent_alone() -> None:
     """The child of a fork doesn't block on its parent's threads; new objects work (raise on macOS)."""
     warnings.simplefilter('ignore', DeprecationWarning)  # fork with threads

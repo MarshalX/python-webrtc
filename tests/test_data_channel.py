@@ -12,12 +12,22 @@ from __future__ import annotations
 import asyncio
 import math
 import re
+from typing import cast
 
 import pytest
 from typing_extensions import TypedDict, Unpack
 
 import webrtc
-from tests.helpers import connect, mistyped, stats_of_type, wait_for_event, wait_until
+import wrtc
+from tests.helpers import (
+    connect,
+    mistyped,
+    stats_of_type,
+    wait_for_event,
+    wait_for_ice_gathering_complete,
+    wait_until,
+)
+from tests.timing import seconds
 
 #: The most a channel queues to send, in bytes
 SEND_QUEUE_LIMIT = 16 * 1024 * 1024
@@ -88,7 +98,7 @@ async def test_messages_both_ways(
     channel.send('text')
     channel.send(b'\x00\x01')
     channel.send(bytearray(b'\x02'))
-    await asyncio.wait_for(got_all, 5)
+    await asyncio.wait_for(got_all, seconds(5))
     assert received == ['text', b'\x00\x01', b'\x02']
 
 
@@ -285,8 +295,50 @@ async def test_messages_sent_on_open_reach_a_handler_added_on_datachannel(
 
     callee.on('datachannel', lambda event: event.channel.on('message', on_message))
     await connect(caller, callee)
-    await asyncio.wait_for(done, 10)
+    await asyncio.wait_for(done, seconds(10))
     assert received == [str(number) for number in range(count)]
+
+
+@pytest.mark.asyncio
+async def test_sent_from_the_datachannel_handler_before_libwebrtc_opens_it(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """A send from the datachannel handler arrives, though libwebrtc opens the channel later."""
+    opened = wait_for_event(caller.create_data_channel('setup'), 'open')
+    announced = wait_for_event(callee, 'datachannel')
+    for local, remote in ((caller, callee), (callee, caller)):
+        await local.set_local_description()
+        await wait_for_ice_gathering_complete(local)
+        description = local.local_description
+        assert description is not None
+        await remote.set_remote_description(description)
+
+    await asyncio.gather(opened, announced)
+
+    # answered on the signaling thread, so it's past the setup channel's announcement
+
+    await callee.get_stats()
+    sent: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+    def send(event: webrtc.RTCDataChannelEvent) -> None:
+        event.channel.send('early')
+        sent.set_result(None)
+
+    async def received() -> bool:
+        report = await caller.get_stats()
+        channels = cast('list[webrtc.RTCDataChannelStats]', stats_of_type(report, 'data-channel'))
+        return any(stats.label == 'early' and stats.messages_received == 1 for stats in channels)
+
+    callee.on('datachannel', send)
+    wrtc._testing.park('connection.datachannel')
+    try:
+        # off the loop: creating it waits for the parked signaling thread too
+        creating = asyncio.ensure_future(asyncio.to_thread(caller.create_data_channel, 'early'))
+        await asyncio.wait_for(sent, seconds(10))
+    finally:
+        wrtc._testing.release('connection.datachannel')
+    await creating
+    await wait_until(received, 'the message')
 
 
 @pytest.mark.asyncio

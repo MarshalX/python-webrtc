@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal, NoReturn, TypeVar
 
 import webrtc
 from tests.helpers import connect, copy_frame, register_stack_dump, settled_alive
+from tests.timing import seconds
 from webrtc.utils import loops
 
 if TYPE_CHECKING:
@@ -130,7 +131,7 @@ class ConnectionSteps(State):
         with self.lock:
             pair = self.random.sample(self.connections, 2) if len(self.connections) >= 2 else None
         if pair is not None:
-            await connect(pair[0], pair[1], timeout=5)
+            await connect(pair[0], pair[1], timeout=seconds(5))
 
     async def add_track(self) -> None:
         pc, track = self.pick(self.connections), self.pick(self.tracks)

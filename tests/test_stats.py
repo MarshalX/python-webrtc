@@ -17,6 +17,7 @@ import pytest
 
 import webrtc
 from tests.helpers import connect, stats_of_type, wait_for_event, wait_until, wait_until_unmuted
+from tests.timing import seconds
 from webrtc.models import rtc_stats
 
 ICE_TYPES = {'candidate-pair', 'local-candidate', 'remote-candidate'}
@@ -189,7 +190,7 @@ async def test_call_stats_are_the_dictionaries_of_their_types(
     async def reported() -> bool:
         return len(stats_of_type(await caller.get_stats(), 'remote-inbound-rtp')) > 0
 
-    await wait_until(reported, 'RTCP reports', timeout=20)
+    await wait_until(reported, 'RTCP reports', timeout=seconds(20))
     for pc in (caller, callee):
         for stats in (await pc.get_stats()).values():
             assert isinstance(stats, rtc_stats._dictionary(stats.to_json())), stats

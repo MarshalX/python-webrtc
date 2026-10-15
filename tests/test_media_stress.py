@@ -27,9 +27,10 @@ from tests.helpers import (
     write_video,
     writing,
 )
+from tests.timing import seconds
 from webrtc.utils.loops import LoopState
 
-TIMEOUT = 20
+TIMEOUT = seconds(20)
 
 
 def frame(timestamp: int = 0, width: int = 16, height: int = 16) -> webrtc.VideoFrame:

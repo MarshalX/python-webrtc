@@ -13,6 +13,7 @@ import asyncio
 import gc
 import sys
 import threading
+import time
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
@@ -24,11 +25,12 @@ import webrtc
 import wrtc
 from tests.helpers import called, mistyped
 from tests.isolation import isolated
+from tests.timing import seconds
 from webrtc.utils import loops
 from webrtc.utils.events import EventTarget
 from webrtc.utils.loops import LoopState, checking_roots
 
-TIMEOUT = 5
+TIMEOUT = seconds(5)
 
 
 def _handled_on(loop: asyncio.AbstractEventLoop) -> tuple[LoopState, webrtc.RTCPeerConnection]:
@@ -210,7 +212,7 @@ def test_closed_loop_held_by_the_user_is_released_on_collection() -> None:
     wrtc._testing.park('dispatcher.wake')
     try:
         wrtc._testing.post(state.mailbox, 'event', 1)
-        assert wrtc._testing.parked('dispatcher.wake', 5)
+        assert wrtc._testing.parked('dispatcher.wake', seconds(5))
         loop.close()
         assert not state.mailbox.closed
 
@@ -232,7 +234,7 @@ def test_closed_loop_held_by_the_user_is_released_on_collection() -> None:
         other.close()
 
 
-@isolated(timeout=60)
+@isolated(timeout=seconds(60))
 def test_collections_under_the_locks_of_the_states_do_not_wait_for_them() -> None:
     """GC sweeps under the state locks without waiting."""
     thresholds = gc.get_threshold()
@@ -393,7 +395,7 @@ def test_release_of_a_closed_loop_drops_what_it_kept() -> None:
     wrtc._testing.park('dispatcher.wake')
     try:
         wrtc._testing.post(state.mailbox, 'event', 1)
-        assert wrtc._testing.parked('dispatcher.wake', 5)
+        assert wrtc._testing.parked('dispatcher.wake', seconds(5))
         loop.close()
         assert state.active == {target: 'has handlers', pc: 'handlers'}
         assert len(state.mailbox) == 1
@@ -431,6 +433,42 @@ def test_a_watching_loop_is_woken_through_its_mailbox_pipe_until_released(monkey
         state.release()
         assert state._wake_fd is None
         assert not loop.remove_reader(fd)
+
+    asyncio.run(scenario())
+
+
+async def _watching() -> LoopState:
+    state = LoopState.of(asyncio.get_running_loop())
+    token, first = state.start(None)
+    _in_thread(lambda: wrtc._testing.complete(state.mailbox, token, 1))
+    assert await asyncio.wait_for(first, TIMEOUT) == 1
+    assert state._wake_fd is not None
+    return state
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='no wake pipe on Windows')
+@pytest.mark.skipif(not LoopState.watches_pipe, reason='every loop is woken through the Dispatcher')
+def test_a_watching_loop_is_released_by_its_close() -> None:
+    """Posts after its close only write to the pipe: the close releases it, not a later collection."""
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        state = asyncio.run(_watching())
+        assert state.mailbox.closed
+    finally:
+        if enabled:
+            gc.enable()
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='no wake pipe on Windows')
+@pytest.mark.skipif(not LoopState.watches_pipe, reason='every loop is woken through the Dispatcher')
+def test_a_loop_that_stops_watching_stays_bound() -> None:
+    """Dropping the pipe's reader from an open loop releases nothing."""
+
+    async def scenario() -> None:
+        state = await _watching()
+        state._unwatch()
+        assert not state.mailbox.closed
 
     asyncio.run(scenario())
 
@@ -735,6 +773,14 @@ def test_update_roots_by_activity() -> None:
         loop.close()
 
 
+def _swept(done: Callable[[], bool]) -> None:
+    """Waits for what another thread (a Dispatcher wake, a gc sweep) may hold or release a moment later."""
+    deadline = time.monotonic() + TIMEOUT
+    while not done():
+        assert time.monotonic() < deadline
+        time.sleep(0)
+
+
 class _DictLoop:
     """A loop collected without a cycle, so no gc sweep sees it go."""
 
@@ -745,42 +791,44 @@ class _DictLoop:
         return self.closed
 
 
-def test_a_state_outliving_its_loop_is_released_by_its_next_use() -> None:
+@pytest.mark.parametrize('use', ['post', 'call_soon'])
+def test_a_state_outliving_its_loop_is_released_by_its_next_use(use: str) -> None:
     """Posts and calls are dropped, and new calls fail."""
-    for use in ('post', 'call_soon'):
-        loop = _DictLoop()
-        state = LoopState.of(mistyped(loop))
-        del loop
-        ran: list[str] = []
-        if use == 'post':
-            state.post(lambda ran=ran: ran.append('posted'))
-        else:
-            state.call_soon(lambda ran=ran: ran.append('soon'), dropped=lambda ran=ran: ran.append('dropped'))
-        assert state.mailbox.closed
-        assert state._markers == {}
-        assert ran == ([] if use == 'post' else ['dropped'])
-        with pytest.raises(RuntimeError, match='the loop of the state is gone'):
-            state.start(None)
+    loop = _DictLoop()
+    state = LoopState.of(mistyped(loop))
+    gone = weakref.ref(loop)
+    del loop
+    _swept(lambda: gone() is None)
+    ran: list[str] = []
+    if use == 'post':
+        state.post(lambda: ran.append('posted'))
+    else:
+        state.call_soon(lambda: ran.append('soon'), dropped=lambda: ran.append('dropped'))
+    expected: list[str] = [] if use == 'post' else ['dropped']
+    _swept(lambda: state.mailbox.closed and ran == expected)
+    assert state._markers == {}
+    with pytest.raises(RuntimeError, match='the loop of the state is gone'):
+        state.start(None)
 
 
-def test_a_post_to_a_closed_loop_releases_its_state() -> None:
+@pytest.mark.parametrize('use', ['post', 'call_soon'])
+def test_a_post_to_a_closed_loop_releases_its_state(use: str) -> None:
     """Only the drop handler runs."""
-    for use in ('post', 'call_soon'):
-        loop = asyncio.new_event_loop()
-        state = LoopState.of(loop)
-        loop.close()
-        ran: list[str] = []
-        if use == 'post':
-            state.post(lambda ran=ran: ran.append('posted'))
-        else:
-            state.call_soon(lambda ran=ran: ran.append('soon'), dropped=lambda ran=ran: ran.append('dropped'))
-        assert state.mailbox.closed
-        assert ran == ([] if use == 'post' else ['dropped'])
-        assert LoopState.find(state.mailbox.id) is None
-        # released: later posts are dropped right away
-        state.post(lambda ran=ran: ran.append('late'))
-        assert state._markers == {}
-        assert ran == ([] if use == 'post' else ['dropped'])
+    loop = asyncio.new_event_loop()
+    state = LoopState.of(loop)
+    loop.close()
+    ran: list[str] = []
+    if use == 'post':
+        state.post(lambda: ran.append('posted'))
+    else:
+        state.call_soon(lambda: ran.append('soon'), dropped=lambda: ran.append('dropped'))
+    expected: list[str] = [] if use == 'post' else ['dropped']
+    _swept(lambda: state.mailbox.closed and ran == expected)
+    assert LoopState.find(state.mailbox.id) is None
+    # released: later posts are dropped right away
+    state.post(lambda: ran.append('late'))
+    assert state._markers == {}
+    assert ran == expected
 
 
 def test_call_soon_released_before_it_runs_runs_the_drop_handler_only() -> None:

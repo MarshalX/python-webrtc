@@ -24,6 +24,7 @@ import webrtc
 import wrtc
 from tests.helpers import ROOT, connect, stats_of_type, wait_for_event, write_video, writing
 from tests.isolation import isolated
+from tests.timing import seconds
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -94,7 +95,7 @@ async def _last_of_ten(track: webrtc.MediaStreamTrack) -> tuple[tuple[int, int],
     ).readable.get_reader()
     # every frame converts, the last one is checked
     for _ in range(10):
-        frame = (await asyncio.wait_for(reader.read(), 20)).value
+        frame = (await asyncio.wait_for(reader.read(), seconds(20))).value
         assert isinstance(frame, webrtc.VideoFrame)
         size, center = (frame.coded_width, frame.coded_height), await _center_pixel(frame)
         frame.close()
@@ -150,7 +151,7 @@ async def _send_red() -> _Received:
     return received
 
 
-@isolated(timeout=120)
+@isolated(timeout=seconds(120))
 def _received_red() -> _Received:
     return asyncio.run(_send_red())
 
@@ -390,7 +391,7 @@ class _Downloaded:
     elsewhere: str
 
 
-@isolated(timeout=120)
+@isolated(timeout=seconds(120))
 def _downloaded(directory: Path) -> _Downloaded:
     try:
         version = asyncio.run(webrtc.openh264.install(directory, print_notice=False))

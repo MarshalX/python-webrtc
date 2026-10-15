@@ -19,6 +19,7 @@ import pytest
 import webrtc
 import wrtc
 from tests.isolation import isolated
+from tests.timing import seconds
 from webrtc.utils import loops
 from webrtc.utils.loops import LoopState, call_native
 
@@ -115,10 +116,10 @@ def test_exit_cancels_the_calls_of_a_loop_of_another_thread_on_that_thread() -> 
     # debug mode raises on a loop touched from another thread
     thread = threading.Thread(target=asyncio.run, args=(awaiting(),), kwargs={'debug': True}, daemon=True)
     thread.start()
-    assert started.wait(5)
+    assert started.wait(seconds(5))
     loops._exit()
-    assert cancelled.wait(5)
-    thread.join(5)
+    assert cancelled.wait(seconds(5))
+    thread.join(seconds(5))
     assert not thread.is_alive()
 
 

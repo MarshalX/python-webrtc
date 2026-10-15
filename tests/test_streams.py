@@ -20,6 +20,7 @@ from typing_extensions import override
 
 import webrtc
 from tests.helpers import wait_progressing, wait_until
+from tests.timing import seconds
 from webrtc import streams
 
 if TYPE_CHECKING:
@@ -484,7 +485,7 @@ async def test_transform_write_settles_on_readable_cancel() -> None:
     await asyncio.sleep(0)
     await transform.readable.cancel(ValueError('stop'))
     with pytest.raises(ValueError, match='stop'):
-        await asyncio.wait_for(write, 1)
+        await asyncio.wait_for(write, seconds(1))
 
 
 @pytest.mark.asyncio
@@ -497,7 +498,7 @@ async def test_transform_async_start_runs() -> None:
             controller.enqueue('hi')
 
     transform = webrtc.TransformStream(Transformer())
-    result = await asyncio.wait_for(transform.readable.get_reader().read(), 1)
+    result = await asyncio.wait_for(transform.readable.get_reader().read(), seconds(1))
     assert result.value == 'hi'
 
 

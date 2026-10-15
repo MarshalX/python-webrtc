@@ -23,6 +23,7 @@ import webrtc
 import wrtc
 from tests.helpers import ROOT, exit_code_within
 from tests.isolation import isolated
+from tests.timing import seconds
 
 _Record = tuple['str | None', int, bool, 'tuple[object, ...] | None']
 
@@ -90,7 +91,7 @@ def test_close_while_posting_drops_the_later_records() -> None:
     mailbox.close()
     stop.set()
     for thread in threads:
-        thread.join(5)
+        thread.join(seconds(5))
         assert not thread.is_alive()
 
     assert mailbox.closed
@@ -258,7 +259,7 @@ def test_destroyed_off_the_dispatcher_aborts() -> None:
         [sys.executable, '-c', 'import wrtc; wrtc._testing.check_destroyed_off_dispatcher()'],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=seconds(60),
         cwd=ROOT,
         check=False,
     )
@@ -273,7 +274,7 @@ def test_blocking_on_a_libwebrtc_thread_while_attached_aborts() -> None:
         [sys.executable, '-c', 'import wrtc; wrtc._testing.check_blocking_while_attached()'],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=seconds(60),
         cwd=ROOT,
         check=False,
     )
@@ -314,7 +315,7 @@ def test_a_parked_dispatcher_wake_holds_the_pipe_wakes_too() -> None:
     wrtc._testing.park('dispatcher.wake')
     try:
         wrtc._testing.post(mailbox, 'event', 1)
-        assert wrtc._testing.parked('dispatcher.wake', 5)
+        assert wrtc._testing.parked('dispatcher.wake', seconds(5))
         assert _pipe_empty(fd)
     finally:
         wrtc._testing.release('dispatcher.wake')
@@ -335,11 +336,11 @@ def test_parking_point_holds_a_posting_thread() -> None:
     wrtc._testing.park('mailbox.post')
     (thread,) = _start(lambda: wrtc._testing.post(mailbox, 'event', 1))
     try:
-        assert wrtc._testing.parked('mailbox.post', 5)
+        assert wrtc._testing.parked('mailbox.post', seconds(5))
         assert len(mailbox) == 0
     finally:
         wrtc._testing.release('mailbox.post')
-    thread.join(5)
+    thread.join(seconds(5))
     assert not thread.is_alive()
     assert len(mailbox) == 1
 
@@ -349,7 +350,7 @@ def test_parking_point_holds_the_dispatcher_before_it_enters_python() -> None:
     wrtc._testing.park('dispatcher.wake')
     try:
         wrtc._testing.post(mailbox, 'event', 1)
-        assert wrtc._testing.parked('dispatcher.wake', 5)
+        assert wrtc._testing.parked('dispatcher.wake', seconds(5))
     finally:
         wrtc._testing.release('dispatcher.wake')
     wrtc._testing.dispatcher_idle()
@@ -378,7 +379,7 @@ def _child_wakes_through_the_dispatcher(mailbox: wrtc.Mailbox) -> bool:
 
 @pytest.mark.skipif(not hasattr(os, 'fork'), reason='no fork')
 @pytest.mark.skipif(wrtc._thread_sanitized, reason='a thread started after a fork ends the child under ThreadSanitizer')
-@isolated(timeout=60)
+@isolated(timeout=seconds(60))
 def test_forked_child_doesnt_wake_through_the_pipe_of_its_parent() -> None:
     warnings.simplefilter('ignore', DeprecationWarning)  # fork with threads
     mailbox = wrtc.Mailbox()
@@ -396,7 +397,7 @@ def test_forked_child_doesnt_wake_through_the_pipe_of_its_parent() -> None:
 
 @pytest.mark.skipif(not hasattr(os, 'fork'), reason='no fork')
 @pytest.mark.skipif(wrtc._thread_sanitized, reason='a thread started after a fork ends the child under ThreadSanitizer')
-@isolated(timeout=60)
+@isolated(timeout=seconds(60))
 def test_forked_child_restarts_the_dispatcher_and_the_parent_goes_on() -> None:
     """A forked child gets its own Dispatcher."""
     warnings.simplefilter('ignore', DeprecationWarning)  # fork with threads

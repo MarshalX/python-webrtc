@@ -19,9 +19,21 @@ from typing import cast
 import pytest
 
 import webrtc
-from tests.helpers import CreatePC, connect, connect_track, wait_for_event, write_video, writing
+from tests.helpers import (
+    CreatePC,
+    available_outgoing_bitrate,
+    connect,
+    connect_track,
+    wait_for_event,
+    wait_until,
+    write_video,
+    writing,
+)
+from tests.timing import seconds
 
-TIMEOUT = 20
+TIMEOUT = seconds(20)
+#: no frame for this long means frames stopped; exact, as it defines the assertion
+QUIET = 0.5
 WIDTH, HEIGHT = 320, 240
 
 
@@ -134,7 +146,7 @@ async def test_relayed_video_outlasts_the_sender_reports(
                 cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), TIMEOUT)).value).close()
         # a second of frames past it
         for _ in range(30):
-            cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), 1)).value).close()
+            cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), seconds(1))).value).close()
         await reader.cancel()
     generator.track.stop()
 
@@ -183,8 +195,10 @@ async def received_widths(
     parameters.degradation_preference = preference
     await sender.set_parameters(parameters)
     received = wait_for_event(callee, 'track', TIMEOUT)
+    await connect(caller, callee, TIMEOUT)
+    # libwebrtc drops frames too large for the bitrate only if it knows the bitrate before the first frame
+    await wait_until(lambda: available_outgoing_bitrate(caller), 'a bandwidth estimate', TIMEOUT)
     async with writing(write_video, generator, bytes(640 * 480 * 3 // 2), (640, 480)):
-        await connect(caller, callee, TIMEOUT)
         event = await received
         assert isinstance(event, webrtc.RTCTrackEvent)
         reader = webrtc.MediaStreamTrackProcessor(
@@ -280,7 +294,7 @@ async def test_stopped_camera_track_stops_sending(
     drained = 0
     while drained < 100:
         try:
-            cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), 0.5)).value).close()
+            cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), QUIET)).value).close()
         except asyncio.TimeoutError:
             break
         drained += 1

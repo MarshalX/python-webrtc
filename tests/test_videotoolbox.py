@@ -25,6 +25,7 @@ import webrtc
 from tests.h264 import HEIGHT, LUMA, WIDTH, Recorder, h264_codecs
 from tests.helpers import connect, stats_of_type, wait_for_event, wait_until, write_video, writing
 from tests.isolation import isolated
+from tests.timing import seconds
 
 pytestmark = pytest.mark.skipif(sys.platform != 'darwin', reason='macOS only')
 
@@ -45,7 +46,7 @@ async def _arrived(track: webrtc.MediaStreamTrack) -> _Arrived:
     arrived = _Arrived(set(), [])
     options = webrtc.VideoFrameCopyToOptions(format='I420')
     for i in range(RECEIVED):
-        frame = (await asyncio.wait_for(reader.read(), 20)).value
+        frame = (await asyncio.wait_for(reader.read(), seconds(20))).value
         assert isinstance(frame, webrtc.VideoFrame)
         arrived.sizes.add(f'{frame.coded_width}x{frame.coded_height}')
         if i in SAMPLES:
@@ -150,7 +151,7 @@ async def _send(ffmpeg: str, ffprobe: str, profile: str) -> _Sent:
     )
 
 
-@isolated(timeout=120)
+@isolated(timeout=seconds(120))
 def _sent(ffmpeg: str, ffprobe: str, profile: str) -> _Sent:
     return asyncio.run(_send(ffmpeg, ffprobe, profile))
 

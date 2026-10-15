@@ -22,6 +22,7 @@ import webrtc
 from tests.h264 import HEIGHT, LUMA, RATE, WIDTH, psnr
 from tests.helpers import stats_of_type, wait_for_ice_gathering_complete
 from tests.isolation import isolated
+from tests.timing import seconds
 
 SOURCE = f'testsrc2=size={WIDTH}x{HEIGHT}:rate={RATE}'
 FRAMES = 90
@@ -92,7 +93,7 @@ async def _arrived(track: webrtc.MediaStreamTrack) -> _Arrived:
     arrived = _Arrived(set(), [], {})
     options = webrtc.VideoFrameCopyToOptions(format='I420')
     for i in range(FRAMES):
-        frame = (await asyncio.wait_for(reader.read(), 20)).value
+        frame = (await asyncio.wait_for(reader.read(), seconds(20))).value
         assert isinstance(frame, webrtc.VideoFrame)
         arrived.sizes.add(f'{frame.coded_width}x{frame.coded_height}')
         arrived.rtp_timestamps.append(frame.metadata().rtp_timestamp)
@@ -169,7 +170,7 @@ async def _receive(ffmpeg: str, encoder: list[str]) -> _Received:
         stderr=subprocess.PIPE,
     )
 
-    arrived = await _arrived(await asyncio.wait_for(received, 20))
+    arrived = await _arrived(await asyncio.wait_for(received, seconds(20)))
     codec, decoder = await _decoder(pc)
     sending.kill()
     await sending.wait()
@@ -178,7 +179,7 @@ async def _receive(ffmpeg: str, encoder: list[str]) -> _Received:
     return _Received(codec.mime_type, codec.sdp_fmtp_line, decoder, sorted(arrived.sizes), _psnrs(ffmpeg, arrived))
 
 
-@isolated(timeout=120)
+@isolated(timeout=seconds(120))
 def _received(ffmpeg: str, encoder: list[str]) -> _Received:
     return asyncio.run(_receive(ffmpeg, encoder))
 

@@ -15,6 +15,7 @@ import math
 import subprocess
 
 import webrtc
+from tests.timing import seconds
 
 WIDTH, HEIGHT, RATE = 320, 240, 30
 SOURCE_FRAMES = 300
@@ -96,10 +97,10 @@ class Recorder:
         async with self._recorded:
             await self._recorded.wait_for(lambda: len(self.encoded) >= target)
 
-    async def bitrate(self, seconds: float) -> float:
-        await asyncio.wait_for(self.frames(2 * RATE), 20)  # settle
+    async def bitrate(self, duration: float) -> float:
+        await asyncio.wait_for(self.frames(2 * RATE), seconds(20))  # settle
         first = len(self.encoded)
-        await asyncio.wait_for(self.frames(round(seconds * RATE)), 20)
+        await asyncio.wait_for(self.frames(round(duration * RATE)), seconds(20))
         sent = self.encoded[first:]
         return sum(len(e.data) for e in sent) * 8 / (sent[-1].time - sent[0].time)
 
@@ -107,5 +108,5 @@ class Recorder:
         options = webrtc.RTCSetParameterOptions(encoding_options=[webrtc.RTCEncodingOptions(key_frame=True)])
         await sender.set_parameters(sender.get_parameters(), options)
         requested_at = len(self.encoded)
-        await asyncio.wait_for(self.frames(15), 20)
+        await asyncio.wait_for(self.frames(15), seconds(20))
         return next((i - requested_at for i, e in enumerate(self.encoded) if i >= requested_at and e.key), None)

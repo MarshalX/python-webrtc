@@ -29,11 +29,12 @@ from tests.helpers import (
     wait_until,
     wait_until_unmuted,
 )
+from tests.timing import seconds
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-TIMEOUT = 15
+TIMEOUT = seconds(15)
 MARK = 0xAB
 
 Frame = Union[webrtc.RTCEncodedVideoFrame, webrtc.RTCEncodedAudioFrame]
@@ -668,7 +669,7 @@ async def test_async_worker_exception_goes_to_the_loop() -> None:
             raise ValueError(msg)
 
         transform = webrtc.RTCRtpScriptTransform(worker)
-        context = await asyncio.wait_for(reported, 5)
+        context = await asyncio.wait_for(reported, seconds(5))
         assert context['message'] == 'Exception in the worker of an RTCRtpScriptTransform'
         assert isinstance(context['exception'], ValueError)
         assert transform is not None
