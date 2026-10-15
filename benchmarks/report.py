@@ -32,12 +32,13 @@ def _merge(older: dict[str, object], newer: dict[str, object]) -> dict[str, obje
 
 
 class Suite(NamedTuple):
-    """A suite: its section's title, ``run(options)``, ``render(results, libraries)`` and ``figures(results)``."""
+    """A suite: its section's title, ``run``, ``render``, ``figures`` and ``cases``, the names of its cases."""
 
     title: str
     run: Callable[..., Awaitable[object]]
     render: Callable[..., list[str]]
     figures: Callable[..., list[Figure]]
+    cases: Callable[..., list[str]]
     #: the libraries in the results of a run
     libraries: Callable[..., list[str]] = _libraries
     #: the results of two runs, a library's from the newer one if it has them
@@ -45,10 +46,12 @@ class Suite(NamedTuple):
 
 
 SUITES = {
-    'setup': Suite('Connection setup', setup.run, setup.render, setup.figures, setup.libraries, setup.merge),
-    'datachannel': Suite('Data channels', datachannel.run, datachannel.render, datachannel.figures),
-    'memory': Suite('Memory', memory.run, memory.render, memory.figures),
-    'media': Suite('Media', media.run, media.render, media.figures, media.libraries, media.merge),
+    'setup': Suite(
+        'Connection setup', setup.run, setup.render, setup.figures, setup.cases, setup.libraries, setup.merge
+    ),
+    'datachannel': Suite('Data channels', datachannel.run, datachannel.render, datachannel.figures, datachannel.cases),
+    'memory': Suite('Memory', memory.run, memory.render, memory.figures, memory.cases),
+    'media': Suite('Media', media.run, media.render, media.figures, media.cases, media.libraries, media.merge),
 }
 
 

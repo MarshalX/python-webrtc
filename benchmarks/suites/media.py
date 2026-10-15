@@ -146,6 +146,11 @@ class Case:
             return f'{self.codec} {self.video.name}'
         return f'{self.streams} stream' if self.streams == 1 else f'{self.streams} streams'
 
+    @property
+    def label(self) -> str:
+        """Like ``video_send VP8 720p30 1.5 Mbps``: what ``--case`` matches."""
+        return f'{self.kind} {self.name}'
+
     def source(self, path: str, *, numbered: bool = False) -> VideoSource:
         """The arguments of ``video_send`` for the case's video."""
         video = self.video
@@ -355,7 +360,7 @@ def _measured(options: Options) -> list[str]:
     return [library for library in options.libraries if library in MEDIA_LIBRARIES and library != NEUTRAL]
 
 
-def _cases(options: Options, plan: Plan) -> list[Case]:
+def _every(options: Options, plan: Plan) -> list[Case]:
     """Every case of the measured libraries, in the order of the tables."""
     cases: list[Case] = []
     for library in _measured(options):
@@ -366,6 +371,16 @@ def _cases(options: Options, plan: Plan) -> list[Case]:
             ]
         cases += [Case(kind, library, streams=n) for kind in AUDIO_KINDS for n in plan.streams]
     return cases
+
+
+def _cases(options: Options, plan: Plan) -> list[Case]:
+    """The selected cases, in the order of the tables."""
+    return [case for case in _every(options, plan) if options.selects(case.label)]
+
+
+def cases(options: Options) -> list[str]:
+    """The name of every case of a run, selected or not."""
+    return list(dict.fromkeys(case.label for case in _every(options, QUICK if options.quick else FULL)))
 
 
 async def _attempt(run: Awaitable[Run]) -> Run | None:
@@ -398,15 +413,13 @@ def prepare(plan: Plan) -> None:
             fixtures.encoded(video, codec)
 
 
-def _references(plan: Plan) -> dict[str, float]:
-    """Ffmpeg's decode time a frame of every file Pion sends."""
+def _references(cases: Sequence[Case]) -> dict[str, float]:
+    """Ffmpeg's decode time a frame of each file Pion sends in the cases."""
     references: dict[str, float] = {}
-    for codec in PION_CODECS:
-        for video in plan.videos:
-            path = fixtures.encoded(video, codec)
-            references[Case('video_receive', NEUTRAL, codec, video).name] = fixtures.ffmpeg_decode_ms(
-                path, fixtures.SECONDS * video.fps
-            )
+    for case in cases:
+        if case.kind == 'video_receive' and case.name not in references:
+            path = fixtures.encoded(case.video, case.codec)
+            references[case.name] = fixtures.ffmpeg_decode_ms(path, fixtures.SECONDS * case.video.fps)
     return references
 
 
@@ -418,10 +431,10 @@ async def run(options: Options) -> MediaResults:
     """
     plan = QUICK if options.quick else FULL
     prepare(plan)
-    references = _references(plan)
+    cases = _cases(options, plan)
+    references = _references(cases)
 
     results: dict[str, Results] = {library: {'video': {}, 'audio': {}} for library in _measured(options)}
-    cases = _cases(options, plan)
     shuffled = cases * options.repeat
     random.shuffle(shuffled)
     for case in shuffled:

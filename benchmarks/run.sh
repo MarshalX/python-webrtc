@@ -37,5 +37,9 @@ python -c 'from benchmarks.runner import build_drivers; build_drivers()'
 echo '== suites' >&2
 python -m benchmarks "$@"
 
+for argument in "$@"; do
+    if [[ $argument == --out || $argument == --out=* ]]; then exit 0; fi
+done
+
 echo '== charts' >&2
 python -m benchmarks.charts
