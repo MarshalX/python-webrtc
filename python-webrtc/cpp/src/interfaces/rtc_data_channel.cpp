@@ -204,7 +204,7 @@ namespace python_webrtc {
   }
 
   webrtc::Priority RTCDataChannel::GetPriority() {
-    // the ranges Chromium maps priority values to
+    // splits at the midpoints between the DCEP priority values of W3C webrtc-priority (128, 256, 512, 1024)
     constexpr int veryLowMax = 192;
     constexpr int lowMax = 384;
     constexpr int mediumMax = 768;

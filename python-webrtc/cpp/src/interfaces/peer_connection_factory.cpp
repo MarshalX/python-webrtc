@@ -17,7 +17,6 @@
 #include "../utils/port_allocator.h"
 #include "../utils/task_queue_factory.h"
 
-#include <api/audio/builtin_audio_processing_builder.h>
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
 #include <api/create_modular_peer_connection_factory.h>
@@ -84,7 +83,7 @@ namespace python_webrtc {
     }
   } // namespace
 
-  // webrtc::CreatePeerConnectionFactory without the RTC event log, which keeps every packet's buffer in memory
+  // webrtc::CreatePeerConnectionFactory without the RTC event log (holds every packet) or audio processing (no capture)
   webrtc::PeerConnectionFactoryDependencies PeerConnectionFactory::Dependencies() {
     webrtc::PeerConnectionFactoryDependencies dependencies;
     dependencies.network_thread = _workerThread.get();
@@ -95,7 +94,6 @@ namespace python_webrtc {
     dependencies.adm = _audioDeviceModule;
     dependencies.audio_encoder_factory = webrtc::CreateBuiltinAudioEncoderFactory();
     dependencies.audio_decoder_factory = webrtc::CreateBuiltinAudioDecoderFactory();
-    dependencies.audio_processing_builder = std::make_unique<webrtc::BuiltinAudioProcessingBuilder>();
     dependencies.video_encoder_factory = std::make_unique<VideoEncoderFactory>();
     dependencies.video_decoder_factory = std::make_unique<VideoDecoderFactory>();
     webrtc::EnableMedia(dependencies);
@@ -117,9 +115,8 @@ namespace python_webrtc {
 
   PeerConnectionFactory::PeerConnectionFactory()
       : _fieldTrials(_trials), _networkIgnoreMask(_loopbackAllowed ? 0 : webrtc::kDefaultNetworkIgnoreMask) {
-    _workerThread = Started(std::make_unique<webrtc::Thread>(std::make_unique<NetworkSocketServer>()),
-                            "PeerConnectionFactory:workerThread");
-    _signalingThread = Started(webrtc::Thread::Create(), "PeerConnectionFactory:signalingThread");
+    _workerThread = Started(std::make_unique<webrtc::Thread>(std::make_unique<NetworkSocketServer>()), "wrtc-network");
+    _signalingThread = Started(webrtc::Thread::Create(), "wrtc-signaling");
     // sanitizer builds check that these threads never enter Python
     _workerThread->PostTask(&TagNativeThread);
     _signalingThread->PostTask(&TagNativeThread);
