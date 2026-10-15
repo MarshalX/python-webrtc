@@ -181,12 +181,23 @@ async def ping_run(library: str, timing: Timing, log: IO[bytes]) -> PingRun | No
     return {'rtts_ms': pinged['rtts_ms'], 'sent': round(PING_RATE * timing.ping)}
 
 
+def _name(cell: Cell | None) -> str:
+    """Like ``ordered 64 KB x10`` or ``ping``: what ``--case`` matches."""
+    return 'ping' if cell is None else cell.name
+
+
 def _cases(options: Options) -> list[tuple[str, Cell | None]]:
-    """The library and the cell (None for the ping) of each case, in a random order."""
-    cells: list[Cell | None] = [*CELLS, None]
+    """The library and the cell (None for the ping) of each selected case, in a random order."""
+    cells = [cell for cell in (*CELLS, None) if options.selects(_name(cell))]
     cases = [(library, cell) for library in options.libraries for cell in cells for _ in range(options.repeat)]
     random.shuffle(cases)
     return cases
+
+
+def cases(options: Options) -> list[str]:
+    """The name of every case of a run, selected or not."""
+    del options
+    return [_name(cell) for cell in (*CELLS, None)]
 
 
 async def run(options: Options) -> dict[str, Results]:
@@ -201,7 +212,7 @@ async def run(options: Options) -> dict[str, Results]:
     }
 
     for library, cell in _cases(options):
-        print(f'datachannel: {library} {"ping" if cell is None else cell.name}', file=sys.stderr, flush=True)
+        print(f'datachannel: {library} {_name(cell)}', file=sys.stderr, flush=True)
         if cell is None:
             results[library]['ping'].append(await ping_run(library, timing, options.log))
         else:

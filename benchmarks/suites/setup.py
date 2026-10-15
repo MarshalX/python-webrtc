@@ -141,13 +141,27 @@ class _Case:
     mode: Mode
     cold: bool
 
+    @property
+    def name(self) -> str:
+        """Like ``trickle cold``: what ``--case`` matches."""
+        return f'{self.mode} {"cold" if self.cold else "warm"}'
+
+
+def _every(options: Options) -> list[_Case]:
+    kinds = [True] * (3 if options.quick else 10) + [False] * options.repeat
+    return [_Case(library, mode, cold) for library in options.libraries for mode in MODES for cold in kinds]
+
 
 def _cases(options: Options) -> list[_Case]:
-    """Every case, in a random order."""
-    kinds = [True] * (3 if options.quick else 10) + [False] * options.repeat
-    cases = [_Case(library, mode, cold) for library in options.libraries for mode in MODES for cold in kinds]
+    """The selected cases, in a random order."""
+    cases = [case for case in _every(options) if options.selects(case.name)]
     random.shuffle(cases)
     return cases
+
+
+def cases(options: Options) -> list[str]:
+    """The name of every case of a run, selected or not."""
+    return list(dict.fromkeys(case.name for case in _every(options)))
 
 
 async def run(options: Options) -> dict[Mode, dict[str, Results]]:
@@ -162,7 +176,7 @@ async def run(options: Options) -> dict[Mode, dict[str, Results]]:
     }
 
     for case in _cases(options):
-        print(f'setup: {case.library} {case.mode} {"cold" if case.cold else "warm"}', file=sys.stderr, flush=True)
+        print(f'setup: {case.library} {case.name}', file=sys.stderr, flush=True)
         result, trickle = results[case.mode][case.library], case.mode == 'trickle'
         if case.cold:
             result['cold'].append(await cold_trial(case.library, options.log, trickle=trickle))

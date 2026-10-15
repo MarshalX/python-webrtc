@@ -233,14 +233,28 @@ def _states(library: str) -> tuple[State, ...]:
     return STATES if library in MEDIA_LIBRARIES else tuple(state for state in STATES if state != 'audio')
 
 
-def _cases(options: Options) -> list[tuple[str, State | None]]:
-    """The library and the state (None for growth) of each case, in a random order."""
+def _name(state: State | None) -> str:
+    """Like ``datachannel`` or ``growth``: what ``--case`` matches."""
+    return 'growth' if state is None else state
+
+
+def _every(options: Options) -> list[tuple[str, State | None]]:
     cases: list[tuple[str, State | None]] = [
         (library, state) for library in options.libraries for state in _states(library) for _ in range(options.repeat)
     ]
-    cases += [(library, None) for library in options.libraries]
+    return cases + [(library, None) for library in options.libraries]
+
+
+def _cases(options: Options) -> list[tuple[str, State | None]]:
+    """The library and the state (None for growth) of each selected case, in a random order."""
+    cases = [(library, state) for library, state in _every(options) if options.selects(_name(state))]
     random.shuffle(cases)
     return cases
+
+
+def cases(options: Options) -> list[str]:
+    """The name of every case of a run, selected or not."""
+    return list(dict.fromkeys(_name(state) for _, state in _every(options)))
 
 
 async def run(options: Options) -> dict[str, Results]:
@@ -258,7 +272,7 @@ async def run(options: Options) -> dict[str, Results]:
         library: {'states': {state: [] for state in STATES}, 'growth': []} for library in options.libraries
     }
     for library, state in _cases(options):
-        print(f'memory: {library} {"growth" if state is None else state}', file=sys.stderr, flush=True)
+        print(f'memory: {library} {_name(state)}', file=sys.stderr, flush=True)
         if state is None:
             results[library]['growth'].append(await growth_run(library, sizes, options.log))
         else:

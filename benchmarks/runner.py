@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fnmatch
 import itertools
 import os
 import pathlib
@@ -187,6 +188,11 @@ class Options:
     quick: bool
     repeat: int
     log: IO[bytes]
+    cases: Sequence[str] = ()
+
+    def selects(self, case: str) -> bool:
+        """Whether a case of that name runs."""
+        return len(self.cases) == 0 or any(fnmatch.fnmatchcase(case, pattern) for pattern in self.cases)
 
 
 @dataclass

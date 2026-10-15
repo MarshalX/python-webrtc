@@ -23,6 +23,20 @@ Run on an idle machine.
 | `drivers/libdatachannel/` | v0.24.6, `runner.py` |
 | `drivers/webrtc-rs/` | 0.21.1, `Cargo.lock` |
 
+## Quick before/after check
+
+```sh
+benchmarks/run.sh --suite datachannel --libs wrtc --quick --repeat 3 --case 'ping' --out /tmp/before
+# make the change, then the same with --out /tmp/after
+uv run --no-sync python -m benchmarks.compare /tmp/before/*.json /tmp/after/*.json
+```
+
+- `--case PATTERN`: only the cases whose name matches (shell-style, repeatable); a pattern that matches none lists them.
+  Names like `trickle warm`, `ordered 64 KB x10`, `ping`, `audio`, `growth`, `video_receive VP8*`.
+- `--out DIR`: the results go into `DIR`; `RESULTS.md` and the charts stay as they are.
+- `benchmarks.compare`: a Markdown table a suite of the charted medians, before, after and the change, with the
+  better direction (↓ or ↑) of each metric; for the pull request's description.
+
 ## Suites
 
 | Suite | Measures | Libraries |
