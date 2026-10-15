@@ -10,6 +10,7 @@
 
 #include <api/video/encoded_image.h>
 #include <api/video_codecs/video_decoder.h>
+#include <common_video/h264/h264_bitstream_parser.h>
 
 class ISVCDecoder;
 
@@ -37,6 +38,7 @@ namespace python_webrtc {
 
     ISVCDecoder *_decoder = nullptr;
     webrtc::DecodedImageCallback *_callback = nullptr;
+    webrtc::H264BitstreamParser _qpParser;
   };
 
 } // namespace python_webrtc
