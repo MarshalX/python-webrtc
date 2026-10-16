@@ -14,8 +14,8 @@
 #include <string>
 #include <utility>
 
+#include <api/make_ref_counted.h>
 #include <api/video/i420_buffer.h>
-#include <api/video/nv12_buffer.h>
 #include <common_video/include/video_frame_buffer.h>
 #include <libyuv/convert.h>
 #include <libyuv/convert_argb.h>
@@ -122,6 +122,43 @@ namespace python_webrtc {
         return libyuv::I444ToI420;
       }
     }
+
+    // NV12 planes kept alive by what they point into, wrapped without a copy
+    class WrappedNV12Buffer : public webrtc::NV12BufferInterface {
+    public:
+      WrappedNV12Buffer(int width, int height, const uint8_t *y, int strideY, const uint8_t *uv, int strideUV,
+                        std::shared_ptr<const std::vector<uint8_t>> owned)
+          : _width(width), _height(height), _y(y), _uv(uv), _strideY(strideY), _strideUV(strideUV),
+            _owned(std::move(owned)) {}
+
+      [[nodiscard]] int width() const override { return _width; }
+
+      [[nodiscard]] int height() const override { return _height; }
+
+      [[nodiscard]] const uint8_t *DataY() const override { return _y; }
+
+      [[nodiscard]] const uint8_t *DataUV() const override { return _uv; }
+
+      [[nodiscard]] int StrideY() const override { return _strideY; }
+
+      [[nodiscard]] int StrideUV() const override { return _strideUV; }
+
+      webrtc::scoped_refptr<webrtc::I420BufferInterface> ToI420() override {
+        auto i420 = webrtc::I420Buffer::Create(_width, _height);
+        libyuv::NV12ToI420(_y, _strideY, _uv, _strideUV, i420->MutableDataY(), i420->StrideY(), i420->MutableDataU(),
+                           i420->StrideU(), i420->MutableDataV(), i420->StrideV(), _width, _height);
+        return i420;
+      }
+
+    private:
+      int _width;
+      int _height;
+      const uint8_t *_y;
+      const uint8_t *_uv;
+      int _strideY;
+      int _strideUV;
+      std::shared_ptr<const std::vector<uint8_t>> _owned;
+    };
 
     // opaque alpha in the 4th byte of each pixel
     void FillOpaque(uint8_t *dst, size_t stride, int width, int height) {
@@ -447,12 +484,8 @@ namespace python_webrtc {
     // the planes live as long as the libwebrtc buffer wrapping them
     auto keep = [owned = _owned, webrtc = _webrtc]() {};
     if (format.layout == Layout::NV12) {
-      auto buffer = webrtc::NV12Buffer::Create(_width, _height);
-      libyuv::CopyPlane(_data[0], _stride[0], buffer->MutableDataY(), buffer->StrideY(), _width, _height);
-      auto uv = format.Planes()[1];
-      libyuv::CopyPlane(_data[1], _stride[1], buffer->MutableDataUV(), buffer->StrideUV(),
-                        uv.Columns(_width) * uv.sampleBytes, uv.Rows(_height));
-      return buffer;
+      return webrtc::make_ref_counted<WrappedNV12Buffer>(_width, _height, _data[0], _stride[0], _data[1], _stride[1],
+                                                         _owned);
     }
     if (format.layout == Layout::RGB) {
       auto buffer = webrtc::I420Buffer::Create(_width, _height);

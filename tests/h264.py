@@ -28,6 +28,15 @@ def psnr(a: bytes, b: bytes) -> float:
     return math.inf if mse == 0 else 10 * math.log10(255 * 255 / mse)
 
 
+def nv12_of(i420: bytes) -> bytes:
+    """The picture with its U and V planes interleaved."""
+    chroma = LUMA // 4
+    uv = bytearray(2 * chroma)
+    uv[0::2] = i420[LUMA : LUMA + chroma]
+    uv[1::2] = i420[LUMA + chroma :]
+    return i420[:LUMA] + bytes(uv)
+
+
 def h264_codecs() -> list[webrtc.RTCRtpCodec]:
     capabilities = webrtc.RTCRtpSender.get_capabilities('video')
     assert capabilities is not None
@@ -44,7 +53,7 @@ class Encoded:
 
 
 class Recorder:
-    def __init__(self, ffmpeg: str) -> None:
+    def __init__(self, ffmpeg: str, format: webrtc.VideoPixelFormatValue = 'I420') -> None:
         self.source = subprocess.run(
             [
                 ffmpeg,
@@ -54,6 +63,7 @@ class Recorder:
             capture_output=True,
             check=True,
         ).stdout
+        self.format = format
         self.generator = webrtc.VideoTrackGenerator()
         self.written = 0
         self.encoded: list[Encoded] = []
@@ -62,9 +72,11 @@ class Recorder:
     def frame_of(self, n: int) -> bytes:
         return self.source[(n % SOURCE_FRAMES) * SIZE : (n % SOURCE_FRAMES + 1) * SIZE]
 
-    def best_psnr(self, luma: bytes, written: int) -> float:
+    def best_psnr(self, picture: bytes, written: int) -> float:
+        """Of the luma, or of the whole I420 picture, against the source frame it's closest to."""
         # the source of a sent frame is one of the last ones written before it was encoded
-        return max(psnr(luma, self.frame_of(n)[:LUMA]) for n in range(max(0, written - 8), written + 1))
+        sources = range(max(0, written - 8), written + 1)
+        return max(psnr(picture, self.frame_of(n)[: len(picture)]) for n in sources)
 
     async def tap(self, event: webrtc.RTCTransformEvent) -> None:
         loop = asyncio.get_running_loop()
@@ -86,9 +98,10 @@ class Recorder:
         start = loop.time()
         while not stop.is_set():
             init = webrtc.VideoFrameBufferInit(
-                format='I420', coded_width=WIDTH, coded_height=HEIGHT, timestamp=self.written * 1_000_000 // RATE
+                format=self.format, coded_width=WIDTH, coded_height=HEIGHT, timestamp=self.written * 1_000_000 // RATE
             )
-            await writer.write(webrtc.VideoFrame(self.frame_of(self.written), init))
+            source = self.frame_of(self.written)
+            await writer.write(webrtc.VideoFrame(nv12_of(source) if self.format == 'NV12' else source, init))
             self.written += 1
             await asyncio.sleep(max(0.0, start + self.written / RATE - loop.time()))
 

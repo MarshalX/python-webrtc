@@ -33,6 +33,7 @@ from tests.helpers import (
     wait_for_event,
     wait_until,
     wait_until_unmuted,
+    write_frames,
     write_video,
     writing,
 )
@@ -52,6 +53,11 @@ WIDTH, HEIGHT = 320, 240
 def solid_i420(y: int, u: int, v: int) -> bytes:
     chroma = (WIDTH // 2) * (HEIGHT // 2)
     return bytes([y] * (WIDTH * HEIGHT) + [u] * chroma + [v] * chroma)
+
+
+def solid_nv12(y: int, u: int, v: int) -> bytes:
+    chroma = (WIDTH // 2) * (HEIGHT // 2)
+    return bytes([y] * (WIDTH * HEIGHT) + [u, v] * chroma)
 
 
 async def write_sine(generator: webrtc.MediaStreamTrackGenerator, frequency: float, *, stop: asyncio.Event) -> None:
@@ -105,11 +111,23 @@ async def read_frames(
 
 
 @pytest.mark.asyncio
-async def test_video_through_a_connection(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
+@pytest.mark.parametrize(('format', 'solid'), [('I420', solid_i420), ('NV12', solid_nv12)])
+async def test_video_through_a_connection(
+    caller: webrtc.RTCPeerConnection,
+    callee: webrtc.RTCPeerConnection,
+    *,
+    format: webrtc.VideoPixelFormatValue,
+    solid: Callable[[int, int, int], bytes],
+) -> None:
     """Frames of one color arrive in that color, at their size, with increasing timestamps."""
     generator = webrtc.VideoTrackGenerator()
     # pure red in BT.601 limited range
-    async with writing(write_video, generator, solid_i420(81, 90, 240), (WIDTH, HEIGHT)):
+    async with writing(
+        write_frames,
+        generator,
+        solid(81, 90, 240),
+        webrtc.VideoFrameBufferInit(format=format, coded_width=WIDTH, coded_height=HEIGHT, timestamp=0),
+    ):
         remote = await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
         reader = webrtc.MediaStreamTrackProcessor(
             webrtc.MediaStreamTrackProcessorInit(remote, max_buffer_size=5)
@@ -242,22 +260,28 @@ async def received_widths(
     callee: webrtc.RTCPeerConnection,
     *,
     preference: webrtc.RTCDegradationPreference,
+    format: webrtc.VideoPixelFormatValue = 'I420',
 ) -> list[int]:
     """The widths of frames received of 640x480 video sent at a low bitrate."""
     generator = webrtc.VideoTrackGenerator()
     received = await send_at_low_bitrate(caller, callee, generator.track, preference=preference)
-    async with writing(write_video, generator, LARGE_I420, LARGE):
+    # black, of the same size in I420 and NV12
+    init = webrtc.VideoFrameBufferInit(format=format, coded_width=LARGE[0], coded_height=LARGE[1], timestamp=0)
+    async with writing(write_frames, generator, LARGE_I420, init):
         widths = await read_widths(await received_track(received), FRAMES)
     generator.track.stop()
     return widths
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('format', ['I420', 'NV12'])
 async def test_a_generator_scales_down_for_the_encoder(
-    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, format: webrtc.VideoPixelFormatValue
 ) -> None:
     """Under maintain-framerate, the source sends the smaller frames the encoder asks for at a low bitrate."""
-    widths = await received_widths(caller, callee, preference=webrtc.RTCDegradationPreference.maintain_framerate)
+    widths = await received_widths(
+        caller, callee, preference=webrtc.RTCDegradationPreference.maintain_framerate, format=format
+    )
     assert all(width < 640 for width in widths)
 
 

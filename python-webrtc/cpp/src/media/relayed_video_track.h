@@ -20,6 +20,8 @@
 #include <api/video/video_sink_interface.h>
 #include <rtc_base/timestamp_aligner.h>
 
+#include "frame_buffer_pool.h"
+
 namespace python_webrtc {
 
   // A track with a remote source as its sender sees it: frames restamped on the local clock without their remote NTP
@@ -81,6 +83,7 @@ namespace python_webrtc {
       webrtc::VideoSinkInterface<webrtc::VideoFrame> *const _sink;
       webrtc::TimestampAligner _aligner;
       webrtc::VideoAdapter _adapter;
+      FrameBufferPool _pool;
     };
 
     const webrtc::scoped_refptr<webrtc::VideoTrackInterface> _track;
