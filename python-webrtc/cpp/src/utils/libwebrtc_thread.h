@@ -67,6 +67,21 @@ namespace python_webrtc {
     OnNativeThread() = true;
   }
 
+  inline int &InLeafDestruction() {
+    static thread_local int destroying = 0;
+    return destroying;
+  }
+
+  class LeafDestruction {
+  public:
+    LeafDestruction() { InLeafDestruction()++; }
+
+    ~LeafDestruction() { InLeafDestruction()--; }
+
+    LeafDestruction(const LeafDestruction &) = delete;
+    LeafDestruction &operator=(const LeafDestruction &) = delete;
+  };
+
   inline void CheckNativeThreadDetached(const char *where) {
     if (OnNativeThread() && AttachedToPython()) {
       (void)std::fprintf(stderr, "python-webrtc: a native thread is attached to Python at %s\n", where);
@@ -86,6 +101,10 @@ namespace python_webrtc {
       std::abort();
     }
 #ifdef WRTC_SANITIZED
+    if (InLeafDestruction() > 0) {
+      (void)std::fputs("python-webrtc: blocking on a libwebrtc thread in a leaf's destructor\n", stderr);
+      std::abort();
+    }
     if (AttachedToPython()) {
       (void)std::fputs("python-webrtc: blocking on a libwebrtc thread while attached to Python\n", stderr);
       std::abort();

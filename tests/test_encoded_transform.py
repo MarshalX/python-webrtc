@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import threading
 import time
 from typing import TYPE_CHECKING, Callable, Union
 
@@ -25,6 +26,7 @@ from tests.helpers import (
     exchange_offer,
     mistyped,
     settled_alive,
+    undelivered,
     wait_progressing,
     wait_until,
     wait_until_unmuted,
@@ -36,16 +38,18 @@ if TYPE_CHECKING:
 
 TIMEOUT = seconds(15)
 MARK = 0xAB
+KEPT = 3
 
 Frame = Union[webrtc.RTCEncodedVideoFrame, webrtc.RTCEncodedAudioFrame]
 
 
 class Recorder:
-    """A worker that records the frames it reads, writing them back after ``change``."""
+    """A worker that records the frames it reads, writing back all but the first ``keep``, after ``change``."""
 
-    def __init__(self, change: Callable[[Frame], None] | None = None, *, write: bool = True) -> None:
+    def __init__(self, change: Callable[[Frame], None] | None = None, *, write: bool = True, keep: int = 0) -> None:
         self.change = change
         self.write = write
+        self.keep = keep
         self.frames: list[Frame] = []
         self.transformer: webrtc.RTCRtpScriptTransformer | None = None
         self.started = asyncio.get_running_loop().create_future()
@@ -65,7 +69,7 @@ class Recorder:
             self.frames.append(frame)
             if self.change is not None:
                 self.change(frame)
-            if writer is not None:
+            if writer is not None and len(self.frames) > self.keep:
                 _ = writer.write(frame)
         self.done.set_result(None)
 
@@ -675,6 +679,36 @@ async def test_closing_releases_transforms() -> None:
         left = {name: count for name, count in wrtc._alive().items() if count > baseline.get(name, 0)}
         msg = f'Timed out waiting for the transforms released, still alive: {left}'
         raise TimeoutError(msg) from None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['video', 'audio'])
+async def test_frames_are_released_where_dropped(kind: str) -> None:
+    """Frames kept past their connection are destroyed on the thread dropping them, while the Dispatcher is held."""
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    sending, receiving = Recorder(keep=KEPT), Recorder(keep=KEPT)
+    await transformed_call(caller, callee, kind, sender_worker=sending, receiver_worker=receiving)
+    await receiving.wait_frames(KEPT)
+    caller.close()
+    callee.close()
+    await asyncio.wait_for(asyncio.gather(sending.done, receiving.done), TIMEOUT)
+
+    # the frames each side kept
+    kept = [frame for frame in sending.frames + receiving.frames if frame._native is not None]
+    assert len(kept) == 2 * KEPT
+    sending.frames.clear()
+    receiving.frames.clear()
+    alive = settled_alive()[0]['RTCEncodedFrame']
+
+    def drop() -> None:
+        kept.clear()
+        gc.collect()
+
+    with undelivered():
+        dropping = threading.Thread(target=drop)
+        dropping.start()
+        dropping.join()
+        assert wrtc._testing.alive_counts()['RTCEncodedFrame'] == alive - 2 * KEPT
 
 
 @pytest.mark.asyncio

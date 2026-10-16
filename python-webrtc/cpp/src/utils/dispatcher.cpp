@@ -12,6 +12,8 @@
 #include "parking.h"
 
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <thread>
 #include <utility>
 
@@ -68,6 +70,12 @@ namespace python_webrtc {
   }
 
   void Dispatcher::Destroy(std::function<void()> destroy, int generation) {
+#ifdef WRTC_SANITIZED
+    if (InLeafDestruction() > 0) {
+      (void)std::fputs("python-webrtc: a leaf's destructor released a wrapper or task queue\n", stderr);
+      std::abort();
+    }
+#endif
     auto &dispatcher = Instance();
     {
       const auto lock = dispatcher.Locked();

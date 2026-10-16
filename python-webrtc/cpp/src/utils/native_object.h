@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 #include "dispatcher.h"
@@ -65,6 +66,12 @@ namespace python_webrtc {
     return AliveCounter::Counts();
   }
 
+  class Binding;
+
+  // a leaf is destroyed where its last reference drops
+  template <typename T>
+  constexpr bool kIsLeaf = requires { requires T::kLeaf; };
+
   inline std::atomic<uint64_t> &NextNativeId() {
     static std::atomic<uint64_t> next{1};
     return next;
@@ -91,9 +98,21 @@ namespace python_webrtc {
 
     template <typename... Args>
     static std::shared_ptr<T> Create(Args &&...args) {
-      return std::shared_ptr<T>(new T(std::forward<Args>(args)...), [generation = Forks().load()](T *dying) {
-        Dispatcher::Destroy([dying]() { delete dying; }, generation);
-      });
+      if constexpr (kIsLeaf<T>) {
+        static_assert(!std::is_base_of_v<Binding, T>, "a leaf doesn't emit");
+        return std::shared_ptr<T>(new T(std::forward<Args>(args)...), [generation = Forks().load()](T *dying) {
+          if (generation == Forks().load()) {
+#ifdef WRTC_SANITIZED
+            const LeafDestruction destruction;
+#endif
+            delete dying;
+          }
+        });
+      } else {
+        return std::shared_ptr<T>(new T(std::forward<Args>(args)...), [generation = Forks().load()](T *dying) {
+          Dispatcher::Destroy([dying]() { delete dying; }, generation);
+        });
+      }
     }
 
   protected:
@@ -101,7 +120,7 @@ namespace python_webrtc {
     ~NativeObject() {
 #ifdef WRTC_SANITIZED
       // a throwing constructor destroys the half-made object where it was made
-      if (std::uncaught_exceptions() == 0 && !Dispatcher::IsCurrent()) {
+      if (!kIsLeaf<T> && std::uncaught_exceptions() == 0 && !Dispatcher::IsCurrent()) {
         (void)std::fprintf(stderr, "python-webrtc: %s destroyed off the Dispatcher, see NativeObject::Create\n",
                            T::kName);
         std::abort();

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import re
+from typing import NamedTuple
 
 from tests.helpers import ROOT
 
@@ -87,6 +88,118 @@ def test_wrappers_are_created_by_create_only() -> None:
         allowed=frozenset({'utils/native_object.h'}),
     )
     assert offending == [], 'a NativeObject is created outside NativeObject::Create:\n' + '\n'.join(offending)
+
+
+LEAVES = frozenset({'EncodedFrame'})
+
+# member types a leaf may have, each freeing only memory or an atomic count
+LEAF_MEMBERS = {
+    'const bool': 'a value',
+    'const uint64_t': 'a value',
+    'std::mutex': 'unlocked once nothing references the leaf',
+    'std::unique_ptr<webrtc::TransformableFrameInterface>': "libwebrtc's frames have implicit destructors over buffers",
+}
+
+LEAF_FORBIDDEN = r'BlockingCall|PostTask|Guard\(|Disarm\(|Dispatcher::|Emit\(|Registry<'
+
+FIXTURES = frozenset({'testing.cpp'})
+
+LEAF_MARKER = 'static constexpr bool kLeaf = true;'
+
+
+class Leaf(NamedTuple):
+    path: str
+    bases: str
+    body: str
+
+
+def _class_body(text: str, start: int) -> str:
+    """The text between a class's braces, from just past its opening brace."""
+    depth, end = 1, start
+    while depth > 0:
+        depth += {'{': 1, '}': -1}.get(text[end], 0)
+        end += 1
+
+    return text[start : end - 1]
+
+
+def _leaves() -> dict[str, Leaf]:
+    """Leaf classes by name."""
+    leaves: dict[str, Leaf] = {}
+    for relative, text in _sources():
+        if relative in FIXTURES:
+            continue
+
+        for marker in re.finditer(re.escape(LEAF_MARKER), text):
+            head = list(re.finditer(r'\bclass (\w+)\b([^;{]*)\{', text[: marker.start()]))[-1]
+            leaves[head.group(1)] = Leaf(relative, ' '.join(head.group(2).split()), _class_body(text, head.end()))
+
+    return leaves
+
+
+def _declarations(body: str) -> list[str]:
+    """A class body's declarations, without comments, inline bodies, initializers or access specifiers."""
+    code = re.sub(r'//[^\n]*|/\*.*?\*/', '', body, flags=re.DOTALL)
+    while (inner := re.sub(r'\{[^{}]*\}', ';', code)) != code:
+        code = inner
+
+    statements = (re.sub(r'\b(public|protected|private)\s*:', '', statement) for statement in code.split(';'))
+    # up to an initializer: = default, = delete or a member's value
+    declarations = (re.split(r'(?<!operator)=(?!=)', statement, maxsplit=1)[0] for statement in statements)
+
+    return [' '.join(declaration.split()) for declaration in declarations if declaration.strip() != '']
+
+
+def _member_types(body: str) -> list[str]:
+    """The types of a class body's instance data members, whatever their names."""
+    members: list[str] = []
+    for declaration in _declarations(body):
+        if re.match(r'(static|using|friend|typedef|template)\b', declaration) is not None:
+            continue
+
+        # a function: its parameters close the declarator, then qualifiers
+        if re.search(r'\)( ?(const|noexcept|override|final|&&?))*$', declaration) is not None:
+            continue
+
+        member = re.fullmatch(r'(.+?[\s*&])(\w+)(\[[^\]]*\])?', declaration)
+        assert member is not None, f'not parsed as a member: {declaration}'
+        members.append(' '.join(member.group(1).split()))
+
+    return members
+
+
+def test_leaves_are_known() -> None:
+    """Every kLeaf class is listed, marked the one way the tests find."""
+    markers = _lines_matching(r'\bkLeaf\b', allowed=FIXTURES | {'utils/native_object.h'})
+    offending = [line for line in markers if not line.endswith(f': {LEAF_MARKER}')]
+    assert offending == [], f'kLeaf set otherwise than `{LEAF_MARKER}`:\n' + '\n'.join(offending)
+    assert set(_leaves()) == LEAVES
+
+
+def test_leaves_hold_only_values() -> None:
+    """A leaf's implicit destructor frees memory only."""
+    used: set[str] = set()
+    for name, leaf in _leaves().items():
+        assert leaf.bases == f': public NativeObject<{name}>', f'{leaf.path}: the leaf {name} derives from {leaf.bases}'
+        assert re.search(rf'~{name}\s*\(', leaf.body) is None, f'{leaf.path}: the leaf {name} declares a destructor'
+        members = _member_types(leaf.body)
+        unknown = [member for member in members if member not in LEAF_MEMBERS]
+        assert unknown == [], f'{leaf.path}: the leaf {name} holds members not known to only free memory: {unknown}'
+        used.update(members)
+
+    # a parse that finds nothing can't pass
+    assert used == set(LEAF_MEMBERS)
+
+
+def test_leaves_dont_wait_or_post() -> None:
+    """A leaf's sources don't wait, post, emit or register."""
+    sources = _sources()
+    for name, leaf in _leaves().items():
+        stem = leaf.path.rsplit('.', 1)[0]
+        for path, text in sources:
+            if path.rsplit('.', 1)[0] == stem:
+                matching = re.findall(LEAF_FORBIDDEN, text)
+                assert matching == [], f'{path}: the leaf {name} waits, posts or registers: {matching}'
 
 
 def test_waits_on_libwebrtc_threads_go_through_blocking_call_on() -> None:

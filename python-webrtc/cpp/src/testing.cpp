@@ -35,6 +35,7 @@
 #include <api/make_ref_counted.h>
 #include <api/ref_count.h>
 #include <api/scoped_refptr.h>
+#include <rtc_base/thread.h>
 
 #include <pybind11/stl.h>
 
@@ -57,6 +58,52 @@ namespace python_webrtc {
         auto ran = std::make_shared<std::atomic<int>>(0);
         return {.run = Guard([ran]() { (*ran)++; }), .ran = ran};
       }
+    };
+
+    class Leaf : public NativeObject<Leaf> {
+    public:
+      static constexpr const char *kName = "Leaf";
+      static constexpr bool kLeaf = true;
+
+      Leaf() = default;
+    };
+
+    // breaks the leaf rules: its wrapper is destroyed on the Dispatcher
+    class LeafOwningCounted : public NativeObject<LeafOwningCounted> {
+    public:
+      static constexpr const char *kName = "LeafOwningCounted";
+      static constexpr bool kLeaf = true;
+
+      LeafOwningCounted() = default;
+
+    private:
+      const std::shared_ptr<Counted> _counted = Counted::Create();
+    };
+
+    // waits for its own libwebrtc thread when destroyed
+    struct BlockingOnDestruction {
+      const std::unique_ptr<webrtc::Thread> thread = webrtc::Thread::Create();
+
+      BlockingOnDestruction() { thread->Start(); }
+
+      BlockingOnDestruction(const BlockingOnDestruction &) = delete;
+      BlockingOnDestruction &operator=(const BlockingOnDestruction &) = delete;
+
+      ~BlockingOnDestruction() {
+        BlockingCallOn(thread, []() {});
+      }
+    };
+
+    // breaks the leaf rules: it waits for a libwebrtc thread
+    class LeafBlocking : public NativeObject<LeafBlocking> {
+    public:
+      static constexpr const char *kName = "LeafBlocking";
+      static constexpr bool kLeaf = true;
+
+      LeafBlocking() = default;
+
+    private:
+      const BlockingOnDestruction _blocking;
     };
 
     class Throwing : public NativeObject<Throwing> {
@@ -214,6 +261,22 @@ namespace python_webrtc {
           BlockingCallOn(factory->signalingThread(), []() {});
         },
         "Blocks on a libwebrtc thread with the GIL held, which sanitizer builds abort on.");
+    pybind11::class_<Leaf, std::shared_ptr<Leaf>>(testing, "Leaf",
+                                                  "A leaf NativeObject counted under 'Leaf', made by Create.")
+        .def(pybind11::init([]() { return Leaf::Create(); }));
+    testing.def(
+        "destroy_leaf_on_native_thread",
+        []() {
+          auto leaf = Leaf::Create();
+          std::thread([&leaf]() { leaf = nullptr; }).join();
+        },
+        nogil(), "Makes a Leaf and drops it on a native thread.");
+    testing.def(
+        "check_leaf_releasing_a_wrapper", []() { (void)LeafOwningCounted::Create(); },
+        "Drops a leaf that owns a wrapper, which sanitizer builds abort on.");
+    testing.def(
+        "check_leaf_blocking", []() { (void)LeafBlocking::Create(); }, nogil(),
+        "Drops a leaf that blocks on a libwebrtc thread, which sanitizer builds abort on.");
     pybind11::class_<Throwing, std::shared_ptr<Throwing>>(testing, "Throwing",
                                                           "A NativeObject counted under 'Throwing', made by Create.")
         .def(pybind11::init(nogil_factory(+[](bool fail) { return Throwing::Create(fail); })), pybind11::arg("fail"),

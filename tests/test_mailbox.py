@@ -21,7 +21,7 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import ROOT, exit_code_within
+from tests.helpers import ROOT, exit_code_within, undelivered
 from tests.isolation import isolated
 from tests.timing import seconds
 
@@ -265,6 +265,39 @@ def test_destroyed_off_the_dispatcher_aborts() -> None:
     )
     assert result.returncode != 0
     assert 'destroyed off the Dispatcher' in result.stderr, result.stderr
+
+
+def test_a_leaf_is_destroyed_where_released() -> None:
+    """A leaf is destroyed on the thread dropping it, Python or native, while the Dispatcher is held."""
+    with undelivered():
+        leaf = wrtc._testing.Leaf()
+        assert wrtc._testing.alive_counts()['Leaf'] == 1
+        del leaf
+        assert wrtc._testing.alive_counts()['Leaf'] == 0
+        wrtc._testing.destroy_leaf_on_native_thread()
+        assert wrtc._testing.alive_counts()['Leaf'] == 0
+
+
+@pytest.mark.skipif(not wrtc._sanitized, reason='checked in sanitizer builds only')
+@pytest.mark.parametrize(
+    ('check', 'message'),
+    [
+        ('check_leaf_releasing_a_wrapper', "a leaf's destructor released a wrapper or task queue"),
+        ('check_leaf_blocking', "blocking on a libwebrtc thread in a leaf's destructor"),
+    ],
+)
+def test_a_leaf_releasing_a_wrapper_or_blocking_aborts(check: str, message: str) -> None:
+    """A leaf's destructor that would need the Dispatcher aborts."""
+    result = subprocess.run(
+        [sys.executable, '-c', f'import wrtc; wrtc._testing.{check}()'],
+        capture_output=True,
+        text=True,
+        timeout=seconds(60),
+        cwd=ROOT,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert message in result.stderr, result.stderr
 
 
 @pytest.mark.skipif(not wrtc._sanitized, reason='checked in sanitizer builds only')

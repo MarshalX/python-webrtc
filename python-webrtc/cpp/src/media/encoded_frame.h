@@ -23,6 +23,7 @@ namespace python_webrtc {
   class EncodedFrame : public NativeObject<EncodedFrame> {
   public:
     static constexpr const char *kName = "RTCEncodedFrame";
+    static constexpr bool kLeaf = true;
 
     EncodedFrame(std::unique_ptr<webrtc::TransformableFrameInterface> frame, uint64_t source);
 
