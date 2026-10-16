@@ -41,6 +41,7 @@
 #include "../rtc_rtp_sender.h"
 #include "../rtc_rtp_transceiver.h"
 #include "../rtc_sctp_transport.h"
+#include "../transceiver_state.h"
 
 namespace webrtc {
   struct PeerConnectionDependencies;
@@ -171,6 +172,8 @@ namespace python_webrtc {
     // are delivered: these events refresh the descriptions
     void RefreshDescriptions();
 
+    void ExpireParameters();
+
     // the connection of a sender, bound here as the sender is bound before the connection
     static std::optional<std::shared_ptr<RTCPeerConnection>> ConnectionOf(RTCRtpSender &sender);
 
@@ -178,9 +181,11 @@ namespace python_webrtc {
 
     bool IsClosed();
 
-    // the transceiver of a sender, while it's in the connection
-    webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>
-    TransceiverOf(const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender);
+    TransceiverState
+    ShownTransceiver(RTCRtpSender &sender,
+                     const webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> &transceiver = nullptr);
+
+    void ShowStopping(const RTCRtpSender &sender);
 
     // The negotiated codecs this side can use: libwebrtc reports none for an inactive sender (receiver), and
     // lists remote codecs it doesn't know
@@ -255,11 +260,20 @@ namespace python_webrtc {
       std::optional<RTCSessionDescriptionInit> init;
     };
 
+    struct TransceiverView {
+      std::shared_ptr<RTCRtpSender> sender;
+      TransceiverState state;
+    };
+
     struct DescriptionsSnapshot {
       std::array<DescriptionView, kDescriptionKinds> kinds;
       // the descriptions set, which any of the kinds is
       std::vector<const webrtc::SessionDescriptionInterface *> live;
+      // shown whenever bound: candidate events refresh the descriptions, not the transceivers
+      std::vector<TransceiverView> transceivers;
     };
+
+    void ShowTransceivers(const std::function<void(TransceiverView &)> &change);
 
     template <typename T, typename U>
     using Wrappers = std::unordered_map<U *, std::shared_ptr<T>>;
@@ -329,6 +343,15 @@ namespace python_webrtc {
     void SetCreatedDescription(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, webrtc::SdpType type,
                                std::function<void(webrtc::RTCError)> complete,
                                const std::shared_ptr<Completion> &completion);
+
+    using ParsedDescription = std::unique_ptr<webrtc::SessionDescriptionInterface>;
+
+    void ApplyLocalDescription(Completion completion, const std::optional<RTCSessionDescriptionInit> &init,
+                               ParsedDescription description, const std::optional<RTCCallbackException> &error,
+                               bool modified);
+
+    void ApplyRemoteDescription(Completion completion, webrtc::SdpType type, ParsedDescription description,
+                                const std::optional<RTCCallbackException> &error);
 
     // What completes setLocalDescription (kLocal) or setRemoteDescription (kRemote); created right before the
     // operation starts, as it holds its events
@@ -410,6 +433,8 @@ namespace python_webrtc {
 
     void FireRemoteStreamChanges();
 
+    void EmitDeferredSignaling(std::optional<uint64_t> snapshot);
+
     // wrappers' destructors use the threads of the factory: declared first, to be destroyed last
     std::shared_ptr<PeerConnectionFactory> _factory;
 
@@ -446,7 +471,7 @@ namespace python_webrtc {
     std::array<uint64_t, kDescriptionKinds> _descriptionsCachedGeneration{};
     std::map<uint64_t, DescriptionsSnapshot> _snapshots;
     uint64_t _lastSnapshot = 0;
-    std::optional<DescriptionsSnapshot> _shown;
+    std::optional<DescriptionsSnapshot> _shown{std::in_place};
     uint64_t _shownGeneration = 0;
     // the snapshot of the operation that completed last
     std::atomic<uint64_t> _completionSnapshot{0};
@@ -461,6 +486,10 @@ namespace python_webrtc {
     HeldEvents _heldGathering;
     // held while a description is set
     HeldEvents _heldTransportStates;
+
+    bool _deferSignaling = false;
+    std::optional<SignalingState> _deferredSignaling;
+    std::vector<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>> _deferredTracks;
 
     std::mutex _remoteStreamsMutex;
     std::map<const void *, std::vector<std::string>> _remoteStreamsBefore;

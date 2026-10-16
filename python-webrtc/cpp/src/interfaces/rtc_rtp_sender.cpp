@@ -73,7 +73,7 @@ namespace python_webrtc {
     const std::scoped_lock lock(_mutex);
     _connection = std::move(connection);
     if (_dtmf) {
-      _dtmf->SetTransceiver(TransceiverGetter());
+      _dtmf->SetTransceiverState(TransceiverStateGetter());
     }
   }
 
@@ -82,14 +82,21 @@ namespace python_webrtc {
     return _connection.lock();
   }
 
-  std::function<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>()> RTCRtpSender::TransceiverGetter() {
-    return [connection = _connection, sender = _sender]() -> webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> {
+  std::function<TransceiverState()> RTCRtpSender::TransceiverStateGetter() {
+    return [connection = _connection, weak = weak_from_this()]() {
       auto pc = connection.lock();
-      return pc ? pc->TransceiverOf(sender) : nullptr;
+      auto self = weak.lock();
+      return pc && self ? pc->ShownTransceiver(*self) : TransceiverState::Gone();
     };
   }
 
   std::optional<std::shared_ptr<MediaStreamTrack>> RTCRtpSender::GetTrack() {
+    {
+      const std::scoped_lock lock(_mutex);
+      if (_knownTrack) {
+        return *_knownTrack ? _knownTrack : std::nullopt;
+      }
+    }
     auto track = _sender->track();
     if (auto *relayed = dynamic_cast<RelayedVideoTrack *>(track.get())) {
       track = relayed->track();
@@ -97,17 +104,17 @@ namespace python_webrtc {
     // wrapped out of the lock: wrapping may wait for the signaling thread
     auto wrapper = MediaStreamTrack::registry().GetOrCreate(_factory, track);
 
-    std::shared_ptr<MediaStreamTrack> previous;
     const std::scoped_lock lock(_mutex);
-    if (!_track || _track->track() != track) {
-      previous = std::move(_track);
-      _track = std::move(wrapper);
+    if (!_knownTrack) {
+      _knownTrack = std::move(wrapper);
     }
+    return *_knownTrack ? _knownTrack : std::nullopt;
+  }
 
-    if (_track) {
-      return _track;
-    }
-    return {};
+  void RTCRtpSender::SetKnownTrack(std::shared_ptr<MediaStreamTrack> track) {
+    std::optional<std::shared_ptr<MediaStreamTrack>> known(std::move(track));
+    const std::scoped_lock lock(_mutex);
+    std::swap(known, _knownTrack);
   }
 
   std::optional<std::shared_ptr<RTCDtlsTransport>> RTCRtpSender::GetTransport() {
@@ -139,7 +146,7 @@ namespace python_webrtc {
     const std::scoped_lock lock(_mutex);
     if (wrapper && _dtmf != wrapper) {
       _dtmf = std::move(wrapper);
-      _dtmf->SetTransceiver(TransceiverGetter());
+      _dtmf->SetTransceiverState(TransceiverStateGetter());
     }
     return dtmf ? _dtmf : nullptr;
   }
@@ -227,7 +234,11 @@ namespace python_webrtc {
   }
 
   bool RTCRtpSender::ReplaceTrack(std::optional<std::reference_wrapper<MediaStreamTrack>> track) {
-    return _sender->SetTrack(track ? track->get().SentTrack().get() : nullptr);
+    if (!_sender->SetTrack(track ? track->get().SentTrack().get() : nullptr)) {
+      return false;
+    }
+    SetKnownTrack(track ? track->get().shared_from_this() : nullptr);
+    return true;
   }
 
   void RTCRtpSender::SetStreams(const std::vector<std::string> &streamIds) {
@@ -250,8 +261,8 @@ namespace python_webrtc {
 
   bool RTCRtpSender::IsTransceiverStopped() {
     auto connection = GetConnection();
-    auto transceiver = connection ? connection->TransceiverOf(_sender) : nullptr;
-    return !transceiver || transceiver->stopping() || transceiver->stopped();
+    auto state = connection ? connection->ShownTransceiver(*this) : TransceiverState::Gone();
+    return state.stopping || state.stopped;
   }
 
   FrameSource RTCRtpSender::TransformSource() {

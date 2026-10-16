@@ -21,10 +21,15 @@ namespace python_webrtc {
                                      webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track)
       : _factory(std::move(factory)), _track(std::move(track)),
         _source(SourceControl::Find(_track.get(), _track->id())) {
+    // live until its ended event, unless read unbound
+    _surfacedEnded.Changed(true, false);
     _factory->signalingThread()->PostTask(Guard([this]() {
       _track->RegisterObserver(this);
       _observing = true;
       AttachMonitor();
+      if (_track->state() == webrtc::MediaStreamTrackInterface::TrackState::kEnded) {
+        EndOnSignalingThread();
+      }
     }));
   }
 
@@ -261,11 +266,12 @@ namespace python_webrtc {
   }
 
   webrtc::MediaStreamTrackInterface::TrackState MediaStreamTrack::GetReadyState() {
-    const bool ended = _ended || _track->state() == webrtc::MediaStreamTrackInterface::TrackState::kEnded;
-    // unbound (outside of an event loop), no event is going to surface it
-    const bool surfaced = _surfacedEnded.Shown(IsBound(), ended);
-    return surfaced ? webrtc::MediaStreamTrackInterface::TrackState::kEnded
-                    : webrtc::MediaStreamTrackInterface::TrackState::kLive;
+    // unbound (outside of an event loop), no event is going to surface it: libwebrtc's, on the signaling thread
+    const bool ended = _surfacedEnded.ShownOr(IsBound(), [this]() {
+      return _ended || _track->state() == webrtc::MediaStreamTrackInterface::TrackState::kEnded;
+    });
+    return ended ? webrtc::MediaStreamTrackInterface::TrackState::kEnded
+                 : webrtc::MediaStreamTrackInterface::TrackState::kLive;
   }
 
   bool MediaStreamTrack::GetMuted() {

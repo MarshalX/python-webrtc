@@ -74,6 +74,8 @@ constructors.
   first binding holds until that loop is released. Children the connection creates natively inherit its binding, so
   their records queue behind the parent's event. Closing a connection unbinds its children (`Surfaced` reads
   `IsBound()`). `HeldEvents` only orders events inside libwebrtc callbacks.
+- A description operation holds its events (`HeldOperationEvents`) until it completes, taking the hold in its first
+  signaling task, which runs after the previous operation released its own.
 - `DefineBinding(cls)` defines `_bind`, `_bound`, `_mailbox` and `_orphaned` (its mailbox closed) per class, not on a pybind base: a base method costs a derived-to-base cast per call (6–8 µs vs
   0.1 µs).
 - `NativeObject<T>` (`utils/native_object.h`) counts objects per `T::kName` (`AliveCounts()`) and exposes `_id`,
@@ -113,7 +115,7 @@ alive while it can still fire an event that has a handler, following the WebRTC 
 `_activity()`). Only the bound loop roots an object, so whatever makes it active binds it first, and whatever unbinds
 it ends its activity first (`close()`) or orphans it (a release): an active object is bound or orphaned at every
 instant. A closed or collected loop releases what it kept: its mailbox closes and its queued records are dropped,
-pending operations are cancelled, a callback queued into it with `call_soon` runs its drop handler instead, and its
+pending operations are cancelled, a callback posted into it with a drop handler runs that instead, and its
 handlers are removed. Its objects with handlers left on another loop are bound to that loop. Everything else is plain
 Python garbage.
 
@@ -121,6 +123,8 @@ Python garbage.
   Python goes through `_changing()` (a spent `once` handler too), so roots checks on other loops wait for it. An
   unbind updates roots after unbinding, and `LoopState.update` re-reads the binding after storing a root
   (`_recheck`): whichever runs last sees the other.
+- An object is kept for the events still owed to it, not for the state it shows (an announced data channel reads
+  open before its open event).
 - Each class's `_open()` is its delivery gate: once it's false, even queued events don't fire (a stopped track, a
   detached transform, a closed connection). The base gate is "its connection isn't closed". `GATES` in
   `tests/test_lifetime_model.py` lists every class's gate; a new class with events is added there.

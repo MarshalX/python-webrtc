@@ -15,7 +15,6 @@
 #include <string>
 
 #include <api/dtmf_sender_interface.h>
-#include <api/rtp_transceiver_interface.h>
 
 #include <pybind11/pybind11.h>
 
@@ -24,6 +23,7 @@
 #include "../utils/native_object.h"
 #include "../utils/registry.h"
 #include "peer_connection_factory.h"
+#include "transceiver_state.h"
 
 namespace python_webrtc {
 
@@ -46,14 +46,16 @@ namespace python_webrtc {
 
     static Registry<RTCDTMFSender, webrtc::DtmfSenderInterface> &registry();
 
-    // the transceiver of the sender, which tells whether tones can be sent; set by the sender
-    void SetTransceiver(std::function<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>()> transceiver);
+    // the state of the sender's transceiver as Python sees it, which tells whether tones can be sent; set by the
+    // sender
+    void SetTransceiverState(std::function<TransceiverState()> state);
 
     // DtmfSenderObserverInterface, on the signaling thread
     void OnToneChange(const std::string &tone, const std::string &toneBuffer) override;
 
     // "determine if DTMF can be sent"
     void CheckCanSend();
+
     void InsertDtmf(const std::string &tones, int duration, int interToneGap);
 
     // the tones not played yet, as Python sees them: set by insertDTMF(), shortened along with tonechange events
@@ -67,9 +69,11 @@ namespace python_webrtc {
     bool GetCanInsertDtmf();
 
   private:
+    std::optional<std::string> CannotSend();
+
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::DtmfSenderInterface> _dtmf;
-    LockedFunction<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>()> _transceiver;
+    LockedFunction<TransceiverState()> _transceiverState;
 
     std::mutex _bufferMutex;
     std::optional<std::string> _surfacedBuffer;

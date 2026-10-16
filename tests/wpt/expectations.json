@@ -597,9 +597,6 @@
       "[harness]": "TIMEOUT",
       "icecandidateerror fires for each failing server": "TIMEOUT"
     },
-    "webrtc/RTCPeerConnection-operations.https.html?interop-2026": {
-      "replaceTrack uses operations chain": "FAIL"
-    },
     "webrtc/RTCPeerConnection-remote-track-currentTime.https.html": {
       "currentTime advances for receive audio track of active sender": "FAIL",
       "currentTime advances for receive audio track of inactive sender": "FAIL",

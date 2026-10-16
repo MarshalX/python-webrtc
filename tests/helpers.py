@@ -32,7 +32,7 @@ from tests.timing import seconds
 from webrtc.utils import loops
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable
+    from collections.abc import AsyncGenerator, Awaitable, Generator
 
 #: The fixture creating connections with a configuration
 CreatePC = Callable[..., webrtc.RTCPeerConnection]
@@ -214,6 +214,23 @@ async def next_task() -> None:
     timer = loop.create_future()
     loop.call_later(0, timer.set_result, None)
     await timer
+
+
+@contextlib.contextmanager
+def undelivered() -> Generator[None, None, None]:
+    """Keeps what libwebrtc's threads post in the mailboxes, by parking the Dispatcher's wake.
+
+    Only loops woken through the Dispatcher wait (``LoopState.watches_pipe = False`` before their first drain).
+    Timers still run on them.
+    """
+    wrtc._testing.park('dispatcher.wake')
+    try:
+        # a post into an empty mailbox wakes the Dispatcher, which parks: later wakes queue behind it
+        wrtc._testing.post(wrtc.Mailbox(), 'event', 1)
+        assert wrtc._testing.parked('dispatcher.wake', seconds(5))
+        yield
+    finally:
+        wrtc._testing.release('dispatcher.wake')
 
 
 def exit_code_within(pid: int, seconds: float) -> int | None:

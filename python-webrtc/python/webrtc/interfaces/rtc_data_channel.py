@@ -139,7 +139,7 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannel
     __slots__ = ()
 
     _class = wrtc.RTCDataChannel
-    # handlers that keep a channel alive in each state, per spec
+    # handlers that keep a channel alive in each state, for the events it can still fire, per spec
     _KEEPING: ClassVar[dict[RTCDataChannelState, frozenset[str]]] = {
         RTCDataChannelState.connecting: frozenset({'open', 'message', 'error', 'closing', 'close'}),
         RTCDataChannelState.open: frozenset({'message', 'error', 'closing', 'close'}),
@@ -239,6 +239,9 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannel
         # the native state follows the connection's close later
         if keeping is None or not self._open():
             return None
+        if state == RTCDataChannelState.open and not self._native_obj._openDelivered:
+            # an announced channel reads open before its open event
+            keeping |= {'open'}
         handled = self.event_names() & keeping
         if len(handled) > 0:
             return f'{state.value} with {", ".join(sorted(handled))} handlers'

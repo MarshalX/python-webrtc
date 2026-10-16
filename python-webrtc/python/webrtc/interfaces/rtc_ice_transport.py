@@ -142,6 +142,9 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
         elif name == 'gatheringstatechange':
             (gathering_state,) = cast('tuple[RTCIceGathererState]', args)
             self._native_obj._surfaceGatheringState(gathering_state)
+        elif name == 'selectedcandidatepairchange':
+            (pair,) = cast('tuple[tuple[wrtc.IceCandidateInit, wrtc.IceCandidateInit, bool]]', args)
+            self._native_obj._surfaceSelectedPair(pair)
         elif name == 'icecandidate' and len(args) > 0 and args[0] is not None:
             self._native_obj._surfaceCandidate()
 

@@ -54,6 +54,8 @@ namespace python_webrtc {
 
     std::optional<std::shared_ptr<MediaStreamTrack>> GetTrack();
 
+    void SetKnownTrack(std::shared_ptr<MediaStreamTrack> track);
+
     std::optional<std::shared_ptr<RTCDtlsTransport>> GetTransport();
 
     webrtc::MediaType GetKind();
@@ -95,16 +97,14 @@ namespace python_webrtc {
   private:
     FrameSource TransformSource();
 
-    // what the DTMF sender finds the transceiver of the sender with
-    std::function<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>()> TransceiverGetter();
+    std::function<TransceiverState()> TransceiverStateGetter();
 
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::RtpSenderInterface> _sender;
 
     std::mutex _mutex;
     std::weak_ptr<RTCPeerConnection> _connection;
-    // the sender owns wrappers of its current track, transport and DTMF sender
-    std::shared_ptr<MediaStreamTrack> _track;
+    std::optional<std::shared_ptr<MediaStreamTrack>> _knownTrack;
     std::shared_ptr<RTCDtlsTransport> _transport;
     std::shared_ptr<RTCDTMFSender> _dtmf;
     std::optional<webrtc::RtpParameters> _lastParameters;

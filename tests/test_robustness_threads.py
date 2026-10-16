@@ -21,9 +21,10 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import connect, exchange_offer_answer, settled_alive, wait_for_event
+from tests.helpers import connect, exchange_offer_answer, settled_alive, wait_for_event, wait_until
 from tests.isolation import isolated
 from tests.timing import seconds
+from webrtc.utils.loops import LoopState
 
 
 def _join(threads: list[threading.Thread]) -> None:
@@ -291,3 +292,86 @@ def test_dispatcher_parked_while_objects_go_and_their_loop_closes() -> None:
     finally:
         wrtc._testing.release('dispatcher.wake')
     assert settled_alive() == baseline
+
+
+async def _read_while_the_signaling_thread_is_parked() -> None:
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    [track] = (await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))).get_tracks()
+    sender = caller.add_track(track)
+    await _open_channel(caller, callee)
+    [transceiver] = caller.get_transceivers()
+    sctp = caller.sctp
+    assert sctp is not None
+    await wait_until(lambda: sctp.transport.ice_transport.get_selected_candidate_pair() is not None, 'the pair')
+    # bound, and never negotiated
+    fresh = webrtc.RTCPeerConnection()
+    remote = callee.get_transceivers()[0].receiver.track
+
+    def read() -> tuple[object, ...]:
+        pair = sctp.transport.ice_transport.get_selected_candidate_pair()
+        return (
+            fresh.ice_gathering_state,
+            remote.ready_state,
+            transceiver.mid,
+            transceiver.current_direction,
+            transceiver.stopped,
+            sender.track,
+            pair is not None,
+            sctp.max_channels,
+        )
+
+    expected = read()
+    wrtc._testing.park('connection.datachannel')
+    try:
+        # off the loop: creating it waits for the parked signaling thread too
+        creating = asyncio.ensure_future(asyncio.to_thread(caller.create_data_channel, 'parked'))
+        assert await asyncio.to_thread(wrtc._testing.parked, 'connection.datachannel', seconds(5))
+        assert await asyncio.wait_for(asyncio.to_thread(read), seconds(5)) == expected
+    finally:
+        wrtc._testing.release('connection.datachannel')
+    await creating
+    track.stop()
+    fresh.close()
+    caller.close()
+    callee.close()
+
+
+@isolated(timeout=seconds(60))
+def test_getters_do_not_wait_for_the_signaling_thread() -> None:
+    """Transceiver, sender, track, ICE and SCTP getters return what Python was shown while signaling is busy."""
+    asyncio.run(_read_while_the_signaling_thread_is_parked())
+
+
+async def _start_while_the_previous_operation_releases() -> list[str]:
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    caller.add_transceiver(webrtc.MediaType.audio)
+    order: list[str] = []
+    callee.on('icegatheringstatechange', lambda _event: order.append(callee.ice_gathering_state.value))
+    await caller.set_local_description()
+    offer = caller.local_description
+    assert offer is not None
+
+    pending = LoopState.of(asyncio.get_running_loop()).pending
+    wrtc._testing.park('description.completed')
+    try:
+        # resolved, while its signaling task is parked before it releases what it held
+        await callee.set_remote_description(offer)
+        assert await asyncio.to_thread(wrtc._testing.parked, 'description.completed', seconds(5))
+        answering = asyncio.ensure_future(callee.set_local_description())
+        # pending once its signaling task is posted, behind the parked one
+        await wait_until(lambda: len(pending) > 0, 'the next operation')
+    finally:
+        wrtc._testing.release('description.completed')
+    await answering
+    order.append('answered')
+    await wait_until(lambda: 'gathering' in order, 'gathering')
+    caller.close()
+    callee.close()
+    return order
+
+
+@isolated(timeout=seconds(60))
+def test_operation_holds_its_events_after_the_previous_one_releases() -> None:
+    """The next operation starts as the one before releases its hold on events, and still holds its own."""
+    order = asyncio.run(_start_while_the_previous_operation_releases())
+    assert order.index('answered') < order.index('gathering'), order

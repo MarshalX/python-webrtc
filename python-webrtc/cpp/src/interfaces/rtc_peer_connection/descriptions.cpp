@@ -17,6 +17,7 @@
 #include <pc/session_description.h>
 
 #include "../../media/sframe_transform.h"
+#include "../../utils/parking.h"
 #include "../peer_connection_factory.h"
 #include "../rtc_rtp_receiver.h"
 #include "create_session_description_observer.h"
@@ -112,6 +113,10 @@ namespace python_webrtc {
       auto sender = RTCRtpSender::registry().Find(transceiver.sender().get());
       auto receiver = RTCRtpReceiver::registry().Find(transceiver.receiver().get());
       return (sender && isSFrame(sender->GetTransform())) || (receiver && isSFrame(receiver->GetTransform()));
+    }
+
+    bool isImplicit(const std::optional<RTCSessionDescriptionInit> &init) {
+      return !init || (init->sdp.empty() && init->type != webrtc::SdpType::kRollback);
     }
 
     bool hasSFrameVideo(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
@@ -288,11 +293,13 @@ namespace python_webrtc {
           self->_remoteEndOfCandidatesDescription = nullptr;
         }
         // the descriptions as the operation left them, before candidates gathered later
-        self->_completionSnapshot = self->SnapshotDescriptions();
+        const auto snapshot = self->SnapshotDescriptions();
+        self->_completionSnapshot = snapshot;
         const auto sctp = self->SctpTransportsOf(self->connection());
         auto created = self->WrapTransports(sctp);
         self->UpdateMaxMessageSize(sctp);
         self->MarkIceRolesKnown();
+        self->EmitDeferredSignaling(snapshot);
         if (remote) {
           self->RecordRemoteDescriptionCandidates();
           // before the operation resolves, as the track events of a description are
@@ -304,8 +311,10 @@ namespace python_webrtc {
           iceTransport->CreatedByDescription();
         }
       } else {
+        self->EmitDeferredSignaling(std::nullopt);
         completion->Fail(RTCCallbackException(std::move(error)));
       }
+      Parking::At("description.completed");
       held->Release();
     };
   }
@@ -313,6 +322,32 @@ namespace python_webrtc {
   void RTCPeerConnection::SetLocalDescription(std::shared_ptr<Mailbox> mailbox, uint64_t token,
                                               const std::optional<RTCSessionDescriptionInit> &init) {
     Completion completion(std::move(mailbox), token);
+    // parsed off the signaling thread, its errors reported after the state's
+    ParsedDescription description;
+    std::optional<RTCCallbackException> error;
+    bool modified = false;
+    if (init && !isImplicit(init)) {
+      if (init->type != webrtc::SdpType::kRollback) {
+        const std::scoped_lock lock(_createdMutex);
+        modified = fingerprintChanged(init->type == webrtc::SdpType::kOffer ? _lastOffer : _lastAnswer, init->sdp);
+      }
+      description = parseDescription(*init, error);
+    }
+
+    _factory->signalingThread()->PostTask([weak = weak_from_this(), completion = std::move(completion), init,
+                                           description = std::move(description), error = std::move(error),
+                                           modified]() mutable {
+      if (auto self = weak.lock()) {
+        self->ApplyLocalDescription(std::move(completion), init, std::move(description), error, modified);
+      }
+    });
+  }
+
+  void RTCPeerConnection::ApplyLocalDescription(Completion completion,
+                                                const std::optional<RTCSessionDescriptionInit> &init,
+                                                ParsedDescription description,
+                                                const std::optional<RTCCallbackException> &error, bool modified) {
+    _deferSignaling = false;
     auto pc = connection();
     auto state = pc ? pc->signaling_state() : SignalingState::kClosed;
     if (state == SignalingState::kClosed) {
@@ -327,7 +362,7 @@ namespace python_webrtc {
       return;
     }
 
-    if (!init || (init->sdp.empty() && init->type != webrtc::SdpType::kRollback)) {
+    if (isImplicit(init)) {
       // without a type, an answer in the states that wait for one, an offer otherwise
       const bool waitsForAnswer =
           state == SignalingState::kHaveRemoteOffer || state == SignalingState::kHaveLocalPrAnswer;
@@ -337,6 +372,7 @@ namespace python_webrtc {
       auto complete = DescriptionCompletion(shared, pc, DescriptionKind::kLocal);
       const bool created = type == webrtc::SdpType::kOffer ||
                            (type == webrtc::SdpType::kAnswer && state == SignalingState::kHaveRemoteOffer);
+      _deferSignaling = true;
       if (created && hasSFrameVideo(pc)) {
         // libwebrtc's own implicit description can't get raw packetization
         SetCreatedDescription(pc, type, std::move(complete), shared);
@@ -349,23 +385,18 @@ namespace python_webrtc {
       return;
     }
 
-    if (init->type != webrtc::SdpType::kRollback) {
-      const std::scoped_lock lock(_createdMutex);
-      if (fingerprintChanged(init->type == webrtc::SdpType::kOffer ? _lastOffer : _lastAnswer, init->sdp)) {
-        completion.Fail(RTCCallbackException(
-            webrtc::RTCErrorType::INVALID_MODIFICATION,
-            "Failed to execute 'setLocalDescription' on 'RTCPeerConnection': The SDP does not match the previously "
-            "generated SDP for this type"));
-        return;
-      }
+    if (modified) {
+      completion.Fail(RTCCallbackException(
+          webrtc::RTCErrorType::INVALID_MODIFICATION,
+          "Failed to execute 'setLocalDescription' on 'RTCPeerConnection': The SDP does not match the previously "
+          "generated SDP for this type"));
+      return;
     }
-
-    std::optional<RTCCallbackException> error;
-    auto description = parseDescription(*init, error);
     if (error) {
       completion.Fail(*error);
       return;
     }
+    _deferSignaling = init && init->type != webrtc::SdpType::kRollback;
     pc->SetLocalDescription(std::move(description),
                             webrtc::make_ref_counted<SetLocalDescriptionObserver>(DescriptionCompletion(
                                 std::make_shared<Completion>(std::move(completion)), pc, DescriptionKind::kLocal)));
@@ -406,6 +437,24 @@ namespace python_webrtc {
   void RTCPeerConnection::SetRemoteDescription(std::shared_ptr<Mailbox> mailbox, uint64_t token,
                                                const RTCSessionDescriptionInit &init) {
     Completion completion(std::move(mailbox), token);
+    std::optional<RTCCallbackException> error;
+    auto description = parseDescription(init, error);
+    if (description) {
+      removeBlockedCandidates(*description);
+    }
+    _factory->signalingThread()->PostTask([weak = weak_from_this(), completion = std::move(completion),
+                                           type = init.type, description = std::move(description),
+                                           error = std::move(error)]() mutable {
+      if (auto self = weak.lock()) {
+        self->ApplyRemoteDescription(std::move(completion), type, std::move(description), error);
+      }
+    });
+  }
+
+  void RTCPeerConnection::ApplyRemoteDescription(Completion completion, webrtc::SdpType type,
+                                                 ParsedDescription description,
+                                                 const std::optional<RTCCallbackException> &error) {
+    _deferSignaling = false;
     auto pc = connection();
     auto state = pc ? pc->signaling_state() : SignalingState::kClosed;
     if (state == SignalingState::kClosed) {
@@ -413,9 +462,9 @@ namespace python_webrtc {
       return;
     }
 
-    // the state is checked before the SDP is parsed
-    const bool answer = init.type == webrtc::SdpType::kAnswer || init.type == webrtc::SdpType::kPrAnswer;
-    const bool rollback = init.type == webrtc::SdpType::kRollback;
+    // the state's errors come before the SDP's
+    const bool answer = type == webrtc::SdpType::kAnswer || type == webrtc::SdpType::kPrAnswer;
+    const bool rollback = type == webrtc::SdpType::kRollback;
     if ((answer && state != SignalingState::kHaveLocalOffer && state != SignalingState::kHaveRemotePrAnswer) ||
         (rollback && state != SignalingState::kHaveRemoteOffer)) {
       completion.Fail(RTCCallbackException(
@@ -429,20 +478,20 @@ namespace python_webrtc {
     auto shared = std::make_shared<Completion>(std::move(completion));
     auto complete = std::make_shared<const std::function<void(webrtc::RTCError)>>(
         DescriptionCompletion(shared, pc, DescriptionKind::kRemote));
-    auto apply = [init, complete, shared](const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
-      std::optional<RTCCallbackException> error;
-      auto description = parseDescription(init, error);
+    auto parsed = std::make_shared<ParsedDescription>(std::move(description));
+    auto apply = [this, parsed, error, complete, shared,
+                  rollback](const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
       if (error) {
         shared->Fail(*error);
         return;
       }
-      removeBlockedCandidates(*description);
-      pc->SetRemoteDescription(std::move(description),
+      _deferSignaling = !rollback;
+      pc->SetRemoteDescription(std::move(*parsed),
                                webrtc::make_ref_counted<SetRemoteDescriptionObserver>(
                                    [complete](webrtc::RTCError error) { (*complete)(std::move(error)); }));
     };
 
-    if (init.type == webrtc::SdpType::kOffer && state == SignalingState::kHaveLocalOffer) {
+    if (type == webrtc::SdpType::kOffer && state == SignalingState::kHaveLocalOffer) {
       // an offer in have-local-offer rolls the local one back first (perfect negotiation),
       // even if the offer turns out to be invalid
       auto rollbackObserver = webrtc::make_ref_counted<SetLocalDescriptionObserver>(
@@ -595,7 +644,12 @@ namespace python_webrtc {
 
   uint64_t RTCPeerConnection::SnapshotDescriptions() {
     auto pc = connection();
-    if (!pc || !IsBound()) {
+    if (!pc) {
+      return 0;
+    }
+    if (!IsBound()) {
+      const std::scoped_lock lock(_descriptionsMutex);
+      _shown.reset();
       return 0;
     }
     DescriptionsSnapshot snapshot;
@@ -612,6 +666,10 @@ namespace python_webrtc {
          {std::tuple(DescriptionKind::kLocal, DescriptionKind::kPendingLocal, DescriptionKind::kCurrentLocal),
           std::tuple(DescriptionKind::kRemote, DescriptionKind::kPendingRemote, DescriptionKind::kCurrentRemote)}) {
       view(kind) = view(pending).description != nullptr ? view(pending) : view(current);
+    }
+    for (const auto &transceiver : pc->GetTransceivers()) {
+      snapshot.transceivers.push_back({.sender = RTCRtpSender::registry().GetOrCreate(_factory, transceiver->sender()),
+                                       .state = TransceiverState::Of(*transceiver)});
     }
     const std::scoped_lock lock(_descriptionsMutex);
     auto id = ++_lastSnapshot;

@@ -10,6 +10,7 @@
 
 #include <mutex>
 #include <optional>
+#include <utility>
 
 namespace python_webrtc {
 
@@ -19,7 +20,7 @@ namespace python_webrtc {
   class Surfaced {
   public:
     // a change reported by libwebrtc, before its event is emitted
-    void Changed(bool bound, T previous) {
+    void Changed(bool bound, const T &previous) {
       const std::scoped_lock lock(_mutex);
       if (!bound) {
         _value.reset();
@@ -30,7 +31,15 @@ namespace python_webrtc {
 
     void Surface(T value) {
       const std::scoped_lock lock(_mutex);
-      _value = value;
+      _value = std::move(value);
+    }
+
+    template <typename F>
+    void Update(F update) {
+      const std::scoped_lock lock(_mutex);
+      if (_value) {
+        update(*_value);
+      }
     }
 
     // shows the current value again, like when events stop

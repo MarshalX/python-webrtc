@@ -8,6 +8,7 @@
 #include "rtc_sctp_transport.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
+#include "../utils/parking.h"
 
 namespace python_webrtc {
 
@@ -20,7 +21,12 @@ namespace python_webrtc {
       _transport->RegisterObserver(this);
       registry().SetObserver(_transport.get(), this);
       _observing = true;
-      _lastState = _transport->Information().state();
+      const auto information = _transport->Information();
+      _lastState = information.state();
+      _lastMaxChannels = information.MaxChannels();
+      // shown until its first change, unless read unbound
+      _surfacedState.Changed(true, _lastState);
+      _surfacedMaxChannels.Changed(true, _lastMaxChannels);
 
       if (_lastState == webrtc::SctpTransportState::kClosed) {
         Stop();
@@ -45,7 +51,8 @@ namespace python_webrtc {
         .def_property_readonly("state", nogil_fn(&RTCSctpTransport::GetState))
         .def_property_readonly("maxMessageSize", nogil_fn(&RTCSctpTransport::GetMaxMessageSize))
         .def_property_readonly("maxChannels", nogil_fn(&RTCSctpTransport::GetMaxChannels))
-        .def("_surfaceState", &RTCSctpTransport::SurfaceState, nogil(), pybind11::arg("state"));
+        .def("_surfaceState", &RTCSctpTransport::SurfaceState, nogil(), pybind11::arg("state"),
+             pybind11::arg("maxChannels"));
   }
 
   Registry<RTCSctpTransport, webrtc::SctpTransportInterface> &RTCSctpTransport::registry() {
@@ -64,8 +71,13 @@ namespace python_webrtc {
   void RTCSctpTransport::OnStateChange(webrtc::SctpTransportInformation info) {
     if (info.state() != _lastState) {
       _surfacedState.Changed(IsBound(), _lastState);
+      _surfacedMaxChannels.Changed(IsBound(), _lastMaxChannels);
       _lastState = info.state();
-      Emit("statechange", info.state());
+      _lastMaxChannels = info.MaxChannels();
+      if (info.state() == webrtc::SctpTransportState::kConnected) {
+        Parking::At("sctp.connected");
+      }
+      Emit("statechange", info.state(), info.MaxChannels());
     }
 
     if (info.state() == webrtc::SctpTransportState::kClosed) {
@@ -76,6 +88,7 @@ namespace python_webrtc {
   void RTCSctpTransport::OnPeerConnectionClosed() {
     Unbind();
     _surfacedState.Reset();
+    _surfacedMaxChannels.Reset();
   }
 
   std::shared_ptr<RTCDtlsTransport> RTCSctpTransport::GetTransport() {
@@ -91,8 +104,9 @@ namespace python_webrtc {
     return _surfacedState.ShownOr(IsBound(), [this]() { return Information().state(); });
   }
 
-  void RTCSctpTransport::SurfaceState(webrtc::SctpTransportState state) {
+  void RTCSctpTransport::SurfaceState(webrtc::SctpTransportState state, std::optional<int> maxChannels) {
     _surfacedState.Surface(state);
+    _surfacedMaxChannels.Surface(maxChannels);
   }
 
   std::optional<double> RTCSctpTransport::GetMaxMessageSize() {
@@ -110,7 +124,7 @@ namespace python_webrtc {
     if (state == webrtc::SctpTransportState::kNew || state == webrtc::SctpTransportState::kConnecting) {
       return {};
     }
-    return Information().MaxChannels();
+    return _surfacedMaxChannels.ShownOr(IsBound(), [this]() { return Information().MaxChannels(); });
   }
 
 } // namespace python_webrtc

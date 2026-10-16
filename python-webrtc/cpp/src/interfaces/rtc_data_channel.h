@@ -102,6 +102,8 @@ namespace python_webrtc {
 
     void SurfaceState(DataState state);
 
+    bool GetOpenDelivered();
+
     uint64_t GetBufferedAmount();
 
     uint64_t GetBufferedAmountLowThreshold();
@@ -145,6 +147,7 @@ namespace python_webrtc {
     // that depend on it
     std::mutex _closeMutex;
     bool _closeRequested = false;
+    bool _openDelivered = false;
 
     LockedFunction<std::optional<double>()> _maxMessageSizeGetter;
     LockedFunction<void()> _closedCallback;

@@ -9,6 +9,7 @@
 
 #include "../exceptions.h"
 #include "../utils/gil.h"
+#include "../utils/libwebrtc_thread.h"
 #include "rtc_peer_connection/rtc_peer_connection.h"
 
 namespace python_webrtc {
@@ -50,8 +51,20 @@ namespace python_webrtc {
     _connection = std::move(connection);
   }
 
+  TransceiverState RTCRtpTransceiver::Shown() {
+    std::shared_ptr<RTCPeerConnection> connection;
+    {
+      const std::scoped_lock lock(_mutex);
+      connection = _connection.lock();
+    }
+    if (!connection) {
+      return BlockingCallOn(_factory->signalingThread(), [this]() { return TransceiverState::Of(*_transceiver); });
+    }
+    return connection->ShownTransceiver(*_sender, _transceiver);
+  }
+
   std::optional<std::string> RTCRtpTransceiver::GetMid() {
-    return _transceiver->mid();
+    return Shown().mid;
   }
 
   std::shared_ptr<RTCRtpSender> RTCRtpTransceiver::GetSender() {
@@ -67,11 +80,11 @@ namespace python_webrtc {
   }
 
   bool RTCRtpTransceiver::GetStopped() {
-    return _transceiver->stopped();
+    return Shown().stopped;
   }
 
   bool RTCRtpTransceiver::GetStopping() {
-    return _transceiver->stopping();
+    return Shown().stopping;
   }
 
   webrtc::RtpTransceiverDirection RTCRtpTransceiver::GetDirection() {
@@ -86,7 +99,7 @@ namespace python_webrtc {
   }
 
   std::optional<webrtc::RtpTransceiverDirection> RTCRtpTransceiver::GetCurrentDirection() {
-    return _transceiver->current_direction();
+    return Shown().currentDirection;
   }
 
   void RTCRtpTransceiver::Stop() {
@@ -102,6 +115,7 @@ namespace python_webrtc {
     if (!result.ok()) {
       throw RTCException(result);
     }
+    connection->ShowStopping(*_sender);
   }
 
   void RTCRtpTransceiver::SetCodecPreferences(std::vector<webrtc::RtpCodecCapability> codecs) {

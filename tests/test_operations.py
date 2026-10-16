@@ -62,6 +62,39 @@ async def test_cancelled_waiting_operation_leaves_the_running_one() -> None:
 
 
 @pytest.mark.asyncio
+async def test_next_operation_waits_for_the_code_the_previous_one_resumed() -> None:
+    """Code awaiting an operation resumes before the next one chained behind it, even over a few iterations.
+
+    Like a browser's microtasks run before a task: a callback chain the completion started, as a JS bridge's promise
+    jobs are, starts its work first.
+    """
+    chain = OperationsChain(lambda: None, lambda: False)
+    release = asyncio.Event()
+    order: list[str] = []
+
+    async def operation(name: str, *, hold: bool = False) -> None:
+        async with chain.operation():
+            if hold:
+                await release.wait()
+            order.append(name)
+
+    async def awaiting() -> None:
+        await operation('first', hold=True)
+        for _ in range(3):
+            # a step of the resumed code
+            await asyncio.sleep(0)
+        order.append('resumed')
+
+    resumed = asyncio.ensure_future(awaiting())
+    await asyncio.sleep(0)
+    second = asyncio.ensure_future(operation('second'))
+    await asyncio.sleep(0)
+    release.set()
+    await asyncio.wait_for(asyncio.gather(resumed, second), seconds(5))
+    assert order == ['first', 'resumed', 'second']
+
+
+@pytest.mark.asyncio
 async def test_operations_of_a_closed_chain_run_at_once() -> None:
     """Once closed, an operation doesn't wait for the running one."""
     closed = False

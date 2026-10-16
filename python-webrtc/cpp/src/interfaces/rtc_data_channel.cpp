@@ -97,6 +97,7 @@ namespace python_webrtc {
             pybind11::arg("data"), pybind11::arg("binary"))
         .def("close", &RTCDataChannel::Close, nogil())
         .def("_surfaceState", &RTCDataChannel::SurfaceState, nogil(), pybind11::arg("state"))
+        .def_property_readonly("_openDelivered", nogil_fn(&RTCDataChannel::GetOpenDelivered))
         .def("_decreaseBufferedAmount", &RTCDataChannel::DecreaseBufferedAmount, nogil(), pybind11::arg("sent"));
   }
 
@@ -245,7 +246,13 @@ namespace python_webrtc {
     if (_closeRequested && state == DataState::kOpen) {
       return;
     }
+    _openDelivered = _openDelivered || state == DataState::kOpen;
     _surfacedState.Surface(state);
+  }
+
+  bool RTCDataChannel::GetOpenDelivered() {
+    const std::scoped_lock lock(_closeMutex);
+    return _openDelivered;
   }
 
   uint64_t RTCDataChannel::GetBufferedAmount() {

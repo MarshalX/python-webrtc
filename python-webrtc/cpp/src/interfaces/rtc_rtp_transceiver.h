@@ -25,6 +25,7 @@
 #include "peer_connection_factory.h"
 #include "rtc_rtp_receiver.h"
 #include "rtc_rtp_sender.h"
+#include "transceiver_state.h"
 
 namespace python_webrtc {
 
@@ -74,6 +75,8 @@ namespace python_webrtc {
     std::vector<webrtc::RtpHeaderExtensionCapability> GetNegotiatedHeaderExtensions();
 
   private:
+    TransceiverState Shown();
+
     std::shared_ptr<PeerConnectionFactory> _factory;
     webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> _transceiver;
 
