@@ -41,11 +41,15 @@ attached when it posts (`utils/libwebrtc_thread.h`). `tests/test_native_rules.py
 - Create wrappers with `NativeObject<T>::Create` or a `Registry`. Construct them outside locks.
 - Don't wait in a constructor: post the setup to its thread instead.
 - Destructors run on the Dispatcher, never on a libwebrtc or Python thread, so they may wait for libwebrtc threads.
+  Leaves are the exception.
+- A leaf (`kLeaf = true`, such as `RTCEncodedFrame`) is destroyed wherever its last reference drops, so its members
+  only free memory: no waits, posts, wrappers or task queues (`tests/test_native_rules.py` lists the allowed types).
 
 A `Registry` constructs its wrappers on the signaling thread, where their observers are registered, except a data
 channel's: libwebrtc calls it on the network thread, where it reads the channel's state and registers.
-Sanitizer builds abort on a destructor that runs off the Dispatcher; a constructor that throws is the exception: the
-half-made object is destroyed where it was made. The factory and the ICE, DTLS and SCTP transports still wait in their
+Sanitizer builds abort on a non-leaf destructor off the Dispatcher and on a leaf's that blocks or releases a wrapper;
+a constructor that throws is the exception: the half-made object is destroyed where it was made. The factory and the
+ICE, DTLS and SCTP transports still wait in their
 constructors.
 
 ### The Dispatcher and mailboxes

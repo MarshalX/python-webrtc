@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import gc
 import re
+import time
 from typing import TYPE_CHECKING, NamedTuple, Union
 
 import pytest
@@ -26,10 +27,12 @@ from tests.helpers import (
     exchange_offer_answer,
     mistyped,
     settled_alive,
+    undelivered,
     wait_progressing,
     wait_until,
 )
 from tests.timing import seconds
+from webrtc.utils.loops import LoopState
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -40,6 +43,7 @@ TIMEOUT = seconds(15)
 SUITES = list(webrtc.SFrameCipherSuite)
 KEY = bytes(range(16))
 OTHER_KEY = bytes(range(1, 17))
+QUEUED_ERRORS = 3
 DEPENDENCY_DESCRIPTOR = 'https://aomediacodec.github.io/av1-rtp-spec/#dependency-descriptor-rtp-header-extension'
 
 Frame = Union[webrtc.RTCEncodedVideoFrame, webrtc.RTCEncodedAudioFrame]
@@ -648,6 +652,51 @@ async def test_decryption_errors(pair: tuple[webrtc.RTCPeerConnection, webrtc.RT
     await decryptor.add_decryption_key(KEY, 2**64 - 1)
     await read_media(receiver.track, 5)
     assert sender.transform == encryptor
+
+
+def queued(mailbox: wrtc.Mailbox, count: int) -> bool:
+    """Whether a mailbox holds count records within the timeout, waiting without a loop."""
+    deadline = time.monotonic() + TIMEOUT
+    while len(mailbox) < count and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return len(mailbox) >= count
+
+
+def test_error_frames_of_a_closed_loop_are_released_with_its_mailbox() -> None:
+    """Errors queued for a closed loop drop their frames on the thread releasing it, while the Dispatcher is held."""
+    baseline = settled_alive()[0]['RTCEncodedFrame']
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    loop = asyncio.new_event_loop()
+
+    async def failing_call() -> wrtc.Mailbox:
+        encryptor, decryptor = sframe_pair()
+        await encryptor.set_encryption_key(KEY, 1)
+        await decryptor.add_decryption_key(OTHER_KEY, 1)
+        failed = asyncio.get_running_loop().create_future()
+        # keeps no event: only the queued records hold frames
+        decryptor.on('error', lambda _event: failed.done() or failed.set_result(None))
+        await encrypted_call(caller, callee, 'video', encryptor=encryptor, receiver_transform=decryptor)
+        await asyncio.wait_for(failed, TIMEOUT)
+        return LoopState.of(asyncio.get_running_loop()).mailbox
+
+    try:
+        try:
+            mailbox = loop.run_until_complete(failing_call())
+            # the loop doesn't run any more: errors queue in its mailbox
+            assert queued(mailbox, QUEUED_ERRORS)
+        finally:
+            caller.close()
+            callee.close()
+        assert settled_alive()[0]['RTCEncodedFrame'] > baseline
+
+        with undelivered():
+            loop.close()
+            # a collection releases the closed loop's state, which closes its mailbox
+            gc.collect()
+            assert mailbox.closed
+            assert wrtc._testing.alive_counts()['RTCEncodedFrame'] == baseline
+    finally:
+        loop.close()
 
 
 def counter_of(frame: Frame) -> int:
