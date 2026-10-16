@@ -42,6 +42,8 @@ namespace python_webrtc {
       return it == _trials.end() ? std::string() : it->second;
     }
 
+    [[nodiscard]] bool Contains(std::string_view name) const { return _trials.contains(std::string(name)); }
+
     [[nodiscard]] std::unique_ptr<webrtc::FieldTrialsView> CreateCopy() const override {
       return std::make_unique<FieldTrials>(*this);
     }

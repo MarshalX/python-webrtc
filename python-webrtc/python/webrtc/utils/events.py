@@ -50,23 +50,24 @@ class HandlerDecorator(Protocol[_E_contra]):
         ...
 
 
+def _report(loop: asyncio.AbstractEventLoop, exception: BaseException, *, message: str, event: object) -> None:
+    loop.call_exception_handler({'message': message, 'exception': exception, 'event': event})
+
+
 def call_handler(loop: asyncio.AbstractEventLoop, handler: Callable[[_E], object], event: _E, *, message: str) -> None:
     """Calls a handler; exceptions, async ones too, go to the loop's exception handler."""
-
-    def report(exception: BaseException) -> None:
-        loop.call_exception_handler({'message': message, 'exception': exception, 'event': event})
-
-    def done(task: asyncio.Future[object]) -> None:
-        tasks.discard(task)
-        if not task.cancelled() and (exception := task.exception()) is not None:
-            report(exception)
-
     try:
         result = handler(event)
     except Exception as e:
-        report(e)
+        _report(loop, e, message=message, event=event)
         return
-    if inspect.isawaitable(result):
+    if result is not None and inspect.isawaitable(result):
+
+        def done(task: asyncio.Future[object]) -> None:
+            tasks.discard(task)
+            if not task.cancelled() and (exception := task.exception()) is not None:
+                _report(loop, exception, message=message, event=event)
+
         task = asyncio.ensure_future(result, loop=loop)
         # strong ref until done, or the task could be collected
         tasks = LoopState.of(loop).tasks
@@ -94,10 +95,12 @@ class _Registration(NamedTuple):
 class _Handlers:
     """An object's handlers by event name, each with its registering loop."""
 
-    __slots__ = ('_lock', '_registrations')
+    __slots__ = ('_lock', '_registrations', 'removals')
 
     def __init__(self) -> None:
         self._registrations: dict[str, list[_Registration]] = {}
+        # counts removals, so a delivery knows its handlers are all still registered
+        self.removals = 0
         # re-entrant: gc may release a loop under it, which removes handlers
         self._lock = threading.RLock()
 
@@ -129,6 +132,7 @@ class _Handlers:
             return
         for registration in list(registrations):
             if not keep(registration):
+                self.removals += 1
                 _discard(registrations, registration)
         if len(registrations) == 0:
             _ = self._registrations.pop(name, None)
@@ -151,6 +155,11 @@ class _Handlers:
         """The loops with a handler of an event."""
         with self._lock:
             return list(dict.fromkeys(r.loop for r in self._registrations.get(name, ())))
+
+    def elsewhere(self, name: str, loop: asyncio.AbstractEventLoop) -> bool:
+        """Whether a loop other than ``loop`` has a handler of an event."""
+        with self._lock:
+            return any(r.loop is not loop for r in self._registrations.get(name, ()))
 
     def of(self, name: str) -> list[AnyHandler]:
         with self._lock:
@@ -425,6 +434,8 @@ class EventTarget(Generic[_N_contra]):
         self, handlers: _Handlers, name: str, args: tuple[object, ...], *, delivering: asyncio.AbstractEventLoop
     ) -> None:
         """Posts an event to the other loops with handlers for it."""
+        if not handlers.elsewhere(name, delivering):
+            return
         for other in handlers.loops(name):
             if other is not delivering and not other.is_closed():
                 elsewhere = LoopState.of(other)
@@ -435,8 +446,10 @@ class EventTarget(Generic[_N_contra]):
     ) -> None:
         event.target = self
         handlers = self._handlers
+        removals = handlers.removals if handlers is not None else -1
         for registration in registrations:
-            if handlers is None or not handlers.has(name, registration):
+            # one removed by an earlier handler isn't called
+            if handlers is None or (handlers.removals != removals and not handlers.has(name, registration)):
                 continue
             if registration.once:
                 with self._changing():

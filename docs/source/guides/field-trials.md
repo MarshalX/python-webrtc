@@ -32,6 +32,12 @@ The engine reads the trials once, when it starts: on the first {class}`~webrtc.R
 Trial names change between releases of the engine, which is libwebrtc M152 in this release. An unknown name is
 accepted and does nothing, as it does in the browsers, so check the spelling.
 
+## Socket receive buffer
+
+python-webrtc gives every UDP socket a receive buffer of at least 8 MB, so a burst of data channel messages isn't
+dropped while the engine is busy. Setting `WebRTC-SetSocketReceiveBuffer` to any group turns this off: `Enabled-<kb>`
+sets your size, and `Disabled` leaves it to the engine and the system. Linux caps the buffer at `net.core.rmem_max`.
+
 ## WARP
 
 [WARP](https://datatracker.ietf.org/doc/draft-uberti-tsvwg-warp/) connects faster by saving round trips. It's made of four parts, and each of them works on its own: a peer that

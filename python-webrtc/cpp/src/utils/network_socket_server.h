@@ -23,7 +23,10 @@ namespace python_webrtc {
   // The network thread's sockets: UDP drains every datagram into one shared buffer; Apple waits with kqueue, not poll
   class NetworkSocketServer : public webrtc::PhysicalSocketServer {
   public:
-    NetworkSocketServer();
+    // the kernel may cap it (Linux at net.core.rmem_max)
+    static constexpr int kReceiveBuffer = 8 << 20;
+
+    explicit NetworkSocketServer(int receiveBuffer);
     ~NetworkSocketServer() override;
     NetworkSocketServer(const NetworkSocketServer &) = delete;
     NetworkSocketServer &operator=(const NetworkSocketServer &) = delete;
@@ -46,6 +49,7 @@ namespace python_webrtc {
     webrtc::Socket *Created(webrtc::Socket *socket, int type);
 
     webrtc::Buffer _scratch;
+    const int _receiveBuffer;
 
 #ifdef __APPLE__
     struct Watched {

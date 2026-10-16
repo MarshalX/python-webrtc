@@ -41,7 +41,7 @@ namespace python_webrtc {
         flags |= webrtc::PORTALLOCATOR_ENABLE_IPV6;
       }
       allocator->set_flags(flags);
-      // like our connections: no waits between gathering phases
+      // no waits between gathering phases
       allocator->set_step_delay(0);
       allocator->SetNetworkIgnoreMask(factory.networkIgnoreMask());
       return allocator;

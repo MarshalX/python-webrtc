@@ -10,9 +10,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import multiprocessing
 import multiprocessing.context
 import os
+import socket
 import subprocess
 import sys
 from typing import TYPE_CHECKING, cast
@@ -297,3 +299,29 @@ def test_sped_carries_the_handshake_in_stun() -> None:
 
     assert without != set()
     assert _handshakes_with(SPED) < without
+
+
+@isolated
+def _receive_buffer_with(trials: dict[str, str]) -> int:
+    webrtc.field_trials.update(trials)
+    return wrtc._testing.udp_receive_buffer()
+
+
+def _kernel_receive_buffer(requested: int | None = None) -> int:
+    """What the kernel gives a new UDP socket, asking for the size or not."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+        if requested is not None:
+            # refused above the system's limit, as the library's request is
+            with contextlib.suppress(OSError):
+                udp.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, requested)
+        return udp.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+
+
+def test_udp_sockets_receive_into_8_mb_by_default() -> None:
+    assert _receive_buffer_with({}) == _kernel_receive_buffer(8 << 20)
+
+
+@pytest.mark.parametrize('group', ['Disabled', 'Enabled-1024'])
+def test_receive_buffer_trial_replaces_the_default(group: str) -> None:
+    """The engine applies the trial itself, to a connection's sockets."""
+    assert _receive_buffer_with({'WebRTC-SetSocketReceiveBuffer': group}) == _kernel_receive_buffer()

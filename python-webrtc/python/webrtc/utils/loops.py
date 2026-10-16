@@ -472,8 +472,10 @@ class LoopState:
         # CPython internals: other loops (e.g. uvloop) never report any
         loop = self._loop_ref()
         ready: object = getattr(loop, '_ready', None)
+        if not isinstance(ready, collections.deque) or len(ready) == 0:
+            return False
         # copy() holds the deque's lock; iterating races call_soon_threadsafe on free-threaded builds
-        handles = cast('collections.deque[object]', ready).copy() if isinstance(ready, collections.deque) else ()
+        handles = cast('collections.deque[object]', ready).copy()
         for handle in handles:
             callback = getattr(handle, '_callback', None)
             owner = callback.state if isinstance(callback, _Callback) else getattr(callback, '__self__', None)

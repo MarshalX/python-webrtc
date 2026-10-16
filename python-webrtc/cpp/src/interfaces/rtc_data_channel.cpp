@@ -60,17 +60,6 @@ namespace python_webrtc {
   }
 
   void RTCDataChannel::Init(pybind11::module &m) {
-    pybind11::class_<DataChannelMessage>(m, "DataChannelMessage")
-        .def_property_readonly("data", [](const DataChannelMessage &message) -> pybind11::object {
-          const auto *data = message.data.cdata<char>();
-          if (message.binary) {
-            return pybind11::bytes(data, message.data.size());
-          }
-          // the upper layers verify UTF-8, as libwebrtc doesn't
-          return pybind11::reinterpret_steal<pybind11::object>(
-              PyUnicode_DecodeUTF8(data, static_cast<Py_ssize_t>(message.data.size()), "replace"));
-        });
-
     DefineBinding(pybind11::class_<RTCDataChannel, Binding, std::shared_ptr<RTCDataChannel>>(m, "RTCDataChannel"))
         .def_property_readonly("_id", &RTCDataChannel::Id)
         .def_property_readonly("label", nogil_fn(&RTCDataChannel::GetLabel))
@@ -157,7 +146,16 @@ namespace python_webrtc {
   }
 
   void RTCDataChannel::OnMessage(const webrtc::DataBuffer &buffer) {
-    Emit("message", DataChannelMessage{.data = buffer.data, .binary = buffer.binary});
+    // the buffer is refcounted, so it's shared with the loop thread without a copy
+    EmitConverted("message", [data = buffer.data, binary = buffer.binary]() -> pybind11::object {
+      const auto *bytes = data.cdata<char>();
+      if (binary) {
+        return pybind11::bytes(bytes, data.size());
+      }
+      // the upper layers verify UTF-8, as libwebrtc doesn't
+      return pybind11::reinterpret_steal<pybind11::object>(
+          PyUnicode_DecodeUTF8(bytes, static_cast<Py_ssize_t>(data.size()), "replace"));
+    });
   }
 
   void RTCDataChannel::OnBufferedAmountChange(uint64_t sentDataSize) {
@@ -328,8 +326,30 @@ namespace python_webrtc {
   }
 
   void RTCDataChannel::SendNow(webrtc::DataBuffer buffer) {
-    // posted in call order; libwebrtc reports a failed send's bytes through OnBufferedAmountChange too
-    _channel->SendAsync(std::move(buffer), nullptr);
+    bool post = false;
+    {
+      const std::scoped_lock lock(_outgoingMutex);
+      post = _outgoing.empty();
+      _outgoing.push_back(std::move(buffer));
+    }
+    if (post) {
+      _factory->workerThread()->PostTask([weak = weak_from_this()]() {
+        if (auto self = weak.lock()) {
+          self->SendOutgoing();
+        }
+      });
+    }
+  }
+
+  void RTCDataChannel::SendOutgoing() {
+    std::vector<webrtc::DataBuffer> outgoing;
+    {
+      const std::scoped_lock lock(_outgoingMutex);
+      outgoing.swap(_outgoing);
+    }
+    for (const auto &buffer : outgoing) {
+      _channel->Send(buffer);
+    }
   }
 
   void RTCDataChannel::SetStateLocked(DataState state) {

@@ -81,6 +81,7 @@ namespace python_webrtc {
     const uint64_t _id;
     mutable std::mutex _mutex;
     std::deque<Record> _records;
+    bool _awake = false;
     bool _closed = false;
     uint64_t _dropped = 0;
     std::optional<WakeEnds> _wake;
@@ -133,12 +134,7 @@ namespace python_webrtc {
     // an rvalue argument is moved into the record, and from it into Python
     template <typename... Args>
     void Emit(const char *name, Args &&...args) {
-      CheckNativeThreadDetached("Emitter::Emit");
-      if (!IsBound()) {
-        return;
-      }
-      // nothing keeps it for the record while its constructor runs
-      auto self = static_cast<T *>(this)->weak_from_this().lock();
+      auto self = Source();
       if (!self) {
         return;
       }
@@ -152,7 +148,29 @@ namespace python_webrtc {
                   }});
     }
 
+    template <typename Convert>
+    void EmitConverted(const char *name, Convert convert) {
+      auto self = Source();
+      if (!self) {
+        return;
+      }
+      Post(Record{.source = self,
+                  .target = self->Id(),
+                  .name = name,
+                  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks): the analyzer loses a moved shared_ptr
+                  .args = [self, convert = std::move(convert)]() { return pybind11::make_tuple(self, convert()); }});
+    }
+
   private:
+    std::shared_ptr<T> Source() {
+      CheckNativeThreadDetached("Emitter::Emit");
+      if (!IsBound()) {
+        return nullptr;
+      }
+      // nothing keeps it for the record while its constructor runs
+      return static_cast<T *>(this)->weak_from_this().lock();
+    }
+
     friend T;
 
     Emitter() = default;

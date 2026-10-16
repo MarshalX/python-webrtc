@@ -260,8 +260,7 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannel
             # discarded: closed before open, or a message once closing
             return None
         if name == 'message':
-            (message,) = cast('tuple[wrtc.DataChannelMessage]', args)
-            data: str | bytes | Blob = message.data
+            (data,) = cast('tuple[str | bytes | Blob]', args)
             # binary_type as of delivery, per the specification
             if isinstance(data, bytes) and self._native_obj.binaryType == BinaryType.blob:
                 data = Blob([data])

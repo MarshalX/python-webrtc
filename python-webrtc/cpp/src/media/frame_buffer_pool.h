@@ -14,6 +14,8 @@
 
 #include <api/scoped_refptr.h>
 #include <api/video/i420_buffer.h>
+#include <api/video/i422_buffer.h>
+#include <api/video/i444_buffer.h>
 #include <api/video/nv12_buffer.h>
 #include <api/video/video_frame_buffer.h>
 #include <common_video/include/video_frame_buffer_pool.h>
@@ -24,6 +26,8 @@ namespace python_webrtc {
   class FrameBufferPool {
   public:
     static constexpr size_t kDefaultSize = 8;
+
+    explicit FrameBufferPool(size_t size = kDefaultSize) : _pool(/*zero_initialize=*/false, size) {}
 
     void Resize(std::optional<int> size) {
       const std::scoped_lock lock(_mutex);
@@ -38,6 +42,26 @@ namespace python_webrtc {
         }
       }
       return webrtc::I420Buffer::Create(width, height);
+    }
+
+    webrtc::scoped_refptr<webrtc::I422Buffer> CreateI422(int width, int height) {
+      {
+        const std::scoped_lock lock(_mutex);
+        if (auto buffer = _pool.CreateI422Buffer(width, height)) {
+          return buffer;
+        }
+      }
+      return webrtc::I422Buffer::Create(width, height);
+    }
+
+    webrtc::scoped_refptr<webrtc::I444Buffer> CreateI444(int width, int height) {
+      {
+        const std::scoped_lock lock(_mutex);
+        if (auto buffer = _pool.CreateI444Buffer(width, height)) {
+          return buffer;
+        }
+      }
+      return webrtc::I444Buffer::Create(width, height);
     }
 
     webrtc::scoped_refptr<webrtc::NV12Buffer> CreateNV12(int width, int height) {
@@ -70,7 +94,7 @@ namespace python_webrtc {
 
   private:
     std::mutex _mutex;
-    webrtc::VideoFrameBufferPool _pool{/*zero_initialize=*/false, kDefaultSize};
+    webrtc::VideoFrameBufferPool _pool;
   };
 
 } // namespace python_webrtc

@@ -286,6 +286,8 @@ namespace python_webrtc {
       if (!self || self->IsClosed()) {
         completion->Fail(RTCCallbackException(closedError(remote ? "setRemoteDescription" : "setLocalDescription")));
       } else if (error.ok()) {
+        const auto current = self->connection();
+        self->_remoteDescribed = current && current->remote_description() != nullptr;
         if (remote) {
           // a new remote description may reuse the address of the one the end of candidates was for
           const std::scoped_lock lock(self->_remoteEndOfCandidatesMutex);
@@ -568,21 +570,37 @@ namespace python_webrtc {
     DescriptionView view;
     std::vector<const webrtc::SessionDescriptionInterface *> live;
     bool shown = false;
+    bool read = false;
+    uint64_t generation = 0;
+    const bool bound = IsBound();
+    const auto mailbox = MailboxId();
     {
       // the descriptions as the last event that changed them left them, until the next one
       const std::scoped_lock lock(_descriptionsMutex);
-      if (IsBound() && _shown && _shownGeneration == _descriptionsGeneration) {
+      generation = _descriptionsGeneration;
+      auto &cached = _liveDescriptions[static_cast<size_t>(kind)];
+      if (bound && _shown && _shownGeneration == generation) {
         view = _shown->kinds[static_cast<size_t>(kind)];
         live = _shown->live;
         shown = true;
+      } else if (bound && cached && cached->generation == generation && cached->mailbox == mailbox) {
+        view = cached->view;
+        live = cached->live;
+        read = true;
       }
     }
-    if (!shown) {
+    if (!shown && !read) {
       // the description is owned by the peer connection and must be read on the signaling thread
       BlockingCallOn(_factory->signalingThread(), [&]() {
         view = ReadDescription(pc, kind);
         live = liveDescriptions(pc);
       });
+      if (bound) {
+        // kept until an event changes the descriptions again
+        const std::scoped_lock lock(_descriptionsMutex);
+        _liveDescriptions[static_cast<size_t>(kind)] =
+            LiveDescription{.mailbox = mailbox, .generation = generation, .view = view, .live = live};
+      }
     }
 
     const std::scoped_lock lock(_descriptionsMutex);

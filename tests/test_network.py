@@ -131,3 +131,26 @@ async def test_gathering_runs_its_phases_without_waiting_between_them(
 
     # libwebrtc's default waits 50 ms between its three phases
     assert time.perf_counter() - started < seconds(0.1)
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_pool_runs_its_phases_without_waiting_between_them(
+    create_pc: CreatePC, pytestconfig: pytest.Config
+) -> None:
+    """The pool, gathered as the connection is created, doesn't wait before its first phase either."""
+    if pytestconfig.getoption('--gc-on-emit'):
+        pytest.skip('a wall-clock limit, and --gc-on-emit collects garbage on every event')
+    started = time.perf_counter()
+    pc = create_pc(webrtc.RTCConfiguration(ice_candidate_pool_size=1))
+    pc.create_data_channel('gather')
+    # not polled: a poll's interval would hide the wait
+    complete = wait_for_event(
+        pc,
+        'icegatheringstatechange',
+        predicate=lambda _: pc.ice_gathering_state == webrtc.RTCIceGatheringState.complete,
+    )
+    await pc.set_local_description()
+    await complete
+
+    # libwebrtc's default waits 50 ms before the pool's first phase
+    assert time.perf_counter() - started < seconds(0.04)

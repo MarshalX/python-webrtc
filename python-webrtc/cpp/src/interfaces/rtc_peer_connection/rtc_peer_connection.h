@@ -152,6 +152,8 @@ namespace python_webrtc {
 
     std::optional<bool> GetCanTrickleIceCandidates();
 
+    [[nodiscard]] bool HasRemoteDescription() const;
+
     // Python asks it when delivering a negotiationneeded event
     bool ShouldFireNegotiationNeededEvent(uint32_t eventId);
 
@@ -353,6 +355,10 @@ namespace python_webrtc {
     void ApplyRemoteDescription(Completion completion, webrtc::SdpType type, ParsedDescription description,
                                 const std::optional<RTCCallbackException> &error);
 
+    void ApplyIceCandidate(Completion completion, std::unique_ptr<webrtc::IceCandidate> candidate,
+                           const std::optional<RTCCallbackException> &error, const std::optional<std::string> &sdpMid,
+                           std::optional<int> sdpMLineIndex, const std::optional<std::string> &usernameFragment);
+
     // What completes setLocalDescription (kLocal) or setRemoteDescription (kRemote); created right before the
     // operation starts, as it holds its events
     std::function<void(webrtc::RTCError)>
@@ -469,6 +475,13 @@ namespace python_webrtc {
     // bumped by the events that change descriptions (see RefreshDescriptions)
     uint64_t _descriptionsGeneration = 0;
     std::array<uint64_t, kDescriptionKinds> _descriptionsCachedGeneration{};
+    struct LiveDescription {
+      std::optional<uint64_t> mailbox;
+      uint64_t generation = 0;
+      DescriptionView view;
+      std::vector<const webrtc::SessionDescriptionInterface *> live;
+    };
+    std::array<std::optional<LiveDescription>, kDescriptionKinds> _liveDescriptions;
     std::map<uint64_t, DescriptionsSnapshot> _snapshots;
     uint64_t _lastSnapshot = 0;
     std::optional<DescriptionsSnapshot> _shown{std::in_place};
@@ -478,7 +491,7 @@ namespace python_webrtc {
     // [[MaxMessageSize]] of the current SCTP transport as the last applied description set it, NaN without one
     std::atomic<double> _maxMessageSize{std::numeric_limits<double>::quiet_NaN()};
 
-    // media sections of the remote description the remote peer ended the candidates of
+    std::atomic<bool> _remoteDescribed{false};
     std::mutex _remoteEndOfCandidatesMutex;
     std::set<std::string> _remoteEndOfCandidates;
     const webrtc::SessionDescriptionInterface *_remoteEndOfCandidatesDescription = nullptr;

@@ -119,6 +119,21 @@ async def test_operations_of_a_closed_chain_run_at_once() -> None:
         await asyncio.wait_for(held, seconds(5))
 
 
+@pytest.mark.asyncio
+async def test_add_ice_candidate_without_a_remote_description_rejects_at_once() -> None:
+    """With the chain empty, it rejects in its first step, before the loop runs anything else."""
+    pc = webrtc.RTCPeerConnection()
+    try:
+        added = asyncio.ensure_future(pc.add_ice_candidate())
+        await asyncio.sleep(0)
+        assert added.done()
+        with pytest.raises(webrtc.InvalidStateError, match='remote description'):
+            added.result()
+        assert pc.remote_description is None
+    finally:
+        pc.close()
+
+
 def test_operations_stranded_by_a_closed_loop_end_quietly() -> None:
     """Operations waiting in the chain when their loop closes end without errors once collected."""
     chain = OperationsChain(lambda: None, lambda: False)

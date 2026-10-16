@@ -103,6 +103,15 @@ namespace python_webrtc {
         // active TCP candidates only, or every TCP port connects to every remote one (interfaces²)
         set_allow_tcp_listen(false);
       }
+
+      webrtc::PortAllocatorSession *CreateSessionInternal(absl::string_view contentName, int component,
+                                                          absl::string_view iceUfrag,
+                                                          absl::string_view icePwd) override {
+        // skips libwebrtc's 50 ms waits between gathering phases with nothing to allocate
+        // the connection sets them right before it starts its candidate pool
+        set_step_delay(0);
+        return BasicPortAllocator::CreateSessionInternal(contentName, component, iceUfrag, icePwd);
+      }
     };
 
   } // namespace

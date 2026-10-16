@@ -22,6 +22,10 @@ namespace python_webrtc {
     return pc ? pc->can_trickle_ice_candidates() : std::nullopt;
   }
 
+  bool RTCPeerConnection::HasRemoteDescription() const {
+    return _remoteDescribed;
+  }
+
   template <typename... Args>
   void RTCPeerConnection::EmitGathering(const char *name, const Args &...args) {
     _heldGathering.Emit([this, name, args...]() { Emit(name, args...); });
@@ -348,25 +352,58 @@ namespace python_webrtc {
                                           std::optional<int> sdpMLineIndex,
                                           const std::optional<std::string> &usernameFragment) {
     Completion completion(std::move(mailbox), token);
+    if (!connection()) {
+      completion.Fail(RTCCallbackException(closedError("addIceCandidate")));
+      return;
+    }
+    if (!_remoteDescribed) {
+      std::set<std::string> mids;
+      if (auto error = candidateSections(nullptr, sdpMid, sdpMLineIndex, usernameFragment, mids)) {
+        completion.Fail(*error);
+      }
+      return;
+    }
+
+    std::unique_ptr<webrtc::IceCandidate> iceCandidate;
+    std::optional<RTCCallbackException> error;
+    if (!candidate.empty()) {
+      webrtc::SdpParseError parseError;
+      iceCandidate =
+          webrtc::IceCandidate::Create(sdpMid.value_or(""), sdpMLineIndex.value_or(0), candidate, &parseError);
+      if (!iceCandidate) {
+        error = RTCCallbackException(webrtc::RTCErrorType::UNSUPPORTED_OPERATION,
+                                     "Failed to parse the ICE candidate: " + parseError.description);
+      }
+    }
+
+    _factory->signalingThread()->PostTask([weak = weak_from_this(), completion = std::move(completion),
+                                           iceCandidate = std::move(iceCandidate), error = std::move(error), sdpMid,
+                                           sdpMLineIndex, usernameFragment]() mutable {
+      if (auto self = weak.lock()) {
+        self->ApplyIceCandidate(std::move(completion), std::move(iceCandidate), error, sdpMid, sdpMLineIndex,
+                                usernameFragment);
+      }
+    });
+  }
+
+  void RTCPeerConnection::ApplyIceCandidate(Completion completion, std::unique_ptr<webrtc::IceCandidate> candidate,
+                                            const std::optional<RTCCallbackException> &error,
+                                            const std::optional<std::string> &sdpMid, std::optional<int> sdpMLineIndex,
+                                            const std::optional<std::string> &usernameFragment) {
     auto pc = connection();
     if (!pc) {
       completion.Fail(RTCCallbackException(closedError("addIceCandidate")));
       return;
     }
 
-    std::optional<RTCCallbackException> error;
     std::set<std::string> mids;
-    const webrtc::SessionDescriptionInterface *remote = nullptr;
-    BlockingCallOn(_factory->signalingThread(), [&]() {
-      remote = pc->remote_description();
-      error = candidateSections(remote, sdpMid, sdpMLineIndex, usernameFragment, mids);
-    });
-    if (error) {
-      completion.Fail(*error);
+    const auto *remote = pc->remote_description();
+    if (auto sectionError = candidateSections(remote, sdpMid, sdpMLineIndex, usernameFragment, mids)) {
+      completion.Fail(*sectionError);
       return;
     }
 
-    if (candidate.empty()) {
+    if (!candidate && !error) {
       // the end of candidates, which libwebrtc doesn't take: the remote description shows it
       {
         const std::scoped_lock lock(_remoteEndOfCandidatesMutex);
@@ -380,22 +417,17 @@ namespace python_webrtc {
       completion.Succeed();
       return;
     }
-
-    webrtc::SdpParseError parseError;
-    auto iceCandidate =
-        webrtc::IceCandidate::Create(sdpMid.value_or(""), sdpMLineIndex.value_or(0), candidate, &parseError);
-    if (!iceCandidate) {
-      completion.Fail(RTCCallbackException(webrtc::RTCErrorType::UNSUPPORTED_OPERATION,
-                                           "Failed to parse the ICE candidate: " + parseError.description));
+    if (error) {
+      completion.Fail(*error);
       return;
     }
 
-    if (isBlockedCandidate(iceCandidate->candidate())) {
+    if (isBlockedCandidate(candidate->candidate())) {
       completion.Succeed();
       return;
     }
 
-    auto added = std::make_shared<IceCandidateInit>(*iceCandidate);
+    auto added = std::make_shared<IceCandidateInit>(*candidate);
     // libwebrtc copies the callback
     auto shared = std::make_shared<Completion>(std::move(completion));
     auto complete = [weak = weak_from_this(), shared, added](webrtc::RTCError error) {
@@ -410,7 +442,7 @@ namespace python_webrtc {
         shared->Fail(RTCCallbackException(std::move(error)));
       }
     };
-    pc->AddIceCandidate(std::move(iceCandidate), complete);
+    pc->AddIceCandidate(std::move(candidate), complete);
   }
 
 } // namespace python_webrtc

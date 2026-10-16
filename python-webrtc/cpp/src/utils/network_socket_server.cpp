@@ -8,6 +8,8 @@
 #include "network_socket_server.h"
 
 #include <memory>
+#include <optional>
+#include <utility>
 
 #ifdef __APPLE__
 #include <array>
@@ -27,7 +29,8 @@ namespace python_webrtc {
     // Forwards to a socket, repeating its read event while the reads its handler makes succeed
     class DrainingSocket : public webrtc::Socket {
     public:
-      DrainingSocket(webrtc::Socket *socket, webrtc::Buffer &scratch) : _socket(socket), _scratch(scratch) {
+      DrainingSocket(webrtc::Socket *socket, webrtc::Buffer &scratch, int receiveBuffer)
+          : _socket(socket), _scratch(scratch), _receiveBuffer(receiveBuffer) {
         // the analyzer loses the callbacks in libwebrtc's receiver list and reports them leaked
 #ifndef __clang_analyzer__
         _socket->SubscribeReadEvent(this, [this](webrtc::Socket *) { Drain(); });
@@ -43,10 +46,25 @@ namespace python_webrtc {
       DrainingSocket(DrainingSocket &&) = delete;
       DrainingSocket &operator=(DrainingSocket &&) = delete;
 
-      [[nodiscard]] webrtc::SocketAddress GetLocalAddress() const override { return _socket->GetLocalAddress(); }
+      // libwebrtc's UDP socket reads it for every packet it sends: kept from the bind, not asked of the kernel
+      [[nodiscard]] webrtc::SocketAddress GetLocalAddress() const override {
+        return _local ? *_local : _socket->GetLocalAddress();
+      }
       [[nodiscard]] webrtc::SocketAddress GetRemoteAddress() const override { return _socket->GetRemoteAddress(); }
-      int Bind(const webrtc::SocketAddress &address) override { return _socket->Bind(address); }
-      int Connect(const webrtc::SocketAddress &address) override { return _socket->Connect(address); }
+      int Bind(const webrtc::SocketAddress &address) override {
+        _local.reset();
+        const int result = _socket->Bind(address);
+        if (result == 0) {
+          if (auto local = _socket->GetLocalAddress(); !local.IsNil()) {
+            _local = std::move(local);
+          }
+        }
+        return result;
+      }
+      int Connect(const webrtc::SocketAddress &address) override {
+        _local.reset();
+        return _socket->Connect(address);
+      }
       int Send(const void *data, size_t size) override { return _socket->Send(data, size); }
       int SendTo(const void *data, size_t size, const webrtc::SocketAddress &address) override {
         return _socket->SendTo(data, size, address);
@@ -59,7 +77,11 @@ namespace python_webrtc {
       }
       int RecvFrom(ReceiveBuffer &buffer) override {
         ReceiveBuffer scratch(_scratch);
-        const int received = Read(_socket->RecvFrom(scratch));
+        int received = Read(_socket->RecvFrom(scratch));
+        // drained: libwebrtc's UDP socket reads its local address to log a failed read, but not an empty one
+        if (received < 0 && webrtc::IsBlockingError(_socket->GetError())) {
+          received = 0;
+        }
         buffer.payload.SetData(_scratch.data(), received > 0 ? static_cast<size_t>(received) : 0);
         buffer.source_address = scratch.source_address;
         buffer.arrival_time = scratch.arrival_time;
@@ -68,12 +90,20 @@ namespace python_webrtc {
       }
       int Listen(int backlog) override { return _socket->Listen(backlog); }
       webrtc::Socket *Accept(webrtc::SocketAddress *address) override { return _socket->Accept(address); }
-      int Close() override { return _socket->Close(); }
+      int Close() override {
+        _local.reset();
+        return _socket->Close();
+      }
       [[nodiscard]] int GetError() const override { return _socket->GetError(); }
       void SetError(int error) override { _socket->SetError(error); }
       [[nodiscard]] ConnState GetState() const override { return _socket->GetState(); }
       int GetOption(Option option, int *value) override { return _socket->GetOption(option, value); }
-      int SetOption(Option option, int value) override { return _socket->SetOption(option, value); }
+      int SetOption(Option option, int value) override {
+        if (option == OPT_RCVBUF && value < _receiveBuffer && _socket->SetOption(option, _receiveBuffer) == 0) {
+          return 0;
+        }
+        return _socket->SetOption(option, value);
+      }
 
     private:
       // bounded, so that one busy socket doesn't hold up the thread's other sockets and tasks
@@ -99,8 +129,10 @@ namespace python_webrtc {
       std::unique_ptr<webrtc::Socket> _socket;
       // the server's, shared by its sockets
       webrtc::Buffer &_scratch;
+      const int _receiveBuffer;
       std::shared_ptr<bool> _alive = std::make_shared<bool>(true);
       bool _read = false;
+      std::optional<webrtc::SocketAddress> _local;
     };
 
 #ifdef __APPLE__
@@ -182,7 +214,7 @@ namespace python_webrtc {
   } // namespace
 
 #ifdef __APPLE__
-  NetworkSocketServer::NetworkSocketServer() : _kqueue(kqueue()) {
+  NetworkSocketServer::NetworkSocketServer(int receiveBuffer) : _receiveBuffer(receiveBuffer), _kqueue(kqueue()) {
     RTC_CHECK(_kqueue >= 0) << "kqueue failed: " << errno;
     struct kevent wake{};
     EV_SET(&wake, 0, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, nullptr);
@@ -312,7 +344,7 @@ namespace python_webrtc {
     PhysicalSocketServer::WakeUp();
   }
 #else
-  NetworkSocketServer::NetworkSocketServer() = default;
+  NetworkSocketServer::NetworkSocketServer(int receiveBuffer) : _receiveBuffer(receiveBuffer) {}
 
   NetworkSocketServer::~NetworkSocketServer() = default;
 
@@ -325,7 +357,10 @@ namespace python_webrtc {
     if (socket == nullptr || type != SOCK_DGRAM) {
       return socket;
     }
-    return new DrainingSocket(socket, _scratch);
+    if (_receiveBuffer > 0) {
+      (void)socket->SetOption(webrtc::Socket::OPT_RCVBUF, _receiveBuffer);
+    }
+    return new DrainingSocket(socket, _scratch, _receiveBuffer);
   }
 
 } // namespace python_webrtc

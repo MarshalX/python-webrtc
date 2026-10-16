@@ -125,3 +125,56 @@ async def test_refused_tcp_connects_neither_spin_nor_leak(create_pc: CreatePC) -
 
     assert time.process_time() - started < seconds(0.5)
     assert _descriptors() <= descriptors
+
+
+async def _selected_pair(pc: webrtc.RTCPeerConnection) -> webrtc.RTCIceCandidatePairStats:
+    report = await pc.get_stats()
+    selected = next(
+        s.selected_candidate_pair_id
+        for s in report.values()
+        if isinstance(s, webrtc.RTCTransportStats) and s.selected_candidate_pair_id is not None
+    )
+    pair = report[selected]
+    assert isinstance(pair, webrtc.RTCIceCandidatePairStats)
+    return pair
+
+
+@pytest.mark.asyncio
+async def test_a_flood_between_connections_of_one_thread_loses_no_datagram(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """The network thread reads what it sends to its own sockets before their kernel buffers overflow."""
+    channel = caller.create_data_channel('flood')
+    announced = wait_for_event(callee, 'datachannel')
+    await connect(caller, callee)
+    event = await announced
+    assert isinstance(event, webrtc.RTCDataChannelEvent)
+    remote = event.channel
+    await wait_until(lambda: channel.ready_state == webrtc.RTCDataChannelState.open, 'the channel to open')
+
+    count = 20000
+    received = 0
+    all_received = asyncio.Event()
+
+    def on_message(_event: webrtc.MessageEvent) -> None:
+        nonlocal received
+        received += 1
+        if received == count:
+            all_received.set()
+
+    remote.on('message', on_message)
+    channel.buffered_amount_low_threshold = 256 << 10
+    payload = b'x' * 1024
+    for _ in range(count):
+        # as a sender keeping under a high watermark does
+        if channel.buffered_amount > 1 << 20:
+            await wait_for_event(channel, 'bufferedamountlow')
+        channel.send(payload)
+    await asyncio.wait_for(all_received.wait(), seconds(30))
+
+    sent = (await _selected_pair(caller)).packets_sent
+    delivered = (await _selected_pair(callee)).packets_received
+    # SCTP retransmits what the kernel dropped, so only these counts show the loss
+    assert sent is not None
+    assert delivered is not None
+    assert sent - delivered <= 16, f'{sent - delivered} of {sent} datagrams dropped'
