@@ -48,6 +48,8 @@ namespace python_webrtc {
     BlockingCallOn(_factory->workerThread(), [allocator]() { allocator->set_step_delay(0); });
 
     _jinglePeerConnection = result.MoveValue();
+    // new until its first event, unless read unbound: libwebrtc's own state runs ahead of the events
+    _surfacedIceGatheringState.Changed(true, IceGatheringState::kIceGatheringNew);
   }
 
   RTCPeerConnection::~RTCPeerConnection() {
@@ -132,6 +134,7 @@ namespace python_webrtc {
         .def("_surfaceIceGatheringState", &RTCPeerConnection::SurfaceIceGatheringState, nogil(), pybind11::arg("state"))
         .def("_surfaceConnectionState", &RTCPeerConnection::SurfaceConnectionState, nogil(), pybind11::arg("state"))
         .def("_refreshDescriptions", &RTCPeerConnection::RefreshDescriptions, nogil())
+        .def("_expireParameters", &RTCPeerConnection::ExpireParameters, nogil())
         .def_static("_connectionOf", &RTCPeerConnection::ConnectionOf, nogil(), pybind11::arg("sender"))
         .def("_applyDescriptions", &RTCPeerConnection::ApplyDescriptions, nogil(),
              pybind11::arg("snapshot") = std::nullopt);
@@ -463,7 +466,9 @@ namespace python_webrtc {
       throw RTCException(result.error());
     }
 
-    return Wrap(_senders, result.value());
+    auto sender = Wrap(_senders, result.value());
+    sender->SetKnownTrack(mediaStreamTrack.shared_from_this());
+    return sender;
   }
 
   std::shared_ptr<RTCRtpSender>
@@ -502,6 +507,7 @@ namespace python_webrtc {
     if (!error.ok()) {
       throw RTCException(error);
     }
+    sender.SetKnownTrack(nullptr);
   }
 
   std::shared_ptr<RTCRtpTransceiver>
@@ -511,7 +517,9 @@ namespace python_webrtc {
     if (!pc) {
       throw RTCException(closedError("addTransceiver"));
     }
-    return AddedTransceiver(init ? pc->AddTransceiver(kind, init->get()) : pc->AddTransceiver(kind));
+    auto transceiver = AddedTransceiver(init ? pc->AddTransceiver(kind, init->get()) : pc->AddTransceiver(kind));
+    transceiver->GetSender()->SetKnownTrack(nullptr);
+    return transceiver;
   }
 
   std::shared_ptr<RTCRtpTransceiver>
@@ -521,8 +529,10 @@ namespace python_webrtc {
     if (!pc) {
       throw RTCException(closedError("addTransceiver"));
     }
-    return AddedTransceiver(init ? pc->AddTransceiver(track.SentTrack(), init->get())
-                                 : pc->AddTransceiver(track.SentTrack()));
+    auto transceiver = AddedTransceiver(init ? pc->AddTransceiver(track.SentTrack(), init->get())
+                                             : pc->AddTransceiver(track.SentTrack()));
+    transceiver->GetSender()->SetKnownTrack(track.shared_from_this());
+    return transceiver;
   }
 
   std::shared_ptr<RTCRtpTransceiver> RTCPeerConnection::AddedTransceiver(
@@ -728,6 +738,12 @@ namespace python_webrtc {
       }
     }
 
+    ShowTransceivers([](TransceiverView &view) {
+      view.state = {.mid = view.state.mid,
+                    .currentDirection = webrtc::RtpTransceiverDirection::kStopped,
+                    .stopping = true,
+                    .stopped = true};
+    });
     Parking::At("connection.close");
     // a closed connection, its channels and transports fire nothing more; remote tracks fire ended
     Unbind();
@@ -818,8 +834,24 @@ namespace python_webrtc {
   void RTCPeerConnection::OnSignalingChange(SignalingState newState) {
     _surfacedSignalingState.Changed(IsBound(), _lastSignalingState.load());
     _lastSignalingState = newState;
+    if (_deferSignaling) {
+      // libwebrtc changes the state before the transceivers: the event comes with the completion
+      _deferredSignaling = newState;
+      return;
+    }
     // the descriptions change along with the event
     Emit("signalingstatechange", newState, SnapshotDescriptions());
+  }
+
+  void RTCPeerConnection::EmitDeferredSignaling(std::optional<uint64_t> snapshot) {
+    _deferSignaling = false;
+    auto tracks = std::exchange(_deferredTracks, {});
+    if (auto state = std::exchange(_deferredSignaling, std::nullopt)) {
+      Emit("signalingstatechange", *state, snapshot ? *snapshot : SnapshotDescriptions());
+    }
+    for (const auto &transceiver : tracks) {
+      EmitTrack(transceiver);
+    }
   }
 
   void RTCPeerConnection::OnIceConnectionChange(IceConnectionState /*unused*/) {
@@ -895,6 +927,10 @@ namespace python_webrtc {
     {
       const std::scoped_lock lock(_remoteStreamsMutex);
       _trackFired.insert(transceiver.get());
+    }
+    if (_deferSignaling) {
+      _deferredTracks.push_back(std::move(transceiver));
+      return;
     }
     EmitTrack(transceiver);
   }

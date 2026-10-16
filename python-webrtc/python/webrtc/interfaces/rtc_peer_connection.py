@@ -479,9 +479,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         """The success task of setting a description."""
         # the descriptions as the operation left them, candidates gathered since come with their events
         self._native_obj._applyDescriptions()
-        # getParameters() returns the negotiated parameters from now on
-        for sender in self._native_obj.getSenders():
-            sender._expireParameters()
+        self._native_obj._expireParameters()
 
     async def create_offer(self, options: webrtc.RTCOfferOptions | None = None) -> webrtc.RTCSessionDescriptionInit:
         """Creates an offer that starts a negotiation or renegotiates one.

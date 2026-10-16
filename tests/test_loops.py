@@ -723,8 +723,8 @@ def test_handlers_bind_an_object_bound_to_a_closed_loop_not_swept_yet() -> None:
         pc.close()
 
 
-def test_call_soon_runs_on_the_loop_from_another_thread() -> None:
-    """A callback scheduled from another thread runs on the loop's thread; its drop handler doesn't."""
+def test_post_from_another_thread_runs_on_the_loop() -> None:
+    """A callback posted from another thread runs on the loop's thread; its drop handler doesn't."""
     ran: list[str] = []
 
     async def schedule() -> None:
@@ -736,25 +736,41 @@ def test_call_soon_runs_on_the_loop_from_another_thread() -> None:
             done.set()
 
         loop_thread = threading.current_thread().name
-        _in_thread(lambda: state.call_soon(callback, dropped=lambda: ran.append('dropped')))
+        _in_thread(lambda: state.post(callback, dropped=lambda: ran.append('dropped')))
         await asyncio.wait_for(done.wait(), TIMEOUT)
         assert ran == [loop_thread]
 
     asyncio.run(schedule())
 
 
-def test_call_soon_of_a_released_loop_runs_the_drop_handler_instead() -> None:
+def test_post_of_a_released_loop_runs_the_drop_handler_instead() -> None:
     """A callback queued when its loop is released never runs; its drop handler runs once, a later one drops at once."""
     loop = asyncio.new_event_loop()
     state = LoopState.of(loop)
     ran: list[str] = []
     # queued in the loop, which never runs again
-    state.call_soon(lambda: ran.append('queued'), dropped=lambda: ran.append('queued dropped'))
+    state.post(lambda: ran.append('queued'), dropped=lambda: ran.append('queued dropped'))
     loop.close()
     state.release()
     state.release()
-    state.call_soon(lambda: ran.append('late'), dropped=lambda: ran.append('late dropped'))
+    state.post(lambda: ran.append('late'), dropped=lambda: ran.append('late dropped'))
     assert ran == ['queued dropped', 'late dropped']
+
+
+def test_post_held_at_release_runs_its_drop_handler() -> None:
+    """A posted callback held behind a completion when its loop is released runs its drop handler, never itself."""
+    loop = asyncio.new_event_loop()
+    state = LoopState.of(loop)
+    ran: list[str] = []
+    token, _ = state.start(None)
+    wrtc._testing.complete(state.mailbox, token, 1)
+    state.post(lambda: ran.append('posted'), after_ready=True, dropped=lambda: ran.append('dropped'))
+    # runs the completion, then holds the callback for a later iteration
+    state.drain()
+    assert state._held is not None
+    loop.close()
+    state.release()
+    assert ran == ['dropped']
 
 
 def test_update_roots_by_activity() -> None:
@@ -791,7 +807,7 @@ class _DictLoop:
         return self.closed
 
 
-@pytest.mark.parametrize('use', ['post', 'call_soon'])
+@pytest.mark.parametrize('use', ['post', 'post with a drop handler'])
 def test_a_state_outliving_its_loop_is_released_by_its_next_use(use: str) -> None:
     """Posts and calls are dropped, and new calls fail."""
     loop = _DictLoop()
@@ -803,7 +819,7 @@ def test_a_state_outliving_its_loop_is_released_by_its_next_use(use: str) -> Non
     if use == 'post':
         state.post(lambda: ran.append('posted'))
     else:
-        state.call_soon(lambda: ran.append('soon'), dropped=lambda: ran.append('dropped'))
+        state.post(lambda: ran.append('posted'), dropped=lambda: ran.append('dropped'))
     expected: list[str] = [] if use == 'post' else ['dropped']
     _swept(lambda: state.mailbox.closed and ran == expected)
     assert state._markers == {}
@@ -811,7 +827,7 @@ def test_a_state_outliving_its_loop_is_released_by_its_next_use(use: str) -> Non
         state.start(None)
 
 
-@pytest.mark.parametrize('use', ['post', 'call_soon'])
+@pytest.mark.parametrize('use', ['post', 'post with a drop handler'])
 def test_a_post_to_a_closed_loop_releases_its_state(use: str) -> None:
     """Only the drop handler runs."""
     loop = asyncio.new_event_loop()
@@ -821,7 +837,7 @@ def test_a_post_to_a_closed_loop_releases_its_state(use: str) -> None:
     if use == 'post':
         state.post(lambda: ran.append('posted'))
     else:
-        state.call_soon(lambda: ran.append('soon'), dropped=lambda: ran.append('dropped'))
+        state.post(lambda: ran.append('posted'), dropped=lambda: ran.append('dropped'))
     expected: list[str] = [] if use == 'post' else ['dropped']
     _swept(lambda: state.mailbox.closed and ran == expected)
     assert LoopState.find(state.mailbox.id) is None
@@ -831,12 +847,12 @@ def test_a_post_to_a_closed_loop_releases_its_state(use: str) -> None:
     assert ran == expected
 
 
-def test_call_soon_released_before_it_runs_runs_the_drop_handler_only() -> None:
+def test_post_released_before_it_runs_runs_the_drop_handler_only() -> None:
     ran: list[str] = []
 
     async def release() -> None:
         state = LoopState.of(asyncio.get_running_loop())
-        state.call_soon(lambda: ran.append('soon'), dropped=lambda: ran.append('dropped'))
+        state.post(lambda: ran.append('posted'), dropped=lambda: ran.append('dropped'))
         state.release()
         await asyncio.sleep(0)
         await asyncio.sleep(0)

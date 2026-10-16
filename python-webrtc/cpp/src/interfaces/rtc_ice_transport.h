@@ -63,7 +63,9 @@ namespace python_webrtc {
 
     // the local and the remote candidate of the pair in use, and whether the remote one is peer-reflexive (known
     // from connectivity checks only, not signaled)
-    std::optional<std::tuple<IceCandidateInit, IceCandidateInit, bool>> GetSelectedCandidatePair();
+    using CandidatePair = std::tuple<IceCandidateInit, IceCandidateInit, bool>;
+
+    std::optional<CandidatePair> GetSelectedCandidatePair();
 
     std::vector<IceCandidateInit> GetLocalCandidates();
 
@@ -74,8 +76,9 @@ namespace python_webrtc {
 
     std::optional<std::pair<std::string, std::string>> GetRemoteParameters();
 
-    // see Surfaced
     void SurfaceState(webrtc::IceTransportState state);
+
+    void SurfaceSelectedPair(std::optional<CandidatePair> pair);
 
     void SurfaceGatheringState(webrtc::IceGatheringState state);
 
@@ -182,9 +185,13 @@ namespace python_webrtc {
 
     std::optional<std::pair<std::string, std::string>> GetParameters(bool local);
 
+    std::optional<CandidatePair> ReadSelectedCandidatePair();
+
     // Libwebrtc hides the address of a peer-reflexive candidate: the remote peer may have signaled it since,
     // which is found by port and protocol
     std::optional<IceCandidateInit> FindSignaledCandidate(const webrtc::Candidate &candidate);
+
+    void ResolveSignaled(CandidatePair &pair);
 
     bool Stopped();
 
@@ -205,8 +212,8 @@ namespace python_webrtc {
     bool _roleKnown = false;
     Surfaced<webrtc::IceTransportState> _surfacedState;
     Surfaced<webrtc::IceGatheringState> _surfacedGatheringState;
-    // the selected pair seen last, as candidate-attributes
-    std::string _selectedPair;
+    Surfaced<std::optional<CandidatePair>> _surfacedPair;
+    std::optional<CandidatePair> _selectedPair;
     std::vector<IceCandidateInit> _localCandidates;
     std::vector<IceCandidateInit> _remoteCandidates;
     LockedFunction<ParametersGetter> _parametersGetter;

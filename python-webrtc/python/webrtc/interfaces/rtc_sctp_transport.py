@@ -38,9 +38,9 @@ class RTCSctpTransport(WebRTCObject[wrtc.RTCSctpTransport], UniformEventTarget[L
 
     @override
     def _on_event(self, name: str, *args: object) -> None:
-        (state,) = cast('tuple[webrtc.RTCSctpTransportState]', args)
-        # the state changes along with its event
-        self._native_obj._surfaceState(state)
+        state, max_channels = cast('tuple[webrtc.RTCSctpTransportState, int | None]', args)
+        # the state changes along with its event, and the channels it allows
+        self._native_obj._surfaceState(state, max_channels)
 
     @override
     def _activity(self) -> str | None:

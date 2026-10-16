@@ -154,7 +154,7 @@ class LoopState:
         self._read_at: weakref.WeakKeyDictionary[EventTarget[Never], list[int]] = weakref.WeakKeyDictionary()
         self._passes = 0
         self._markers: dict[int, _Item] = {}
-        # drop handlers of call_soon callbacks not run yet, by key
+        # drop handlers of posted callbacks not run yet, by key
         self._soon: dict[int, Callable[[], object]] = {}
         self._next_key = 0
         # re-entrant, like _states_lock
@@ -242,51 +242,47 @@ class LoopState:
             self.pending[token] = _Call(future, weakref.ref(target) if target is not None else None)
         return token, future
 
-    def post(self, callback: Callable[[], object], *, resumes: bool = False, after_ready: bool = False) -> None:
-        """Schedules a callback in order with the native records (flags as in ``_Item``)."""
-        item = _Item(callback, resumes, after_ready)
-        with self._lock:
-            key = self._key()
-            # after allocating: gc may have released the state under the lock
-            if self._released:
-                return
-            self._markers[key] = item
-        self.mailbox.postMarker(key)
-        self._schedule()
+    def post(
+        self,
+        callback: Callable[[], object],
+        *,
+        resumes: bool = False,
+        after_ready: bool = False,
+        dropped: Callable[[], object] | None = None,
+    ) -> None:
+        """Schedules a callback in order with the native records (flags as in ``_Item``).
 
-    def call_soon(self, callback: Callable[[], object], *, dropped: Callable[[], object]) -> None:
-        """Runs a callback on the loop soon, from any thread, unordered with the native records.
-
-        If the loop is released first, ``dropped`` runs instead: exactly one of them runs.
+        If the loop is released first, ``dropped`` runs instead, if given: exactly one of them runs.
         """
         with self._lock:
             key = self._key()
+            # after allocating: gc may have released the state under the lock
             released = self._released
             if not released:
-                self._soon[key] = dropped
+                self._markers[key] = _Item(self._unless_dropped(key, callback), resumes, after_ready)
+                if dropped is not None:
+                    self._soon[key] = dropped
         if released:
-            _ = dropped()
+            if dropped is not None:
+                _ = dropped()
             return
+        self.mailbox.postMarker(key)
+        self._schedule()
+
+    def _unless_dropped(self, key: int, callback: Callable[[], object]) -> Callable[[], object]:
+        """The callback of a posted item, which a release that ran its drop handler (held or queued) skips."""
 
         def run() -> None:
             with self._lock:
-                # gone once released: its drop handler ran
-                if self._soon.pop(key, None) is None:
+                if self._released:
                     return
+                _ = self._soon.pop(key, None)
             _ = callback()
 
-        # closed or gone: the release runs the drop handler
-        loop = self._loop_ref()
-        if loop is None:
-            self.release()
-            return
-        try:
-            _ = loop.call_soon_threadsafe(run)
-        except RuntimeError:
-            self.release()
+        return run
 
     def _key(self) -> int:
-        """Next marker, completion or ``call_soon`` key; call under the lock."""
+        """Next marker or completion key; call under the lock."""
         self._next_key += 1
         return self._next_key
 

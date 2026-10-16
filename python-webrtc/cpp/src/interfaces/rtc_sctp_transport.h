@@ -60,8 +60,7 @@ namespace python_webrtc {
 
     std::optional<int> GetMaxChannels();
 
-    // see Surfaced
-    void SurfaceState(webrtc::SctpTransportState state);
+    void SurfaceState(webrtc::SctpTransportState state, std::optional<int> maxChannels);
 
   private:
     // on the network thread
@@ -77,8 +76,10 @@ namespace python_webrtc {
     // accessed on the network thread only
     bool _observing = false;
     webrtc::SctpTransportState _lastState = webrtc::SctpTransportState::kNew;
+    std::optional<int> _lastMaxChannels;
 
     Surfaced<webrtc::SctpTransportState> _surfacedState;
+    Surfaced<std::optional<int>> _surfacedMaxChannels;
     LockedFunction<std::optional<double>()> _maxMessageSizeGetter;
   };
 

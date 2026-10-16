@@ -104,8 +104,9 @@ class OperationsChain:
             if not waiter.done():
                 waiter.set_result(None)
 
-        # if the loop is released first, this operation can't run, so it ends then
-        previous.add_done_callback(lambda _: state.call_soon(resolve, dropped=lambda: self._end(done)))
+        # in order with the native records, once the code the previous one resumed ran (see LoopState.drain); if the
+        # loop is released first, this operation can't run, so it ends then
+        previous.add_done_callback(lambda _: state.post(resolve, after_ready=True, dropped=lambda: self._end(done)))
         return waiter
 
     def _end(self, done: concurrent.futures.Future[None]) -> None:

@@ -16,6 +16,7 @@
 #include <media/base/media_constants.h>
 #include <pc/session_description.h>
 
+#include "../../utils/libwebrtc_thread.h"
 #include "../peer_connection_factory.h"
 #include "stats_collector_callback.h"
 
@@ -95,10 +96,74 @@ namespace python_webrtc {
 
   } // namespace
 
-  webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>
-  RTCPeerConnection::TransceiverOf(const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender) {
+  TransceiverState
+  RTCPeerConnection::ShownTransceiver(RTCRtpSender &sender,
+                                      const webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> &transceiver) {
+    bool bound = false;
+    {
+      const std::scoped_lock lock(_descriptionsMutex);
+      bound = IsBound() && _shown;
+      if (bound) {
+        auto it = std::ranges::find_if(_shown->transceivers,
+                                       [&](const TransceiverView &view) { return view.sender.get() == &sender; });
+        if (it != _shown->transceivers.end()) {
+          return it->state;
+        }
+      }
+    }
     auto pc = connection();
-    return pc ? transceiverOf(pc, sender) : nullptr;
+    auto current = BlockingCallOn(_factory->signalingThread(), [&]() {
+      auto found = transceiver;
+      if (!found && pc) {
+        found = transceiverOf(pc, sender.sender());
+      }
+      return found ? TransceiverState::Of(*found) : TransceiverState::Gone();
+    });
+    if (bound && !current.stopped) {
+      // added since: only a description negotiates it, along with a snapshot
+      return {.stopping = current.stopping};
+    }
+    // or gone, stopped for good
+    return current;
+  }
+
+  void RTCPeerConnection::ExpireParameters() {
+    std::vector<std::shared_ptr<RTCRtpSender>> senders;
+    {
+      const TrackedLock lock(_wrappersMutex);
+      for (const auto &entry : _senders) {
+        senders.push_back(entry.second);
+      }
+      for (const auto &entry : _transceivers) {
+        senders.push_back(entry.second->GetSender());
+      }
+    }
+    for (const auto &sender : senders) {
+      sender->ExpireParameters(std::nullopt);
+    }
+  }
+
+  void RTCPeerConnection::ShowTransceivers(const std::function<void(TransceiverView &)> &change) {
+    auto changeAll = [&](DescriptionsSnapshot &snapshot) {
+      for (auto &view : snapshot.transceivers) {
+        change(view);
+      }
+    };
+    const std::scoped_lock lock(_descriptionsMutex);
+    if (_shown) {
+      changeAll(*_shown);
+    }
+    for (auto &entry : _snapshots) {
+      changeAll(entry.second);
+    }
+  }
+
+  void RTCPeerConnection::ShowStopping(const RTCRtpSender &sender) {
+    ShowTransceivers([&](TransceiverView &view) {
+      if (view.sender.get() == &sender) {
+        view.state.stopping = true;
+      }
+    });
   }
 
   template <typename T>

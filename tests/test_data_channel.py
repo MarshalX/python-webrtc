@@ -21,7 +21,11 @@ from typing_extensions import TypedDict, Unpack
 import webrtc
 import wrtc
 from tests.helpers import (
+    collect,
     connect,
+    exchange_answer,
+    exchange_ice_candidates,
+    exchange_offer,
     mistyped,
     stats_of_type,
     wait_for_event,
@@ -405,6 +409,27 @@ async def test_closed_in_the_datachannel_handler_never_opens(
 
 
 @pytest.mark.asyncio
+async def test_announced_channel_kept_for_its_open_event(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """A remote channel reads open from its datachannel event on, and its open handler keeps it until the event."""
+    states: list[webrtc.RTCDataChannelState] = []
+    opened: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+    def on_channel(event: webrtc.RTCDataChannelEvent) -> None:
+        states.append(event.channel.ready_state)
+        event.channel.on('open', lambda _event: opened.set_result(None))
+        # once this handler returns nothing holds the channel; the loop runs this before the next record
+        asyncio.get_running_loop().call_soon(collect)
+
+    callee.on('datachannel', on_channel)
+    caller.create_data_channel('announced')
+    await connect(caller, callee)
+    await asyncio.wait_for(opened, seconds(10))
+    assert states == [webrtc.RTCDataChannelState.open]
+
+
+@pytest.mark.asyncio
 async def test_messages_sent_on_open_reach_a_handler_added_on_datachannel(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:
@@ -622,6 +647,37 @@ async def test_concurrent_stats_share_a_collection(
     assert started == ['getStats', 'getStats']
     assert isinstance(stats, webrtc.RTCDataChannelStats)
     assert stats.messages_received == 1
+
+
+@pytest.mark.asyncio
+async def test_max_channels_with_the_connected_statechange(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """The max number of channels is known once the connected statechange is delivered."""
+    caller.create_data_channel('channels')
+    exchange_ice_candidates(caller, callee)
+    await exchange_offer(caller, callee)
+    transports = (caller.sctp, callee.sctp)
+
+    def parked_max_channels() -> list[int | None]:
+        # off the loop, which may wait for the network thread while it's parked
+        try:
+            assert wrtc._testing.parked('sctp.connected', seconds(10))
+            return [transport.max_channels for transport in transports if transport is not None]
+        finally:
+            wrtc._testing.release('sctp.connected')
+
+    wrtc._testing.park('sctp.connected')
+    answering = asyncio.ensure_future(exchange_answer(caller, callee))
+    # connected natively, its event not delivered
+    assert await asyncio.to_thread(parked_max_channels) == [None, None]
+    await answering
+
+    def connected() -> bool:
+        return all(t is not None and t.state == webrtc.RTCSctpTransportState.connected for t in transports)
+
+    await wait_until(connected, 'SCTP to connect')
+    assert all(t is not None and t.max_channels is not None and t.max_channels > 0 for t in transports)
 
 
 @pytest.mark.asyncio

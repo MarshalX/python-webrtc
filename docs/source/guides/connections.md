@@ -95,8 +95,9 @@ for stats in report.values():
 
 ## Closing
 
-{meth}`~webrtc.RTCPeerConnection.close` stops the transports and the media at once. A closed connection can't be
-reused, so create a new one to connect again.
+{meth}`~webrtc.RTCPeerConnection.close` stops the transports and the media at once: its transceivers read stopped
+right away, and remote tracks end with their `ended` event. A closed connection can't be reused, so create a new one
+to connect again.
 
 Calls pending when the connection closes are cancelled: they raise {obj}`asyncio.CancelledError`.
 

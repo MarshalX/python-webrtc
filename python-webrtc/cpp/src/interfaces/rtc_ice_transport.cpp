@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 
 #include <api/environment/environment_factory.h>
 #include <p2p/base/p2p_constants.h>
@@ -23,6 +24,7 @@
 #include "../exceptions.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
+#include "../utils/parking.h"
 #include "../utils/port_allocator.h"
 
 namespace python_webrtc {
@@ -83,6 +85,8 @@ namespace python_webrtc {
       }
       TakeSnapshot();
     });
+    // none until its first change, unless read unbound
+    _surfacedPair.Changed(true, std::nullopt);
   }
 
   RTCIceTransport::~RTCIceTransport() {
@@ -127,6 +131,7 @@ namespace python_webrtc {
         .def_property_readonly("_standalone", &RTCIceTransport::IsStandalone)
         .def_property_readonly("_stopped", nogil_fn(&RTCIceTransport::Stopped))
         .def("_surfaceState", &RTCIceTransport::SurfaceState, nogil(), pybind11::arg("state"))
+        .def("_surfaceSelectedPair", &RTCIceTransport::SurfaceSelectedPair, nogil(), pybind11::arg("pair"))
         .def("_surfaceGatheringState", &RTCIceTransport::SurfaceGatheringState, nogil(), pybind11::arg("state"))
         .def("_surfaceCandidate", &RTCIceTransport::SurfaceLocalCandidate, nogil());
   }
@@ -206,6 +211,7 @@ namespace python_webrtc {
     }
     _surfacedState.Reset();
     _surfacedGatheringState.Reset();
+    _surfacedPair.Reset();
   }
 
   void RTCIceTransport::OnStateChanged(webrtc::IceTransportInternal * /*unused*/) {
@@ -226,6 +232,10 @@ namespace python_webrtc {
   }
 
   void RTCIceTransport::EmitState(webrtc::IceTransportState previous, webrtc::IceTransportState state) {
+    if (state == webrtc::IceTransportState::kFailed || state == webrtc::IceTransportState::kClosed) {
+      const std::scoped_lock lock(_mutex);
+      _selectedPair.reset();
+    }
     auto emitter = _stateEmitter.Get();
     if (emitter && emitter(previous, state)) {
       return;
@@ -301,14 +311,31 @@ namespace python_webrtc {
     return _surfacedState.Shown(IsBound(), state);
   }
 
-  std::optional<std::tuple<IceCandidateInit, IceCandidateInit, bool>> RTCIceTransport::GetSelectedCandidatePair() {
+  std::optional<RTCIceTransport::CandidatePair> RTCIceTransport::GetSelectedCandidatePair() {
     {
       const std::scoped_lock lock(_mutex);
       if (_stopped) {
         return std::nullopt;
       }
     }
-    std::optional<std::tuple<IceCandidateInit, IceCandidateInit, bool>> result;
+    return _surfacedPair.ShownOr(IsBound(), [this]() { return ReadSelectedCandidatePair(); });
+  }
+
+  void RTCIceTransport::ResolveSignaled(CandidatePair &pair) {
+    auto &[local, remote, peerReflexive] = pair;
+    if (!peerReflexive) {
+      return;
+    }
+    webrtc::SdpParseError error;
+    auto parsed = webrtc::IceCandidate::Create(remote.sdpMid, remote.sdpMLineIndex, remote.candidate, &error);
+    if (auto signaled = parsed ? FindSignaledCandidate(parsed->candidate()) : std::nullopt) {
+      remote = *signaled;
+      peerReflexive = false;
+    }
+  }
+
+  std::optional<RTCIceTransport::CandidatePair> RTCIceTransport::ReadSelectedCandidatePair() {
+    std::optional<CandidatePair> result;
     BlockingCallOn(_factory->workerThread(), [&]() {
       auto *internal = _transport ? _transport->internal() : nullptr;
       auto pair = internal ? internal->GetSelectedCandidatePair() : std::nullopt;
@@ -362,8 +389,15 @@ namespace python_webrtc {
   }
 
   void RTCIceTransport::AddRemoteCandidate(const IceCandidateInit &candidate) {
-    const std::scoped_lock lock(_mutex);
-    addCandidate(_remoteCandidates, candidate);
+    {
+      const std::scoped_lock lock(_mutex);
+      addCandidate(_remoteCandidates, candidate);
+    }
+    _surfacedPair.Update([this](std::optional<CandidatePair> &shown) {
+      if (shown) {
+        ResolveSignaled(*shown);
+      }
+    });
   }
 
   std::vector<IceCandidateInit> RTCIceTransport::GetLocalCandidates() {
@@ -555,6 +589,7 @@ namespace python_webrtc {
     Unbind();
     _surfacedState.Reset();
     _surfacedGatheringState.Reset();
+    _surfacedPair.Reset();
   }
 
   void RTCIceTransport::SurfaceCurrent() {
@@ -579,23 +614,43 @@ namespace python_webrtc {
     Emit("gatheringstatechange", webrtc::IceGatheringState::kIceGatheringComplete);
   }
 
+  namespace {
+
+    std::string keyOf(const std::optional<RTCIceTransport::CandidatePair> &pair) {
+      return pair ? std::get<0>(*pair).candidate + "|" + std::get<1>(*pair).candidate : std::string();
+    }
+
+  } // namespace
+
   void RTCIceTransport::CheckSelectedCandidatePair() {
-    auto pair = GetSelectedCandidatePair();
-    auto key = pair ? std::get<0>(*pair).candidate + "|" + std::get<1>(*pair).candidate : std::string();
+    auto pair = ReadSelectedCandidatePair();
+    std::optional<CandidatePair> previous;
     {
       const std::scoped_lock lock(_mutex);
-      if (key == _selectedPair) {
+      if (keyOf(pair) == keyOf(_selectedPair)) {
         return;
       }
-      _selectedPair = key;
+      previous = std::exchange(_selectedPair, pair);
     }
     if (pair) {
-      Emit("selectedcandidatepairchange");
+      _surfacedPair.Changed(IsBound(), previous);
+      Parking::At("ice.pairchanged");
+      Emit("selectedcandidatepairchange", *pair);
     }
   }
 
   void RTCIceTransport::SurfaceState(webrtc::IceTransportState state) {
     _surfacedState.Surface(state);
+    if (state == webrtc::IceTransportState::kFailed || state == webrtc::IceTransportState::kClosed) {
+      _surfacedPair.Surface(std::nullopt);
+    }
+  }
+
+  void RTCIceTransport::SurfaceSelectedPair(std::optional<CandidatePair> pair) {
+    if (pair) {
+      ResolveSignaled(*pair);
+    }
+    _surfacedPair.Surface(std::move(pair));
   }
 
   void RTCIceTransport::SurfaceGatheringState(webrtc::IceGatheringState state) {

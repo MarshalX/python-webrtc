@@ -50,9 +50,8 @@ namespace python_webrtc {
     return registry.Get();
   }
 
-  void
-  RTCDTMFSender::SetTransceiver(std::function<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>()> transceiver) {
-    _transceiver.Set(std::move(transceiver));
+  void RTCDTMFSender::SetTransceiverState(std::function<TransceiverState()> state) {
+    _transceiverState.Set(std::move(state));
   }
 
   void RTCDTMFSender::OnToneChange(const std::string &tone, const std::string &toneBuffer) {
@@ -64,40 +63,54 @@ namespace python_webrtc {
     Emit("tonechange", tone, toneBuffer, insertion);
   }
 
-  void RTCDTMFSender::CheckCanSend() {
-    auto lookup = _transceiver.Get();
-    auto transceiver = lookup ? lookup() : nullptr;
-    if (!transceiver || transceiver->stopping() || transceiver->stopped()) {
-      throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "The transceiver of the sender is stopped");
+  std::optional<std::string> RTCDTMFSender::CannotSend() {
+    auto lookup = _transceiverState.Get();
+    auto state = lookup ? lookup() : TransceiverState::Gone();
+    if (state.stopping || state.stopped) {
+      return "The transceiver of the sender is stopped";
     }
-    auto direction = transceiver->current_direction();
+    auto direction = state.currentDirection;
     if (direction && (*direction == webrtc::RtpTransceiverDirection::kRecvOnly ||
                       *direction == webrtc::RtpTransceiverDirection::kInactive)) {
-      throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "The transceiver of the sender doesn't send");
+      return "The transceiver of the sender doesn't send";
     }
     if (!_dtmf->CanInsertDtmf()) {
-      throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "The DTMF sender can't send tones yet");
+      return "The DTMF sender can't send tones yet";
+    }
+    return std::nullopt;
+  }
+
+  void RTCDTMFSender::CheckCanSend() {
+    if (auto reason = CannotSend()) {
+      throw RTCException(webrtc::RTCErrorType::INVALID_STATE, *reason);
     }
   }
 
   void RTCDTMFSender::InsertDtmf(const std::string &tones, int duration, int interToneGap) {
-    CheckCanSend();
-    if (tones.empty() && _dtmf->tones().empty()) {
-      // nothing to play, nor to cancel
-      return;
-    }
-    {
-      // tone changes of the tones inserted before don't change the buffer anymore
+    // the proxies run inline there; nothing may throw through libwebrtc's task
+    auto reason = BlockingCallOn(_factory->signalingThread(), [&]() -> std::optional<std::string> {
+      auto cannot = CannotSend();
+      if (cannot || (tones.empty() && _dtmf->tones().empty())) {
+        // or nothing to play, nor to cancel
+        return cannot;
+      }
+      {
+        // tone changes of the tones inserted before don't change the buffer anymore
+        const std::scoped_lock lock(_bufferMutex);
+        ++_insertions;
+      }
+      if (!_dtmf->InsertDtmf(tones, duration, interToneGap) && !tones.empty()) {
+        return "The DTMF sender can't send tones yet";
+      }
       const std::scoped_lock lock(_bufferMutex);
-      ++_insertions;
+      _surfacedBuffer = tones;
+      // a cancel (no tones) ends with an empty tonechange too
+      _playing = true;
+      return std::nullopt;
+    });
+    if (reason) {
+      throw RTCException(webrtc::RTCErrorType::INVALID_STATE, *reason);
     }
-    if (!_dtmf->InsertDtmf(tones, duration, interToneGap) && !tones.empty()) {
-      throw RTCException(webrtc::RTCErrorType::INVALID_STATE, "The DTMF sender can't send tones yet");
-    }
-    const std::scoped_lock lock(_bufferMutex);
-    _surfacedBuffer = tones;
-    // a cancel (no tones) ends with an empty tonechange too
-    _playing = true;
   }
 
   std::string RTCDTMFSender::GetToneBuffer() {

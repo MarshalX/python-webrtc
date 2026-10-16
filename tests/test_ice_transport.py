@@ -17,11 +17,20 @@ import ipaddress
 import re
 import socket
 import time
+from typing import cast
 
 import pytest
 
 import webrtc
-from tests.helpers import connect, exchange_answer, exchange_offer, wait_for_event, wait_until
+import wrtc
+from tests.helpers import (
+    connect,
+    exchange_answer,
+    exchange_offer,
+    wait_for_event,
+    wait_for_ice_gathering_complete,
+    wait_until,
+)
 from tests.timing import seconds
 
 
@@ -166,6 +175,48 @@ def test_start_validation() -> None:
     assert transport.state == webrtc.RTCIceTransportState.new
     assert transport.get_remote_candidates() == []
     transport.stop()
+
+
+@pytest.mark.asyncio
+async def test_selected_pair_changes_with_its_event(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """A transport's selected pair changes once Python sees its selectedcandidatepairchange event."""
+    caller.create_data_channel('pair')
+    # the candidates go in the descriptions: none to trickle while the signaling thread is parked
+    await caller.set_local_description()
+    await wait_for_ice_gathering_complete(caller)
+    await callee.set_remote_description(cast('webrtc.RTCSessionDescription', caller.local_description))
+    await callee.set_local_description()
+    await wait_for_ice_gathering_complete(callee)
+    assert caller.sctp is not None
+    assert callee.sctp is not None
+    transports = (caller.sctp.transport.ice_transport, callee.sctp.transport.ice_transport)
+    # the pair each transport showed last along with its event
+    shown = [transport.get_selected_candidate_pair() for transport in transports]
+    for index, transport in enumerate(transports):
+        transport.on(
+            'selectedcandidatepairchange',
+            lambda _event, i=index, t=transport: shown.__setitem__(i, t.get_selected_candidate_pair()),
+        )
+
+    wrtc._testing.park('ice.pairchanged')
+    try:
+        answering = asyncio.ensure_future(
+            caller.set_remote_description(cast('webrtc.RTCSessionDescription', callee.local_description))
+        )
+        # a transport selected another pair, before its event
+        assert await asyncio.to_thread(wrtc._testing.parked, 'ice.pairchanged', seconds(5))
+        assert [transport.get_selected_candidate_pair() for transport in transports] == shown
+    finally:
+        wrtc._testing.release('ice.pairchanged')
+    await answering
+    await wait_until(lambda: shown[0] is not None, 'the selected pair')
+
+    ice = transports[0]
+
+    caller.close()
+    assert ice.get_selected_candidate_pair() is None
 
 
 CANDIDATE = 'candidate:1 1 udp 2122260223 192.0.2.1 50000 typ host'
@@ -396,6 +447,14 @@ async def test_unsignaled_remote_is_peer_reflexive() -> None:
     assert pair.remote.candidate == ''
     assert pair.remote.type == webrtc.RTCIceCandidateType.prflx
     assert pair.remote.address is None
+
+    # signaled later, the remote candidate is the signaled one
+    for candidate in local.get_local_candidates():
+        remote.add_remote_candidate(candidate)
+    pair = remote.get_selected_candidate_pair()
+    assert pair is not None
+    assert pair.remote.type == webrtc.RTCIceCandidateType.host
+    assert pair.remote.candidate in [c.candidate for c in local.get_local_candidates()]
     local.stop()
     remote.stop()
 

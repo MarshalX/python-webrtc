@@ -15,17 +15,21 @@ import contextlib
 import gc
 import threading
 import weakref
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
 
 import webrtc
+import wrtc
 from tests.helpers import (
     called,
     collect,
     connect,
     delivered,
+    exchange_answer,
+    exchange_offer,
     exchange_offer_answer,
+    undelivered,
     wait_for_event,
     wait_for_ice_gathering_complete,
     wait_until,
@@ -276,6 +280,148 @@ async def test_signaling_state_changes_with_its_event(pc: webrtc.RTCPeerConnecti
     assert states == [webrtc.RTCSignalingState.have_local_offer]
     await pc.set_local_description(webrtc.RTCSessionDescriptionInit('rollback'))
     assert states == [webrtc.RTCSignalingState.have_local_offer, webrtc.RTCSignalingState.stable]
+
+
+async def _set_undelivered(pc: webrtc.RTCPeerConnection) -> asyncio.Future[None]:
+    """Sets the local description, which libwebrtc applies while its events and completion wait in the mailbox."""
+    wrtc._testing.park('description.completed')
+    try:
+        setting = asyncio.ensure_future(pc.set_local_description())
+        # applied: the completion is posted
+        assert await asyncio.to_thread(wrtc._testing.parked, 'description.completed', seconds(5))
+    finally:
+        wrtc._testing.release('description.completed')
+    return setting
+
+
+def test_transceivers_change_with_the_descriptions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A transceiver's mid and current direction change once Python sees the description that set them."""
+    monkeypatch.setattr(LoopState, 'watches_pipe', False)
+
+    async def scenario() -> None:
+        caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        offered = caller.add_transceiver(webrtc.MediaType.audio)
+        await delivered()
+        with undelivered():
+            setting = await _set_undelivered(caller)
+            assert (offered.mid, offered.current_direction, caller.local_description) == (None, None, None)
+        await setting
+        assert offered.mid == '0'
+        assert caller.local_description is not None
+
+        await callee.set_remote_description(caller.local_description)
+        [answered] = callee.get_transceivers()
+        await delivered()
+        with undelivered():
+            setting = await _set_undelivered(callee)
+            assert (answered.current_direction, callee.local_description) == (None, None)
+        await setting
+        assert answered.current_direction == webrtc.RTCRtpTransceiverDirection.recvonly
+        caller.close()
+        callee.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.asyncio
+async def test_close_stops_the_transceivers_at_once(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """close() stops every transceiver synchronously, though no description shows it."""
+    caller.add_transceiver(webrtc.MediaType.audio)
+    await exchange_offer_answer(caller, callee)
+    callee.close()
+    # read through a wrapper made after close(), which binds the connection again
+    [transceiver] = callee.get_transceivers()
+    assert (transceiver.mid, transceiver.stopped) == ('0', True)
+    assert transceiver.current_direction == webrtc.RTCRtpTransceiverDirection.stopped
+
+
+@pytest.mark.asyncio
+async def test_answer_shows_its_transceivers_to_its_events(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """The signalingstatechange and track events of an answer see the transceivers as the answer left them."""
+    audio = caller.add_transceiver(webrtc.MediaType.audio)
+    video = caller.add_transceiver(webrtc.MediaType.video)
+    await exchange_offer(caller, callee)
+    callee.get_transceivers()[0].direction = webrtc.RTCRtpTransceiverDirection.sendrecv
+    answer = await callee.create_answer()
+    await callee.set_local_description(answer)
+    seen: list[tuple[str, object, object, bool]] = []
+
+    def on_event(event: webrtc.Event) -> None:
+        seen.append((event.type, audio.current_direction, video.current_direction, video.stopped))
+
+    caller.on('signalingstatechange', on_event)
+    caller.on('track', on_event)
+    # the remote peer rejects the video section
+    await caller.set_remote_description(
+        webrtc.RTCSessionDescriptionInit('answer', answer.sdp.replace('m=video 9 ', 'm=video 0 '))
+    )
+
+    sendrecv, stopped = webrtc.RTCRtpTransceiverDirection.sendrecv, webrtc.RTCRtpTransceiverDirection.stopped
+    assert seen == [('signalingstatechange', sendrecv, stopped, True), ('track', sendrecv, stopped, True)]
+
+
+@pytest.mark.asyncio
+async def test_rollback_shows_the_transceivers_it_restores(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """A rollback takes back the mids it gave, and the transceivers it removes read stopped."""
+    added = caller.add_transceiver(webrtc.MediaType.audio)
+    await caller.set_local_description()
+    assert added.mid == '0'
+    await caller.set_local_description(webrtc.RTCSessionDescriptionInit('rollback'))
+    assert (added.mid, added.stopped) == (None, False)
+
+    await caller.set_local_description()
+    await callee.set_remote_description(cast('webrtc.RTCSessionDescription', caller.local_description))
+    [created] = callee.get_transceivers()
+    assert created.mid == added.mid
+    await callee.set_remote_description(webrtc.RTCSessionDescriptionInit('rollback'))
+    assert created.stopped
+    assert callee.get_transceivers() == []
+
+
+@pytest.mark.asyncio
+async def test_stopped_transceiver_through_a_negotiation(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """stop() makes a transceiver stopping at once, the answer stops it, and it leaves the connection."""
+    transceiver = caller.add_transceiver(webrtc.MediaType.audio)
+    await exchange_offer_answer(caller, callee)
+    transceiver.stop()
+    assert (transceiver._native_obj.stopping, transceiver.stopped) == (True, False)
+    await exchange_offer(caller, callee)
+    assert not transceiver.stopped
+    await exchange_answer(caller, callee)
+    assert (transceiver.stopped, transceiver.current_direction) == (True, webrtc.RTCRtpTransceiverDirection.stopped)
+    assert caller.get_transceivers() == []
+
+
+@pytest.mark.asyncio
+async def test_close_while_a_description_waits_to_be_set(pc: webrtc.RTCPeerConnection) -> None:
+    """close() before an operation's signaling task runs aborts the operation; the transceivers read stopped."""
+    transceiver = pc.add_transceiver(webrtc.MediaType.audio)
+    pending = LoopState.of(asyncio.get_running_loop()).pending
+    wrtc._testing.park('description.completed')
+    try:
+        await pc.set_local_description()
+        assert await asyncio.to_thread(wrtc._testing.parked, 'description.completed', seconds(5))
+        setting = asyncio.ensure_future(pc.set_local_description())
+        # its signaling task is posted, behind the parked one
+        await wait_until(lambda: len(pending) > 0, 'the operation')
+        # off the loop: close() waits for the signaling thread, after taking the connection
+        closing = asyncio.ensure_future(asyncio.to_thread(pc.close))
+        await wait_until(lambda: pc.signaling_state == webrtc.RTCSignalingState.closed, 'close()')
+    finally:
+        wrtc._testing.release('description.completed')
+    await closing
+    # the specification aborts its steps
+    with pytest.raises(asyncio.CancelledError):
+        await setting
+    assert (transceiver.stopped, transceiver.current_direction) == (True, webrtc.RTCRtpTransceiverDirection.stopped)
 
 
 @pytest.mark.asyncio

@@ -268,6 +268,37 @@ async def test_replace_track(
 
 
 @pytest.mark.asyncio
+async def test_sender_track_is_the_one_it_was_given(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """addTrack, addTransceiver and replaceTrack give a sender its track, removeTrack takes it, close() keeps it."""
+    [audio] = audio_stream.get_tracks()
+    other = audio.clone()
+    sender = caller.add_track(audio, audio_stream)
+    assert sender.track is audio
+    await sender.replace_track(None)
+    assert sender.track is None
+    await sender.replace_track(other)
+    assert sender.track is other
+    caller.remove_track(sender)
+    assert sender.track is None
+    assert caller.add_transceiver(webrtc.MediaType.audio).sender.track is None
+    assert caller.add_transceiver(other).sender.track is other
+
+    # addTrack reuses the transceiver a remote offer made, whose sender had no track
+    await exchange_offer(caller, callee)
+    created = callee.get_transceivers()[0].sender
+    assert created.track is None
+    reused = callee.add_track(audio)
+    assert reused is created
+    assert reused.track is audio
+
+    callee.close()
+    assert reused.track is audio
+    other.stop()
+
+
+@pytest.mark.asyncio
 async def test_replace_track_of_a_stopped_transceiver(pc: webrtc.RTCPeerConnection) -> None:
     """The track of a stopped transceiver's sender can't be replaced."""
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
@@ -533,6 +564,21 @@ async def test_dtmf_cancel(
     assert dtmf.tone_buffer == ''
     await done
     assert dtmf.tone_buffer == ''
+
+
+@pytest.mark.asyncio
+async def test_dtmf_of_a_negotiated_transceiver_stopped_since(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream
+) -> None:
+    """stop() ends the tones of a negotiated sender at once, before any negotiation shows it."""
+    sender = caller.add_track(audio_stream.get_tracks()[0], audio_stream)
+    await connect(caller, callee)
+    dtmf = sender.dtmf
+    assert dtmf is not None
+    assert dtmf.can_insert_dtmf
+    caller.get_transceivers()[0].stop()
+    with pytest.raises(webrtc.InvalidStateError, match='stopped'):
+        dtmf.insert_dtmf('1')
 
 
 def test_dtmf_of_a_stopped_transceiver_checks_the_state_first(pc: webrtc.RTCPeerConnection) -> None:

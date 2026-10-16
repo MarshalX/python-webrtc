@@ -122,6 +122,23 @@ async def test_rollback_ends_the_track_of_a_removed_transceiver(
     assert track.ready_state == webrtc.MediaStreamTrackState.ended
 
 
+@pytest.mark.asyncio
+async def test_track_ended_before_its_wrapper_ends_with_its_event(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """A remote track that ended before Python first used it ends with its event, like any other."""
+    # nothing receives, so no track event wraps the callee's transceiver
+    stopped = caller.add_transceiver(webrtc.MediaType.audio, webrtc.RTCRtpTransceiverInit(direction='recvonly'))
+    await exchange_offer_answer(caller, callee)
+    stopped.stop()
+    # rejects the section, which stops the callee's transceiver and ends its track
+    await exchange_offer(caller, callee)
+    [transceiver] = callee.get_transceivers()
+    track = transceiver.receiver.track
+    await wait_for_event(track, 'ended')
+    assert track.ready_state == webrtc.MediaStreamTrackState.ended
+
+
 def test_remove_track_of_another_connection(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
     """A connection can't remove a sender of another one."""
     sender = callee.add_transceiver(webrtc.MediaType.audio).sender
