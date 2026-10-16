@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <api/scoped_refptr.h>
+#include <rtc_base/timestamp_aligner.h>
 
 #include <pybind11/pybind11.h>
 
@@ -64,6 +65,10 @@ namespace python_webrtc {
     std::shared_ptr<MediaStreamTrack> _track;
     std::shared_ptr<SourceControl> _control = std::make_shared<SourceControl>();
     std::atomic<bool> _muted = false;
+
+    std::mutex _videoMutex;
+    webrtc::TimestampAligner _aligner;
+    int64_t _lastCaptureMs = 0;
 
     // samples short of a 10 ms frame, sent with the next ones of the same format
     std::mutex _audioMutex;

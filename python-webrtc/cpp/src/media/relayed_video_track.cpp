@@ -11,6 +11,8 @@
 
 #include <rtc_base/time_utils.h>
 
+#include "frame_adaptation.h"
+
 namespace python_webrtc {
 
   RelayedVideoTrack::RelayedVideoTrack(webrtc::scoped_refptr<webrtc::VideoTrackInterface> track)
@@ -27,7 +29,11 @@ namespace python_webrtc {
     if (!restamper) {
       restamper = std::make_unique<Restamper>(sink);
     }
-    _track->AddOrUpdateSink(restamper.get(), wants);
+    restamper->OnSinkWants(wants);
+    webrtc::VideoSinkWants delivered;
+    delivered.rotation_applied = wants.rotation_applied;
+    delivered.black_frames = wants.black_frames;
+    _track->AddOrUpdateSink(restamper.get(), delivered);
   }
 
   void RelayedVideoTrack::RemoveSink(webrtc::VideoSinkInterface<webrtc::VideoFrame> *sink) {
@@ -42,7 +48,12 @@ namespace python_webrtc {
     webrtc::VideoFrame restamped = frame;
     restamped.set_timestamp_us(_aligner.TranslateTimestamp(frame.timestamp_us(), webrtc::TimeMicros()));
     restamped.set_ntp_time_ms(0);
-    _sink->OnFrame(restamped);
+    auto adapted = AdaptFrame(_adapter, restamped);
+    if (adapted) {
+      _sink->OnFrame(*adapted);
+    } else {
+      _sink->OnDiscardedFrame();
+    }
   }
 
 } // namespace python_webrtc

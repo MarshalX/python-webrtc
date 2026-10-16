@@ -14,6 +14,9 @@
 #include <api/video/i420_buffer.h>
 #include <rtc_base/time_utils.h>
 
+#include "../media/frame_adaptation.h"
+#include "../media/local_video_sink.h"
+
 namespace python_webrtc {
 
   RTCVideoTrackSource::RTCVideoTrackSource(bool isScreencast, std::optional<bool> needsDenoising)
@@ -100,29 +103,16 @@ namespace python_webrtc {
   }
 
   void RTCVideoTrackSource::Broadcast(const webrtc::VideoFrame &frame) {
+    _unadapted.OnFrame(frame);
     if (!_broadcaster.frame_wanted()) {
       return;
     }
-    int croppedWidth = 0;
-    int croppedHeight = 0;
-    int width = 0;
-    int height = 0;
-    // timed by arrival, as generator frames carry the application's timestamps
-    if (!_adapter.AdaptFrameResolution(frame.width(), frame.height(), webrtc::TimeNanos(), &croppedWidth,
-                                       &croppedHeight, &width, &height)) {
+    auto adapted = AdaptFrame(_adapter, frame);
+    if (adapted) {
+      _broadcaster.OnFrame(*adapted);
+    } else {
       _broadcaster.OnDiscardedFrame();
-      return;
     }
-    if (width == frame.width() && height == frame.height()) {
-      _broadcaster.OnFrame(frame);
-      return;
-    }
-    webrtc::VideoFrame adapted = frame;
-    adapted.set_video_frame_buffer(frame.video_frame_buffer()->CropAndScale(
-        (frame.width() - croppedWidth) / 2, (frame.height() - croppedHeight) / 2, croppedWidth, croppedHeight, width,
-        height));
-    adapted.clear_update_rect();
-    _broadcaster.OnFrame(adapted);
   }
 
   void RTCVideoTrackSource::End() {
@@ -142,13 +132,19 @@ namespace python_webrtc {
 
   void RTCVideoTrackSource::AddOrUpdateSink(webrtc::VideoSinkInterface<webrtc::VideoFrame> *sink,
                                             const webrtc::VideoSinkWants &wants) {
-    const std::scoped_lock lock(_sinksMutex);
-    auto [it, added] = _sinks.try_emplace(sink, wants.black_frames);
-    if (!added && it->second != wants.black_frames) {
-      (it->second ? _blackBroadcaster : _broadcaster).RemoveSink(sink);
-      it->second = wants.black_frames;
+    auto *broadcaster = &_broadcaster;
+    if (wants.black_frames) {
+      broadcaster = &_blackBroadcaster;
+    } else if (LocalVideoSink::Is(sink)) {
+      broadcaster = &_unadapted;
     }
-    (wants.black_frames ? _blackBroadcaster : _broadcaster).AddOrUpdateSink(sink, wants);
+    const std::scoped_lock lock(_sinksMutex);
+    auto [it, added] = _sinks.try_emplace(sink, broadcaster);
+    if (!added && it->second != broadcaster) {
+      it->second->RemoveSink(sink);
+      it->second = broadcaster;
+    }
+    broadcaster->AddOrUpdateSink(sink, wants);
     _adapter.OnSinkWants(_broadcaster.wants());
   }
 
@@ -158,7 +154,7 @@ namespace python_webrtc {
     if (it == _sinks.end()) {
       return;
     }
-    (it->second ? _blackBroadcaster : _broadcaster).RemoveSink(sink);
+    it->second->RemoveSink(sink);
     _sinks.erase(it);
     _adapter.OnSinkWants(_broadcaster.wants());
   }

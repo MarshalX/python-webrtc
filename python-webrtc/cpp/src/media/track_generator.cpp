@@ -15,10 +15,10 @@
 
 #include <api/audio/audio_frame.h>
 #include <api/audio/audio_view.h>
+#include <api/units/timestamp.h>
 #include <api/video/video_frame.h>
 #include <rtc_base/crypto_random.h>
 #include <rtc_base/time_utils.h>
-#include <system_wrappers/include/clock.h>
 
 #include "../exceptions.h"
 #include "../utils/gil.h"
@@ -93,11 +93,18 @@ namespace python_webrtc {
     if (!GetLive() || _muted) {
       return;
     }
-    // sinks see the timestamp of the application, encoders take the capture time from the NTP one
+    // sinks see the timestamp of the application, encoders a capture time on the system clock, spaced as it is
+    const std::scoped_lock lock(_videoMutex);
+    int64_t captureUs = _aligner.TranslateTimestamp(timestampUs, webrtc::TimeMicros());
+    // encoders drop a frame whose capture millisecond isn't after the previous one's
+    if (captureUs / webrtc::kNumMicrosecsPerMillisec <= _lastCaptureMs) {
+      captureUs = (_lastCaptureMs + 1) * webrtc::kNumMicrosecsPerMillisec;
+    }
+    _lastCaptureMs = captureUs / webrtc::kNumMicrosecsPerMillisec;
     auto frame = webrtc::VideoFrame::Builder()
                      .set_video_frame_buffer(buffer->ToWebrtc())
-                     .set_timestamp_us(timestampUs)
-                     .set_ntp_time_ms(webrtc::Clock::GetRealTimeClock()->CurrentNtpInMilliseconds())
+                     .set_timestamp_us(captureUs)
+                     .set_presentation_timestamp(webrtc::Timestamp::Micros(timestampUs))
                      .set_rotation(static_cast<webrtc::VideoRotation>(rotation))
                      .build();
     _videoSource->PushFrame(frame);

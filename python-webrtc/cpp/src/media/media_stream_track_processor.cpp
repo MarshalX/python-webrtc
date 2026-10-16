@@ -118,6 +118,8 @@ namespace python_webrtc {
       constexpr int64_t kRtpTicksPerMs = 90;
       timestampUs =
           _firstReceived->first + ((rtp - _firstReceived->second) * webrtc::kNumMicrosecsPerMillisec / kRtpTicksPerMs);
+    } else if (frame.presentation_timestamp()) {
+      timestampUs = frame.presentation_timestamp()->us();
     }
     Push(VideoItem{.buffer = frame.video_frame_buffer(),
                    .timestampUs = timestampUs,

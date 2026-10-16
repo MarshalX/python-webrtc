@@ -84,10 +84,11 @@ namespace python_webrtc {
     const std::optional<bool> _needsDenoising;
     webrtc::VideoBroadcaster _broadcaster;
     webrtc::VideoAdapter _adapter;
+    webrtc::VideoBroadcaster _unadapted;
     // sinks of disabled or ended tracks: a black frame a second
     webrtc::VideoBroadcaster _blackBroadcaster;
     std::mutex _sinksMutex;
-    std::map<webrtc::VideoSinkInterface<webrtc::VideoFrame> *, bool> _sinks;
+    std::map<webrtc::VideoSinkInterface<webrtc::VideoFrame> *, webrtc::VideoBroadcaster *> _sinks;
     std::atomic<int64_t> _lastBlackMs{0};
     std::atomic<int> _width{0};
     std::atomic<int> _height{0};
