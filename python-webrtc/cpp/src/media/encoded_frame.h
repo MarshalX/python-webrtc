@@ -32,7 +32,7 @@ namespace python_webrtc {
 
     [[nodiscard]] uint64_t Source() const { return _source; }
 
-    pybind11::bytes GetData();
+    pybind11::bytearray GetData();
 
     pybind11::dict GetMetadata();
 

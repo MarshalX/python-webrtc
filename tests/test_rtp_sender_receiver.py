@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import webrtc
+import wrtc
 from tests.helpers import (
     connect,
     exchange_offer,
@@ -587,6 +588,29 @@ async def test_synchronization_sources_of_audio_have_its_level(
     [source] = receiver.get_synchronization_sources()
     assert source.audio_level is not None
     assert 0 <= source.audio_level <= 1
+
+
+@pytest.mark.asyncio
+async def test_sources_are_read_once_per_task(pc: webrtc.RTCPeerConnection, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Both getters in one task share one read of the native sources, a later task reads them again."""
+    receiver = pc.add_transceiver(webrtc.MediaType.audio).receiver
+    reads = 0
+
+    def counted(_native: wrtc.RTCRtpReceiver) -> list[tuple[bool, int, float, int, int | None]]:
+        nonlocal reads
+        reads += 1
+        return [(True, reads, 0.0, 0, None), (False, reads, 0.0, 0, None)]
+
+    monkeypatch.setattr(wrtc.RTCRtpReceiver, '_getSources', counted)
+
+    [synchronization] = receiver.get_synchronization_sources()
+    [contributing] = receiver.get_contributing_sources()
+    assert reads == 1
+    assert synchronization.source == contributing.source == 1
+    await next_task()
+    [synchronization] = receiver.get_synchronization_sources()
+    assert reads == 2
+    assert synchronization.source == 2
 
 
 @pytest.mark.parametrize(

@@ -308,6 +308,28 @@ async def test_frame_data(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerCo
 
 
 @pytest.mark.asyncio
+async def test_changed_data_is_received(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
+    """Data changed in place, or replaced by bytes or a memoryview, is what the receiver's transform reads."""
+    caller, callee = pair
+    written = 0
+
+    def change(frame: Frame) -> None:
+        nonlocal written
+        written += 1
+        if written % 3 == 0:
+            frame.data[:] = b'in place'
+        elif written % 3 == 1:
+            frame.data = b'bytes'
+        else:
+            frame.data = memoryview(b'a memoryview')
+
+    payloads: set[bytes] = set()
+    receiving = Recorder(lambda frame: payloads.add(bytes(frame.data)))
+    await transformed_call(caller, callee, 'audio', sender_worker=Recorder(change), receiver_worker=receiving)
+    await wait_until(lambda: {b'in place', b'bytes', b'a memoryview'} <= payloads, 'each changed payload', TIMEOUT)
+
+
+@pytest.mark.asyncio
 async def test_written_frame_is_detached(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
     caller, callee = pair
     sending = Recorder()
@@ -601,8 +623,8 @@ async def test_nobody_reading(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPe
         encoded = max((frames for frames in outbound if frames is not None), default=0)
         return encoded
 
-    # past the 120 frames a transformer queues, the oldest are dropped; slow cores encode slower, not never
-    await wait_progressing(frames_encoded, lambda: encoded > 130, 'more frames than the queue keeps')
+    # past the 60 frames a transformer queues, the oldest are dropped; slow cores encode slower, not never
+    await wait_progressing(frames_encoded, lambda: encoded > 70, 'more frames than the queue keeps')
     assert len(started) == 1
     caller.close()
     callee.close()

@@ -229,7 +229,7 @@ class _RTCEncodedFrame(Generic[_MetadataT]):
             TypeError: If the value set isn't a contiguous buffer.
         """
         if self._payload is None:
-            self._payload = bytearray(self._native.getData()) if self._native is not None else bytearray()
+            self._payload = self._native.getData() if self._native is not None else bytearray()
         return self._payload
 
     @data.setter

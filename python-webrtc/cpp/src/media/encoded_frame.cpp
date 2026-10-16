@@ -112,16 +112,10 @@ namespace python_webrtc {
         .def("getMetadata", &EncodedFrame::GetMetadata);
   }
 
-  pybind11::bytes EncodedFrame::GetData() {
-    std::vector<uint8_t> data;
-    {
-      const std::scoped_lock lock(_mutex);
-      if (_frame) {
-        auto span = _frame->GetData();
-        data.assign(span.begin(), span.end());
-      }
-    }
-    return Bytes(data.data(), data.size());
+  pybind11::bytearray EncodedFrame::GetData() {
+    // copied once, under _mutex taken with the GIL held (GIL, then _mutex: its holders never wait for the GIL)
+    const std::scoped_lock lock(_mutex);
+    return _frame ? ByteArray(_frame->GetData()) : pybind11::bytearray();
   }
 
   pybind11::dict EncodedFrame::GetMetadata() {

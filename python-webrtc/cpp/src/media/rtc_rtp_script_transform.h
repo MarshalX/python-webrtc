@@ -32,7 +32,7 @@ namespace python_webrtc {
                                 public Emitter<RTCRtpScriptTransform> {
   public:
     static constexpr const char *kName = "RTCRtpScriptTransform";
-    static constexpr size_t kMaxQueuedFrames = 120;
+    static constexpr size_t kMaxQueuedFrames = 60;
 
     enum class State : uint8_t { kNew, kAssociated, kDisassociated };
 
