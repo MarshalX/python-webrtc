@@ -13,11 +13,14 @@ namespace python_webrtc {
 
   void CreateSessionDescriptionObserver::OnSuccess(webrtc::SessionDescriptionInterface *description) {
     const std::unique_ptr<webrtc::SessionDescriptionInterface> owned(description);
-    if (auto peerConnection = _peerConnection.lock()) {
+    auto peerConnection = _peerConnection.lock();
+    if (peerConnection) {
       peerConnection->PrepareCreatedDescription(*owned);
-      peerConnection->SaveCreatedDescription(RTCSessionDescriptionInit::Wrap(owned.get()));
     }
     auto created = RTCSessionDescription::Wrap(owned.get());
+    if (peerConnection) {
+      peerConnection->SaveCreatedDescription(created.init());
+    }
     if (_created) {
       _created(created);
     } else {

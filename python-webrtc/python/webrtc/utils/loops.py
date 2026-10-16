@@ -19,7 +19,7 @@ import os
 import sys
 import threading
 import weakref
-from typing import TYPE_CHECKING, Callable, ClassVar, NamedTuple, cast
+from typing import TYPE_CHECKING, Callable, ClassVar, NamedTuple, TypeVar, cast
 
 import wrtc
 from webrtc.exceptions import InvalidStateError
@@ -33,6 +33,8 @@ if TYPE_CHECKING:
     from webrtc.utils.events import EventTarget
 
     _P = ParamSpec('_P')
+
+_T = TypeVar('_T')
 
 #: (event name or None, token, failed, args or None)
 _Record = tuple['str | None', int, bool, 'tuple[object, ...] | None']
@@ -137,6 +139,7 @@ class LoopState:
         self._loop_ref = weakref.ref(loop)
         self.mailbox = wrtc.Mailbox()
         self.pending: dict[int, _Call] = {}
+        self.batches: dict[object, asyncio.Future[object]] = {}
         #: kept until done, or they'd be collected
         self.tasks: set[asyncio.Future[object]] = set()
         #: objects kept alive while they can fire a handled event, with the reason
@@ -451,6 +454,8 @@ class LoopState:
         if item.resumes:
             self._resumed = True
             _ = self._live_loop.call_soon(self._settle)
+
+        self.batches.clear()
         _ = item.run()
         return item.resumes
 
@@ -771,16 +776,41 @@ def _exit() -> None:
         state.release()
 
 
-async def call_native(
-    method: Callable[Concatenate[wrtc.Mailbox, int, _P], None], *args: _P.args, **kwargs: _P.kwargs
-) -> object:
-    """Awaits ``method(mailbox, token, ...)``, resuming after the events emitted before its completion."""
-    state = LoopState.of(asyncio.get_running_loop())
+def _start_native(
+    state: LoopState, method: Callable[Concatenate[wrtc.Mailbox, int, _P], None], *args: _P.args, **kwargs: _P.kwargs
+) -> asyncio.Future[object]:
+    """Calls ``method(mailbox, token, ...)``; returns the future its completion settles."""
     native: lifetime.Native | None = getattr(method, '__self__', None)
     wrapper = lifetime.find(native) if native is not None else None
     token, future = state.start(wrapper._target() if wrapper is not None else None)
     method(state.mailbox, token, *args, **kwargs)
-    return await future
+    return future
+
+
+async def call_native(
+    method: Callable[Concatenate[wrtc.Mailbox, int, _P], None], *args: _P.args, **kwargs: _P.kwargs
+) -> object:
+    """Awaits ``method(mailbox, token, ...)``, resuming after the events emitted before its completion."""
+    return await _start_native(LoopState.of(asyncio.get_running_loop()), method, *args, **kwargs)
+
+
+async def _converted(future: asyncio.Future[object], convert: Callable[[object], _T]) -> _T:
+    return convert(await future)
+
+
+async def call_native_batched(
+    owner: object, method: Callable[[wrtc.Mailbox, int], None], convert: Callable[[object], _T]
+) -> _T:
+    """Awaits ``convert(result)`` of ``method(mailbox, token)``, shared by the calls on ``owner`` in one iteration."""
+    loop = asyncio.get_running_loop()
+    state = LoopState.of(loop)
+    batch = cast('asyncio.Future[_T] | None', state.batches.get(owner))
+    if batch is None:
+        batch = asyncio.ensure_future(_converted(_start_native(state, method), convert))
+        state.batches[owner] = cast('asyncio.Future[object]', batch)
+        _ = loop.call_soon(state.batches.pop, owner, None)
+
+    return await asyncio.shield(batch)
 
 
 gc.callbacks.append(_on_collection)

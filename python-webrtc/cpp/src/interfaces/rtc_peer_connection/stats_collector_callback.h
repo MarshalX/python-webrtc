@@ -21,7 +21,7 @@
 
 namespace python_webrtc {
 
-  // Delivers a stats report as JSON, which Python turns into webrtc.RTCStatsReport
+  // Delivers a stats report as JSON, made on the loop thread, which Python turns into webrtc.RTCStatsReport
   class StatsCollectorCallback : public webrtc::RTCStatsCollectorCallback {
   public:
     // remoteTrackIds by mid: libwebrtc drops trackIdentifier once a transceiver stops
@@ -43,7 +43,11 @@ namespace python_webrtc {
         completed->Take(stats->id());
         completed->AddStats(std::move(stats));
       }
-      _completion.Succeed(completed ? completed->ToJson() : report->ToJson());
+      webrtc::scoped_refptr<const webrtc::RTCStatsReport> delivered = report;
+      if (completed) {
+        delivered = completed;
+      }
+      _completion.SucceedWith([delivered]() { return delivered->ToJson(); });
     }
 
   private:

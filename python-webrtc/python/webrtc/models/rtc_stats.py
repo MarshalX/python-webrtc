@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import copy
+import functools
 import json
 import warnings
 from collections.abc import Iterable, Iterator, Mapping
@@ -70,25 +72,35 @@ class RTCStats(Dictionary):
 
     def __init__(self, **members: object) -> None:
         cls = self.__class__
-        unknown = sorted(members.keys() - {field.name for field in fields(cls)})
+        names, defaults, enums = _layout(cls)
+        unknown = sorted(members.keys() - names)
         if len(unknown) > 0:
             msg = f'{cls.__name__} has no member {unknown[0]!r}'
             raise TypeError(msg)
-        enums: dict[str, type[enum.Enum]] = {}
-        for klass in cls.__mro__:
-            own: Mapping[str, type[enum.Enum]] = vars(klass).get('_enums', {})
-            enums.update(own)
-        for field in fields(cls):
-            if field.name in members:
-                value = members[field.name]
-            elif field.default is not MISSING:
-                value = field.default
+        for name, default in defaults:
+            if name in members:
+                value = members[name]
+            elif default is not MISSING:
+                value = default
             else:
-                msg = f'{cls.__name__} is missing the required member {field.name!r}'
+                msg = f'{cls.__name__} is missing the required member {name!r}'
                 raise TypeError(msg)
-            if field.name in enums and isinstance(value, str):
-                value = _enum_value(enums[field.name], value)
-            setattr(self, field.name, value)
+            if name in enums and isinstance(value, str):
+                value = _enum_value(enums[name], value)
+            setattr(self, name, value)
+
+
+@functools.cache
+def _layout(
+    cls: type[RTCStats],
+) -> tuple[frozenset[str], tuple[tuple[str, object], ...], Mapping[str, type[enum.Enum]]]:
+    """The member names of a stats dictionary, each with its default (or MISSING), and the enums of its members."""
+    enums: dict[str, type[enum.Enum]] = {}
+    for klass in cls.__mro__:
+        own: Mapping[str, type[enum.Enum]] = vars(klass).get('_enums', {})
+        enums.update(own)
+    defaults = tuple((field.name, field.default) for field in fields(cls))
+    return frozenset(name for name, _ in defaults), defaults, enums
 
 
 @dataclass(init=False)
@@ -1311,6 +1323,19 @@ class RTCStatsReport(Mapping[str, RTCStats]):
                 entry['address'] = None
         stats = [_stats(entry) for entry in entries]
         return cls({entry.id: entry for entry in stats})
+
+    def _copy(self) -> RTCStatsReport:
+        """A copy whose stats, and their dict members, change apart from these: one caller's of a shared report."""
+        copied: dict[str, RTCStats] = {}
+        for stats_id, stats in self._stats.items():
+            duplicate = copy.copy(stats)
+            for name, value in vars(duplicate).items():
+                if isinstance(value, dict):
+                    setattr(duplicate, name, dict(value))
+
+            copied[stats_id] = duplicate
+
+        return RTCStatsReport(copied)
 
     def __getitem__(self, stats_id: str) -> RTCStats:
         return self._stats[stats_id]

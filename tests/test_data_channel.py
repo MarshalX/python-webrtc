@@ -13,7 +13,7 @@ import asyncio
 import math
 import re
 import sys
-from typing import cast
+from typing import Callable, cast
 
 import pytest
 from typing_extensions import TypedDict, Unpack
@@ -29,6 +29,7 @@ from tests.helpers import (
     wait_until,
 )
 from tests.timing import seconds
+from webrtc.utils import loops
 
 #: The most a channel queues to send, in bytes
 SEND_QUEUE_LIMIT = 16 * 1024 * 1024
@@ -589,6 +590,59 @@ async def test_stats_are_current(caller: webrtc.RTCPeerConnection, callee: webrt
     after = await bytes_received()
     assert before is not None
     assert after == before + 5
+
+
+@pytest.mark.asyncio
+async def test_concurrent_stats_share_a_collection(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stats requests of one loop iteration share a collection, one after an observed message starts another."""
+    channel, remote = await open_pair(caller, callee)
+    started: list[str] = []
+    start = loops._start_native
+
+    def counted(state: loops.LoopState, method: Callable[..., None], *args: object) -> asyncio.Future[object]:
+        # late trickled candidates also start native calls
+        if method.__name__ == 'getStats':
+            started.append(method.__name__)
+        return start(state, method, *args)
+
+    monkeypatch.setattr(loops, '_start_native', counted)
+
+    reports = await asyncio.gather(*(callee.get_stats() for _ in range(5)))
+    assert started == ['getStats']
+    # each caller gets its own report
+    assert len({id(report) for report in reports}) == len(reports)
+    assert len({id(stats) for report in reports for stats in report.values()}) == sum(map(len, reports))
+
+    received = wait_for_event(remote, 'message')
+    channel.send('hello')
+    await received
+    [stats] = stats_of_type(await callee.get_stats(), 'data-channel')
+    assert started == ['getStats', 'getStats']
+    assert isinstance(stats, webrtc.RTCDataChannelStats)
+    assert stats.messages_received == 1
+
+
+@pytest.mark.asyncio
+async def test_a_delivered_message_ends_the_stats_batch(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """A stats request made in a message handler doesn't join one started before the message, in any loop."""
+    channel, remote = await open_pair(caller, callee)
+    state = loops.LoopState.of(asyncio.get_running_loop())
+    batched: list[bool] = []
+
+    @remote.on('message')
+    def on_message(_: object) -> None:
+        batched.append(callee in state.batches)
+
+    received = wait_for_event(remote, 'message')
+    # a batch still open when the message arrives, as on loops that drain records in the same iteration
+    state.batches[callee] = asyncio.get_running_loop().create_future()
+    channel.send('hello')
+    await received
+    assert batched == [False]
 
 
 @pytest.mark.asyncio

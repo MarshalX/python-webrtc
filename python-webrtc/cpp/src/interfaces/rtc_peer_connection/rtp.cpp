@@ -149,33 +149,38 @@ namespace python_webrtc {
     }
     if (!pc) {
       completion.Fail(RTCCallbackException(closedError("getStats")));
-      return nullptr;
     }
-    pc->ClearStatsCache();
     return pc;
   }
 
   void RTCPeerConnection::GetStats(std::shared_ptr<Mailbox> mailbox, uint64_t token) {
     Completion completion(std::move(mailbox), token);
     if (auto pc = StatsConnection(completion)) {
-      auto trackIds = remoteTrackIds(pc);
-      pc->GetStats(webrtc::make_ref_counted<StatsCollectorCallback>(std::move(completion), std::move(trackIds)).get());
+      BlockingCallOn(_factory->signalingThread(), [&]() {
+        pc->ClearStatsCache();
+        pc->GetStats(webrtc::make_ref_counted<StatsCollectorCallback>(std::move(completion), remoteTrackIds(pc)).get());
+      });
     }
   }
 
   void RTCPeerConnection::CollectStats(const webrtc::scoped_refptr<webrtc::RtpSenderInterface> &sender,
                                        Completion completion) {
     if (auto pc = StatsConnection(completion)) {
-      pc->GetStats(sender, webrtc::make_ref_counted<StatsCollectorCallback>(std::move(completion)));
+      BlockingCallOn(_factory->signalingThread(), [&]() {
+        pc->ClearStatsCache();
+        pc->GetStats(sender, webrtc::make_ref_counted<StatsCollectorCallback>(std::move(completion)));
+      });
     }
   }
 
   void RTCPeerConnection::CollectStats(const webrtc::scoped_refptr<webrtc::RtpReceiverInterface> &receiver,
                                        Completion completion) {
     if (auto pc = StatsConnection(completion)) {
-      auto trackIds = remoteTrackIds(pc);
-      pc->GetStats(receiver,
-                   webrtc::make_ref_counted<StatsCollectorCallback>(std::move(completion), std::move(trackIds)));
+      BlockingCallOn(_factory->signalingThread(), [&]() {
+        pc->ClearStatsCache();
+        pc->GetStats(receiver,
+                     webrtc::make_ref_counted<StatsCollectorCallback>(std::move(completion), remoteTrackIds(pc)));
+      });
     }
   }
 

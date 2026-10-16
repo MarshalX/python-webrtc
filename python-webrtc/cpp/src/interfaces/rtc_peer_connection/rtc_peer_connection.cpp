@@ -463,7 +463,6 @@ namespace python_webrtc {
       throw RTCException(result.error());
     }
 
-    QueueNegotiationNeeded();
     return Wrap(_senders, result.value());
   }
 
@@ -503,7 +502,6 @@ namespace python_webrtc {
     if (!error.ok()) {
       throw RTCException(error);
     }
-    QueueNegotiationNeeded();
   }
 
   std::shared_ptr<RTCRtpTransceiver>
@@ -532,7 +530,6 @@ namespace python_webrtc {
     if (!result.ok()) {
       throw RTCException(result.error());
     }
-    QueueNegotiationNeeded();
     return Wrap(_transceivers, result.value());
   }
 
@@ -588,7 +585,6 @@ namespace python_webrtc {
                              : webrtc::RTCErrorType::UNSUPPORTED_OPERATION,
                          error.message());
     }
-    QueueNegotiationNeeded();
     return Wrap(_channels, result.MoveValue());
   }
 
@@ -660,15 +656,13 @@ namespace python_webrtc {
     });
   }
 
-  void RTCPeerConnection::UpdateMaxMessageSize() {
+  void RTCPeerConnection::UpdateMaxMessageSize(const SctpTransports &sctp) {
     auto pc = connection();
     if (!pc) {
       return;
     }
     // read by send() without waiting for the signaling thread
-    _maxMessageSize = BlockingCallOn(_factory->signalingThread(), [&pc]() {
-      return pc->GetSctpTransport() ? NegotiatedMaxMessageSize(*pc) : std::numeric_limits<double>::quiet_NaN();
-    });
+    _maxMessageSize = sctp.sctp ? NegotiatedMaxMessageSize(*pc) : std::numeric_limits<double>::quiet_NaN();
   }
 
   ConfigurationInit RTCPeerConnection::GetConfiguration() {
@@ -705,17 +699,16 @@ namespace python_webrtc {
 
   void RTCPeerConnection::RestartIce() {
     auto pc = connection();
-    // before the first local description, there are no credentials to replace: the first offer has new ones
-    if (pc && (pc->local_description() != nullptr)) {
-      pc->RestartIce();
-      QueueNegotiationNeeded();
+    if (!pc) {
+      return;
     }
-  }
 
-  void RTCPeerConnection::QueueNegotiationNeeded() {
-    // libwebrtc posts the negotiationneeded event of a change to the signaling thread: once the thread ran it,
-    // the event is queued during the call
-    BlockingCallOn(_factory->signalingThread(), []() {});
+    BlockingCallOn(_factory->signalingThread(), [&pc]() {
+      // before the first local description, there are no credentials to replace: the first offer has new ones
+      if (pc->local_description() != nullptr) {
+        pc->RestartIce();
+      }
+    });
   }
 
   bool RTCPeerConnection::ShouldFireNegotiationNeededEvent(uint32_t eventId) {

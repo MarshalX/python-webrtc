@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import functools
 import re
 from typing import TYPE_CHECKING, Generic, TypeVar, overload
 
@@ -24,6 +25,7 @@ def camel_case(name: str) -> str:
     return _CAMEL.sub(lambda match: match.group(1).upper(), name)
 
 
+@functools.lru_cache(maxsize=1024)
 def snake_case(name: str) -> str:
     """``'namedCurve'`` -> ``'named_curve'``."""
     return ''.join(f'_{c.lower()}' if c.isupper() else c for c in name)
@@ -32,7 +34,7 @@ def snake_case(name: str) -> str:
 def members(value: Mapping[str, object], names: Iterable[str]) -> dict[str, object]:
     """The members of a dictionary, with snake_case or camelCase names: unknown ones are ignored, as in WebIDL."""
     wanted = set(names)
-    return {snake_case(name): member for name, member in value.items() if snake_case(name) in wanted}
+    return {snake: member for name, member in value.items() if (snake := snake_case(name)) in wanted}
 
 
 class Alias(Generic[_T]):

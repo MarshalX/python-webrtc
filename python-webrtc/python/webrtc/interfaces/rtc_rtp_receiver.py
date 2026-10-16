@@ -20,7 +20,7 @@ from webrtc.interfaces.rtc_rtp_sender import _set_transform
 from webrtc.models.rtc_stats import RTCStatsReport
 from webrtc.models.rtp_parameters import RTCRtpCapabilities, RTCRtpReceiveParameters
 from webrtc.models.rtp_source import RTCRtpContributingSource, RTCRtpSynchronizationSource
-from webrtc.utils.loops import call_native
+from webrtc.utils.loops import call_native_batched
 
 _SourceT = TypeVar('_SourceT', bound=RTCRtpContributingSource)
 
@@ -137,6 +137,8 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
     async def get_stats(self) -> webrtc.RTCStatsReport:
         """Collects the stats of the receiver and of the objects they refer to.
 
+        Calls in the same loop iteration, like those one :func:`asyncio.gather` starts, share one collection.
+
         See :mdn:`RTCRtpReceiver/getStats`.
 
         Returns:
@@ -145,7 +147,10 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
         Raises:
             webrtc.InvalidStateError: If the connection is closed.
         """
-        return RTCStatsReport._from_native(cast('str', await call_native(self._native_obj.getStats)), [self])
+        report = await call_native_batched(
+            self, self._native_obj.getStats, lambda json: RTCStatsReport._from_native(cast('str', json), [self])
+        )
+        return report._copy()
 
     def get_synchronization_sources(self) -> list[webrtc.RTCRtpSynchronizationSource]:
         """Returns the synchronization sources (SSRCs) of the media received in the last 10 seconds.

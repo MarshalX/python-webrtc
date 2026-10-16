@@ -174,6 +174,11 @@ namespace python_webrtc {
       Settle(false, [result...]() { return pybind11::make_tuple(result...); });
     }
 
+    template <typename Convert>
+    void SucceedWith(Convert convert) {
+      Settle(false, [convert = std::move(convert)]() { return pybind11::make_tuple(convert()); });
+    }
+
     void Fail(RTCCallbackException error);
 
   private:
