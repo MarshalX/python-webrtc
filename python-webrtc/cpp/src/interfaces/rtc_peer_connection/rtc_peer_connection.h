@@ -264,14 +264,18 @@ namespace python_webrtc {
     template <typename T, typename U>
     using Wrappers = std::unordered_map<U *, std::shared_ptr<T>>;
 
+    struct SctpTransports {
+      webrtc::scoped_refptr<webrtc::SctpTransportInterface> sctp;
+      webrtc::scoped_refptr<webrtc::DtlsTransportInterface> dtls;
+    };
+
     // Python threads may call close() concurrently with other methods (the GIL is released)
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> connection();
 
     // a closed connection still has stats and transceivers
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> closedConnection();
 
-    // The connection to collect the stats of, even closed, with its stats cache cleared: libwebrtc reuses a report
-    // for 50 ms, the stats are the current ones. None fails the request.
+    // the connection to collect the stats of, even closed; none fails the request
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> StatsConnection(Completion &completion);
 
     // the wrapper of a libwebrtc object of this connection, which the connection keeps while it's open
@@ -309,11 +313,8 @@ namespace python_webrtc {
 
     // the SCTP transport's maxMessageSize, cached in kept while the connection still uses that transport
     std::optional<double> MaxMessageSize(const webrtc::SctpTransportInterface *transport, std::optional<double> &kept);
-    // the spec's "update the data max message size", for a transport Python may hold
-    void UpdateMaxMessageSize();
-
-    // waits for the negotiationneeded event a change may have caused to be emitted
-    void QueueNegotiationNeeded();
+    // the spec's "update the data max message size", for a transport Python may hold; on the signaling thread
+    void UpdateMaxMessageSize(const SctpTransports &sctp);
 
     std::shared_ptr<RTCRtpTransceiver>
     AddedTransceiver(webrtc::RTCErrorOr<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>> result);
@@ -351,6 +352,9 @@ namespace python_webrtc {
     // On the signaling thread.
     uint64_t SnapshotDescriptions();
 
+    // read in one wait for the network thread, which libwebrtc's getter waits for anyway
+    SctpTransports SctpTransportsOf(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc);
+
     // the ICE transports of the connection that Python has wrappers of
     std::vector<std::shared_ptr<RTCIceTransport>> IceTransports();
 
@@ -359,7 +363,7 @@ namespace python_webrtc {
 
     // Wraps the transports a description creates, so their states are followed from the start. Returns the new
     // ICE transports, which get their gathering event once the description is set. On the signaling thread.
-    std::vector<std::shared_ptr<RTCIceTransport>> WrapTransports();
+    std::vector<std::shared_ptr<RTCIceTransport>> WrapTransports(const SctpTransports &sctp);
 
     // the transports of a closed connection fire no events
     void UnbindTransports(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc);

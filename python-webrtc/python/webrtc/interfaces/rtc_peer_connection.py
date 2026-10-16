@@ -44,7 +44,7 @@ from webrtc.models.rtc_stats import RTCStatsReport
 from webrtc.models.rtp_parameters import RTCRtpCodec
 from webrtc.utils import lifetime
 from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
-from webrtc.utils.loops import call_native
+from webrtc.utils.loops import call_native, call_native_batched
 from webrtc.utils.operations import OperationsChain, later
 from webrtc.utils.strings import usv_string
 
@@ -769,6 +769,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
     async def get_stats(self, selector: webrtc.MediaStreamTrack | None = None) -> webrtc.RTCStatsReport:
         """Collects the stats of the connection, or of the sender or the receiver of a track.
 
+        Calls in the same loop iteration, like those one :func:`asyncio.gather` starts, share one collection.
+
         See :mdn:`RTCPeerConnection/getStats`.
 
         Args:
@@ -789,8 +791,12 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
                 msg = f'{len(matches)} senders and receivers have the track, not exactly one'
                 raise webrtc.InvalidAccessError(msg)
             return await matches[0].get_stats()
-        report = cast('str', await call_native(self._native_obj.getStats))
-        return RTCStatsReport._from_native(report, self.get_receivers())
+        report = await call_native_batched(
+            self,
+            self._native_obj.getStats,
+            lambda json: RTCStatsReport._from_native(cast('str', json), self.get_receivers()),
+        )
+        return report._copy()
 
     @staticmethod
     async def generate_certificate(keygen_algorithm: AlgorithmIdentifier) -> webrtc.RTCCertificate:

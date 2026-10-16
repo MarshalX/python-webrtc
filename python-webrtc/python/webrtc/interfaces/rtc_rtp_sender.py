@@ -23,7 +23,7 @@ from webrtc.models.rtc_stats import RTCStatsReport
 from webrtc.models.rtp_parameters import RTCRtpCapabilities, RTCRtpSendParameters
 from webrtc.utils import lifetime
 from webrtc.utils.events import EventTarget
-from webrtc.utils.loops import LoopState, call_native
+from webrtc.utils.loops import LoopState, call_native, call_native_batched
 from webrtc.utils.operations import later
 
 if TYPE_CHECKING:
@@ -250,6 +250,8 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
     async def get_stats(self) -> webrtc.RTCStatsReport:
         """Collects the stats of the sender and of the objects they refer to.
 
+        Calls in the same loop iteration, like those one :func:`asyncio.gather` starts, share one collection.
+
         See :mdn:`RTCRtpSender/getStats`.
 
         Returns:
@@ -258,7 +260,10 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         Raises:
             webrtc.InvalidStateError: If the connection is closed.
         """
-        return RTCStatsReport._from_native(cast('str', await call_native(self._native_obj.getStats)))
+        report = await call_native_batched(
+            self, self._native_obj.getStats, lambda json: RTCStatsReport._from_native(cast('str', json))
+        )
+        return report._copy()
 
     #: Alias for :attr:`get_stats`
     getStats = get_stats

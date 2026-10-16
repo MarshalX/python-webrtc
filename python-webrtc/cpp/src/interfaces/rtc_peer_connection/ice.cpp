@@ -71,24 +71,46 @@ namespace python_webrtc {
 
   namespace {
 
-    // the DTLS transports of the media sections and of the data channels, some of them shared (bundled)
-    std::vector<webrtc::scoped_refptr<webrtc::DtlsTransportInterface>>
-    dtlsTransports(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
-      std::vector<webrtc::scoped_refptr<webrtc::DtlsTransportInterface>> transports;
+    using DtlsTransport = webrtc::scoped_refptr<webrtc::DtlsTransportInterface>;
+    using Transceivers = std::vector<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>>;
+
+    std::vector<DtlsTransport> dtlsTransports(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
+                                              const DtlsTransport &sctp) {
+      std::vector<DtlsTransport> transports;
       for (const auto &transceiver : pc->GetTransceivers()) {
         transports.push_back(transceiver->sender()->dtls_transport());
         transports.push_back(transceiver->receiver()->dtls_transport());
       }
-      if (auto sctp = pc->GetSctpTransport()) {
-        transports.push_back(sctp->dtls_transport());
-      }
+      transports.push_back(sctp);
       std::erase(transports, nullptr);
       return transports;
     }
 
+    DtlsTransport dtlsTransportOf(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc,
+                                  const Transceivers &transceivers, const DtlsTransport &sctp,
+                                  const webrtc::ContentInfo &content) {
+      if (content.rejected) {
+        return nullptr;
+      }
+      DtlsTransport known;
+      if (content.type == webrtc::MediaProtocolType::kSctp) {
+        known = sctp;
+      } else if (auto transceiver = std::ranges::find_if(
+                     transceivers, [&](const auto &candidate) { return candidate->mid() == content.mid(); });
+                 transceiver != transceivers.end()) {
+        if ((*transceiver)->stopped()) {
+          return nullptr;
+        }
+        known = (*transceiver)->sender()->dtls_transport();
+      }
+      // no transceiver, or a rollback took its transport: the lookup waits for the network thread
+      return known ? known : pc->LookupDtlsTransportByMid(content.mid());
+    }
+
     std::map<std::string, std::shared_ptr<RTCIceTransport>>
-    iceTransportsByMid(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
+    iceTransportsByMid(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc, const DtlsTransport &sctp) {
       std::map<std::string, std::shared_ptr<RTCIceTransport>> byMid;
+      auto transceivers = pc->GetTransceivers();
       for (const auto *description : {pc->local_description(), pc->remote_description()}) {
         if (description == nullptr) {
           continue;
@@ -97,7 +119,7 @@ namespace python_webrtc {
           if (byMid.contains(content.mid())) {
             continue;
           }
-          auto dtls = pc->LookupDtlsTransportByMid(content.mid());
+          auto dtls = dtlsTransportOf(pc, transceivers, sctp, content);
           if (auto wrapper = dtls ? RTCDtlsTransport::registry().Find(dtls.get()) : nullptr) {
             byMid.emplace(content.mid(), wrapper->GetIceTransport());
           }
@@ -106,22 +128,47 @@ namespace python_webrtc {
       return byMid;
     }
 
-  } // namespace
-
-  std::vector<std::shared_ptr<RTCIceTransport>> RTCPeerConnection::IceTransports() {
-    std::vector<std::shared_ptr<RTCIceTransport>> iceTransports;
-    auto pc = connection();
-    if (!pc) {
+    std::vector<std::shared_ptr<RTCIceTransport>>
+    iceTransportsOf(const std::vector<std::shared_ptr<RTCDtlsTransport>> &dtlsTransports) {
+      std::vector<std::shared_ptr<RTCIceTransport>> iceTransports;
+      for (const auto &dtls : dtlsTransports) {
+        auto ice = dtls ? dtls->GetIceTransport() : nullptr;
+        if (ice && std::ranges::find(iceTransports, ice) == iceTransports.end()) {
+          iceTransports.push_back(std::move(ice));
+        }
+      }
       return iceTransports;
     }
-    for (const auto &transport : dtlsTransports(pc)) {
-      auto dtls = RTCDtlsTransport::registry().Find(transport.get());
-      auto ice = dtls ? dtls->GetIceTransport() : nullptr;
-      if (ice && std::ranges::find(iceTransports, ice) == iceTransports.end()) {
-        iceTransports.push_back(ice);
-      }
+
+  } // namespace
+
+  RTCPeerConnection::SctpTransports
+  RTCPeerConnection::SctpTransportsOf(const webrtc::scoped_refptr<webrtc::PeerConnectionInterface> &pc) {
+    SctpTransports transports;
+    if (!pc) {
+      return transports;
     }
-    return iceTransports;
+    // the connection's getter waits for the network thread too, where the transport is read
+    BlockingCallOn(_factory->workerThread(), [&]() {
+      transports.sctp = pc->GetSctpTransport();
+      transports.dtls = transports.sctp ? transports.sctp->dtls_transport() : nullptr;
+    });
+    return transports;
+  }
+
+  std::vector<std::shared_ptr<RTCIceTransport>> RTCPeerConnection::IceTransports() {
+    auto pc = connection();
+    if (!pc) {
+      return {};
+    }
+    auto sctp = SctpTransportsOf(pc).dtls;
+    auto transports = BlockingCallOn(_factory->signalingThread(), [&]() { return dtlsTransports(pc, sctp); });
+    std::vector<std::shared_ptr<RTCDtlsTransport>> wrappers;
+    wrappers.reserve(transports.size());
+    for (const auto &transport : transports) {
+      wrappers.push_back(RTCDtlsTransport::registry().Find(transport.get()));
+    }
+    return iceTransportsOf(wrappers);
   }
 
   std::shared_ptr<RTCIceTransport> RTCPeerConnection::IceTransportByMid(const std::string &mid) {
@@ -137,14 +184,14 @@ namespace python_webrtc {
     return wrapper ? wrapper->GetIceTransport() : nullptr;
   }
 
-  std::vector<std::shared_ptr<RTCIceTransport>> RTCPeerConnection::WrapTransports() {
+  std::vector<std::shared_ptr<RTCIceTransport>> RTCPeerConnection::WrapTransports(const SctpTransports &sctp) {
     std::vector<std::shared_ptr<RTCIceTransport>> created;
     auto pc = connection();
     if (!pc) {
       return created;
     }
     std::vector<std::shared_ptr<RTCDtlsTransport>> wrappers;
-    for (const auto &transport : dtlsTransports(pc)) {
+    for (const auto &transport : dtlsTransports(pc, sctp.dtls)) {
       const bool existed = RTCDtlsTransport::registry().Find(transport.get()) != nullptr;
       auto wrapper = RTCDtlsTransport::registry().GetOrCreate(_factory, transport);
       Adopt(wrapper);
@@ -166,7 +213,7 @@ namespace python_webrtc {
       }
       _negotiatedTransports.assign(wrappers.begin(), wrappers.end());
     }
-    auto byMid = iceTransportsByMid(pc);
+    auto byMid = iceTransportsByMid(pc, sctp.dtls);
     {
       const TrackedLock lock(_wrappersMutex);
       std::swap(_dtlsTransports, wrappers);
@@ -193,14 +240,11 @@ namespace python_webrtc {
       return;
     }
 
-    std::vector<webrtc::scoped_refptr<webrtc::DtlsTransportInterface>> transports;
-    webrtc::scoped_refptr<webrtc::SctpTransportInterface> sctpTransport;
-    BlockingCallOn(_factory->signalingThread(), [&]() {
-      transports = dtlsTransports(pc);
-      sctpTransport = pc->GetSctpTransport();
-    });
+    auto sctpTransports = SctpTransportsOf(pc);
+    auto transports =
+        BlockingCallOn(_factory->signalingThread(), [&]() { return dtlsTransports(pc, sctpTransports.dtls); });
 
-    if (auto sctp = sctpTransport ? RTCSctpTransport::registry().Find(sctpTransport.get()) : nullptr) {
+    if (auto sctp = sctpTransports.sctp ? RTCSctpTransport::registry().Find(sctpTransports.sctp.get()) : nullptr) {
       sctp->OnPeerConnectionClosed();
     }
     for (const auto &transport : transports) {
@@ -219,7 +263,12 @@ namespace python_webrtc {
     auto state = pc->signaling_state();
     if (state == SignalingState::kStable || state == SignalingState::kHaveLocalPrAnswer ||
         state == SignalingState::kHaveRemotePrAnswer) {
-      for (const auto &iceTransport : IceTransports()) {
+      std::vector<std::shared_ptr<RTCDtlsTransport>> wrapped;
+      {
+        const TrackedLock lock(_wrappersMutex);
+        wrapped = _dtlsTransports;
+      }
+      for (const auto &iceTransport : iceTransportsOf(wrapped)) {
         iceTransport->SetRoleKnown();
       }
     }
@@ -269,13 +318,15 @@ namespace python_webrtc {
     if (!pc) {
       return {};
     }
+    auto sctp = SctpTransportsOf(pc).dtls;
     return BlockingCallOn(_factory->signalingThread(), [&]() -> std::optional<std::pair<std::string, std::string>> {
       const auto *description = local ? pc->local_description() : pc->remote_description();
       if (!description) {
         return std::nullopt;
       }
+      auto transceivers = pc->GetTransceivers();
       for (const auto &content : description->description()->contents()) {
-        auto dtls = pc->LookupDtlsTransportByMid(content.mid());
+        auto dtls = dtlsTransportOf(pc, transceivers, sctp, content);
         const auto *info = description->description()->GetTransportInfoByName(content.mid());
         if (dtls && dtls->ice_transport().get() == iceTransport && info) {
           return std::make_pair(info->description.ice_ufrag, info->description.ice_pwd);

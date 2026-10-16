@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <map>
+#include <tuple>
 #include <utility>
 
 #include <api/rtp_parameters.h>
@@ -288,8 +289,9 @@ namespace python_webrtc {
         }
         // the descriptions as the operation left them, before candidates gathered later
         self->_completionSnapshot = self->SnapshotDescriptions();
-        auto created = self->WrapTransports();
-        self->UpdateMaxMessageSize();
+        const auto sctp = self->SctpTransportsOf(self->connection());
+        auto created = self->WrapTransports(sctp);
+        self->UpdateMaxMessageSize(sctp);
         self->MarkIceRolesKnown();
         if (remote) {
           self->RecordRemoteDescriptionCandidates();
@@ -597,10 +599,20 @@ namespace python_webrtc {
       return 0;
     }
     DescriptionsSnapshot snapshot;
-    for (size_t kind = 0; kind < kDescriptionKinds; ++kind) {
-      snapshot.kinds[kind] = ReadDescription(pc, static_cast<DescriptionKind>(kind));
+    auto view = [&snapshot](DescriptionKind kind) -> DescriptionView & {
+      return snapshot.kinds[static_cast<size_t>(kind)];
+    };
+    for (auto kind : {DescriptionKind::kCurrentLocal, DescriptionKind::kCurrentRemote, DescriptionKind::kPendingLocal,
+                      DescriptionKind::kPendingRemote}) {
+      view(kind) = ReadDescription(pc, kind);
+      snapshot.live.push_back(view(kind).description);
     }
-    snapshot.live = liveDescriptions(pc);
+    // the pending description if there's one, else the current one (webrtc-pc)
+    for (auto [kind, pending, current] :
+         {std::tuple(DescriptionKind::kLocal, DescriptionKind::kPendingLocal, DescriptionKind::kCurrentLocal),
+          std::tuple(DescriptionKind::kRemote, DescriptionKind::kPendingRemote, DescriptionKind::kCurrentRemote)}) {
+      view(kind) = view(pending).description != nullptr ? view(pending) : view(current);
+    }
     const std::scoped_lock lock(_descriptionsMutex);
     auto id = ++_lastSnapshot;
     _snapshots.emplace(id, std::move(snapshot));
