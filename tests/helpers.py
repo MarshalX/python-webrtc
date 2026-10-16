@@ -356,6 +356,8 @@ async def write_video(
         timestamp += round(interval * 1_000_000)
         await asyncio.sleep(interval)
 
+    writer.release_lock()
+
 
 @contextlib.asynccontextmanager
 async def writing(write: Callable[..., Awaitable[None]], *args: object, **kwargs: object) -> AsyncGenerator[None]:

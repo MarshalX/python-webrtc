@@ -15,6 +15,7 @@
 #include <api/media_stream_interface.h>
 #include <api/scoped_refptr.h>
 #include <api/sequence_checker.h>
+#include <api/video/video_adapter.h>
 #include <api/video/video_frame.h>
 #include <api/video/video_sink_interface.h>
 #include <rtc_base/timestamp_aligner.h>
@@ -22,7 +23,7 @@
 namespace python_webrtc {
 
   // A track with a remote source as its sender sees it: frames restamped on the local clock without their remote NTP
-  // time, since encoders drop frames whose capture time goes back
+  // time, since encoders drop frames whose capture time goes back, and adapted to what the encoder wants
   class RelayedVideoTrack : public webrtc::VideoTrackInterface {
   public:
     explicit RelayedVideoTrack(webrtc::scoped_refptr<webrtc::VideoTrackInterface> track);
@@ -66,6 +67,8 @@ namespace python_webrtc {
     public:
       explicit Restamper(webrtc::VideoSinkInterface<webrtc::VideoFrame> *sink) : _sink(sink) {}
 
+      void OnSinkWants(const webrtc::VideoSinkWants &wants) { _adapter.OnSinkWants(wants); }
+
       void OnFrame(const webrtc::VideoFrame &frame) override;
 
       void OnDiscardedFrame() override { _sink->OnDiscardedFrame(); }
@@ -77,6 +80,7 @@ namespace python_webrtc {
     private:
       webrtc::VideoSinkInterface<webrtc::VideoFrame> *const _sink;
       webrtc::TimestampAligner _aligner;
+      webrtc::VideoAdapter _adapter;
     };
 
     const webrtc::scoped_refptr<webrtc::VideoTrackInterface> _track;

@@ -14,9 +14,10 @@ import asyncio
 import contextlib
 import dataclasses
 import gc
+import itertools
 import math
 import weakref
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -31,10 +32,14 @@ from tests.helpers import (
     stats_of_type,
     wait_for_event,
     wait_until,
+    wait_until_unmuted,
     write_video,
     writing,
 )
 from tests.timing import seconds
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 TIMEOUT = seconds(20)
 #: no frame for this long means frames stopped; exact, as it defines the assertion
@@ -184,6 +189,52 @@ async def test_a_remote_video_track_has_one_sender_a_connection(
 
 #: frames read to check their size
 FRAMES = 10
+#: a size too large for the bitrate the frames are sent at, and the frames of it
+LARGE = (640, 480)
+LARGE_I420 = bytes(640 * 480 * 3 // 2)
+
+
+async def send_at_low_bitrate(
+    caller: webrtc.RTCPeerConnection,
+    callee: webrtc.RTCPeerConnection,
+    track: webrtc.MediaStreamTrack,
+    *,
+    preference: webrtc.RTCDegradationPreference,
+) -> Awaitable[webrtc.Event]:
+    """Sends the track at 100 kbps, too low a bitrate for 640x480, and returns the callee's coming track event."""
+    init = webrtc.RTCRtpTransceiverInit(
+        direction='sendonly', send_encodings=[webrtc.RTCRtpEncodingParameters(max_bitrate=100_000)]
+    )
+    sender = caller.add_transceiver(track, init).sender
+    parameters = sender.get_parameters()
+    parameters.degradation_preference = preference
+    await sender.set_parameters(parameters)
+    received = wait_for_event(callee, 'track', TIMEOUT)
+    await connect(caller, callee, TIMEOUT)
+    # libwebrtc drops frames too large for the bitrate only if it knows the bitrate before the first frame
+    await wait_until(lambda: available_outgoing_bitrate(caller), 'a bandwidth estimate', TIMEOUT)
+    return received
+
+
+async def read_widths(track: webrtc.MediaStreamTrack, count: int) -> list[int]:
+    """The widths of the next frames of the track."""
+    reader = webrtc.MediaStreamTrackProcessor(
+        webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=1)
+    ).readable.get_reader()
+    widths: list[int] = []
+    while len(widths) < count:
+        frame = (await asyncio.wait_for(reader.read(), TIMEOUT)).value
+        assert isinstance(frame, webrtc.VideoFrame)
+        widths.append(frame.coded_width)
+        frame.close()
+    await reader.cancel()
+    return widths
+
+
+async def received_track(received: Awaitable[webrtc.Event]) -> webrtc.MediaStreamTrack:
+    event = await received
+    assert isinstance(event, webrtc.RTCTrackEvent)
+    return event.track
 
 
 async def received_widths(
@@ -192,32 +243,11 @@ async def received_widths(
     *,
     preference: webrtc.RTCDegradationPreference,
 ) -> list[int]:
-    """The widths of frames received of 640x480 video sent at 100 kbps, too low a bitrate for its size."""
+    """The widths of frames received of 640x480 video sent at a low bitrate."""
     generator = webrtc.VideoTrackGenerator()
-    init = webrtc.RTCRtpTransceiverInit(
-        direction='sendonly', send_encodings=[webrtc.RTCRtpEncodingParameters(max_bitrate=100_000)]
-    )
-    sender = caller.add_transceiver(generator.track, init).sender
-    parameters = sender.get_parameters()
-    parameters.degradation_preference = preference
-    await sender.set_parameters(parameters)
-    received = wait_for_event(callee, 'track', TIMEOUT)
-    await connect(caller, callee, TIMEOUT)
-    # libwebrtc drops frames too large for the bitrate only if it knows the bitrate before the first frame
-    await wait_until(lambda: available_outgoing_bitrate(caller), 'a bandwidth estimate', TIMEOUT)
-    async with writing(write_video, generator, bytes(640 * 480 * 3 // 2), (640, 480)):
-        event = await received
-        assert isinstance(event, webrtc.RTCTrackEvent)
-        reader = webrtc.MediaStreamTrackProcessor(
-            webrtc.MediaStreamTrackProcessorInit(event.track, max_buffer_size=5)
-        ).readable.get_reader()
-        widths: list[int] = []
-        while len(widths) < FRAMES:
-            frame = (await asyncio.wait_for(reader.read(), TIMEOUT)).value
-            assert isinstance(frame, webrtc.VideoFrame)
-            widths.append(frame.coded_width)
-            frame.close()
-        await reader.cancel()
+    received = await send_at_low_bitrate(caller, callee, generator.track, preference=preference)
+    async with writing(write_video, generator, LARGE_I420, LARGE):
+        widths = await read_widths(await received_track(received), FRAMES)
     generator.track.stop()
     return widths
 
@@ -237,6 +267,131 @@ async def test_a_generator_keeps_its_size_under_maintain_resolution(
 ) -> None:
     widths = await received_widths(caller, callee, preference=webrtc.RTCDegradationPreference.maintain_resolution)
     assert widths == [640] * FRAMES
+
+
+@pytest.mark.asyncio
+async def test_a_sent_track_keeps_its_size_for_its_own_sinks(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """A processor of a track and its settings see the frames of its source, not the smaller ones the encoder takes."""
+    generator = webrtc.VideoTrackGenerator()
+    received = await send_at_low_bitrate(
+        caller, callee, generator.track, preference=webrtc.RTCDegradationPreference.maintain_framerate
+    )
+    async with writing(write_video, generator, LARGE_I420, LARGE):
+        assert all(width < 640 for width in await read_widths(await received_track(received), FRAMES))
+        local = await read_widths(generator.track, FRAMES)
+        settings = generator.track.get_settings()
+    generator.track.stop()
+
+    assert local == [640] * FRAMES
+    assert (settings.width, settings.height) == LARGE
+
+
+@pytest.mark.asyncio
+async def test_relayed_video_scales_down_for_the_encoder(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, create_pc: CreatePC
+) -> None:
+    """A remote track sent on at a low bitrate is sent in the smaller frames its encoder asks for."""
+    relay, sink = create_pc(), create_pc()
+    generator = webrtc.VideoTrackGenerator()
+    async with writing(write_video, generator, LARGE_I420, LARGE):
+        remote = await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
+        await wait_until_unmuted(remote, TIMEOUT)
+    # no frame reaches the relay's encoder before it knows its bitrate
+    received = await send_at_low_bitrate(
+        relay, sink, remote, preference=webrtc.RTCDegradationPreference.maintain_framerate
+    )
+    async with writing(write_video, generator, LARGE_I420, LARGE):
+        widths = await read_widths(await received_track(received), FRAMES)
+    generator.track.stop()
+
+    assert all(width < 640 for width in widths)
+
+
+#: a frame interval of the producer, in microseconds, the unit of frame timestamps
+FRAME_US = 33_333
+#: frames a producer writes at its pace first, a second of them, for the generator to learn its clock
+PACED = 30
+#: frames a producer that fell behind writes at once
+BURST = 4
+
+
+async def source_frames(pc: webrtc.RTCPeerConnection) -> int:
+    """The frames the encoders of the connection took from their sources."""
+    report = await pc.get_stats()
+    sources = stats_of_type(report, 'media-source')
+    return sum(s.frames for s in sources if isinstance(s, webrtc.RTCVideoSourceStats) and s.frames is not None)
+
+
+def frame_writer(generator: webrtc.VideoTrackGenerator) -> Callable[[], Awaitable[None]]:
+    """Writes the next frame of a producer to the generator, its timestamp a frame interval after the previous one."""
+    writer = generator.writable.get_writer()
+    data = solid_i420(128, 128, 128)
+    timestamps = itertools.count(0, FRAME_US)
+
+    async def write() -> None:
+        init = webrtc.VideoFrameBufferInit(
+            format='I420', coded_width=WIDTH, coded_height=HEIGHT, timestamp=next(timestamps)
+        )
+        await writer.write(webrtc.VideoFrame(data, init))
+
+    return write
+
+
+async def frames_taken(caller: webrtc.RTCPeerConnection, before: int, count: int) -> int:
+    """The frames the encoder took since it had taken ``before``, once it took ``count`` or a while passed."""
+
+    async def all_taken() -> bool:
+        return await source_frames(caller) >= before + count
+
+    with contextlib.suppress(TimeoutError):
+        await wait_until(all_taken, 'the frames at the encoder', seconds(5))
+    return await source_frames(caller) - before
+
+
+@pytest.mark.asyncio
+async def test_generator_frames_written_at_once_reach_the_encoder(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """Two frames written back to back, a frame interval apart in their timestamps, are both encoded."""
+    generator = webrtc.VideoTrackGenerator()
+    write = frame_writer(generator)
+    await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
+    await write()
+    await write()
+    taken = await frames_taken(caller, 0, 2)
+    generator.track.stop()
+
+    assert taken == 2
+
+
+@pytest.mark.asyncio
+async def test_late_generator_frames_written_at_once_reach_the_encoder(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    """A producer that stalls, then writes the frames it owes at once, has none of them dropped as duplicates."""
+    generator = webrtc.VideoTrackGenerator()
+    write = frame_writer(generator)
+    loop = asyncio.get_running_loop()
+    await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
+    start = loop.time()
+    written = 0
+    deadline = start + TIMEOUT
+    while written < PACED or await source_frames(caller) == 0:
+        assert loop.time() < deadline, 'no frame reached the encoder'
+        await write()
+        written += 1
+        await asyncio.sleep(max(0.0, start + written * FRAME_US / 1e6 - loop.time()))
+    # it falls behind by the burst, then catches up
+    await asyncio.sleep(max(0.0, start + (written + BURST) * FRAME_US / 1e6 - loop.time()))
+    before = await source_frames(caller)
+    for _ in range(BURST):
+        await write()
+    taken = await frames_taken(caller, before, BURST)
+    generator.track.stop()
+
+    assert taken == BURST
 
 
 #: the rids of three layers of 720p, lowest first, and their sizes

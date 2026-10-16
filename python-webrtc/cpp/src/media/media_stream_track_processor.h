@@ -27,6 +27,7 @@
 #include "../interfaces/media_stream_track.h"
 #include "../utils/mailbox.h"
 #include "../utils/native_object.h"
+#include "local_video_sink.h"
 #include "video_frame_buffer.h"
 
 namespace python_webrtc {
@@ -35,7 +36,7 @@ namespace python_webrtc {
   class MediaStreamTrackProcessor : public NativeObject<MediaStreamTrackProcessor>,
                                     public Emitter<MediaStreamTrackProcessor>,
                                     public TrackEndObserver,
-                                    public webrtc::VideoSinkInterface<webrtc::VideoFrame>,
+                                    public LocalVideoSink,
                                     public webrtc::AudioTrackSinkInterface {
   public:
     static constexpr const char *kName = "MediaStreamTrackProcessor";

@@ -19,10 +19,12 @@
 #include <api/video/video_sink_interface.h>
 #include <rtc_base/time_utils.h>
 
+#include "local_video_sink.h"
+
 namespace python_webrtc {
 
   // What a track carries, for its settings: the size and rate of its frames, the format of its audio
-  class TrackMonitor : public webrtc::VideoSinkInterface<webrtc::VideoFrame>, public webrtc::AudioTrackSinkInterface {
+  class TrackMonitor : public LocalVideoSink, public webrtc::AudioTrackSinkInterface {
   public:
     struct Video {
       int width;
