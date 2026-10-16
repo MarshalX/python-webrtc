@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import ctypes
+import dataclasses
 import faulthandler
 import functools
 import gc
@@ -344,15 +345,23 @@ async def write_video(
 ) -> None:
     """Writes I420 frames of the data and the size to a generator, one an interval, until stopped."""
     width, height = size
+    init = webrtc.VideoFrameBufferInit(format='I420', coded_width=width, coded_height=height, timestamp=0)
+    await write_frames(generator, data, init, stop=stop, interval=interval)
+
+
+async def write_frames(
+    generator: webrtc.VideoTrackGenerator,
+    data: bytes,
+    init: webrtc.VideoFrameBufferInit,
+    *,
+    stop: asyncio.Event,
+    interval: float = 1 / 30,
+) -> None:
+    """Writes frames of the data and the init to a generator, one an interval and timed as such, until stopped."""
     writer = generator.writable.get_writer()
     timestamp = 0
     while not stop.is_set():
-        await writer.write(
-            webrtc.VideoFrame(
-                data,
-                webrtc.VideoFrameBufferInit(format='I420', coded_width=width, coded_height=height, timestamp=timestamp),
-            )
-        )
+        await writer.write(webrtc.VideoFrame(data, dataclasses.replace(init, timestamp=timestamp)))
         timestamp += round(interval * 1_000_000)
         await asyncio.sleep(interval)
 

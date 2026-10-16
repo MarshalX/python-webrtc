@@ -9,7 +9,7 @@
 #include "openh264.h"
 
 #include <api/video/encoded_image.h>
-#include <api/video/i420_buffer.h>
+#include <api/video/video_frame_buffer.h>
 #include <api/video_codecs/h264_profile_level_id.h>
 #include <api/video_codecs/video_decoder_software_fallback_wrapper.h>
 #include <common_video/h264/h264_bitstream_parser.h>
@@ -18,6 +18,7 @@
 #import <components/video_frame_buffer/RTCCVPixelBuffer.h>
 #include <libyuv/convert.h>
 #include <libyuv/convert_from.h>
+#include <libyuv/planar_functions.h>
 #include <media/base/media_constants.h>
 #include <modules/video_coding/codecs/h264/include/h264.h>
 #include <modules/video_coding/codecs/interface/common_constants.h>
@@ -35,6 +36,8 @@
 #include <algorithm>
 #include <atomic>
 #include <memory>
+
+#include "../media/frame_buffer_pool.h"
 
 // Encoding is our own VTCompressionSession; decoding is the SDK's, whose full-range output we map to video range.
 
@@ -153,14 +156,11 @@ namespace {
         if (restart && !RestartSession()) {
           return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
         }
-        const auto i420 = frame.video_frame_buffer()->ToI420();
-        if (i420 == nullptr) {
-          return WEBRTC_VIDEO_CODEC_ERROR;
-        }
-        if (!FitSession(i420->width(), i420->height())) {
+        const auto buffer = frame.video_frame_buffer();
+        if (!FitSession(buffer->width(), buffer->height())) {
           return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
         }
-        CVPixelBufferRef pixelBuffer = PoolBufferOf(*i420);
+        CVPixelBufferRef pixelBuffer = PoolBufferOf(*buffer);
         if (pixelBuffer == nullptr) {
           return WEBRTC_VIDEO_CODEC_ERROR;
         }
@@ -200,6 +200,8 @@ namespace {
       info.implementation_name = "VideoToolbox";
       info.is_hardware_accelerated = true;
       info.scaling_settings = ScalingSettings(kLowQpThreshold, kHighQpThreshold);
+      // NV12 is what the session takes, copied as it is
+      info.preferred_pixel_formats = {webrtc::VideoFrameBuffer::Type::kNV12, webrtc::VideoFrameBuffer::Type::kI420};
       return info;
     }
 
@@ -304,8 +306,16 @@ namespace {
       }
     }
 
-    // the frame copied into a buffer of the session's pool; the caller releases it
-    CVPixelBufferRef PoolBufferOf(const webrtc::I420BufferInterface &i420) {
+    // the frame copied into a buffer of the session's pool, as NV12 without an I420 step; the caller releases it
+    CVPixelBufferRef PoolBufferOf(webrtc::VideoFrameBuffer &buffer) {
+      // the I420 of any other format, made before a pool buffer is taken
+      webrtc::scoped_refptr<webrtc::I420BufferInterface> i420;
+      if (buffer.type() != webrtc::VideoFrameBuffer::Type::kNV12) {
+        i420 = buffer.ToI420();
+        if (i420 == nullptr) {
+          return nullptr;
+        }
+      }
       CVPixelBufferPoolRef pool = VTCompressionSessionGetPixelBufferPool(_session);
       CVPixelBufferRef pixelBuffer = nullptr;
       if (pool == nullptr || CVPixelBufferPoolCreatePixelBuffer(nullptr, pool, &pixelBuffer) != kCVReturnSuccess) {
@@ -315,9 +325,16 @@ namespace {
         CVPixelBufferRelease(pixelBuffer);
         return nullptr;
       }
-      libyuv::I420ToNV12(i420.DataY(), i420.StrideY(), i420.DataU(), i420.StrideU(), i420.DataV(), i420.StrideV(),
-                         PlaneData(pixelBuffer, 0), PlaneStride(pixelBuffer, 0), PlaneData(pixelBuffer, 1),
-                         PlaneStride(pixelBuffer, 1), i420.width(), i420.height());
+      if (i420 == nullptr) {
+        const auto *nv12 = buffer.GetNV12();
+        libyuv::NV12Copy(nv12->DataY(), nv12->StrideY(), nv12->DataUV(), nv12->StrideUV(), PlaneData(pixelBuffer, 0),
+                         PlaneStride(pixelBuffer, 0), PlaneData(pixelBuffer, 1), PlaneStride(pixelBuffer, 1),
+                         nv12->width(), nv12->height());
+      } else {
+        libyuv::I420ToNV12(i420->DataY(), i420->StrideY(), i420->DataU(), i420->StrideU(), i420->DataV(),
+                           i420->StrideV(), PlaneData(pixelBuffer, 0), PlaneStride(pixelBuffer, 0),
+                           PlaneData(pixelBuffer, 1), PlaneStride(pixelBuffer, 1), i420->width(), i420->height());
+      }
       CVPixelBufferUnlockBaseAddress(pixelBuffer, 0);
       CVBufferSetAttachment(pixelBuffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4,
                             kCVAttachmentMode_ShouldPropagate);
@@ -394,7 +411,10 @@ namespace {
   public:
     explicit VideoRangeDecoder(std::unique_ptr<webrtc::VideoDecoder> decoder) : _decoder(std::move(decoder)) {}
 
-    bool Configure(const Settings &settings) override { return _decoder->Configure(settings); }
+    bool Configure(const Settings &settings) override {
+      _pool.Resize(settings.buffer_pool_size());
+      return _decoder->Configure(settings);
+    }
 
     int32_t Decode(const webrtc::EncodedImage &image, int64_t renderTimeMs) override {
       return _decoder->Decode(image, renderTimeMs);
@@ -431,7 +451,7 @@ namespace {
 
   private:
     // full-range NV12 to video-range I420; false drops the frame
-    static bool Convert(webrtc::VideoFrame &frame) {
+    bool Convert(webrtc::VideoFrame &frame) {
       CVPixelBufferRef pixelBuffer = PixelBufferOf(*frame.video_frame_buffer());
       if (pixelBuffer == nullptr ||
           CVPixelBufferGetPixelFormatType(pixelBuffer) != kCVPixelFormatType_420YpCbCr8BiPlanarFullRange) {
@@ -442,7 +462,7 @@ namespace {
       }
       const int width = static_cast<int>(CVPixelBufferGetWidth(pixelBuffer));
       const int height = static_cast<int>(CVPixelBufferGetHeight(pixelBuffer));
-      auto i420 = webrtc::I420Buffer::Create(width, height);
+      auto i420 = _pool.CreateI420(width, height);
       libyuv::NV12ToI420(PlaneData(pixelBuffer, 0), PlaneStride(pixelBuffer, 0), PlaneData(pixelBuffer, 1),
                          PlaneStride(pixelBuffer, 1), i420->MutableDataY(), i420->StrideY(), i420->MutableDataU(),
                          i420->StrideU(), i420->MutableDataV(), i420->StrideV(), width, height);
@@ -468,6 +488,8 @@ namespace {
     std::unique_ptr<webrtc::VideoDecoder> _decoder;
     // set on the decoding thread, called on VideoToolbox's
     std::atomic<webrtc::DecodedImageCallback *> _callback = nullptr;
+    // the converted frames, made on VideoToolbox's thread
+    python_webrtc::FrameBufferPool _pool;
   };
 
   // leaked: decoders may outlive static destruction at interpreter exit

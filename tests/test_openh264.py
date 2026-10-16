@@ -90,15 +90,22 @@ async def _center_pixel(frame: webrtc.VideoFrame) -> bytes:
     return bytes(rgba[center : center + 4])
 
 
-async def _last_of_ten(track: webrtc.MediaStreamTrack) -> tuple[tuple[int, int], bytes]:
+#: more frames than a decoder keeps buffers of: held, they don't stop it
+_HELD = 24
+
+
+async def _last_of_held(track: webrtc.MediaStreamTrack) -> tuple[tuple[int, int], bytes]:
     reader = webrtc.MediaStreamTrackProcessor(
         webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=5)
     ).readable.get_reader()
     # every frame converts, the last one is checked
-    for _ in range(10):
+    held: list[webrtc.VideoFrame] = []
+    for _ in range(_HELD):
         frame = (await asyncio.wait_for(reader.read(), seconds(20))).value
         assert isinstance(frame, webrtc.VideoFrame)
         size, center = (frame.coded_width, frame.coded_height), await _center_pixel(frame)
+        held.append(frame)
+    for frame in held:
         frame.close()
     await reader.cancel()
     return size, center
@@ -111,7 +118,7 @@ async def _received(
     version: str,
     track: webrtc.MediaStreamTrack,
 ) -> _Received:
-    size, center = await _last_of_ten(track)
+    size, center = await _last_of_held(track)
     outbound = stats_of_type(await caller.get_stats(), 'outbound-rtp')[0]
     stats = await callee.get_stats()
     inbound = stats_of_type(stats, 'inbound-rtp')[0]
@@ -168,7 +175,7 @@ def test_h264_through_a_connection() -> None:
     # the OS's decoder takes every H.264 profile on macOS
     assert result.decoder == ('VideoToolbox' if sys.platform == 'darwin' else 'OpenH264')
     assert result.decoded is not None
-    assert result.decoded >= 10
+    assert result.decoded >= _HELD
     assert result.size == (320, 240)
     r, g, b, a = result.center
     assert r > 230
@@ -190,7 +197,7 @@ def test_decodes_in_software_with_qp() -> None:
 
     assert result.decoder == ('OpenH264 (fallback from: VideoToolbox)' if sys.platform == 'darwin' else 'OpenH264')
     assert result.decoded is not None
-    assert result.decoded >= 10
+    assert result.decoded >= _HELD
     assert result.qp_sum is not None
     assert result.qp_sum > 0
     assert result.size == (320, 240)

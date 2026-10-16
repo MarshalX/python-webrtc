@@ -21,6 +21,7 @@
 #include <api/video/video_broadcaster.h>
 #include <api/video/video_frame.h>
 
+#include "../media/frame_buffer_pool.h"
 #include "../media/source_control.h"
 #include "../utils/paced_thread.h"
 
@@ -84,6 +85,8 @@ namespace python_webrtc {
     const std::optional<bool> _needsDenoising;
     webrtc::VideoBroadcaster _broadcaster;
     webrtc::VideoAdapter _adapter;
+    FrameBufferPool _drawPool;
+    FrameBufferPool _scalePool;
     webrtc::VideoBroadcaster _unadapted;
     // sinks of disabled or ended tracks: a black frame a second
     webrtc::VideoBroadcaster _blackBroadcaster;

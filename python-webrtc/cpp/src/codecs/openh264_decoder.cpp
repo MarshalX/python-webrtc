@@ -7,8 +7,8 @@
 
 #include "openh264_decoder.h"
 
-#include <api/video/i420_buffer.h>
 #include <api/video/video_frame.h>
+#include <libyuv/convert.h>
 #include <modules/video_coding/include/video_error_codes.h>
 #include <third_party/openh264/src/codec/api/wels/codec_api.h>
 
@@ -21,8 +21,9 @@ namespace python_webrtc {
     Destroy();
   }
 
-  bool OpenH264Decoder::Configure(const Settings & /*settings*/) {
+  bool OpenH264Decoder::Configure(const Settings &settings) {
     Destroy();
+    _pool.Resize(settings.buffer_pool_size());
     if (WelsCreateDecoder(&_decoder) != 0 || _decoder == nullptr) {
       _decoder = nullptr;
       return false;
@@ -66,8 +67,10 @@ namespace python_webrtc {
 
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-union-access): OpenH264's output has this one member
     const auto &picture = info.UsrData.sSystemBuffer;
-    const auto buffer = webrtc::I420Buffer::Copy(picture.iWidth, picture.iHeight, planes[0], picture.iStride[0],
-                                                 planes[1], picture.iStride[1], planes[2], picture.iStride[1]);
+    auto buffer = _pool.CreateI420(picture.iWidth, picture.iHeight);
+    libyuv::I420Copy(planes[0], picture.iStride[0], planes[1], picture.iStride[1], planes[2], picture.iStride[1],
+                     buffer->MutableDataY(), buffer->StrideY(), buffer->MutableDataU(), buffer->StrideU(),
+                     buffer->MutableDataV(), buffer->StrideV(), picture.iWidth, picture.iHeight);
     auto frame = webrtc::VideoFrame::Builder()
                      .set_video_frame_buffer(buffer)
                      .set_rtp_timestamp(image.RtpTimestamp())

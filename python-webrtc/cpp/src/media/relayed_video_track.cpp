@@ -48,7 +48,7 @@ namespace python_webrtc {
     webrtc::VideoFrame restamped = frame;
     restamped.set_timestamp_us(_aligner.TranslateTimestamp(frame.timestamp_us(), webrtc::TimeMicros()));
     restamped.set_ntp_time_ms(0);
-    auto adapted = AdaptFrame(_adapter, restamped);
+    auto adapted = AdaptFrame(_adapter, _pool, restamped);
     if (adapted) {
       _sink->OnFrame(*adapted);
     } else {

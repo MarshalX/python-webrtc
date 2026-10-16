@@ -14,10 +14,14 @@
 #include <api/video/video_frame.h>
 #include <rtc_base/time_utils.h>
 
+#include "frame_buffer_pool.h"
+
 namespace python_webrtc {
 
-  // The frame as the adapter's sinks want it, timed by its capture time: cropped and scaled, or none when dropped
-  inline std::optional<webrtc::VideoFrame> AdaptFrame(webrtc::VideoAdapter &adapter, const webrtc::VideoFrame &frame) {
+  // The frame as the adapter's sinks want it, timed by its capture time: cropped and scaled into a buffer of the pool,
+  // or none when dropped
+  inline std::optional<webrtc::VideoFrame> AdaptFrame(webrtc::VideoAdapter &adapter, FrameBufferPool &pool,
+                                                      const webrtc::VideoFrame &frame) {
     int croppedWidth = 0;
     int croppedHeight = 0;
     int width = 0;
@@ -31,9 +35,9 @@ namespace python_webrtc {
       return frame;
     }
     webrtc::VideoFrame adapted = frame;
-    adapted.set_video_frame_buffer(frame.video_frame_buffer()->CropAndScale(
-        (frame.width() - croppedWidth) / 2, (frame.height() - croppedHeight) / 2, croppedWidth, croppedHeight, width,
-        height));
+    adapted.set_video_frame_buffer(pool.CropAndScale(*frame.video_frame_buffer(), (frame.width() - croppedWidth) / 2,
+                                                     (frame.height() - croppedHeight) / 2, croppedWidth, croppedHeight,
+                                                     width, height));
     adapted.clear_update_rect();
     return adapted;
   }

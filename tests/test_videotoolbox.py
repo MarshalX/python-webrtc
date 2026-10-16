@@ -22,7 +22,7 @@ import tempfile
 import pytest
 
 import webrtc
-from tests.h264 import HEIGHT, LUMA, WIDTH, Recorder, h264_codecs
+from tests.h264 import HEIGHT, WIDTH, Recorder, h264_codecs
 from tests.helpers import connect, stats_of_type, wait_for_event, wait_until, write_video, writing
 from tests.isolation import isolated
 from tests.timing import seconds
@@ -36,7 +36,8 @@ SAMPLES = range(10, RECEIVED, 10)
 @dataclasses.dataclass
 class _Arrived:
     sizes: set[str]
-    lumas: list[tuple[int | None, bytes]]
+    # sampled frames in I420, by RTP timestamp
+    pictures: list[tuple[int | None, bytes]]
 
 
 async def _arrived(track: webrtc.MediaStreamTrack) -> _Arrived:
@@ -52,7 +53,7 @@ async def _arrived(track: webrtc.MediaStreamTrack) -> _Arrived:
         if i in SAMPLES:
             data = bytearray(frame.allocation_size(options))
             await frame.copy_to(data, options)
-            arrived.lumas.append((frame.metadata().rtp_timestamp, bytes(data[:LUMA])))
+            arrived.pictures.append((frame.metadata().rtp_timestamp, bytes(data)))
         frame.close()
     await reader.cancel()
     return arrived
@@ -113,7 +114,7 @@ def _videotoolbox_sender(caller: webrtc.RTCPeerConnection, recorder: Recorder, p
 def _psnrs(recorder: Recorder, arrived: _Arrived) -> list[float]:
     # the source of a received frame is one of the last ones written before it was encoded
     written_by = {e.rtp_timestamp: e.written for e in recorder.encoded}
-    return [min(recorder.best_psnr(luma, written_by[timestamp]), 99.0) for timestamp, luma in arrived.lumas]
+    return [min(recorder.best_psnr(picture, written_by[timestamp]), 99.0) for timestamp, picture in arrived.pictures]
 
 
 def _probe(ffprobe: str, stream: bytes) -> dict[str, object]:
@@ -126,8 +127,8 @@ def _probe(ffprobe: str, stream: bytes) -> dict[str, object]:
     return probe
 
 
-async def _send(ffmpeg: str, ffprobe: str, profile: str) -> _Sent:
-    recorder = Recorder(ffmpeg)
+async def _send(ffmpeg: str, ffprobe: str, profile: str, *, format: webrtc.VideoPixelFormatValue) -> _Sent:
+    recorder = Recorder(ffmpeg, format)
     caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
     sender = _videotoolbox_sender(caller, recorder, profile)
     track_event = wait_for_event(callee, 'track', 20)
@@ -152,16 +153,16 @@ async def _send(ffmpeg: str, ffprobe: str, profile: str) -> _Sent:
 
 
 @isolated(timeout=seconds(120))
-def _sent(ffmpeg: str, ffprobe: str, profile: str) -> _Sent:
-    return asyncio.run(_send(ffmpeg, ffprobe, profile))
+def _sent(ffmpeg: str, ffprobe: str, profile: str, *, format: webrtc.VideoPixelFormatValue) -> _Sent:
+    return asyncio.run(_send(ffmpeg, ffprobe, profile, format=format))
 
 
 @functools.cache
-def result(profile: str) -> _Sent:
+def result(profile: str, format: webrtc.VideoPixelFormatValue = 'I420') -> _Sent:
     ffmpeg, ffprobe = shutil.which('ffmpeg'), shutil.which('ffprobe')
     if ffmpeg is None or ffprobe is None:
         pytest.skip('no ffmpeg and ffprobe')
-    return _sent(ffmpeg, ffprobe, profile)
+    return _sent(ffmpeg, ffprobe, profile, format=format)
 
 
 PROFILES = [
@@ -186,6 +187,16 @@ def test_loopback(profile: str, name: str) -> None:
     assert sent.sizes == [f'{WIDTH}x{HEIGHT}']
     assert sent.first_is_key
     # encoding loses some, a broken stream or a wrong frame loses far more
+    assert min(sent.psnr) > 30, sent.psnr
+
+
+def test_nv12_loopback() -> None:
+    """NV12 frames go to VideoToolbox as they are and arrive as close to their source as I420 ones."""
+    sent = result('640c1f', 'NV12')
+
+    assert sent.implementations.encoder == 'VideoToolbox'
+    assert sent.implementations.decoder == 'VideoToolbox'
+    assert sent.sizes == [f'{WIDTH}x{HEIGHT}']
     assert min(sent.psnr) > 30, sent.psnr
 
 

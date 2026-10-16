@@ -11,7 +11,6 @@
 #include <chrono>
 #include <cstring>
 
-#include <api/video/i420_buffer.h>
 #include <rtc_base/time_utils.h>
 
 #include "../media/frame_adaptation.h"
@@ -61,7 +60,7 @@ namespace python_webrtc {
 
   void RTCVideoTrackSource::DrawFrame(int width, int height, uint32_t frame) {
     // a gradient moving across the frame, with a moving block, so that encoders have work to do
-    auto buffer = webrtc::I420Buffer::Create(width, height);
+    auto buffer = _drawPool.CreateI420(width, height);
     for (int y = 0; y < height; ++y) {
       auto *row = buffer->MutableDataY() + (static_cast<std::ptrdiff_t>(y) * buffer->StrideY());
       for (int x = 0; x < width; ++x) {
@@ -107,7 +106,7 @@ namespace python_webrtc {
     if (!_broadcaster.frame_wanted()) {
       return;
     }
-    auto adapted = AdaptFrame(_adapter, frame);
+    auto adapted = AdaptFrame(_adapter, _scalePool, frame);
     if (adapted) {
       _broadcaster.OnFrame(*adapted);
     } else {

@@ -72,6 +72,36 @@ async def test_video_frames_of_a_camera(video_stream: webrtc.MediaStream) -> Non
     assert (await reader.read()).done
 
 
+#: more frames than a source keeps buffers of, so some are recycled while others are held
+HELD = 24
+
+
+async def i420_of(frame: webrtc.VideoFrame) -> bytes:
+    options = webrtc.VideoFrameCopyToOptions(format='I420')
+    data = bytearray(frame.allocation_size(options))
+    await frame.copy_to(data, options)
+    return bytes(data)
+
+
+@pytest.mark.asyncio
+async def test_held_camera_frames_keep_coming_and_keep_their_pixels(video_stream: webrtc.MediaStream) -> None:
+    """The camera's buffers are recycled only once their frames are gone, and held frames don't stop it."""
+    track = video_stream.get_tracks()[0]
+    reader = webrtc.MediaStreamTrackProcessor(
+        webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=HELD)
+    ).readable.get_reader()
+    held: list[tuple[webrtc.VideoFrame, bytes]] = []
+    for _ in range(HELD):
+        frame = as_video_frame((await read(reader)).value)
+        held.append((frame, await i420_of(frame)))
+    # the camera draws a moving picture: a recycled buffer would show a later frame
+    assert len({pixels for _, pixels in held}) == HELD
+    for frame, pixels in held:
+        assert await i420_of(frame) == pixels
+        frame.close()
+    track.stop()
+
+
 @pytest.mark.asyncio
 async def test_audio_data_of_a_microphone(audio_stream: webrtc.MediaStream) -> None:
     """A processor of an audio track reads its samples, 10 ms at a time."""
@@ -250,11 +280,18 @@ async def test_generator_sends_other_formats_as_i420(format: webrtc.VideoPixelFo
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ('format', 'size'),
-    [('I420A', 20), ('I422', 16), ('I444', 24), ('NV12', 12)],
+    ('format', 'width', 'height', 'size'),
+    [
+        ('I420A', 4, 2, 20),
+        ('I422', 4, 2, 16),
+        ('I444', 4, 2, 24),
+        ('NV12', 4, 2, 12),
+        # a chroma sample covers the last column and row alone
+        ('NV12', 5, 3, 27),
+    ],
 )
 async def test_generator_sends_formats_libwebrtc_has_as_they_are(
-    format: webrtc.VideoPixelFormatValue, size: int
+    *, format: webrtc.VideoPixelFormatValue, width: int, height: int, size: int
 ) -> None:
     generator = webrtc.VideoTrackGenerator()
     reader = webrtc.MediaStreamTrackProcessor(
@@ -262,7 +299,7 @@ async def test_generator_sends_formats_libwebrtc_has_as_they_are(
     ).readable.get_reader()
     planes = bytes(range(1, size + 1))
     frame = webrtc.VideoFrame(
-        planes, webrtc.VideoFrameBufferInit(format=format, coded_width=4, coded_height=2, timestamp=0)
+        planes, webrtc.VideoFrameBufferInit(format=format, coded_width=width, coded_height=height, timestamp=0)
     )
     await generator.writable.get_writer().write(frame)
     with as_video_frame((await read(reader)).value) as received:
