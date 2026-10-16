@@ -9,8 +9,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 from typing import TypeVar, cast
+
+from typing_extensions import override
 
 import webrtc
 import wrtc
@@ -36,14 +39,40 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
     See :mdn:`RTCRtpReceiver`.
     """
 
-    __slots__ = ()
+    __slots__ = ('_cached_sources',)
 
     _class = wrtc.RTCRtpReceiver
+    _cached_sources: tuple[asyncio.AbstractEventLoop, list[tuple[bool, int, float, int, int | None]]] | None
+
+    @override
+    def _init_native(self, native_obj: wrtc.RTCRtpReceiver | None) -> None:
+        super()._init_native(native_obj)
+        self._cached_sources = None
+
+    def _native_sources(self) -> list[tuple[bool, int, float, int, int | None]]:
+        # kept for the loop iteration (the spec's task): both getters in it cost one hop to the worker thread
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return self._native_obj._getSources()
+
+        cached = self._cached_sources
+        if cached is not None and cached[0] is loop:
+            return cached[1]
+
+        sources = self._native_obj._getSources()
+        self._cached_sources = (loop, sources)
+        _ = loop.call_soon(self._clear_sources)
+
+        return sources
+
+    def _clear_sources(self) -> None:
+        self._cached_sources = None
 
     def _sources(self, cls: type[_SourceT]) -> list[_SourceT]:
         synchronization = cls is RTCRtpSynchronizationSource
         # each native source starts with whether it's an SSRC
-        return [cls._from_native(source) for source in self._native_obj._getSources() if source[0] == synchronization]
+        return [cls._from_native(source) for source in self._native_sources() if source[0] == synchronization]
 
     @property
     def track(self) -> webrtc.MediaStreamTrack:
@@ -155,6 +184,8 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
     def get_synchronization_sources(self) -> list[webrtc.RTCRtpSynchronizationSource]:
         """Returns the synchronization sources (SSRCs) of the media received in the last 10 seconds.
 
+        Calls in the same loop iteration, of this method and :meth:`get_contributing_sources`, see the same sources.
+
         See :mdn:`RTCRtpReceiver/getSynchronizationSources`.
 
         Returns:
@@ -166,6 +197,7 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
         """Returns the contributing sources (CSRCs) of the media received in the last 10 seconds.
 
         These are the original streams a mixer, like a conference server, combined into the received one.
+        Calls in the same loop iteration, of this method and :meth:`get_synchronization_sources`, see the same sources.
 
         See :mdn:`RTCRtpReceiver/getContributingSources`.
 

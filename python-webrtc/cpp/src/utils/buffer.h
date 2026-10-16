@@ -37,6 +37,11 @@ namespace python_webrtc {
     return {reinterpret_cast<const char *>(data), size};
   }
 
+  inline pybind11::bytearray ByteArray(std::span<const uint8_t> data) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): Python bytes are chars, octets alias them
+    return {reinterpret_cast<const char *>(data.data()), data.size()};
+  }
+
   // Whether rows of rowBytes, stride apart and starting at offset, fit in size bytes, without overflowing
   inline bool RowsFit(size_t offset, size_t stride, size_t rows, size_t rowBytes, size_t size) {
     if (rows == 0 || rowBytes == 0) {

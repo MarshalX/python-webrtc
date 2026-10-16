@@ -7,7 +7,7 @@
 
 #include "rtc_rtp_script_transform.h"
 
-#include <cstring>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -121,14 +121,11 @@ namespace python_webrtc {
   }
 
   bool RTCRtpScriptTransform::Write(EncodedFrame &frame, std::optional<pybind11::buffer> data) {
-    std::optional<std::vector<uint8_t>> payload;
+    // the view keeps the octets in place without the GIL (a bytearray can't resize), released once it's back
+    std::optional<pybind11::buffer_info> info;
+    std::span<const uint8_t> payload;
     if (data) {
-      auto info = ContiguousBuffer(*data);
-      const auto size = static_cast<size_t>(info.size * info.itemsize);
-      payload.emplace(size);
-      if (size > 0) {
-        std::memcpy(payload->data(), info.ptr, size);
-      }
+      payload = BufferSpan(*data, info.emplace());
     }
     const gil_release release;
     webrtc::scoped_refptr<FrameTransformerBridge> bridge;
@@ -147,8 +144,8 @@ namespace python_webrtc {
     if (!transformable) {
       return false;
     }
-    if (payload) {
-      transformable->SetData(*payload);
+    if (info) {
+      transformable->SetData(payload);
     }
     bridge->Output(std::move(transformable));
     return true;

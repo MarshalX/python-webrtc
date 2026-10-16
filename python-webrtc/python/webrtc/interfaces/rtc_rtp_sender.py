@@ -81,6 +81,8 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
 
         It changes the encoded frames before they're sent. With :obj:`None`, frames are sent as encoded.
         A transform serves one sender or receiver for its lifetime, so once attached it can't be set elsewhere.
+        Setting the first transform on a video sender that is already sending restarts its encoder (a short glitch and
+        a key frame); set it before negotiation to avoid that.
 
         See :mdn:`RTCRtpSender/transform`.
 

@@ -109,7 +109,7 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
 
     The worker gets it as the ``transformer`` of the ``rtctransform`` event. Frames read from :attr:`readable` and
     written to :attr:`writable` go on to the packetizer or the decoder, whether they were changed or not. Frames
-    that aren't written are dropped. Up to 120 unread frames are queued, and after that the oldest is dropped. Both
+    that aren't written are dropped. Up to 60 unread frames are queued, and after that the oldest is dropped. Both
     streams end once the transform is removed from its sender or receiver.
 
     See :mdn:`RTCRtpScriptTransformer`.
