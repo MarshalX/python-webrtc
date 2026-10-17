@@ -28,19 +28,19 @@ from webrtc.utils import lifetime
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from typing_extensions import Concatenate, Never, ParamSpec
+    from typing_extensions import Concatenate, Never, ParamSpec, TypeAlias
 
     from webrtc.base import WebRTCObject
     from webrtc.utils.events import EventTarget
 
     _P = ParamSpec('_P')
 
-_T = TypeVar('_T')
+    #: (event name, token, failed, args with the native object first)
+    _EventRecord: TypeAlias = tuple[str, int, bool, tuple[object, ...]]
+    #: an event record, or a marker or completion record: (None, token, failed, args or None)
+    _Record: TypeAlias = _EventRecord | tuple[None, int, bool, tuple[object, ...] | None]
 
-#: (event name, token, failed, args with the native object first)
-_EventRecord = tuple[str, int, bool, tuple[object, ...]]
-#: an event record, or a marker or completion record: (None, token, failed, args or None)
-_Record = _EventRecord | tuple[None, int, bool, 'tuple[object, ...] | None']
+_T = TypeVar('_T')
 
 
 class _Item(NamedTuple):

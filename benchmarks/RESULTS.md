@@ -2,7 +2,13 @@
 
 Medians; % columns are of aiortc's. How: [README](README.md#method).
 
-2026-10-17, 3 runs a case, Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.2, commit 908dd26 with uncommitted changes.
+| Suite | Libraries | Date | Runs | Machine | Commit |
+| --- | --- | --- | --- | --- | --- |
+| setup | wrtc, aiortc, pion, libdatachannel, webrtc-rs | 2026-10-17 | 3 | Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.2 | 908dd26 with uncommitted changes |
+| datachannel | aiortc, pion, libdatachannel, webrtc-rs | 2026-10-17 | 3 | Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.2 | 908dd26 with uncommitted changes |
+| datachannel | wrtc | 2026-10-17 | 3 | Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.2 | 621d5be with uncommitted changes |
+| memory | wrtc, aiortc, pion, libdatachannel, webrtc-rs | 2026-10-17 | 3 | Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.2 | 908dd26 with uncommitted changes |
+| media | wrtc, aiortc | 2026-10-17 | 3 | Apple M1, 8 cores, Darwin 27.0.0 (arm64), Python 3.13.13, go1.27.2 | 908dd26 with uncommitted changes |
 
 ## Connection setup
 
@@ -67,27 +73,27 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Flood | wrtc 0.0.3 | aiortc 1.15.0 | pion v4.2.23 | libdatachannel 0.24.6 | webrtc-rs 0.21.1 | wrtc, % of aiortc | pion, % of aiortc | libdatachannel, % of aiortc | webrtc-rs, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ordered 1 KB x1 | 758 | 90 | 517 | 478 | 684 | 844% | 575% | 532% | 762% |
-| ordered 1 KB x10 | 738 | 95 | 1058 | 1039 | 1260 | 779% | 1117% | 1097% | 1330% |
-| ordered 64 KB x1 | 1049 | 183 | 485 | 653 | 1618 | 573% | 265% | 357% | 885% |
-| ordered 64 KB x10 | 1063 | 241 | 1135 | 1152 | 1307 | 440% | 470% | 477% | 541% |
-| unordered 1 KB x1 | 821 | 89 | 464 | 472 | 1185 | 919% | 519% | 528% | 1326% |
-| unordered 1 KB x10 | 755 | 95 | 1037 | 1046 | 808 | 796% | 1093% | 1103% | 852% |
-| unordered 64 KB x1 | 1088 | 192 | 544 | 650 | 459 | 566% | 283% | 338% | 239% |
-| unordered 64 KB x10 | 1050 | 241 | 1137 | 1164 | 720 | 435% | 471% | 482% | 298% |
+| ordered 1 KB x1 | 1215 | 90 | 517 | 478 | 684 | 1353% | 575% | 532% | 762% |
+| ordered 1 KB x10 | 1282 | 95 | 1058 | 1039 | 1260 | 1353% | 1117% | 1097% | 1330% |
+| ordered 64 KB x1 | 2071 | 183 | 485 | 653 | 1618 | 1133% | 265% | 357% | 885% |
+| ordered 64 KB x10 | 1865 | 241 | 1135 | 1152 | 1307 | 772% | 470% | 477% | 541% |
+| unordered 1 KB x1 | 1232 | 89 | 464 | 472 | 1185 | 1379% | 519% | 528% | 1326% |
+| unordered 1 KB x10 | 1385 | 95 | 1037 | 1046 | 808 | 1460% | 1093% | 1103% | 852% |
+| unordered 64 KB x1 | 2035 | 192 | 544 | 650 | 459 | 1059% | 283% | 338% | 239% |
+| unordered 64 KB x10 | 1915 | 241 | 1137 | 1164 | 720 | 793% | 471% | 482% | 298% |
 
 ### Message rate (messages/s)
 
 | Flood | wrtc 0.0.3 | aiortc 1.15.0 | pion v4.2.23 | libdatachannel 0.24.6 | webrtc-rs 0.21.1 | wrtc, % of aiortc | pion, % of aiortc | libdatachannel, % of aiortc | webrtc-rs, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ordered 1 KB x1 | 92568 | 10964 | 63078 | 58348 | 83512 | 844% | 575% | 532% | 762% |
-| ordered 1 KB x10 | 90030 | 11562 | 129161 | 126857 | 153778 | 779% | 1117% | 1097% | 1330% |
-| ordered 64 KB x1 | 2000 | 349 | 926 | 1245 | 3087 | 573% | 265% | 357% | 885% |
-| ordered 64 KB x10 | 2027 | 461 | 2165 | 2197 | 2492 | 440% | 470% | 477% | 541% |
-| unordered 1 KB x1 | 100231 | 10904 | 56647 | 57566 | 144599 | 919% | 519% | 528% | 1326% |
-| unordered 1 KB x10 | 92192 | 11578 | 126573 | 127670 | 98637 | 796% | 1093% | 1103% | 852% |
-| unordered 64 KB x1 | 2075 | 367 | 1038 | 1240 | 876 | 566% | 283% | 338% | 239% |
-| unordered 64 KB x10 | 2002 | 461 | 2169 | 2221 | 1374 | 435% | 471% | 482% | 298% |
+| ordered 1 KB x1 | 148350 | 10964 | 63078 | 58348 | 83512 | 1353% | 575% | 532% | 762% |
+| ordered 1 KB x10 | 156464 | 11562 | 129161 | 126857 | 153778 | 1353% | 1117% | 1097% | 1330% |
+| ordered 64 KB x1 | 3951 | 349 | 926 | 1245 | 3087 | 1133% | 265% | 357% | 885% |
+| ordered 64 KB x10 | 3557 | 461 | 2165 | 2197 | 2492 | 772% | 470% | 477% | 541% |
+| unordered 1 KB x1 | 150376 | 10904 | 56647 | 57566 | 144599 | 1379% | 519% | 528% | 1326% |
+| unordered 1 KB x10 | 169038 | 11578 | 126573 | 127670 | 98637 | 1460% | 1093% | 1103% | 852% |
+| unordered 64 KB x1 | 3882 | 367 | 1038 | 1240 | 876 | 1059% | 283% | 338% | 239% |
+| unordered 64 KB x10 | 3652 | 461 | 2169 | 2221 | 1374 | 793% | 471% | 482% | 298% |
 
 ### CPU per MB delivered, both processes (ms)
 
@@ -95,20 +101,20 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Flood | wrtc 0.0.3 | aiortc 1.15.0 | pion v4.2.23 | libdatachannel 0.24.6 | webrtc-rs 0.21.1 | wrtc, % of aiortc | pion, % of aiortc | libdatachannel, % of aiortc | webrtc-rs, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ordered 1 KB x1 | 31 | 132 | 82 | 62 | 13 | 23% | 62% | 47% | 10% |
-| ordered 1 KB x10 | 31 | 127 | 54 | 52 | 34 | 25% | 43% | 41% | 27% |
-| ordered 64 KB x1 | 15 | 78 | 83 | 41 | 10 | 20% | 107% | 52% | 12% |
-| ordered 64 KB x10 | 15 | 85 | 51 | 46 | 31 | 18% | 60% | 54% | 37% |
-| unordered 1 KB x1 | 28 | 131 | 90 | 64 | 15 | 21% | 68% | 49% | 11% |
-| unordered 1 KB x10 | 31 | 126 | 56 | 49 | 53 | 24% | 44% | 38% | 42% |
-| unordered 64 KB x1 | 15 | 76 | 75 | 40 | 23 | 19% | 99% | 53% | 30% |
-| unordered 64 KB x10 | 15 | 86 | 50 | 46 | 66 | 18% | 58% | 54% | 76% |
+| ordered 1 KB x1 | 20 | 132 | 82 | 62 | 13 | 15% | 62% | 47% | 10% |
+| ordered 1 KB x10 | 19 | 127 | 54 | 52 | 34 | 15% | 43% | 41% | 27% |
+| ordered 64 KB x1 | 8 | 78 | 83 | 41 | 10 | 10% | 107% | 52% | 12% |
+| ordered 64 KB x10 | 9 | 85 | 51 | 46 | 31 | 10% | 60% | 54% | 37% |
+| unordered 1 KB x1 | 20 | 131 | 90 | 64 | 15 | 15% | 68% | 49% | 11% |
+| unordered 1 KB x10 | 17 | 126 | 56 | 49 | 53 | 14% | 44% | 38% | 42% |
+| unordered 64 KB x1 | 8 | 76 | 75 | 40 | 23 | 11% | 99% | 53% | 30% |
+| unordered 64 KB x10 | 9 | 86 | 50 | 46 | 66 | 10% | 58% | 54% | 76% |
 
 ### Round trip of 1 KB messages at 100 a second
 
 | Library | RTT p50 / p95 (ms) | Lost | p50, % of aiortc |
 | --- | --- | --- | --- |
-| wrtc 0.0.3 | 0.7 / 1.2 | 0 | 62% |
+| wrtc 0.0.3 | 0.6 / 0.8 | 0 | 48% |
 | aiortc 1.15.0 | 1.2 / 1.7 | 0 | 100% |
 | pion v4.2.23 | 0.5 / 0.9 | 0 | 46% |
 | libdatachannel 0.24.6 | 0.5 / 0.7 | 0 | 39% |
