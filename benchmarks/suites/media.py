@@ -394,7 +394,6 @@ async def _attempt(run: Awaitable[Run]) -> Run | None:
 
 async def _record(case: Case, plan: Plan, log: IO[bytes], *, results: Results) -> None:
     """Runs a case into the results, None if it failed."""
-    print(f'media: {case.library} {case.kind} {case.name}', file=sys.stderr, flush=True)
     if case.kind in AUDIO_KINDS:
         audio = await _attempt(_audio(case, plan, log))
         results['audio'].setdefault(case.kind, {}).setdefault(case.name, []).append(audio)
@@ -438,6 +437,7 @@ async def run(options: Options) -> MediaResults:
     shuffled = cases * options.repeat
     random.shuffle(shuffled)
     for case in shuffled:
+        options.progress(f'media: {case.library} {case.kind} {case.name}')
         await _record(case, plan, options.log, results=results[case.library])
 
     order = list(dict.fromkeys(case.name for case in cases))

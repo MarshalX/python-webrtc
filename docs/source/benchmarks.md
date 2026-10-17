@@ -22,9 +22,9 @@ processes, and the charts show the medians of each library's newest run.
 
 Against aiortc, Python WebRTC:
 
-- opens a connection **5–7x faster**;
-- moves **4.5–9x more data** through a data channel, with **4–6x less CPU** per megabyte;
-- spends **less CPU on audio** at every stream count, up to 4.5x less when sending;
+- opens a connection **7–8x faster**;
+- moves **4.4–9x more data** through a data channel, with **4–6x less CPU** per megabyte;
+- spends **less CPU on audio** at every stream count, up to 4x less when sending;
 - encodes H.264 in hardware on macOS, at **a tenth of the CPU** per frame;
 - delivers call video with **about half the latency**;
 - holds **more connections** in one process (1450 against 1100).
@@ -37,7 +37,7 @@ read worse because of that, and the sections below explain each one.
 
 ![Connection setup](https://raw.githubusercontent.com/MarshalX/python-webrtc/main/benchmarks/charts/setup.png)
 
-The time from creating a connection to an open data channel: about 5 ms, against 29 ms for aiortc. Cold runs start
+The time from creating a connection to an open data channel: about 3.5 ms, against 29 ms for aiortc. Cold runs start
 fresh processes. The benchmark keeps the defaults: DTLS 1.3 is on, while SNAP and SPED, the other parts of
 [WARP](guides/field-trials.md#warp), are off and would save more round trips.
 
@@ -72,7 +72,7 @@ This chart favors aiortc, for two reasons that come from the engine rather than 
 Memory stays reserved after connections close, because the allocator keeps it for reuse: opening and closing 100
 connections over and over doesn't grow the process past the first round.
 
-The process itself starts smaller, 91 MB against 126 MB, and holds 1450 connections where aiortc stops at 1100.
+The process itself starts smaller, 92 MB against 128 MB, and holds 1450 connections where aiortc stops at 1100.
 
 ## Media
 
@@ -81,7 +81,7 @@ The process itself starts smaller, 91 MB against 126 MB, and holds 1450 connecti
 ![Video receive](https://raw.githubusercontent.com/MarshalX/python-webrtc/main/benchmarks/charts/media-video-receive.png)
 
 CPU for each frame received, decoded and read in Python. VP8 decodes with the same library in both, so the bars stay
-close. H.264 at 1080p is cheaper, decoded by VideoToolbox on macOS.
+close. H.264 is cheaper at every resolution, decoded by VideoToolbox on macOS.
 
 ### Video send
 
@@ -102,13 +102,13 @@ encoder on macOS and costs a tenth of the CPU per frame.
 ![Video call](https://raw.githubusercontent.com/MarshalX/python-webrtc/main/benchmarks/charts/media-video-call.png)
 
 Two peers of the same library call each other, and each library's congestion control picks the bitrate. Python WebRTC
-reaches the bitrate the video asks for, 2.5 or 5 Mbps, while aiortc stays near 1.5–2.3 Mbps. The panel under the bars
+reaches the bitrate the video asks for, 2.5 or 5 Mbps, while aiortc stays near 1.5–2.4 Mbps. The panel under the bars
 shows it: Python WebRTC receives up to three times the bits for every frame, so a better picture, and decoding more
 bits costs more CPU per frame.
 
 ![Video call latency](https://raw.githubusercontent.com/MarshalX/python-webrtc/main/benchmarks/charts/media-video-latency.png)
 
-From writing a frame on one side to reading it on the other: 21–30 ms against aiortc's 43 ms, at the higher
+From writing a frame on one side to reading it on the other: 22–28 ms against aiortc's 44 ms, at the higher
 bitrate.
 
 ### Audio

@@ -22,11 +22,15 @@
 #include <api/enable_media.h>
 #include <api/environment/environment_factory.h>
 #include <api/make_ref_counted.h>
+#include <pc/srtp_session.h>
+#include <rtc_base/buffer.h>
 #include <rtc_base/network.h>
 #include <rtc_base/ssl_adapter.h>
+#include <rtc_base/ssl_stream_adapter.h>
 
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -49,6 +53,45 @@ namespace python_webrtc {
       }
       return thread;
     }
+
+    // a leaked session keeps libsrtp up: its self-tests (~1 ms) run again after its last session, so once, on a thread
+    class LibsrtpKeeper {
+    public:
+      LibsrtpKeeper() = default;
+      ~LibsrtpKeeper() { Join(); }
+      LibsrtpKeeper(const LibsrtpKeeper &) = delete;
+      LibsrtpKeeper &operator=(const LibsrtpKeeper &) = delete;
+      LibsrtpKeeper(LibsrtpKeeper &&) = delete;
+      LibsrtpKeeper &operator=(LibsrtpKeeper &&) = delete;
+
+      void Start() {
+        if (!_started) {
+          _started = true;
+          _thread = std::thread([]() {
+            constexpr size_t kKeyAndSalt = 30;
+            const webrtc::ZeroOnFreeBuffer<uint8_t> key(kKeyAndSalt);
+            (void)(new webrtc::SrtpSession())->SetSend(webrtc::kSrtpAes128CmSha1_80, key, {});
+          });
+        }
+      }
+
+      // before a fork, so the child doesn't inherit libsrtp's lock held
+      void Join() {
+        if (_thread.joinable()) {
+          _thread.join();
+        }
+      }
+
+    private:
+      bool _started = false;
+      std::thread _thread;
+    };
+
+    // under PeerConnectionFactory's mutex
+    LibsrtpKeeper &Libsrtp() {
+      static LibsrtpKeeper keeper;
+      return keeper;
+    }
   } // namespace
 
   // webrtc::CreatePeerConnectionFactory without the RTC event log (holds every packet) or audio processing (no capture)
@@ -70,11 +113,8 @@ namespace python_webrtc {
 
   std::unique_ptr<webrtc::PortAllocator>
   PeerConnectionFactory::CreatePortAllocator(const webrtc::PeerConnectionInterface::RTCConfiguration &configuration) {
-    std::unique_ptr<webrtc::PortAllocator> allocator;
-    BlockingCallOn(_workerThread, [&]() {
-      allocator = python_webrtc::CreatePortAllocator(webrtc::CreateEnvironment(_fieldTrials.CreateCopy()),
-                                                     _networkManager, _packetSocketFactory);
-    });
+    auto allocator = python_webrtc::CreatePortAllocator(webrtc::CreateEnvironment(_fieldTrials.CreateCopy()),
+                                                        _networkManager, _packetSocketFactory);
     // as libwebrtc's factory does
     allocator->SetPortRange(configuration.port_allocator_config.min_port, configuration.port_allocator_config.max_port);
     allocator->set_flags(configuration.port_allocator_config.flags);
@@ -83,25 +123,32 @@ namespace python_webrtc {
 
   PeerConnectionFactory::PeerConnectionFactory()
       : _fieldTrials(_trials), _networkIgnoreMask(_loopbackAllowed ? 0 : webrtc::kDefaultNetworkIgnoreMask) {
-    _workerThread = Started(std::make_unique<webrtc::Thread>(std::make_unique<NetworkSocketServer>()), "wrtc-network");
+    // the user's WebRTC-SetSocketReceiveBuffer, even Disabled, replaces the floor
+    const int receiveBuffer =
+        _fieldTrials.Contains("WebRTC-SetSocketReceiveBuffer") ? 0 : NetworkSocketServer::kReceiveBuffer;
+    const bool siblings = !_fieldTrials.IsDisabled(NetworkSocketServer::kSiblingsTrial);
+    _workerThread =
+        Started(std::make_unique<webrtc::Thread>(std::make_unique<NetworkSocketServer>(receiveBuffer, siblings)),
+                "wrtc-network");
     _signalingThread = Started(webrtc::Thread::Create(), "wrtc-signaling");
     // sanitizer builds check that these threads never enter Python
     _workerThread->PostTask(&TagNativeThread);
     _signalingThread->PostTask(&TagNativeThread);
 
-    BlockingCallOn(_workerThread, [this]() {
-      _audioDeviceModule = webrtc::make_ref_counted<PlayoutAudioDevice>();
-      auto *sockets = _workerThread->socketserver();
-      _networkManager =
-          std::make_unique<webrtc::BasicNetworkManager>(webrtc::CreateEnvironment(_fieldTrials.CreateCopy()), sockets);
-      _packetSocketFactory = std::make_shared<webrtc::BasicPacketSocketFactory>(sockets);
-    });
+    _audioDeviceModule = webrtc::make_ref_counted<PlayoutAudioDevice>();
+    auto *sockets = _workerThread->socketserver();
+    _networkManager =
+        std::make_unique<webrtc::BasicNetworkManager>(webrtc::CreateEnvironment(_fieldTrials.CreateCopy()), sockets);
+    _packetSocketFactory = std::make_shared<webrtc::BasicPacketSocketFactory>(sockets);
+    // kept updating, so a connection after an idle gap doesn't enumerate the interfaces again
+    _workerThread->PostTask([networks = _networkManager.get()]() { networks->StartUpdating(); });
 
     _factory = webrtc::CreateModularPeerConnectionFactory(Dependencies());
     if (!_factory) {
       BlockingCallOn(_workerThread, [this]() {
         _audioDeviceModule = nullptr;
         _packetSocketFactory = nullptr;
+        _networkManager->StopUpdating();
         _networkManager = nullptr;
       });
       throw RTCException(webrtc::RTCErrorType::INTERNAL_ERROR, "Failed to create the peer connection factory");
@@ -118,6 +165,7 @@ namespace python_webrtc {
     BlockingCallOn(_workerThread, [this]() {
       this->_audioDeviceModule = nullptr;
       _packetSocketFactory = nullptr;
+      _networkManager->StopUpdating();
       _networkManager = nullptr;
     });
 
@@ -138,6 +186,7 @@ namespace python_webrtc {
     }
 #endif
     InitializeSSL();
+    Libsrtp().Start();
     _started = true;
     return NativeObject::Create();
   }
@@ -206,6 +255,7 @@ namespace python_webrtc {
     pthread_atfork(
         []() {
           _mutex.lock();
+          Libsrtp().Join();
           Dispatcher::LockForFork();
         },
         []() {

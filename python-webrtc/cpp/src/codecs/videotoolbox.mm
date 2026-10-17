@@ -48,6 +48,7 @@ namespace {
   constexpr unsigned kLumaRange = 219;
   constexpr unsigned kChromaRange = 224;
   constexpr unsigned kFullRange = 255;
+  constexpr unsigned kByteBits = 8;
 
   // libwebrtc's own H.264 QP thresholds, which its quality scaling applies over an encoder's by default
   constexpr int kLowQpThreshold = 24;
@@ -462,25 +463,54 @@ namespace {
       }
       const int width = static_cast<int>(CVPixelBufferGetWidth(pixelBuffer));
       const int height = static_cast<int>(CVPixelBufferGetHeight(pixelBuffer));
+      const uint8_t *luma = PlaneData(pixelBuffer, 0);
+      const uint8_t *chroma = PlaneData(pixelBuffer, 1);
+      if (luma == nullptr || chroma == nullptr) {
+        CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
+        return false;
+      }
       auto i420 = _pool.CreateI420(width, height);
-      libyuv::NV12ToI420(PlaneData(pixelBuffer, 0), PlaneStride(pixelBuffer, 0), PlaneData(pixelBuffer, 1),
-                         PlaneStride(pixelBuffer, 1), i420->MutableDataY(), i420->StrideY(), i420->MutableDataU(),
-                         i420->StrideU(), i420->MutableDataV(), i420->StrideV(), width, height);
+      ToVideoRange(luma, PlaneStride(pixelBuffer, 0), chroma, PlaneStride(pixelBuffer, 1), *i420);
       CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
-      Compress(i420->MutableDataY(), i420->StrideY(), width, height, kLumaRange);
-      Compress(i420->MutableDataU(), i420->StrideU(), i420->ChromaWidth(), i420->ChromaHeight(), kChromaRange);
-      Compress(i420->MutableDataV(), i420->StrideV(), i420->ChromaWidth(), i420->ChromaHeight(), kChromaRange);
       frame.set_video_frame_buffer(i420);
       return true;
     }
 
-    // 0-255 onto 16-(16 + range); arithmetic rather than a table, so it vectorizes
-    static void Compress(uint8_t *data, int stride, int width, int height, unsigned range) {
-      for (int row = 0; row < height; ++row) {
-        uint8_t *line = data + (static_cast<ptrdiff_t>(row) * stride);
-        for (int column = 0; column < width; ++column) {
-          line[column] =
-              static_cast<uint8_t>(kRangeOffset + (((line[column] * range) + (kFullRange / 2)) / kFullRange));
+    // 0-255 onto 16-(16 + range), rounded; arithmetic rather than a table, so it vectorizes
+    static uint8_t Compressed(unsigned value, unsigned range) {
+      // v / 255 as (v + 1 + (v >> 8)) >> 8, exact below 65280: 16-bit lanes, twice as many as 32-bit ones
+      const auto scaled = static_cast<uint16_t>((value * range) + (kFullRange / 2));
+      return static_cast<uint8_t>(kRangeOffset +
+                                  static_cast<uint16_t>((scaled + 1 + (scaled >> kByteBits)) >> kByteBits));
+    }
+
+    // NV12 into I420 and onto video range in one pass over each row
+    static void ToVideoRange(const uint8_t *y, int strideY, const uint8_t *uv, int strideUV, webrtc::I420Buffer &i420) {
+      // the buffer's getters are virtual: read once, so the loops vectorize
+      const ptrdiff_t width = i420.width();
+      const ptrdiff_t height = i420.height();
+      const ptrdiff_t chromaWidth = i420.ChromaWidth();
+      const ptrdiff_t chromaHeight = i420.ChromaHeight();
+      uint8_t *toY = i420.MutableDataY();
+      uint8_t *toU = i420.MutableDataU();
+      uint8_t *toV = i420.MutableDataV();
+      const ptrdiff_t strideToY = i420.StrideY();
+      const ptrdiff_t strideToU = i420.StrideU();
+      const ptrdiff_t strideToV = i420.StrideV();
+      for (ptrdiff_t row = 0; row < height; ++row) {
+        const uint8_t *from = y + (row * strideY);
+        uint8_t *line = toY + (row * strideToY);
+        for (ptrdiff_t column = 0; column < width; ++column) {
+          line[column] = Compressed(from[column], kLumaRange);
+        }
+      }
+      for (ptrdiff_t row = 0; row < chromaHeight; ++row) {
+        const uint8_t *from = uv + (row * strideUV);
+        uint8_t *u = toU + (row * strideToU);
+        uint8_t *v = toV + (row * strideToV);
+        for (ptrdiff_t column = 0; column < chromaWidth; ++column) {
+          u[column] = Compressed(from[2 * column], kChromaRange);
+          v[column] = Compressed(from[(2 * column) + 1], kChromaRange);
         }
       }
     }

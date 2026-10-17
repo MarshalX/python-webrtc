@@ -134,7 +134,8 @@ namespace python_webrtc {
       if (_closed) {
         _dropped++;
       } else {
-        wake = _records.empty();
+        wake = !_awake;
+        _awake = true;
         _records.push_back(std::move(record));
         const WakeEnds *ends = wake && direct ? WakeLocked() : nullptr;
         if (ends != nullptr) {
@@ -199,6 +200,8 @@ namespace python_webrtc {
       {
         const std::scoped_lock lock(_mutex);
         if (_records.empty()) {
+          // the loop drains until a take finds nothing, so the next post wakes it
+          _awake = false;
           return pybind11::none();
         }
         record = std::move(_records.front());
@@ -281,12 +284,13 @@ namespace python_webrtc {
     (void)Bind(parent.mailbox());
   }
 
-  void Binding::Unbind() {
+  std::optional<uint64_t> Binding::Unbind() {
     std::shared_ptr<Mailbox> unbound;
     {
       const std::scoped_lock lock(_mutex);
       unbound.swap(_mailbox);
     }
+    return unbound ? std::optional(unbound->Id()) : std::nullopt;
   }
 
   bool Binding::IsBound() const {

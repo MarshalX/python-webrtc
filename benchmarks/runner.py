@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime as dt
 import fnmatch
 import itertools
 import os
@@ -18,7 +19,8 @@ import pathlib
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import IO, TYPE_CHECKING, TypedDict, cast
 
 import psutil
@@ -189,10 +191,21 @@ class Options:
     repeat: int
     log: IO[bytes]
     cases: Sequence[str] = ()
+    started: float = field(default_factory=time.monotonic)
 
     def selects(self, case: str) -> bool:
         """Whether a case of that name runs."""
         return len(self.cases) == 0 or any(fnmatch.fnmatchcase(case, pattern) for pattern in self.cases)
+
+    def progress(self, message: str) -> None:
+        """Writes a line to stderr after the time of day and the time since the run started."""
+        elapsed = duration(time.monotonic() - self.started)
+        print(f'{dt.datetime.now().astimezone():%H:%M:%S} +{elapsed} {message}', file=sys.stderr, flush=True)
+
+
+def duration(seconds: float) -> str:
+    """A span of seconds as H:MM:SS."""
+    return str(dt.timedelta(seconds=round(seconds)))
 
 
 @dataclass
@@ -269,6 +282,7 @@ class Driver:  # ruff: ignore[too-many-public-methods] - a method a command of t
             cwd=ROOT,
             env={**os.environ, 'WRTC_ALLOW_LOOPBACK': '1'},
             limit=LINE_LIMIT,
+            start_new_session=True,
         )
 
         driver = cls(library, process)

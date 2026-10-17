@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import re
 import threading
 from typing import TYPE_CHECKING, Callable, ClassVar, Literal, TypeVar, Union, cast, overload
@@ -44,13 +43,11 @@ from webrtc.models.rtc_stats import RTCStatsReport
 from webrtc.models.rtp_parameters import RTCRtpCodec
 from webrtc.utils import lifetime
 from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
-from webrtc.utils.loops import call_native, call_native_batched
-from webrtc.utils.operations import OperationsChain, later
+from webrtc.utils.loops import LoopState, call_native, call_native_batched
+from webrtc.utils.operations import Operation, OperationsChain, later
 from webrtc.utils.strings import usv_string
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
     from typing_extensions import Self
 
     from webrtc.enums import RTCDtlsTransportState, RTCIceConnectionState, RTCIceTransportState, RTCPeerConnectionState
@@ -288,8 +285,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         self._chain = None
         self._deferred_negotiation_id = None
 
-    @contextlib.asynccontextmanager
-    async def _operation(self) -> AsyncGenerator[None, None]:
+    def _operation(self) -> Operation:
         """Chains an operation, like setting a description, after the running ones (see :obj:`OperationsChain`)."""
         if self._chain is None:
             with _chains_lock:
@@ -297,8 +293,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
                     self._chain = OperationsChain(self._chain_emptied, self._is_closed, self._changing)
         # bound before it's pending: only its loop roots it
         _ = self._attach()
-        async with self._chain.operation():
-            yield
+        return self._chain.operation()
 
     def _is_closed(self) -> bool:
         return self.signaling_state == RTCSignalingState.closed
@@ -722,6 +717,9 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
 
         async with self._operation():
             self._check_state('add an ICE candidate')
+            if not self._native_obj._hasRemoteDescription:
+                msg = 'A candidate can only be added once there is a remote description'
+                raise webrtc.InvalidStateError(msg)
             await later()
             await call_native(self._native_obj.addIceCandidate, candidate_str, sdp_mid, sdp_m_line_index, ufrag)
 
@@ -866,7 +864,10 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         No events follow except remote tracks' ``ended``. See :mdn:`RTCPeerConnection/close`.
         """
         with self._changing():
-            self._native_obj.close()
+            unbound = self._native_obj.close()
+            state = LoopState.find(unbound)
+            if state is not None:
+                state.update(self)
 
     async def __aenter__(self) -> Self:
         return self

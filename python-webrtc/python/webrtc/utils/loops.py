@@ -28,16 +28,19 @@ from webrtc.utils import lifetime
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from typing_extensions import Concatenate, Never, ParamSpec
+    from typing_extensions import Concatenate, Never, ParamSpec, TypeAlias
 
+    from webrtc.base import WebRTCObject
     from webrtc.utils.events import EventTarget
 
     _P = ParamSpec('_P')
 
-_T = TypeVar('_T')
+    #: (event name, token, failed, args with the native object first)
+    _EventRecord: TypeAlias = tuple[str, int, bool, tuple[object, ...]]
+    #: an event record, or a marker or completion record: (None, token, failed, args or None)
+    _Record: TypeAlias = _EventRecord | tuple[None, int, bool, tuple[object, ...] | None]
 
-#: (event name or None, token, failed, args or None)
-_Record = tuple['str | None', int, bool, 'tuple[object, ...] | None']
+_T = TypeVar('_T')
 
 
 class _Item(NamedTuple):
@@ -163,7 +166,10 @@ class LoopState:
         self._released = False
         # the last item resumed code that runs before the next one
         self._resumed = False
-        self._held: _Item | None = None
+        # an event record is held as is
+        self._held: _Item | _EventRecord | None = None
+        # the last event's native object and wrapper, while a batch runs
+        self._recent: tuple[object, WebRTCObject[object]] | None = None
         # the mailbox's wake fd while the loop watches it
         self._wake_fd: int | None = None
         # _watch ran: the fd is tried once
@@ -177,6 +183,12 @@ class LoopState:
     def loop(self) -> asyncio.AbstractEventLoop:
         """:obj:`asyncio.AbstractEventLoop`: The loop."""
         return self._live_loop
+
+    @property
+    def drain_scheduled(self) -> bool:
+        """:obj:`bool`: Whether a drain of the mailbox is scheduled on the loop."""
+        with self._lock:
+            return self._scheduled
 
     @property
     def _live_loop(self) -> asyncio.AbstractEventLoop:
@@ -379,29 +391,33 @@ class LoopState:
         """Runs items until one must wait; returns whether any are left."""
         if self._take() is None:
             return False
-        for _ in range(self.MAX_BATCH):
-            resumes = self._run()
-            item = self._take()
-            if item is None:
-                return False
-            if self._yields(resumes=resumes, after_ready=item.after_ready):
-                return True
-        return True
+        # asyncio's private ready queue (CPython's loop; absent on others), looked up once per batch
+        ready: object = getattr(self._loop_ref(), '_ready', None)
+        try:
+            for _ in range(self.MAX_BATCH):
+                resumes = self._run()
+                held = self._take()
+                if held is None:
+                    return False
+                after_ready = isinstance(held, _Item) and held.after_ready
+                if resumes or after_ready or self._busy(ready):
+                    return True
+            return True
+        finally:
+            self._recent = None
 
-    def _take(self) -> _Item | None:
-        """Holds and returns the next live item."""
+    def _take(self) -> _Item | _EventRecord | None:
+        """Holds and returns the next live item, or event record."""
         while self._held is None:
             record: _Record | None = self.mailbox.take()
             if record is None:
                 return None
-            self._held = self._item(record)
+            self._held = record if record[0] is not None else self._item(record)
         return self._held
 
     def _item(self, record: _Record) -> _Item | None:
-        name, token, failed, args = record
-        if name is not None:
-            run = functools.partial(self._dispatch_event, name, args if args is not None else ())
-            return _Item(run, resumes=False, after_ready=False)
+        """The item of a marker or a completion record."""
+        _, token, failed, args = record
         with self._lock:
             marker = self._markers.pop(token, None)
             if marker is not None:
@@ -412,12 +428,22 @@ class LoopState:
         run = functools.partial(self._settle_call, call, args, failed=failed)
         return _Item(run, resumes=True, after_ready=True)
 
-    def _dispatch_event(self, name: str, args: tuple[object, ...]) -> None:
+    def _dispatch_event(self, record: _EventRecord) -> None:
         """Delivers an event record, its native object first, to that object's wrapper, recreating a dead one."""
+        name, _, _, args = record
         native, args = args[0], args[1:]
-        wrapper = lifetime.find(cast('lifetime.Native', native))
+        recent = self._recent
+        if recent is not None and recent[0] is native:
+            wrapper: WebRTCObject[object] | None = recent[1]
+        else:
+            wrapper = lifetime.find(cast('lifetime.Native', native))
         created = wrapper is None
-        target = (wrapper if wrapper is not None else lifetime.wrapper_of(cast('lifetime.Native', native)))._target()
+        if wrapper is None:
+            wrapper = lifetime.wrapper_of(cast('lifetime.Native', native))
+        else:
+            # kept for the batch, as a channel's messages come in a row; a fresh wrapper isn't
+            self._recent = (native, wrapper)
+        target = wrapper._target()
         if target is None:
             return
         target._deliver(self, name, args)
@@ -444,16 +470,18 @@ class LoopState:
 
     def _run(self) -> bool:
         """Runs the held item; returns whether it resumes code."""
-        item, self._held = self._held, None
-        if item is None:
+        held, self._held = self._held, None
+        if held is None:
             return False
-        if item.resumes:
+        self.batches.clear()
+        if not isinstance(held, _Item):
+            self._dispatch_event(held)
+            return False
+        if held.resumes:
             self._resumed = True
             _ = self._live_loop.call_soon(self._settle)
-
-        self.batches.clear()
-        _ = item.run()
-        return item.resumes
+        _ = held.run()
+        return held.resumes
 
     def _settle(self, deferred: int = 0) -> None:
         # resumed code may span several iterations: wait until nothing else is ready
@@ -472,8 +500,10 @@ class LoopState:
         # CPython internals: other loops (e.g. uvloop) never report any
         loop = self._loop_ref()
         ready: object = getattr(loop, '_ready', None)
+        if not isinstance(ready, collections.deque) or len(ready) == 0:
+            return False
         # copy() holds the deque's lock; iterating races call_soon_threadsafe on free-threaded builds
-        handles = cast('collections.deque[object]', ready).copy() if isinstance(ready, collections.deque) else ()
+        handles = cast('collections.deque[object]', ready).copy()
         for handle in handles:
             callback = getattr(handle, '_callback', None)
             owner = callback.state if isinstance(callback, _Callback) else getattr(callback, '__self__', None)
@@ -482,12 +512,12 @@ class LoopState:
             return True
         return False
 
-    def _yields(self, *, resumes: bool, after_ready: bool) -> bool:
-        """Whether the next item waits for the loop instead of running now."""
+    def _busy(self, ready: object) -> bool:
+        """Whether the next item waits for the loop's other ready callbacks, given ``loop._ready``."""
         # without loop._ready, run one item per iteration
-        if resumes or after_ready:
+        if ready is None:
             return True
-        return not hasattr(self._loop_ref(), '_ready') or self._others_ready()
+        return (not isinstance(ready, collections.deque) or len(ready) > 0) and self._others_ready()
 
     def update(self, target: EventTarget[Never]) -> None:
         """Roots or unroots an object and its rooted children from their ``_activity()``."""
@@ -646,6 +676,7 @@ class LoopState:
             self._soon.clear()
             self._markers.clear()
             self._held = None
+            self._recent = None
             self.tasks.clear()
             self.active.clear()
             targets = list(self.targets)

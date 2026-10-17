@@ -37,16 +37,12 @@ namespace python_webrtc {
 
     webrtc::PeerConnectionDependencies dependencies(this);
     dependencies.allocator = _factory->CreatePortAllocator(configuration);
-    auto *allocator = dependencies.allocator.get();
 
     auto result = _factory->factory()->CreatePeerConnectionOrError(configuration, std::move(dependencies));
 
     if (!result.ok()) {
       throw RTCException(result.error());
     }
-    // skips libwebrtc's 50 ms waits between gathering phases with nothing to allocate
-    BlockingCallOn(_factory->workerThread(), [allocator]() { allocator->set_step_delay(0); });
-
     _jinglePeerConnection = result.MoveValue();
     // new until its first event, unless read unbound: libwebrtc's own state runs ahead of the events
     _surfacedIceGatheringState.Changed(true, IceGatheringState::kIceGatheringNew);
@@ -69,6 +65,7 @@ namespace python_webrtc {
     DefineBinding(
         pybind11::class_<RTCPeerConnection, Binding, std::shared_ptr<RTCPeerConnection>>(m, "RTCPeerConnection"))
         .def_property_readonly("_id", &RTCPeerConnection::Id)
+        .def_property_readonly("_hasRemoteDescription", &RTCPeerConnection::HasRemoteDescription)
         .def(pybind11::init(nogil_factory(+[](const std::optional<ConfigurationInit> &configuration) {
                return RTCPeerConnection::Create(configuration);
              })),
@@ -726,7 +723,7 @@ namespace python_webrtc {
     return pc && pc->ShouldFireNegotiationNeededEvent(eventId);
   }
 
-  void RTCPeerConnection::Close() {
+  std::optional<uint64_t> RTCPeerConnection::Close() {
     const auto gathering = GetIceGatheringState();
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
     {
@@ -746,7 +743,7 @@ namespace python_webrtc {
     });
     Parking::At("connection.close");
     // a closed connection, its channels and transports fire nothing more; remote tracks fire ended
-    Unbind();
+    const auto unbound = Unbind();
     {
       const TrackedLock lock(_wrappersMutex);
       for (auto &channel : _channels) {
@@ -770,6 +767,7 @@ namespace python_webrtc {
 
     // wrappers still referenced from Python keep their (closed) state
     ReleaseWrappers();
+    return unbound;
   }
 
   void RTCPeerConnection::SurfaceSignalingState(SignalingState state) {

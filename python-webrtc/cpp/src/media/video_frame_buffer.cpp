@@ -10,11 +10,11 @@
 #include <array>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
-#include <api/make_ref_counted.h>
 #include <api/video/i420_buffer.h>
 #include <common_video/include/video_frame_buffer.h>
 #include <libyuv/convert.h>
@@ -24,8 +24,10 @@
 
 #include <pybind11/stl.h>
 
+#include "frame_buffer_pool.h"
 #include "utils/buffer.h"
 #include "utils/gil.h"
+#include "utils/libwebrtc_thread.h"
 
 namespace python_webrtc {
 
@@ -123,43 +125,6 @@ namespace python_webrtc {
       }
     }
 
-    // NV12 planes kept alive by what they point into, wrapped without a copy
-    class WrappedNV12Buffer : public webrtc::NV12BufferInterface {
-    public:
-      WrappedNV12Buffer(int width, int height, const uint8_t *y, int strideY, const uint8_t *uv, int strideUV,
-                        std::shared_ptr<const std::vector<uint8_t>> owned)
-          : _width(width), _height(height), _y(y), _uv(uv), _strideY(strideY), _strideUV(strideUV),
-            _owned(std::move(owned)) {}
-
-      [[nodiscard]] int width() const override { return _width; }
-
-      [[nodiscard]] int height() const override { return _height; }
-
-      [[nodiscard]] const uint8_t *DataY() const override { return _y; }
-
-      [[nodiscard]] const uint8_t *DataUV() const override { return _uv; }
-
-      [[nodiscard]] int StrideY() const override { return _strideY; }
-
-      [[nodiscard]] int StrideUV() const override { return _strideUV; }
-
-      webrtc::scoped_refptr<webrtc::I420BufferInterface> ToI420() override {
-        auto i420 = webrtc::I420Buffer::Create(_width, _height);
-        libyuv::NV12ToI420(_y, _strideY, _uv, _strideUV, i420->MutableDataY(), i420->StrideY(), i420->MutableDataU(),
-                           i420->StrideU(), i420->MutableDataV(), i420->StrideV(), _width, _height);
-        return i420;
-      }
-
-    private:
-      int _width;
-      int _height;
-      const uint8_t *_y;
-      const uint8_t *_uv;
-      int _strideY;
-      int _strideUV;
-      std::shared_ptr<const std::vector<uint8_t>> _owned;
-    };
-
     // opaque alpha in the 4th byte of each pixel
     void FillOpaque(uint8_t *dst, size_t stride, int width, int height) {
       for (int row = 0; row < height; ++row) {
@@ -167,6 +132,61 @@ namespace python_webrtc {
         for (int column = 0; column < width; ++column, pixel += 4) {
           *pixel = kOpaque;
         }
+      }
+    }
+
+    void CopyRows(const uint8_t *source, size_t sourceStride, uint8_t *target, size_t targetStride, size_t rowBytes,
+                  size_t rows) {
+      if (sourceStride == rowBytes && targetStride == rowBytes) {
+        std::memcpy(target, source, rowBytes * rows);
+        return;
+      }
+      for (size_t row = 0; row < rows; ++row) {
+        std::memcpy(target + (row * targetStride), source + (row * sourceStride), rowBytes);
+      }
+    }
+
+    // a frame made from data is mostly sent and dropped before the next, and an idle 2160p one keeps 12 MB
+    struct DataFramePool : FrameBufferPool {
+      DataFramePool() : FrameBufferPool(3) {}
+    };
+
+    struct PooledBuffer {
+      webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer;
+      std::array<uint8_t *, 4> data{};
+      std::array<int, 4> stride{};
+    };
+
+    template <typename Buffer>
+    PooledBuffer Planar(webrtc::scoped_refptr<Buffer> buffer) {
+      PooledBuffer result{.data = {buffer->MutableDataY(), buffer->MutableDataU(), buffer->MutableDataV(), nullptr},
+                          .stride = {buffer->StrideY(), buffer->StrideU(), buffer->StrideV(), 0}};
+      result.buffer = std::move(buffer);
+      return result;
+    }
+
+    std::optional<PooledBuffer> Pooled(const PixelFormat &format, int width, int height) {
+      if (format.bits != kEightBit || format.alpha) {
+        return std::nullopt;
+      }
+      static ForkLocal<DataFramePool> pools;
+      auto &pool = pools.Get();
+      switch (format.layout) {
+      case Layout::I420:
+        return Planar(pool.CreateI420(width, height));
+      case Layout::I422:
+        return Planar(pool.CreateI422(width, height));
+      case Layout::I444:
+        return Planar(pool.CreateI444(width, height));
+      case Layout::NV12: {
+        auto buffer = pool.CreateNV12(width, height);
+        PooledBuffer result{.data = {buffer->MutableDataY(), buffer->MutableDataUV(), nullptr, nullptr},
+                            .stride = {buffer->StrideY(), buffer->StrideUV(), 0, 0}};
+        result.buffer = std::move(buffer);
+        return result;
+      }
+      default:
+        return std::nullopt;
       }
     }
 
@@ -302,21 +322,25 @@ namespace python_webrtc {
       }
       total += static_cast<size_t>(result->_stride[i]) * rows[i];
     }
-    result->_owned = std::make_shared<std::vector<uint8_t>>(total);
-
     {
       const gil_release release;
+      if (auto pooled = Pooled(format, width, height)) {
+        for (size_t i = 0; i < planes.size(); ++i) {
+          auto [offset, stride] = layout[i];
+          CopyRows(source + offset, stride, pooled->data[i], pooled->stride[i], result->_stride[i], rows[i]);
+          result->_data[i] = pooled->data[i];
+        }
+        result->_stride = pooled->stride;
+        result->_webrtc = std::move(pooled->buffer);
+        return result;
+      }
+      result->_owned = std::make_shared<std::vector<uint8_t>>(total);
       for (size_t i = 0; i < planes.size(); ++i) {
         auto [offset, stride] = layout[i];
-        const size_t rowBytes = result->_stride[i];
-        for (size_t row = 0; row < rows[i]; ++row) {
-          std::memcpy(result->_owned->data() + offsets[i] + (row * rowBytes), source + offset + (row * stride),
-                      rowBytes);
-        }
+        CopyRows(source + offset, stride, result->_owned->data() + offsets[i], result->_stride[i], result->_stride[i],
+                 rows[i]);
+        result->_data[i] = result->_owned->data() + offsets[i];
       }
-    }
-    for (size_t i = 0; i < planes.size(); ++i) {
-      result->_data[i] = result->_owned->data() + offsets[i];
     }
     return result;
   }
@@ -483,10 +507,6 @@ namespace python_webrtc {
     }
     // the planes live as long as the libwebrtc buffer wrapping them
     auto keep = [owned = _owned, webrtc = _webrtc]() {};
-    if (format.layout == Layout::NV12) {
-      return webrtc::make_ref_counted<WrappedNV12Buffer>(_width, _height, _data[0], _stride[0], _data[1], _stride[1],
-                                                         _owned);
-    }
     if (format.layout == Layout::RGB) {
       auto buffer = webrtc::I420Buffer::Create(_width, _height);
       auto convert = format.rgbOrder ? libyuv::ABGRToI420 : libyuv::ARGBToI420;

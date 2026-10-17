@@ -15,6 +15,7 @@
 #include "utils/libwebrtc_thread.h"
 #include "utils/mailbox.h"
 #include "utils/native_object.h"
+#include "utils/network_socket_server.h"
 #include "utils/parking.h"
 #include "utils/registry.h"
 #include "utils/task_queue_factory.h"
@@ -35,6 +36,7 @@
 #include <api/make_ref_counted.h>
 #include <api/ref_count.h>
 #include <api/scoped_refptr.h>
+#include <rtc_base/socket.h>
 #include <rtc_base/thread.h>
 
 #include <pybind11/stl.h>
@@ -355,6 +357,23 @@ namespace python_webrtc {
           BlockingCallOn(factory->signalingThread(), []() {});
         },
         nogil(), "Returns once the signaling, worker and signaling threads ran what they queued.");
+    testing.def("sibling_sockets", &NetworkSocketServer::SiblingsMade,
+                "How many connected sibling sockets the network threads of the process made.");
+    testing.def(
+        "udp_receive_buffer",
+        []() {
+          const auto factory = PeerConnectionFactory::GetOrCreateDefault();
+          auto *thread = factory->workerThread();
+          return BlockingCallOn(thread, [thread]() {
+            const std::unique_ptr<webrtc::Socket> socket(thread->socketserver()->CreateSocket(AF_INET, SOCK_DGRAM));
+            int size = -1;
+            if (socket) {
+              (void)socket->GetOption(webrtc::Socket::OPT_RCVBUF, &size);
+            }
+            return size;
+          });
+        },
+        nogil(), "The receive buffer of a new UDP socket of the network thread, in bytes as the kernel reports it.");
     testing.def(
         "sframe_skip_counters",
         [](SFrameTransform &transform, uint64_t next) { transform.Context().SkipCounters(next); },

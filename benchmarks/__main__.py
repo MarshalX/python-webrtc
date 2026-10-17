@@ -24,11 +24,12 @@ import json
 import pathlib
 import platform
 import sys
+import time
 from typing import IO, TYPE_CHECKING
 
 from benchmarks import report
 from benchmarks.report import SUITES
-from benchmarks.runner import BENCHMARKS, LIBRARIES, RESULTS, Driver, Options
+from benchmarks.runner import BENCHMARKS, LIBRARIES, RESULTS, Driver, Options, duration
 from benchmarks.stats import commit, go_version, machine
 
 if TYPE_CHECKING:
@@ -153,8 +154,15 @@ def _manifest(options: Options, versions: dict[str, Hello]) -> Manifest:
 
 
 async def _run(names: list[str], options: Options) -> Run:
+    today = dt.datetime.now().astimezone()
+    options.progress(f'started {today:%Y-%m-%d}: {", ".join(names)} of {", ".join(options.libraries)}')
     manifest = _manifest(options, await _versions(options.libraries, options.log))
-    suites = {name: await SUITES[name].run(options) for name in names}
+    suites: dict[str, object] = {}
+    for name in names:
+        started = time.monotonic()
+        suites[name] = await SUITES[name].run(options)
+        options.progress(f'{name}: done in {duration(time.monotonic() - started)}')
+    options.progress(f'done in {duration(time.monotonic() - options.started)}')
     return {'manifest': manifest, 'suites': suites}
 
 
@@ -166,7 +174,12 @@ def main() -> None:
     stamp = dt.datetime.now().astimezone().strftime('%Y-%m-%dT%H%M%S')
     name = f'{stamp}-{platform.system().lower()}-{platform.machine().lower()}'
     with (directory / f'{name}.log').open('ab') as log:
-        results = asyncio.run(_run(command.suites, command.options(log)))
+        options = command.options(log)
+        try:
+            results = asyncio.run(_run(command.suites, options))
+        except KeyboardInterrupt:
+            options.progress(f'interrupted, no results saved; drivers logged to {log.name}')
+            sys.exit(130)
 
     path = directory / f'{name}.json'
     path.write_text(json.dumps(results, indent=1) + '\n', encoding='utf-8')

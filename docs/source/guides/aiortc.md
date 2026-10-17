@@ -75,22 +75,12 @@ Behaves differently:
 
 ## Performance
 
-Code moved to the layer runs several times faster than on aiortc. aiortc's own benchmark driver, run once on aiortc
-1.15 and once on the layer, in the same session: Apple M1, medians of 3 runs.
+Python WebRTC opens connections 7–8x faster than aiortc, moves 4.4–9x more data through a data channel and spends
+less CPU on audio. See the [benchmarks](../benchmarks.md).
 
-| Case | Layer against aiortc |
-|------|----------------------|
-| Connection setup, to an open data channel | **5.4x faster**: 5.8 ms against 31.4 ms |
-| Data channel throughput | **3.9–7.6x more** data a second |
-| Audio send, CPU per stream | **3–4x less** |
-| Connections in one process | 1100 against 850 |
-| Memory per connection | **more**: 3.6x bare, 2x with a data channel, 1.45x with audio |
-
-Memory per connection is where aiortc is lighter: the engine keeps a full browser's state for each connection. See
-[Benchmarks](../benchmarks.md#memory). Video send isn't compared, since the two encode different resolutions.
-
-Against the same code written for the native API, the layer costs 0–8% more. The difference is one copy per received
-video frame into a PyAV frame, and about 24 MB at startup from importing PyAV.
+The layer gives up some of that for compatibility: it costs up to 8% more than the same code on the native API. Each
+received video frame is copied into a PyAV frame, and importing PyAV adds about 24 MB at startup. The native API has
+neither cost, see [Moving to the native API](#moving-to-the-native-api).
 
 ## Moving to the native API
 

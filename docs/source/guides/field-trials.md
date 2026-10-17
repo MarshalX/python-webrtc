@@ -1,7 +1,7 @@
 # Field trials
 
 The native WebRTC engine ships some features turned off, behind field trials. A trial has a name, like
-`WebRTC-Sctp-Snap`, and a group, usually `Enabled`. Browsers set them with a command-line flag. In python-webrtc,
+`WebRTC-Sctp-Snap`, and a group, usually `Enabled`. Browsers set them with a command-line flag. In Python WebRTC,
 `webrtc.field_trials` sets them: a mapping of names to groups that works like {data}`os.environ`.
 
 ```python
@@ -32,6 +32,32 @@ The engine reads the trials once, when it starts: on the first {class}`~webrtc.R
 Trial names change between releases of the engine, which is libwebrtc M152 in this release. An unknown name is
 accepted and does nothing, as it does in the browsers, so check the spelling.
 
+## Socket receive buffer
+
+Python WebRTC gives every UDP socket a receive buffer of at least 8 MB, so a burst of data channel messages isn't
+dropped while the engine is busy. Setting `WebRTC-SetSocketReceiveBuffer` to any group turns this off: `Enabled-<kb>`
+sets your size, and `Disabled` leaves it to the engine and the system.
+
+Linux caps the buffer at `net.core.rmem_max`, often about 200 KB. With that cap, a flood of data channel messages
+overflows the buffer, and the channel can stall for seconds while SCTP recovers the lost packets. To lift the cap:
+
+```bash
+sudo sysctl -w net.core.rmem_max=8388608
+```
+
+Add `net.core.rmem_max = 8388608` to `/etc/sysctl.conf` to keep it after a reboot.
+
+## Connected sockets
+
+On macOS and Linux, when one remote address both sends to a UDP socket and receives from it, like the peer of a busy
+data channel, Python WebRTC gives that peer a second socket on the same local address, connected to it. The kernel
+then skips its route and socket lookups on every datagram, which makes data channels faster. Packets on the wire don't
+change, so the peer can't tell, and every other address keeps using the first socket.
+
+Set `PythonWebRTC-ConnectedSockets` to `Disabled` to keep one socket per address, as the engine does on its own: to
+rule this out while debugging a connection, or on a machine shared with other users, as the second socket shares the
+address while it binds.
+
 ## WARP
 
 [WARP](https://datatracker.ietf.org/doc/draft-uberti-tsvwg-warp/) connects faster by saving round trips. It's made of four parts, and each of them works on its own: a peer that
@@ -55,5 +81,5 @@ The server has to know the `id` of the channel, so the signalling sends it along
 [OpenAI's WARP guide](https://developers.openai.com/api/docs/guides/realtime-webrtc-warp) describes. The
 [GPT-Live example](../examples/openai_live.md) connects this way.
 
-With both trials, a data channel between two python-webrtc peers opens 50% sooner, and a GPT-Live session starts 62%
+With both trials, a data channel between two Python WebRTC peers opens 50% sooner, and a GPT-Live session starts 62%
 sooner once the API has answered.

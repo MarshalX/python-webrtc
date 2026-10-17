@@ -125,7 +125,8 @@ Python garbage.
 
 - Every change of binding or activity ends in an update of the root on the loop that holds it. A change made from
   Python goes through `_changing()` (a spent `once` handler too), so roots checks on other loops wait for it. An
-  unbind updates roots after unbinding, and `LoopState.update` re-reads the binding after storing a root
+  unbind updates roots after unbinding, on the loop of the mailbox the unbind itself found (`Unbind()` returns its
+  id), as a loop read before it may be stale. `LoopState.update` re-reads the binding after storing a root
   (`_recheck`): whichever runs last sees the other.
 - An object is kept for the events still owed to it, not for the state it shows (an announced data channel reads
   open before its open event).

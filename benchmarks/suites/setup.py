@@ -176,7 +176,7 @@ async def run(options: Options) -> dict[Mode, dict[str, Results]]:
     }
 
     for case in _cases(options):
-        print(f'setup: {case.library} {case.name}', file=sys.stderr, flush=True)
+        options.progress(f'setup: {case.library} {case.name}')
         result, trickle = results[case.mode][case.library], case.mode == 'trickle'
         if case.cold:
             result['cold'].append(await cold_trial(case.library, options.log, trickle=trickle))

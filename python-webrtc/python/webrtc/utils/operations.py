@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Callable
 from webrtc.utils.loops import LoopState
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from types import TracebackType
 
 
 class OperationsChain:
@@ -60,32 +60,9 @@ class OperationsChain:
         """:obj:`bool`: Whether an operation is running."""
         return self._last is not None and not self._last.done()
 
-    @contextlib.asynccontextmanager
-    async def operation(self) -> AsyncGenerator[None, None]:
+    def operation(self) -> Operation:
         """Chains an operation after the ones that are running."""
-        if self._closed():
-            # it fails its checks right away
-            yield
-            return
-        done: concurrent.futures.Future[None] = concurrent.futures.Future()
-        with self._changing(), self._lock:
-            previous = self._last
-            self._last = done
-        try:
-            if previous is not None and not previous.done():
-                await self._after(previous, done)
-            try:
-                yield
-            except Exception:
-                self._cancel_if_closed()
-                raise
-            self._cancel_if_closed()
-        finally:
-            if previous is not None and not previous.done():
-                # cancelled while waiting: the next operations still wait for the previous one
-                previous.add_done_callback(lambda _: self._end(done))
-            else:
-                self._end(done)
+        return Operation(self)
 
     def _cancel_if_closed(self) -> None:
         if self._closed():
@@ -120,6 +97,60 @@ class OperationsChain:
 
             if self._last is done:
                 self._on_empty()
+
+
+class Operation:
+    """An operation of the chain, used with ``async with``.
+
+    Not an async generator: a loop's ``shutdown_asyncgens()`` would close one under a suspended operation, whose end
+    then fails as an unraisable error that keeps its frames and their connections.
+    """
+
+    __slots__ = ('_chain', '_done', '_previous')
+
+    def __init__(self, chain: OperationsChain) -> None:
+        self._chain = chain
+        # None while closed: the operation fails its checks right away
+        self._done: concurrent.futures.Future[None] | None = None
+        self._previous: concurrent.futures.Future[None] | None = None
+
+    async def __aenter__(self) -> None:
+        chain = self._chain
+        if chain._closed():
+            return
+        done: concurrent.futures.Future[None] = concurrent.futures.Future()
+        with chain._changing(), chain._lock:
+            previous = chain._last
+            chain._last = done
+        self._done, self._previous = done, previous
+        if previous is not None and not previous.done():
+            try:
+                await chain._after(previous, done)
+            except BaseException:
+                self._end()
+                raise
+
+    async def __aexit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None
+    ) -> None:
+        if self._done is None:
+            return
+        try:
+            # a cancellation or an exit isn't replaced
+            if exc_type is None or issubclass(exc_type, Exception):
+                self._chain._cancel_if_closed()
+        finally:
+            self._end()
+
+    def _end(self) -> None:
+        chain, done, previous = self._chain, self._done, self._previous
+        if done is None:
+            return
+        if previous is not None and not previous.done():
+            # cancelled while waiting: the next operations still wait for the previous one
+            previous.add_done_callback(lambda _: chain._end(done))
+        else:
+            chain._end(done)
 
 
 async def later() -> None:

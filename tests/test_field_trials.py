@@ -10,9 +10,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import multiprocessing
 import multiprocessing.context
 import os
+import socket
 import subprocess
 import sys
 from typing import TYPE_CHECKING, cast
@@ -297,3 +299,71 @@ def test_sped_carries_the_handshake_in_stun() -> None:
 
     assert without != set()
     assert _handshakes_with(SPED) < without
+
+
+@isolated
+def _receive_buffer_with(trials: dict[str, str]) -> int:
+    webrtc.field_trials.update(trials)
+    return wrtc._testing.udp_receive_buffer()
+
+
+def _kernel_receive_buffer(requested: int | None = None) -> int:
+    """What the kernel gives a new UDP socket, asking for the size or not."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+        if requested is not None:
+            # refused above the system's limit, as the library's request is
+            with contextlib.suppress(OSError):
+                udp.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, requested)
+        return udp.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+
+
+def test_udp_sockets_receive_into_8_mb_by_default() -> None:
+    assert _receive_buffer_with({}) == _kernel_receive_buffer(8 << 20)
+
+
+@pytest.mark.parametrize('group', ['Disabled', 'Enabled-1024'])
+def test_receive_buffer_trial_replaces_the_default(group: str) -> None:
+    """The engine applies the trial itself, to a connection's sockets."""
+    assert _receive_buffer_with({'WebRTC-SetSocketReceiveBuffer': group}) == _kernel_receive_buffer()
+
+
+async def _flood(count: int) -> None:
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    channel = caller.create_data_channel('flood')
+    announced = wait_for_event(callee, 'datachannel')
+    await connect(caller, callee)
+    event = await announced
+    assert isinstance(event, webrtc.RTCDataChannelEvent)
+    remote = event.channel
+    await wait_until(lambda: channel.ready_state == webrtc.RTCDataChannelState.open, 'the channel to open')
+    received = 0
+    all_received = asyncio.Event()
+
+    def on_message(_event: webrtc.MessageEvent) -> None:
+        nonlocal received
+        received += 1
+        if received == count:
+            all_received.set()
+
+    remote.on('message', on_message)
+    for _ in range(count):
+        channel.send(bytes(1024))
+    await asyncio.wait_for(all_received.wait(), seconds(10))
+    caller.close()
+    callee.close()
+
+
+@isolated
+def _siblings_after_a_flood(trials: dict[str, str]) -> int:
+    webrtc.field_trials.update(trials)
+    asyncio.run(_flood(1000))
+    return wrtc._testing.sibling_sockets()
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='Windows keeps one socket per address')
+def test_a_flooded_connection_gets_connected_sibling_sockets() -> None:
+    assert _siblings_after_a_flood({}) > 0
+
+
+def test_connected_sockets_trial_turns_siblings_off() -> None:
+    assert _siblings_after_a_flood({'PythonWebRTC-ConnectedSockets': 'Disabled'}) == 0

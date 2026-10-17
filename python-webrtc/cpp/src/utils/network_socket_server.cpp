@@ -7,16 +7,26 @@
 
 #include "network_socket_server.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <memory>
+#include <optional>
+#include <utility>
+#include <vector>
+
+#ifndef _WIN32
+#include <cerrno>
+
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#endif
 
 #ifdef __APPLE__
 #include <array>
-#include <cerrno>
 
 #include <rtc_base/time_utils.h>
 
 #include <sys/event.h>
-#include <sys/socket.h>
 #include <unistd.h>
 #endif
 
@@ -24,10 +34,19 @@ namespace python_webrtc {
 
   namespace {
 
-    // Forwards to a socket, repeating its read event while the reads its handler makes succeed
+#ifndef _WIN32
+    void ShareAddress(int descriptor, bool share) {
+      const int value = share ? 1 : 0;
+      (void)setsockopt(descriptor, SOL_SOCKET, SO_REUSEADDR, &value, sizeof value);
+      (void)setsockopt(descriptor, SOL_SOCKET, SO_REUSEPORT, &value, sizeof value);
+    }
+#endif
+
+    // Forwards to a socket, repeating its read event while the reads its handler makes succeed; see MakeSibling
     class DrainingSocket : public webrtc::Socket {
     public:
-      DrainingSocket(webrtc::Socket *socket, webrtc::Buffer &scratch) : _socket(socket), _scratch(scratch) {
+      DrainingSocket(NetworkSocketServer &server, webrtc::Socket *socket, webrtc::Buffer &scratch, int receiveBuffer)
+          : _server(server), _socket(socket), _scratch(scratch), _receiveBuffer(receiveBuffer) {
         // the analyzer loses the callbacks in libwebrtc's receiver list and reports them leaked
 #ifndef __clang_analyzer__
         _socket->SubscribeReadEvent(this, [this](webrtc::Socket *) { Drain(); });
@@ -37,29 +56,88 @@ namespace python_webrtc {
 #endif
       }
 
-      ~DrainingSocket() override { *_alive = false; }
+      ~DrainingSocket() override {
+        *_alive = false;
+        DropSibling();
+      }
       DrainingSocket(const DrainingSocket &) = delete;
       DrainingSocket &operator=(const DrainingSocket &) = delete;
       DrainingSocket(DrainingSocket &&) = delete;
       DrainingSocket &operator=(DrainingSocket &&) = delete;
 
-      [[nodiscard]] webrtc::SocketAddress GetLocalAddress() const override { return _socket->GetLocalAddress(); }
+      // libwebrtc's UDP socket reads it for every packet it sends: kept from the bind, not asked of the kernel
+      [[nodiscard]] webrtc::SocketAddress GetLocalAddress() const override {
+        return _local ? *_local : _socket->GetLocalAddress();
+      }
       [[nodiscard]] webrtc::SocketAddress GetRemoteAddress() const override { return _socket->GetRemoteAddress(); }
-      int Bind(const webrtc::SocketAddress &address) override { return _socket->Bind(address); }
-      int Connect(const webrtc::SocketAddress &address) override { return _socket->Connect(address); }
+      int Bind(const webrtc::SocketAddress &address) override {
+        _local.reset();
+        const int result = _socket->Bind(address);
+        if (result == 0) {
+          if (auto local = _socket->GetLocalAddress(); !local.IsNil()) {
+            _local = std::move(local);
+          }
+        }
+        return result;
+      }
+      int Connect(const webrtc::SocketAddress &address) override {
+        _local.reset();
+        return _socket->Connect(address);
+      }
       int Send(const void *data, size_t size) override { return _socket->Send(data, size); }
       int SendTo(const void *data, size_t size, const webrtc::SocketAddress &address) override {
+        if (_sibling && address == _siblingRemote) {
+          const int sent = _sibling->Send(data, size);
+          if (sent >= 0) {
+            return sent;
+          }
+          const int error = _sibling->GetError();
+#ifndef _WIN32
+          // an unconnected socket never learns of the destination's ICMP port unreachable: neither does this one
+          if (error == ECONNREFUSED) {
+            return static_cast<int>(size);
+          }
+#endif
+          _socket->SetError(error);
+          return sent;
+        }
+        if (address == _lastDestination) {
+          _sends = std::min(_sends + 1, kSiblingSends);
+          // both ways, or one connection's datagrams arrive on two queues out of order, which SCTP takes for loss
+          if (_sends == kSiblingSends && _receives == kSiblingSends && _lastSource == address && !_sibling &&
+              _server.SiblingsAllowed()) {
+            MakeSibling(address);
+          }
+        } else {
+          _lastDestination = address;
+          _sends = 1;
+        }
         return _socket->SendTo(data, size, address);
       }
       int Recv(void *data, size_t size, int64_t *timestamp) override {
-        return Read(_socket->Recv(data, size, timestamp));
+        return Read(Reading()->Recv(data, size, timestamp));
       }
       int RecvFrom(void *data, size_t size, webrtc::SocketAddress *address, int64_t *timestamp) override {
-        return Read(_socket->RecvFrom(data, size, address, timestamp));
+        return Read(Reading()->RecvFrom(data, size, address, timestamp));
       }
       int RecvFrom(ReceiveBuffer &buffer) override {
         ReceiveBuffer scratch(_scratch);
-        const int received = Read(_socket->RecvFrom(scratch));
+        webrtc::Socket *reading = Reading();
+        int received = Read(reading->RecvFrom(scratch));
+        if (received >= 0 && reading == _socket.get()) {
+          // an empty datagram counts too, so that a flood of them can't hold the backlog
+          _backlog -= std::max(received, 1);
+          if (scratch.source_address == _lastSource) {
+            _receives = std::min(_receives + 1, kSiblingSends);
+          } else {
+            _lastSource = scratch.source_address;
+            _receives = 1;
+          }
+        }
+        // drained: libwebrtc's UDP socket reads its local address to log a failed read, but not an empty one
+        if (received < 0 && (webrtc::IsBlockingError(reading->GetError()) || reading != _socket.get())) {
+          received = 0;
+        }
         buffer.payload.SetData(_scratch.data(), received > 0 ? static_cast<size_t>(received) : 0);
         buffer.source_address = scratch.source_address;
         buffer.arrival_time = scratch.arrival_time;
@@ -68,39 +146,155 @@ namespace python_webrtc {
       }
       int Listen(int backlog) override { return _socket->Listen(backlog); }
       webrtc::Socket *Accept(webrtc::SocketAddress *address) override { return _socket->Accept(address); }
-      int Close() override { return _socket->Close(); }
+      int Close() override {
+        _local.reset();
+        DropSibling();
+        return _socket->Close();
+      }
       [[nodiscard]] int GetError() const override { return _socket->GetError(); }
       void SetError(int error) override { _socket->SetError(error); }
       [[nodiscard]] ConnState GetState() const override { return _socket->GetState(); }
       int GetOption(Option option, int *value) override { return _socket->GetOption(option, value); }
-      int SetOption(Option option, int value) override { return _socket->SetOption(option, value); }
+      int SetOption(Option option, int value) override {
+        std::erase_if(_options, [&](const auto &set) { return set.first == option; });
+        _options.emplace_back(option, value);
+        if (_sibling) {
+          (void)SetOptionOn(*_sibling, option, value);
+        }
+        return SetOptionOn(*_socket, option, value);
+      }
 
     private:
-      // bounded, so that one busy socket doesn't hold up the thread's other sockets and tasks
       static constexpr int kMaxReadsPerEvent = 64;
+      static constexpr int kSiblingSends = 32;
+
+      int SetOptionOn(webrtc::Socket &socket, Option option, int value) const {
+        if (option == OPT_RCVBUF && value < _receiveBuffer && socket.SetOption(option, _receiveBuffer) == 0) {
+          return 0;
+        }
+        return socket.SetOption(option, value);
+      }
+
+      [[nodiscard]] webrtc::Socket *Reading() const { return _reading != nullptr ? _reading : _socket.get(); }
+
+      void MakeSibling(const webrtc::SocketAddress &remote) {
+#ifndef _WIN32
+        if (!_local) {
+          return;
+        }
+        std::unique_ptr<webrtc::Socket> sibling(_server.CreateUnwrappedSocket(_local->family(), SOCK_DGRAM));
+        if (!sibling) {
+          return;
+        }
+        const int descriptor = Descriptor(*_socket);
+        const int siblingDescriptor = Descriptor(*sibling);
+        ShareAddress(descriptor, true);
+        ShareAddress(siblingDescriptor, true);
+        const bool connected = sibling->Bind(*_local) == 0 && sibling->Connect(remote) == 0;
+        ShareAddress(siblingDescriptor, false);
+        ShareAddress(descriptor, false);
+        if (!connected) {
+          return;
+        }
+        if (_receiveBuffer > 0) {
+          (void)sibling->SetOption(OPT_RCVBUF, _receiveBuffer);
+        }
+        for (const auto &[option, value] : _options) {
+          (void)SetOptionOn(*sibling, option, value);
+        }
+#ifndef __clang_analyzer__
+        sibling->SubscribeReadEvent(this, [this](webrtc::Socket *) { DrainSibling(); });
+        sibling->SubscribeWriteEvent(this, [this](webrtc::Socket *) { NotifyWriteEvent(this); });
+#endif
+        _sibling = std::move(sibling);
+        _siblingRemote = remote;
+        NetworkSocketServer::CountSibling();
+        int queued = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): FIONREAD is only an ioctl
+        _backlog = ioctl(descriptor, FIONREAD, &queued) == 0 ? queued : 0;
+#else
+        (void)remote;
+#endif
+      }
+
+      void DropSibling() {
+        if (!_sibling) {
+          return;
+        }
+        if (_reading == _sibling.get()) {
+          _reading = nullptr;
+        }
+        _sibling->UnsubscribeReadEvent(this);
+        _sibling->UnsubscribeWriteEvent(this);
+        _sibling.reset();
+        _siblingRemote.Clear();
+      }
+
+      void DrainSibling() {
+        const auto alive = _alive;
+        while (_backlog > 0) {
+          const Drained drained = Drain();
+          if (!*alive || !_sibling) {
+            return;
+          }
+          if (drained == Drained::kEmpty) {
+            _backlog = 0;
+          }
+        }
+        _reading = _sibling.get();
+        Drain();
+        if (*alive) {
+          _reading = nullptr;
+        }
+      }
+
+#ifndef _WIN32
+      static int Descriptor(webrtc::Socket &socket) {
+        return static_cast<webrtc::SocketDispatcher &>(socket).GetDescriptor();
+      }
+#endif
 
       int Read(int result) {
         _read = result >= 0;
         return result;
       }
 
-      void Drain() {
+      enum class Drained : uint8_t { kEmpty, kMore, kDestroyed };
+
+      Drained Drain() {
         // a handler may destroy the socket
         const auto alive = _alive;
         for (int i = 0; i < kMaxReadsPerEvent; ++i) {
           _read = false;
           NotifyReadEvent(this);
-          if (!*alive || !_read) {
-            return;
+          if (!*alive) {
+            return Drained::kDestroyed;
+          }
+          if (!_read) {
+            return Drained::kEmpty;
           }
         }
+        return Drained::kMore;
       }
 
+      NetworkSocketServer &_server;
       std::unique_ptr<webrtc::Socket> _socket;
       // the server's, shared by its sockets
       webrtc::Buffer &_scratch;
+      const int _receiveBuffer;
       std::shared_ptr<bool> _alive = std::make_shared<bool>(true);
       bool _read = false;
+      std::optional<webrtc::SocketAddress> _local;
+      // what libwebrtc set, for a sibling made later
+      std::vector<std::pair<Option, int>> _options;
+      std::unique_ptr<webrtc::Socket> _sibling;
+      webrtc::SocketAddress _siblingRemote;
+      webrtc::SocketAddress _lastDestination;
+      int _sends = 0;
+      webrtc::Socket *_reading = nullptr;
+      int _backlog = 0;
+      webrtc::SocketAddress _lastSource;
+      int _receives = 0;
     };
 
 #ifdef __APPLE__
@@ -182,7 +376,8 @@ namespace python_webrtc {
   } // namespace
 
 #ifdef __APPLE__
-  NetworkSocketServer::NetworkSocketServer() : _kqueue(kqueue()) {
+  NetworkSocketServer::NetworkSocketServer(int receiveBuffer, bool siblings)
+      : _receiveBuffer(receiveBuffer), _siblings(siblings), _kqueue(kqueue()) {
     RTC_CHECK(_kqueue >= 0) << "kqueue failed: " << errno;
     struct kevent wake{};
     EV_SET(&wake, 0, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, nullptr);
@@ -200,6 +395,15 @@ namespace python_webrtc {
       return nullptr;
     }
     return Created(dispatcher, type);
+  }
+
+  webrtc::Socket *NetworkSocketServer::CreateUnwrappedSocket(int family, int type) {
+    auto *dispatcher = new KqueueDispatcher(*this);
+    if (!dispatcher->Create(family, type)) {
+      delete dispatcher;
+      return nullptr;
+    }
+    return dispatcher;
   }
 
   webrtc::Socket *NetworkSocketServer::WrapSocket(SOCKET descriptor) {
@@ -312,12 +516,17 @@ namespace python_webrtc {
     PhysicalSocketServer::WakeUp();
   }
 #else
-  NetworkSocketServer::NetworkSocketServer() = default;
+  NetworkSocketServer::NetworkSocketServer(int receiveBuffer, bool siblings)
+      : _receiveBuffer(receiveBuffer), _siblings(siblings) {}
 
   NetworkSocketServer::~NetworkSocketServer() = default;
 
   webrtc::Socket *NetworkSocketServer::CreateSocket(int family, int type) {
     return Created(webrtc::PhysicalSocketServer::CreateSocket(family, type), type);
+  }
+
+  webrtc::Socket *NetworkSocketServer::CreateUnwrappedSocket(int family, int type) {
+    return webrtc::PhysicalSocketServer::CreateSocket(family, type);
   }
 #endif
 
@@ -325,7 +534,10 @@ namespace python_webrtc {
     if (socket == nullptr || type != SOCK_DGRAM) {
       return socket;
     }
-    return new DrainingSocket(socket, _scratch);
+    if (_receiveBuffer > 0) {
+      (void)socket->SetOption(webrtc::Socket::OPT_RCVBUF, _receiveBuffer);
+    }
+    return new DrainingSocket(*this, socket, _scratch, _receiveBuffer);
   }
 
 } // namespace python_webrtc

@@ -1238,3 +1238,24 @@ async def test_wrappers_take_no_attributes() -> None:
             obj.close()
         elif isinstance(obj, webrtc.MediaStreamTrack):
             obj.stop()
+
+
+def test_close_unroots_a_connection_bound_while_it_closes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A loop that binds a connection after close() read its loop doesn't keep it once closed."""
+    pc = webrtc.RTCPeerConnection()
+
+    async def scenario() -> None:
+        loop_read = events.states_elsewhere
+
+        def bind_meanwhile() -> list[loops.LoopState]:
+            monkeypatch.setattr(events, 'states_elsewhere', loop_read)
+            # as another thread's first operation would, right after close() read the (absent) loop
+            pc.on('negotiationneeded', lambda _: None)
+            return loop_read()
+
+        monkeypatch.setattr(events, 'states_elsewhere', bind_meanwhile)
+        pc.close()
+        await delivered()
+        assert pc not in loops.LoopState.of(asyncio.get_running_loop()).active
+
+    asyncio.run(scenario())

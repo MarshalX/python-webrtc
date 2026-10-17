@@ -5,7 +5,7 @@ import typing_extensions
 import webrtc.enums
 import webrtc.exceptions
 from . import _testing as _testing
-__all__: list[str] = ['ConfigurationInit', 'DataChannelMessage', 'IceCandidateInit', 'IceServerInit', 'Mailbox', 'MediaStream', 'MediaStreamTrack', 'MediaStreamTrackProcessor', 'PeerConnectionFactory', 'PythonWebRTCException', 'PythonWebRTCExceptionBase', 'RTCCallbackException', 'RTCCertificate', 'RTCDTMFSender', 'RTCDataChannel', 'RTCDtlsTransport', 'RTCEncodedFrame', 'RTCIceTransport', 'RTCPeerConnection', 'RTCRtpReceiver', 'RTCRtpScriptTransform', 'RTCRtpSender', 'RTCRtpTransceiver', 'RTCSctpTransport', 'RTCSessionDescription', 'RTCSessionDescriptionInit', 'RtcpParameters', 'RtpCapabilities', 'RtpCodec', 'RtpCodecCapability', 'RtpCodecParameters', 'RtpEncodingParameters', 'RtpExtension', 'RtpHeaderExtensionCapability', 'RtpParameters', 'RtpTransceiverInit', 'SFrameTransform', 'TrackGenerator', 'VideoFrameBuffer', 'copyAudioSamples', 'disableOpenH264', 'getUserMedia', 'loadOpenH264', 'openH264Enabled']
+__all__: list[str] = ['ConfigurationInit', 'IceCandidateInit', 'IceServerInit', 'Mailbox', 'MediaStream', 'MediaStreamTrack', 'MediaStreamTrackProcessor', 'PeerConnectionFactory', 'PythonWebRTCException', 'PythonWebRTCExceptionBase', 'RTCCallbackException', 'RTCCertificate', 'RTCDTMFSender', 'RTCDataChannel', 'RTCDtlsTransport', 'RTCEncodedFrame', 'RTCIceTransport', 'RTCPeerConnection', 'RTCRtpReceiver', 'RTCRtpScriptTransform', 'RTCRtpSender', 'RTCRtpTransceiver', 'RTCSctpTransport', 'RTCSessionDescription', 'RTCSessionDescriptionInit', 'RtcpParameters', 'RtpCapabilities', 'RtpCodec', 'RtpCodecCapability', 'RtpCodecParameters', 'RtpEncodingParameters', 'RtpExtension', 'RtpHeaderExtensionCapability', 'RtpParameters', 'RtpTransceiverInit', 'SFrameTransform', 'TrackGenerator', 'VideoFrameBuffer', 'copyAudioSamples', 'disableOpenH264', 'getUserMedia', 'loadOpenH264', 'openH264Enabled']
 class RTCCallbackException:
     def toPython(self) -> webrtc.exceptions.RTCException:
         ...
@@ -19,7 +19,7 @@ class Mailbox:
     @property
     def id(self) -> int:
         ...
-    def take(self) -> tuple[str | None, int, bool, tuple[object, ...] | None] | None:
+    def take(self) -> tuple[str, int, bool, tuple[object, ...]] | tuple[None, int, bool, tuple[object, ...] | None] | None:
         ...
     def enableWake(self) -> int | None:
         ...
@@ -631,10 +631,6 @@ class RTCRtpTransceiver:
     @property
     def stopping(self) -> bool:
         ...
-class DataChannelMessage:
-    @property
-    def data(self) -> str | bytes:
-        ...
 class RTCDataChannel(Binding):
     @property
     def _id(self) -> int:
@@ -689,6 +685,9 @@ class RTCDataChannel(Binding):
         ...
 class RTCPeerConnection(Binding):
     @property
+    def _hasRemoteDescription(self) -> bool:
+        ...
+    @property
     def _id(self) -> int:
         ...
     @staticmethod
@@ -726,7 +725,7 @@ class RTCPeerConnection(Binding):
     @typing.overload
     def addTransceiver(self, track: MediaStreamTrack, init: RtpTransceiverInit | None) -> RTCRtpTransceiver:
         ...
-    def close(self) -> None:
+    def close(self) -> int | None:
         ...
     def createAnswer(self, mailbox: Mailbox, token: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...

@@ -16,6 +16,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <api/data_channel_interface.h>
 #include <rtc_base/copy_on_write_buffer.h>
@@ -31,13 +32,6 @@
 #include "peer_connection_factory.h"
 
 namespace python_webrtc {
-
-  // A received message, converted to str or bytes by Python
-  struct DataChannelMessage {
-    // refcounted and only read, so it's shared across threads without a copy
-    webrtc::CopyOnWriteBuffer data;
-    bool binary;
-  };
 
   class RTCDataChannel : public webrtc::DataChannelObserver,
                          public NativeObject<RTCDataChannel>,
@@ -125,6 +119,7 @@ namespace python_webrtc {
 
   private:
     void SendNow(webrtc::DataBuffer buffer);
+    void SendOutgoing();
 
     void SetStateLocked(DataState state);
 
@@ -141,6 +136,9 @@ namespace python_webrtc {
     DataState _lastState = DataState::kConnecting;
     // sent before libwebrtc opens an announced channel; under _closeMutex
     std::deque<webrtc::DataBuffer> _held;
+    // sent in one network-thread task: a task per message makes the network thread wait on its queue's lock
+    std::mutex _outgoingMutex;
+    std::vector<webrtc::DataBuffer> _outgoing;
 
     Surfaced<DataState> _surfacedState;
     // closing locally sets the state to closing right away, without a closing event; guards the state changes

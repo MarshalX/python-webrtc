@@ -21,7 +21,7 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import connect, exchange_offer_answer, settled_alive, wait_for_event, wait_until
+from tests.helpers import connect, delivered, exchange_offer_answer, settled_alive, wait_for_event, wait_until
 from tests.isolation import isolated
 from tests.timing import seconds
 from webrtc.utils.loops import LoopState
@@ -352,6 +352,8 @@ async def _start_while_the_previous_operation_releases() -> list[str]:
     assert offer is not None
 
     pending = LoopState.of(asyncio.get_running_loop()).pending
+    # the offer's completion is still on the signaling thread, before the point the park would stop it at
+    await delivered()
     wrtc._testing.park('description.completed')
     try:
         # resolved, while its signaling task is parked before it releases what it held
