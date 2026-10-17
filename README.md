@@ -100,7 +100,7 @@ equal to the strings of the specification, dictionaries are typed dataclasses, a
 | VP9 and AV1                                             | ✅                    | ❌                 | ✅                          | ✅                     |
 | `pip install` on Linux, macOS and Windows               | ✅                    | ✅                 | ✅                          | ❌ system packages     |
 
-Against aiortc, it opens connections 5–7x faster, moves 4.5–9x more data through a data channel and spends less CPU on
+Against aiortc, it opens connections 7–8x faster, moves 4.4–9x more data through a data channel and spends less CPU on
 audio. See the [benchmarks](https://wrtc.marshal.dev/benchmarks/), which also measure Pion, libdatachannel and
 webrtc-rs.
 

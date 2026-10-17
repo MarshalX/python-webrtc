@@ -272,7 +272,7 @@ async def run(options: Options) -> dict[str, Results]:
         library: {'states': {state: [] for state in STATES}, 'growth': []} for library in options.libraries
     }
     for library, state in _cases(options):
-        print(f'memory: {library} {_name(state)}', file=sys.stderr, flush=True)
+        options.progress(f'memory: {library} {_name(state)}')
         if state is None:
             results[library]['growth'].append(await growth_run(library, sizes, options.log))
         else:

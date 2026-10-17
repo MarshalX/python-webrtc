@@ -212,7 +212,7 @@ async def run(options: Options) -> dict[str, Results]:
     }
 
     for library, cell in _cases(options):
-        print(f'datachannel: {library} {_name(cell)}', file=sys.stderr, flush=True)
+        options.progress(f'datachannel: {library} {_name(cell)}')
         if cell is None:
             results[library]['ping'].append(await ping_run(library, timing, options.log))
         else:
