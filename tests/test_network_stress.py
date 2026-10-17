@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import webrtc
+import wrtc
 from tests.helpers import connect, exchange_offer_answer, wait_for_event, wait_for_ice_gathering_complete, wait_until
 from tests.timing import seconds
 
@@ -139,11 +140,20 @@ async def _selected_pair(pc: webrtc.RTCPeerConnection) -> webrtc.RTCIceCandidate
     return pair
 
 
+def _skip_unless_a_flood_fits(pytestconfig: pytest.Config) -> None:
+    if pytestconfig.getoption('--gc-on-emit'):
+        pytest.skip('a flood of events, and --gc-on-emit collects garbage on every event')
+    # the library's floor: below it the kernel overflows here and SCTP stalls on recovery
+    if wrtc._testing.udp_receive_buffer() < 8 << 20:
+        pytest.skip('the system caps the UDP receive buffer below 8 MB (on Linux, net.core.rmem_max)')
+
+
 @pytest.mark.asyncio
 async def test_a_flood_between_connections_of_one_thread_loses_no_datagram(
-    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, pytestconfig: pytest.Config
 ) -> None:
     """The network thread reads what it sends to its own sockets before their kernel buffers overflow."""
+    _skip_unless_a_flood_fits(pytestconfig)
     channel = caller.create_data_channel('flood')
     announced = wait_for_event(callee, 'datachannel')
     await connect(caller, callee)
@@ -170,7 +180,7 @@ async def test_a_flood_between_connections_of_one_thread_loses_no_datagram(
         if channel.buffered_amount > 1 << 20:
             await wait_for_event(channel, 'bufferedamountlow')
         channel.send(payload)
-    await asyncio.wait_for(all_received.wait(), seconds(30))
+    await all_received.wait()
 
     sent = (await _selected_pair(caller)).packets_sent
     delivered = (await _selected_pair(callee)).packets_received

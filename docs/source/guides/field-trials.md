@@ -36,7 +36,16 @@ accepted and does nothing, as it does in the browsers, so check the spelling.
 
 python-webrtc gives every UDP socket a receive buffer of at least 8 MB, so a burst of data channel messages isn't
 dropped while the engine is busy. Setting `WebRTC-SetSocketReceiveBuffer` to any group turns this off: `Enabled-<kb>`
-sets your size, and `Disabled` leaves it to the engine and the system. Linux caps the buffer at `net.core.rmem_max`.
+sets your size, and `Disabled` leaves it to the engine and the system.
+
+Linux caps the buffer at `net.core.rmem_max`, often about 200 KB. With that cap, a flood of data channel messages
+overflows the buffer, and the channel can stall for seconds while SCTP recovers the lost packets. To lift the cap:
+
+```bash
+sudo sysctl -w net.core.rmem_max=8388608
+```
+
+Add `net.core.rmem_max = 8388608` to `/etc/sysctl.conf` to keep it after a reboot.
 
 ## WARP
 
