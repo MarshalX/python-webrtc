@@ -146,6 +146,8 @@ def test_operations_stranded_by_a_closed_loop_end_quietly() -> None:
     operations = [operation() for _ in range(3)]
     tasks = [loop.create_task(coroutine) for coroutine in operations]
     loop.run_until_complete(asyncio.sleep(0))
+    # as asyncio.run and pytest-asyncio close a loop: its async generators first
+    loop.run_until_complete(loop.shutdown_asyncgens())
     loop.close()
     for coroutine in operations:
         # as collecting it does
