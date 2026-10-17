@@ -284,12 +284,13 @@ namespace python_webrtc {
     (void)Bind(parent.mailbox());
   }
 
-  void Binding::Unbind() {
+  std::optional<uint64_t> Binding::Unbind() {
     std::shared_ptr<Mailbox> unbound;
     {
       const std::scoped_lock lock(_mutex);
       unbound.swap(_mailbox);
     }
+    return unbound ? std::optional(unbound->Id()) : std::nullopt;
   }
 
   bool Binding::IsBound() const {

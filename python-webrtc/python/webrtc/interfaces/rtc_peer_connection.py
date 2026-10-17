@@ -44,7 +44,7 @@ from webrtc.models.rtc_stats import RTCStatsReport
 from webrtc.models.rtp_parameters import RTCRtpCodec
 from webrtc.utils import lifetime
 from webrtc.utils.events import AnyHandler, EventTarget, HandlerDecorator
-from webrtc.utils.loops import call_native, call_native_batched
+from webrtc.utils.loops import LoopState, call_native, call_native_batched
 from webrtc.utils.operations import OperationsChain, later
 from webrtc.utils.strings import usv_string
 
@@ -869,7 +869,10 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         No events follow except remote tracks' ``ended``. See :mdn:`RTCPeerConnection/close`.
         """
         with self._changing():
-            self._native_obj.close()
+            unbound = self._native_obj.close()
+            state = LoopState.find(unbound)
+            if state is not None:
+                state.update(self)
 
     async def __aenter__(self) -> Self:
         return self

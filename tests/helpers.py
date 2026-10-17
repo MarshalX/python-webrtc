@@ -216,6 +216,19 @@ async def next_task() -> None:
     await timer
 
 
+async def asleep() -> None:
+    """Delivers what is queued until no drain is scheduled, so that under :func:`undelivered` later records wait.
+
+    A drain woken before the Dispatcher parked takes the records posted after, as a mailbox stays awake until a take
+    finds it empty.
+    """
+    state = loops.LoopState.of(asyncio.get_running_loop())
+    await delivered()
+    # a drain that ended with records left schedules the next one itself
+    while state.drain_scheduled:
+        await delivered()
+
+
 @contextlib.contextmanager
 def undelivered() -> Generator[None, None, None]:
     """Keeps what libwebrtc's threads post in the mailboxes, by parking the Dispatcher's wake.

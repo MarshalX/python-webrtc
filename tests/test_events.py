@@ -22,6 +22,7 @@ import pytest
 import webrtc
 import wrtc
 from tests.helpers import (
+    asleep,
     called,
     collect,
     connect,
@@ -284,6 +285,7 @@ async def test_signaling_state_changes_with_its_event(pc: webrtc.RTCPeerConnecti
 
 async def _set_undelivered(pc: webrtc.RTCPeerConnection) -> asyncio.Future[None]:
     """Sets the local description, which libwebrtc applies while its events and completion wait in the mailbox."""
+    await asleep()
     wrtc._testing.park('description.completed')
     try:
         setting = asyncio.ensure_future(pc.set_local_description())

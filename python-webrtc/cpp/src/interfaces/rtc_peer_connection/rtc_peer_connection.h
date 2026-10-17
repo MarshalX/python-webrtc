@@ -128,7 +128,8 @@ namespace python_webrtc {
 
     void SetConfiguration(const ConfigurationInit &init);
 
-    void Close();
+    // the id of the mailbox the connection was bound to, whose loop unroots it
+    std::optional<uint64_t> Close();
 
     PeerConnectionState GetConnectionState();
 

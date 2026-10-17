@@ -723,7 +723,7 @@ namespace python_webrtc {
     return pc && pc->ShouldFireNegotiationNeededEvent(eventId);
   }
 
-  void RTCPeerConnection::Close() {
+  std::optional<uint64_t> RTCPeerConnection::Close() {
     const auto gathering = GetIceGatheringState();
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
     {
@@ -743,7 +743,7 @@ namespace python_webrtc {
     });
     Parking::At("connection.close");
     // a closed connection, its channels and transports fire nothing more; remote tracks fire ended
-    Unbind();
+    const auto unbound = Unbind();
     {
       const TrackedLock lock(_wrappersMutex);
       for (auto &channel : _channels) {
@@ -767,6 +767,7 @@ namespace python_webrtc {
 
     // wrappers still referenced from Python keep their (closed) state
     ReleaseWrappers();
+    return unbound;
   }
 
   void RTCPeerConnection::SurfaceSignalingState(SignalingState state) {

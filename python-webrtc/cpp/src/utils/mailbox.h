@@ -95,7 +95,8 @@ namespace python_webrtc {
 
     void Inherit(const Binding &parent);
 
-    void Unbind();
+    // the id of the mailbox it was bound to, if any
+    std::optional<uint64_t> Unbind();
 
     [[nodiscard]] bool IsBound() const;
 

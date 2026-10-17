@@ -185,6 +185,12 @@ class LoopState:
         return self._live_loop
 
     @property
+    def drain_scheduled(self) -> bool:
+        """:obj:`bool`: Whether a drain of the mailbox is scheduled on the loop."""
+        with self._lock:
+            return self._scheduled
+
+    @property
     def _live_loop(self) -> asyncio.AbstractEventLoop:
         """The loop, alive when called from its callbacks."""
         loop = self._loop_ref()
