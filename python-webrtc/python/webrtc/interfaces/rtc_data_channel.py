@@ -256,15 +256,16 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannel
 
     @override
     def _create_event(self, name: str, *args: object) -> webrtc.Event | None:
-        if name in {'open', 'message'} and self.ready_state != RTCDataChannelState.open:
+        native = self._native_obj
+        if name in {'open', 'message'} and native.readyState != RTCDataChannelState.open:
             # discarded: closed before open, or a message once closing
             return None
         if name == 'message':
-            (data,) = cast('tuple[str | bytes | Blob]', args)
+            (data,) = args
             # binary_type as of delivery, per the specification
-            if isinstance(data, bytes) and self._native_obj.binaryType == BinaryType.blob:
+            if isinstance(data, bytes) and native.binaryType == BinaryType.blob:
                 data = Blob([data])
-            return MessageEvent(name, data)
+            return MessageEvent(name, cast('str | bytes | Blob', data))
         if name == 'error':
             (error,) = cast('tuple[wrtc.RTCCallbackException]', args)
             return RTCErrorEvent(name, RTCErrorEventInit(_event_error(error)))

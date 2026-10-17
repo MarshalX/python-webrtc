@@ -11,6 +11,9 @@
 #include <rtc_base/buffer.h>
 #include <rtc_base/physical_socket_server.h>
 
+#include <atomic>
+#include <cstdint>
+
 #ifdef __APPLE__
 #include <memory>
 #include <mutex>
@@ -25,8 +28,9 @@ namespace python_webrtc {
   public:
     // the kernel may cap it (Linux at net.core.rmem_max)
     static constexpr int kReceiveBuffer = 8 << 20;
+    static constexpr const char *kSiblingsTrial = "PythonWebRTC-ConnectedSockets";
 
-    explicit NetworkSocketServer(int receiveBuffer);
+    NetworkSocketServer(int receiveBuffer, bool siblings);
     ~NetworkSocketServer() override;
     NetworkSocketServer(const NetworkSocketServer &) = delete;
     NetworkSocketServer &operator=(const NetworkSocketServer &) = delete;
@@ -34,6 +38,10 @@ namespace python_webrtc {
     NetworkSocketServer &operator=(NetworkSocketServer &&) = delete;
 
     webrtc::Socket *CreateSocket(int family, int type) override;
+    webrtc::Socket *CreateUnwrappedSocket(int family, int type);
+    [[nodiscard]] bool SiblingsAllowed() const { return _siblings; }
+    static int64_t SiblingsMade() { return _siblingsMade.load(); }
+    static void CountSibling() { ++_siblingsMade; }
 
 #ifdef __APPLE__
     webrtc::Socket *WrapSocket(SOCKET descriptor) override;
@@ -50,6 +58,8 @@ namespace python_webrtc {
 
     webrtc::Buffer _scratch;
     const int _receiveBuffer;
+    const bool _siblings;
+    static inline std::atomic<int64_t> _siblingsMade{0};
 
 #ifdef __APPLE__
     struct Watched {

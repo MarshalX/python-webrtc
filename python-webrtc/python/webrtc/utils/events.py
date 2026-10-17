@@ -92,13 +92,23 @@ class _Registration(NamedTuple):
     once: bool
 
 
+class _Plan(NamedTuple):
+    """How an event is delivered on a loop, as of the last change of the handlers."""
+
+    loop: asyncio.AbstractEventLoop
+    registrations: tuple[_Registration, ...]
+    elsewhere: bool
+
+
 class _Handlers:
     """An object's handlers by event name, each with its registering loop."""
 
-    __slots__ = ('_lock', '_registrations', 'removals')
+    __slots__ = ('_lock', '_plans', '_registrations', 'removals')
 
     def __init__(self) -> None:
         self._registrations: dict[str, list[_Registration]] = {}
+        # by event name, for the last delivering loop; cleared on every change
+        self._plans: dict[str, _Plan] = {}
         # counts removals, so a delivery knows its handlers are all still registered
         self.removals = 0
         # re-entrant: gc may release a loop under it, which removes handlers
@@ -112,6 +122,7 @@ class _Handlers:
             registrations.append(_Registration(handler, loop, once))
             # re-stored: a loop released under the lock may have dropped the emptied list
             self._registrations[name] = registrations
+            self._plans.clear()
 
     def remove(self, name: str | None, handler: AnyHandler | None) -> None:
         """Removes a handler of an event, every handler of it, or every handler of every event."""
@@ -134,6 +145,7 @@ class _Handlers:
             if not keep(registration):
                 self.removals += 1
                 _discard(registrations, registration)
+                self._plans.clear()
         if len(registrations) == 0:
             _ = self._registrations.pop(name, None)
 
@@ -141,10 +153,20 @@ class _Handlers:
         with self._lock:
             return any(r is registration for r in self._registrations.get(name, ()))
 
-    def for_loop(self, name: str, loop: asyncio.AbstractEventLoop) -> list[_Registration]:
-        """An event's handlers registered from a loop, in order."""
+    def plan(self, name: str, loop: asyncio.AbstractEventLoop) -> _Plan:
+        """How an event is delivered on a loop; cached until the handlers change."""
+        plan = self._plans.get(name)
+        if plan is not None and plan.loop is loop:
+            return plan
         with self._lock:
-            return [r for r in self._registrations.get(name, ()) if r.loop is loop]
+            removals = self.removals
+            registrations = self._registrations.get(name, ())
+            mine = tuple(r for r in registrations if r.loop is loop)
+            plan = _Plan(loop, mine, len(mine) < len(registrations))
+            # a later change clears it; not kept if gc removed some meanwhile, or with no handler here to pin the loop
+            if len(mine) > 0 and self.removals == removals:
+                self._plans[name] = plan
+        return plan
 
     def all_loops(self) -> list[asyncio.AbstractEventLoop]:
         """The loops with a handler of any event, in the order of registration."""
@@ -155,11 +177,6 @@ class _Handlers:
         """The loops with a handler of an event."""
         with self._lock:
             return list(dict.fromkeys(r.loop for r in self._registrations.get(name, ())))
-
-    def elsewhere(self, name: str, loop: asyncio.AbstractEventLoop) -> bool:
-        """Whether a loop other than ``loop`` has a handler of an event."""
-        with self._lock:
-            return any(r.loop is not loop for r in self._registrations.get(name, ()))
 
     def of(self, name: str) -> list[AnyHandler]:
         with self._lock:
@@ -178,7 +195,13 @@ def _discard(registrations: list[_Registration], registration: _Registration) ->
             return
 
 
-def _handler_names(registrations: list[_Registration]) -> str:
+@functools.cache
+def _handler_error(name: str) -> str:
+    """The message of an exception in a handler of an event; event names are few."""
+    return f'Exception in {name!r} event handler'
+
+
+def _handler_names(registrations: tuple[_Registration, ...]) -> str:
     return ', '.join(getattr(r.handler, '__qualname__', repr(r.handler)) for r in registrations)
 
 
@@ -188,7 +211,12 @@ def _roots_of(loop: asyncio.AbstractEventLoop | None) -> LoopState | None:
 
 
 def _check_handled(
-    target: EventTarget[Never], name: str, registrations: list[_Registration], *, roots: LoopState, generation: int
+    target: EventTarget[Never],
+    name: str,
+    registrations: tuple[_Registration, ...],
+    *,
+    roots: LoopState,
+    generation: int,
 ) -> None:
     """Asserts an object about to run handlers is rooted or active."""
     if not target._rootable:
@@ -418,31 +446,35 @@ class EventTarget(Generic[_N_contra]):
         handlers = self._handlers
         if handlers is None:
             return
-        loop = state.loop
-        registrations = handlers.for_loop(name, loop)
+        plan = handlers.plan(name, state.loop)
         # read before _open(), so the check can detect a racing change
         generation = state.generation
-        event = self._create_event(name, *args) if len(registrations) > 0 and self._open() else None
+        event = self._create_event(name, *args) if len(plan.registrations) > 0 and self._open() else None
         if event is not None:
             if primary and checking_roots():
-                _check_handled(self, name, registrations, roots=state, generation=generation)
-            self._call(loop, name, event, registrations=registrations)
-        if primary:
-            self._forward(handlers, name, args, delivering=loop)
+                _check_handled(self, name, plan.registrations, roots=state, generation=generation)
+            self._call(plan.loop, name, event, registrations=plan.registrations)
+            # the handlers may have changed the others
+            plan = handlers.plan(name, plan.loop)
+        if primary and plan.elsewhere:
+            self._forward(handlers, name, args, delivering=plan.loop)
 
     def _forward(
         self, handlers: _Handlers, name: str, args: tuple[object, ...], *, delivering: asyncio.AbstractEventLoop
     ) -> None:
         """Posts an event to the other loops with handlers for it."""
-        if not handlers.elsewhere(name, delivering):
-            return
         for other in handlers.loops(name):
             if other is not delivering and not other.is_closed():
                 elsewhere = LoopState.of(other)
                 elsewhere.post(functools.partial(self._deliver, elsewhere, name, args, primary=False))
 
     def _call(
-        self, loop: asyncio.AbstractEventLoop, name: str, event: webrtc.Event, *, registrations: list[_Registration]
+        self,
+        loop: asyncio.AbstractEventLoop,
+        name: str,
+        event: webrtc.Event,
+        *,
+        registrations: tuple[_Registration, ...],
     ) -> None:
         event.target = self
         handlers = self._handlers
@@ -454,7 +486,7 @@ class EventTarget(Generic[_N_contra]):
             if registration.once:
                 with self._changing():
                     handlers.remove(name, registration.handler)
-            call_handler(loop, registration.handler, event, message=f'Exception in {name!r} event handler')
+            call_handler(loop, registration.handler, event, message=_handler_error(name))
 
     def _on_event(self, name: str, *args: object) -> None:
         """Called for every event on the bound loop, before its handlers.

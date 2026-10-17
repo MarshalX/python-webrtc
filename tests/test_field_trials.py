@@ -325,3 +325,45 @@ def test_udp_sockets_receive_into_8_mb_by_default() -> None:
 def test_receive_buffer_trial_replaces_the_default(group: str) -> None:
     """The engine applies the trial itself, to a connection's sockets."""
     assert _receive_buffer_with({'WebRTC-SetSocketReceiveBuffer': group}) == _kernel_receive_buffer()
+
+
+async def _flood(count: int) -> None:
+    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    channel = caller.create_data_channel('flood')
+    announced = wait_for_event(callee, 'datachannel')
+    await connect(caller, callee)
+    event = await announced
+    assert isinstance(event, webrtc.RTCDataChannelEvent)
+    remote = event.channel
+    await wait_until(lambda: channel.ready_state == webrtc.RTCDataChannelState.open, 'the channel to open')
+    received = 0
+    all_received = asyncio.Event()
+
+    def on_message(_event: webrtc.MessageEvent) -> None:
+        nonlocal received
+        received += 1
+        if received == count:
+            all_received.set()
+
+    remote.on('message', on_message)
+    for _ in range(count):
+        channel.send(bytes(1024))
+    await asyncio.wait_for(all_received.wait(), seconds(10))
+    caller.close()
+    callee.close()
+
+
+@isolated
+def _siblings_after_a_flood(trials: dict[str, str]) -> int:
+    webrtc.field_trials.update(trials)
+    asyncio.run(_flood(1000))
+    return wrtc._testing.sibling_sockets()
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='Windows keeps one socket per address')
+def test_a_flooded_connection_gets_connected_sibling_sockets() -> None:
+    assert _siblings_after_a_flood({}) > 0
+
+
+def test_connected_sockets_trial_turns_siblings_off() -> None:
+    assert _siblings_after_a_flood({'PythonWebRTC-ConnectedSockets': 'Disabled'}) == 0

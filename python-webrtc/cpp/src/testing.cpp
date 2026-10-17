@@ -15,6 +15,7 @@
 #include "utils/libwebrtc_thread.h"
 #include "utils/mailbox.h"
 #include "utils/native_object.h"
+#include "utils/network_socket_server.h"
 #include "utils/parking.h"
 #include "utils/registry.h"
 #include "utils/task_queue_factory.h"
@@ -356,6 +357,8 @@ namespace python_webrtc {
           BlockingCallOn(factory->signalingThread(), []() {});
         },
         nogil(), "Returns once the signaling, worker and signaling threads ran what they queued.");
+    testing.def("sibling_sockets", &NetworkSocketServer::SiblingsMade,
+                "How many connected sibling sockets the network threads of the process made.");
     testing.def(
         "udp_receive_buffer",
         []() {
