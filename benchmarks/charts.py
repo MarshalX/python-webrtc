@@ -39,6 +39,13 @@ if TYPE_CHECKING:
 CHARTS = BENCHMARKS / 'charts'
 
 
+def _ratio(value: float, baseline: float, *, lower_is_better: bool) -> float:
+    """How many times better than the baseline the value is; NaN when either is 0."""
+    if value == 0 or baseline == 0:
+        return math.nan
+    return baseline / value if lower_is_better else value / baseline
+
+
 def _relative(figure: Figure) -> tuple[list[str], list[str], list[float]]:
     """The categories, the libraries and the values relative to the baseline's, as the columns of a long table."""
     categories: list[str] = []
@@ -48,7 +55,7 @@ def _relative(figure: Figure) -> tuple[list[str], list[str], list[float]]:
     for category, values in figure.values.items():
         baseline = values.get(BASELINE, math.nan)
         for library, value in values.items():
-            ratio = baseline / value if figure.lower_is_better else value / baseline
+            ratio = _ratio(value, baseline, lower_is_better=figure.lower_is_better)
             if math.isfinite(ratio):
                 categories.append(category)
                 libraries.append(library)

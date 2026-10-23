@@ -356,7 +356,8 @@ class LiveCall:
                     json={'session': session, 'transport': transport},
                 )
         except httpx.HTTPError as e:
-            msg = f'Could not reach the OpenAI API: {e or type(e).__name__}'
+            reason = str(e) if str(e) != '' else type(e).__name__
+            msg = f'Could not reach the OpenAI API: {reason}'
             raise CallError(msg) from None
         if response.is_error:
             raise CallError(_describe_http_error(response))

@@ -1151,6 +1151,7 @@ class WritableStreamDefaultController(Generic[_W_contra]):
         self._strategy = strategy
         # (chunk, future, size) of the writes, then (_CLOSE, future, 0)
         self._queue: collections.deque[tuple[object, asyncio.Future[None], float]] = collections.deque()
+        self._queue_total_size = 0.0
         self._started = False
         self._in_flight = False
 
@@ -1172,7 +1173,16 @@ class WritableStreamDefaultController(Generic[_W_contra]):
             self._stream._start_erroring(_error_of(e))
 
     def _desired_size(self) -> float:
-        return self._strategy.high_water_mark - sum(size for _, _, size in self._queue)
+        return self._strategy.high_water_mark - self._queue_total_size
+
+    def _enqueue(self, chunk: object, future: asyncio.Future[None], size: float) -> None:
+        self._queue.append((chunk, future, size))
+        self._queue_total_size += size
+
+    def _dequeue(self) -> None:
+        _, _, size = self._queue.popleft()
+        # rounding errors could leave it below 0
+        self._queue_total_size = max(0.0, self._queue_total_size - size)
 
     def _start(self) -> None:
         def started() -> None:
@@ -1190,17 +1200,17 @@ class WritableStreamDefaultController(Generic[_W_contra]):
             size = _chunk_size(self._strategy, chunk)
         except Exception as e:
             # queued to be rejected once the stream errors
-            self._queue.append((chunk, future, 0))
+            self._enqueue(chunk, future, 0)
             self.error(e)
             return
 
-        self._queue.append((chunk, future, size))
+        self._enqueue(chunk, future, size)
         # advance first: a sink done right away leaves no backpressure to signal
         self._advance()
         self._stream._update_backpressure()
 
     def _close(self, future: asyncio.Future[None]) -> None:
-        self._queue.append((_CLOSE, future, 0))
+        self._enqueue(_CLOSE, future, 0)
         self._advance()
 
     def _advance(self) -> None:
@@ -1227,7 +1237,7 @@ class WritableStreamDefaultController(Generic[_W_contra]):
 
     def _settle_in_flight(self, future: asyncio.Future[None], error: BaseException | None = None) -> None:
         self._in_flight = False
-        _ = self._queue.popleft()
+        self._dequeue()
         _settle(future, None, error)
 
     def _written(self, future: asyncio.Future[None]) -> None:
@@ -1248,8 +1258,9 @@ class WritableStreamDefaultController(Generic[_W_contra]):
         for _, future, _ in self._queue:
             _fail(future, error)
         self._queue.clear()
+        self._queue_total_size = 0.0
         if in_flight is not None:
-            self._queue.append(in_flight)
+            self._enqueue(*in_flight)
 
 
 class WritableStream(Generic[_W_contra]):
