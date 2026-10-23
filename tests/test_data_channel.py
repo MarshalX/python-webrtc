@@ -79,6 +79,21 @@ async def open_pair(
     return channel, remote
 
 
+def max_message_size(pc: webrtc.RTCPeerConnection) -> float:
+    """The max message size of the connection's SCTP transport."""
+    assert pc.sctp is not None
+    size = pc.sctp.max_message_size
+    assert size is not None
+    return size
+
+
+def with_max_message_size(sdp: str, size: str | None) -> str:
+    """The SDP with the max-message-size given, if any."""
+    if size is None:
+        return sdp
+    return re.sub(r'a=max-message-size:\d+', f'a=max-message-size:{size}', sdp)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('options', [{}, {'negotiated': True, 'id': 3}], ids=['announced', 'negotiated'])
 async def test_messages_both_ways(
@@ -105,6 +120,7 @@ async def test_messages_both_ways(
     channel.send(b'\x00\x01')
     channel.send(bytearray(b'\x02'))
     await asyncio.wait_for(got_all, seconds(5))
+
     assert received == ['text', b'\x00\x01', b'\x02']
 
 
@@ -117,6 +133,7 @@ async def test_buffered_amount_and_low_event(
     channel.buffered_amount_low_threshold = 0
 
     channel.send('hello')
+
     assert channel.buffered_amount == 5
     await wait_for_event(channel, 'bufferedamountlow')
     assert channel.buffered_amount == 0
@@ -137,6 +154,7 @@ async def test_close_states_and_events(caller: webrtc.RTCPeerConnection, callee:
     channel.on('closing', local_closing.append)
 
     channel.close()
+
     assert channel.ready_state == webrtc.RTCDataChannelState.closing
     await remote_closed
 
@@ -267,11 +285,8 @@ async def test_native_send_takes_only_bytes(caller: webrtc.RTCPeerConnection, ca
 async def test_messages_round_trip(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
     """Text and binary messages arrive unchanged, empty and as large as the SCTP transport takes."""
     channel, remote = await open_pair(caller, callee)
-    assert caller.sctp is not None
     large = 256 * 1024
-    max_message_size = caller.sctp.max_message_size
-    assert max_message_size is not None
-    assert max_message_size >= large
+    assert max_message_size(caller) >= large
     messages: list[str | bytes] = [
         '',
         b'',
@@ -294,6 +309,7 @@ async def test_messages_round_trip(caller: webrtc.RTCPeerConnection, callee: web
     # a lone surrogate becomes U+FFFD
     channel.send('a\ud800b')
     await asyncio.wait_for(got_all, seconds(10))
+
     assert received == [*messages, 'a\ufffdb']
 
 
@@ -318,7 +334,9 @@ def test_invalid_data_channel_init(pc: webrtc.RTCPeerConnection, init: ChannelOp
 
 def test_id_is_ignored_unless_negotiated(pc: webrtc.RTCPeerConnection) -> None:
     """The id of a channel that isn't negotiated is chosen once SCTP is up."""
-    assert pc.create_data_channel('x', webrtc.RTCDataChannelInit(id=65535)).id is None
+    channel = pc.create_data_channel('x', webrtc.RTCDataChannelInit(id=65535))
+
+    assert channel.id is None
 
 
 def test_label_too_long(pc: webrtc.RTCPeerConnection) -> None:
@@ -330,15 +348,17 @@ def test_label_too_long(pc: webrtc.RTCPeerConnection) -> None:
 def test_id_taken(pc: webrtc.RTCPeerConnection) -> None:
     """Two negotiated channels can't have the same id."""
     pc.create_data_channel('taken', webrtc.RTCDataChannelInit(negotiated=True, id=1))
+
     with pytest.raises(webrtc.OperationError):
         pc.create_data_channel('again', webrtc.RTCDataChannelInit(negotiated=True, id=1))
 
 
 def test_data_channel_options(pc: webrtc.RTCPeerConnection) -> None:
     """A new channel has its options and is connecting, and only sends text and bytes."""
-    channel = pc.create_data_channel(
-        'x', webrtc.RTCDataChannelInit(priority=webrtc.RTCPriorityType.high, ordered=False)
-    )
+    init = webrtc.RTCDataChannelInit(priority=webrtc.RTCPriorityType.high, ordered=False)
+
+    channel = pc.create_data_channel('x', init)
+
     assert channel.priority == webrtc.RTCPriorityType.high
     assert channel.ordered is False
     assert channel.ready_state == webrtc.RTCDataChannelState.connecting
@@ -361,6 +381,7 @@ def test_reliability_and_negotiated_reflect_the_init(
 ) -> None:
     """Unlimited and announced by default."""
     channel = pc.create_data_channel('x', webrtc.RTCDataChannelInit(**options))
+
     assert (channel.max_packet_life_time, channel.max_retransmits, channel.negotiated) == expected
 
 
@@ -368,8 +389,10 @@ def test_buffered_amount_low_threshold(pc: webrtc.RTCPeerConnection) -> None:
     """0 by default; keeps the value set."""
     channel = pc.create_data_channel('x')
     assert channel.buffered_amount_low_threshold == 0
+
     channel.buffered_amount_low_threshold = 1024
     assert channel.buffered_amount_low_threshold == 1024
+
     for value in (-1, 2**64):
         with pytest.raises(ValueError, match='buffered_amount_low_threshold'):
             channel.buffered_amount_low_threshold = value
@@ -380,8 +403,10 @@ def test_buffered_amount_low_threshold(pc: webrtc.RTCPeerConnection) -> None:
 async def test_close_twice(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
     """Closing a closing channel does nothing."""
     channel, _ = await open_pair(caller, callee)
+
     channel.close()
     channel.close()
+
     assert channel.ready_state == webrtc.RTCDataChannelState.closing
 
 
@@ -402,9 +427,11 @@ async def test_closed_in_the_datachannel_handler_never_opens(
 
     callee.on('datachannel', on_datachannel)
     remote_closed = wait_for_event(channel, 'close')
+
     await connect(caller, callee)
     await closed
     await remote_closed
+
     assert events == []
 
 
@@ -424,8 +451,10 @@ async def test_announced_channel_kept_for_its_open_event(
 
     callee.on('datachannel', on_channel)
     caller.create_data_channel('announced')
+
     await connect(caller, callee)
     await asyncio.wait_for(opened, seconds(10))
+
     assert states == [webrtc.RTCDataChannelState.open]
 
 
@@ -436,18 +465,24 @@ async def test_messages_sent_on_open_reach_a_handler_added_on_datachannel(
     """Messages that arrive before the remote channel is announced follow its datachannel event, in order."""
     channel = caller.create_data_channel('burst')
     count = 50
-    channel.on('open', lambda _event: [channel.send(str(number)) for number in range(count)])
     received: list[str | bytes | webrtc.Blob] = []
     done: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+    def send_all(_event: webrtc.Event) -> None:
+        for number in range(count):
+            channel.send(str(number))
 
     def on_message(event: webrtc.MessageEvent) -> None:
         received.append(event.data)
         if len(received) == count:
             done.set_result(None)
 
+    channel.on('open', send_all)
     callee.on('datachannel', lambda event: event.channel.on('message', on_message))
+
     await connect(caller, callee)
     await asyncio.wait_for(done, seconds(10))
+
     assert received == [str(number) for number in range(count)]
 
 
@@ -464,12 +499,10 @@ async def test_sent_from_the_datachannel_handler_before_libwebrtc_opens_it(
         description = local.local_description
         assert description is not None
         await remote.set_remote_description(description)
-
     await asyncio.gather(opened, announced)
-
     # answered on the signaling thread, so it's past the setup channel's announcement
-
     await callee.get_stats()
+
     sent: asyncio.Future[None] = asyncio.get_running_loop().create_future()
 
     def send(event: webrtc.RTCDataChannelEvent) -> None:
@@ -482,6 +515,7 @@ async def test_sent_from_the_datachannel_handler_before_libwebrtc_opens_it(
         return any(stats.label == 'early' and stats.messages_received == 1 for stats in channels)
 
     callee.on('datachannel', send)
+
     wrtc._testing.park('connection.datachannel')
     try:
         # off the loop: creating it waits for the parked signaling thread too
@@ -499,12 +533,17 @@ async def test_once_handles_the_first_message_only(
 ) -> None:
     channel, remote = await open_pair(caller, callee)
     first: list[str | bytes | webrtc.Blob] = []
+
+    def is_b(event: webrtc.Event) -> bool:
+        return isinstance(event, webrtc.MessageEvent) and event.data == 'b'
+
     remote.once('message', lambda event: first.append(event.data))
-    second = wait_for_event(remote, 'message', predicate=lambda e: isinstance(e, webrtc.MessageEvent) and e.data == 'b')
+    second = wait_for_event(remote, 'message', predicate=is_b)
 
     channel.send('a')
     channel.send('b')
     await second
+
     assert first == ['a']
     assert 'message' not in remote.event_names()
 
@@ -515,10 +554,7 @@ async def test_send_past_the_send_queue_limit(
 ) -> None:
     """The send fails and the channel stays open."""
     channel, _ = await open_pair(caller, callee)
-    assert caller.sctp is not None
-    size = caller.sctp.max_message_size
-    assert size is not None
-    message = bytes(int(size))
+    message = bytes(int(max_message_size(caller)))
     # the queue only drains in event loop tasks
     fitting = SEND_QUEUE_LIMIT // len(message)
     for _ in range(fitting):
@@ -533,6 +569,7 @@ async def test_send_past_the_send_queue_limit(
 def test_create_data_channel_on_closed_connection(pc: webrtc.RTCPeerConnection) -> None:
     """A closed connection can't create channels."""
     pc.close()
+
     with pytest.raises(webrtc.InvalidStateError):
         pc.create_data_channel('x')
 
@@ -541,7 +578,9 @@ def test_create_data_channel_on_closed_connection(pc: webrtc.RTCPeerConnection) 
 async def test_max_message_size_before_an_answer(pc: webrtc.RTCPeerConnection) -> None:
     """The max message size is 65536 until an answer negotiates the max-message-size of the remote peer."""
     pc.create_data_channel('size')
+
     await pc.set_local_description()
+
     assert pc.sctp is not None
     assert pc.sctp.max_message_size == 65536
 
@@ -555,7 +594,9 @@ async def test_max_message_size_kept_once_closed(pc: webrtc.RTCPeerConnection) -
     assert sctp is not None
     size = sctp.max_message_size
     assert size is not None
+
     pc.close()
+
     assert sctp.max_message_size == size
 
 
@@ -571,9 +612,8 @@ async def test_max_message_size_once_the_data_section_is_rejected(
     assert sctp.max_message_size == 262144
 
     offer = await caller.create_offer()
-    await callee.set_remote_description(
-        webrtc.RTCSessionDescriptionInit('offer', re.sub(r'm=application \d+', 'm=application 0', offer.sdp))
-    )
+    rejecting = re.sub(r'm=application \d+', 'm=application 0', offer.sdp)
+    await callee.set_remote_description(webrtc.RTCSessionDescriptionInit('offer', rejecting))
     await callee.set_local_description()
 
     assert callee.sctp is None
@@ -586,9 +626,7 @@ async def test_send_larger_than_max_message_size(
 ) -> None:
     """A message larger than the negotiated max message size isn't sent, and the channel stays open."""
     channel, _ = await open_pair(caller, callee)
-    assert caller.sctp is not None
-    size = caller.sctp.max_message_size
-    assert size is not None
+    size = max_message_size(caller)
     assert size > 65536
 
     with pytest.raises(TypeError, match='larger than the maxMessageSize'):
@@ -609,10 +647,12 @@ async def test_stats_are_current(caller: webrtc.RTCPeerConnection, callee: webrt
 
     before = await bytes_received()
     received = wait_for_event(remote, 'message')
+
     channel.send('hello')
     await received
     # libwebrtc reuses a report for 50 ms: the stats right after a message count it
     after = await bytes_received()
+
     assert before is not None
     assert after == before + 5
 
@@ -635,15 +675,18 @@ async def test_concurrent_stats_share_a_collection(
     monkeypatch.setattr(loops, '_start_native', counted)
 
     reports = await asyncio.gather(*(callee.get_stats() for _ in range(5)))
+
     assert started == ['getStats']
     # each caller gets its own report
     assert len({id(report) for report in reports}) == len(reports)
-    assert len({id(stats) for report in reports for stats in report.values()}) == sum(map(len, reports))
+    every_stats = [stats for report in reports for stats in report.values()]
+    assert len({id(stats) for stats in every_stats}) == len(every_stats)
 
     received = wait_for_event(remote, 'message')
     channel.send('hello')
     await received
     [stats] = stats_of_type(await callee.get_stats(), 'data-channel')
+
     assert started == ['getStats', 'getStats']
     assert isinstance(stats, webrtc.RTCDataChannelStats)
     assert stats.messages_received == 1
@@ -667,17 +710,20 @@ async def test_max_channels_with_the_connected_statechange(
         finally:
             wrtc._testing.release('sctp.connected')
 
+    def connected() -> bool:
+        return all(t is not None and t.state == webrtc.RTCSctpTransportState.connected for t in transports)
+
+    def has_max_channels(transport: webrtc.RTCSctpTransport | None) -> bool:
+        return transport is not None and transport.max_channels is not None and transport.max_channels > 0
+
     wrtc._testing.park('sctp.connected')
     answering = asyncio.ensure_future(exchange_answer(caller, callee))
     # connected natively, its event not delivered
     assert await asyncio.to_thread(parked_max_channels) == [None, None]
     await answering
 
-    def connected() -> bool:
-        return all(t is not None and t.state == webrtc.RTCSctpTransportState.connected for t in transports)
-
     await wait_until(connected, 'SCTP to connect')
-    assert all(t is not None and t.max_channels is not None and t.max_channels > 0 for t in transports)
+    assert all(has_max_channels(transport) for transport in transports)
 
 
 @pytest.mark.asyncio
@@ -696,8 +742,10 @@ async def test_a_delivered_message_ends_the_stats_batch(
     received = wait_for_event(remote, 'message')
     # a batch still open when the message arrives, as on loops that drain records in the same iteration
     state.batches[callee] = asyncio.get_running_loop().create_future()
+
     channel.send('hello')
     await received
+
     assert batched == [False]
 
 
@@ -760,8 +808,10 @@ async def test_binary_type_back_to_arraybuffer(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:
     channel, remote = await open_pair(caller, callee)
+
     remote.binary_type = 'blob'
     remote.binary_type = 'arraybuffer'
+
     assert remote.binary_type == webrtc.BinaryType.arraybuffer
     received = wait_for_event(remote, 'message')
     channel.send(b'\x05')
@@ -773,6 +823,7 @@ async def test_binary_type_back_to_arraybuffer(
 def test_lone_surrogate_label_is_replaced(pc: webrtc.RTCPeerConnection) -> None:
     """A lone surrogate label becomes U+FFFD."""
     channel = pc.create_data_channel('\ud800')
+
     assert channel.label == '�'
 
 
@@ -780,6 +831,7 @@ def test_send_lone_surrogate_on_closed_channel(pc: webrtc.RTCPeerConnection) -> 
     """A closed channel raises InvalidStateError."""
     channel = pc.create_data_channel('chat')
     pc.close()
+
     with pytest.raises(webrtc.InvalidStateError):
         channel.send('a\ud800b')
 
@@ -787,12 +839,9 @@ def test_send_lone_surrogate_on_closed_channel(pc: webrtc.RTCPeerConnection) -> 
 def test_closed_check_comes_before_the_label_check(pc: webrtc.RTCPeerConnection) -> None:
     """A closed connection raises InvalidStateError first."""
     pc.close()
+
     with pytest.raises(webrtc.InvalidStateError):
         pc.create_data_channel('x' * 70000)
-
-
-def with_max_message_size(sdp: str, size: str | None) -> str:
-    return sdp if size is None else re.sub(r'a=max-message-size:\d+', f'a=max-message-size:{size}', sdp)
 
 
 @pytest.mark.asyncio

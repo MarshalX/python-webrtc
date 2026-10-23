@@ -122,8 +122,9 @@ class RTCRtpTransceiver(WebRTCObject[wrtc.RTCRtpTransceiver]):
         """
         kind = self._kind
         natives: list[wrtc.RtpCodecCapability] = []
-        for source in (wrtc.RTCRtpReceiver.getCapabilities(kind), wrtc.RTCRtpSender.getCapabilities(kind)):
-            natives.extend(source.codecs if source is not None else [])
+        for capabilities in (wrtc.RTCRtpReceiver.getCapabilities(kind), wrtc.RTCRtpSender.getCapabilities(kind)):
+            if capabilities is not None:
+                natives.extend(capabilities.codecs)
 
         preferences: list[wrtc.RtpCodecCapability] = []
         for codec in codecs:

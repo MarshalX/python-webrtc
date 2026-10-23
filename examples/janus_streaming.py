@@ -126,15 +126,20 @@ class Janus:
 
     async def event(self) -> Reply:
         """Waits up to 30 s for an event: requests reply right away and send their results, like offers, as events."""
-        event: Reply = (await self.client.get(JANUS + self.session)).json()
+        response = await self.client.get(JANUS + self.session)
+        event: Reply = response.json()
         return event
 
     async def _post(self, path: str, **message: object) -> Reply:
-        reply: Reply = (await self.client.post(JANUS + path, json={'transaction': uuid.uuid4().hex, **message})).json()
-        if reply['janus'] == 'error':
-            error = reply.get('error')
-            raise RuntimeError(error['reason'] if error is not None else reply)
-        return reply
+        response = await self.client.post(JANUS + path, json={'transaction': uuid.uuid4().hex, **message})
+        reply: Reply = response.json()
+        if reply['janus'] != 'error':
+            return reply
+
+        error = reply.get('error')
+        if error is not None:
+            raise RuntimeError(error['reason'])
+        raise RuntimeError(reply)
 
     async def _create(self, path: str, **message: object) -> str:
         """Creates a session or a handle under the path, returns its path."""
@@ -149,14 +154,18 @@ class Speakers:
     """Plays 16-bit audio from a buffer that keeps half a second at most."""
 
     def __init__(self) -> None:
-        self.buffer, self.lock, self.limit = bytearray(), threading.Lock(), 0
+        self.buffer = bytearray()
+        self.lock = threading.Lock()
+        self.limit = 0
         self.stream: sounddevice.RawOutputStream | None = None
 
     def play(self, samples: bytes | bytearray, rate: int, channels: int) -> None:
         """Queues samples, dropping the oldest ones over the limit, reopens the output when their format changes."""
         if self.stream is None or (self.stream.samplerate, self.stream.channels) != (rate, channels):
             self.close()
-            self.buffer, self.limit = bytearray(), rate * channels
+            self.buffer = bytearray()
+            # half a second of 16-bit samples
+            self.limit = rate * channels
             self.stream = sounddevice.RawOutputStream(rate, channels=channels, dtype='int16', callback=self._on_need)
             self.stream.start()
         with self.lock:
@@ -188,24 +197,28 @@ def speakers_found() -> bool:
 
 def draw(rgbx: bytes | bytearray, width: int, height: int, *, slot: int, slots: int) -> None:
     """Draws a frame in its slot of the screen with ▀, its foreground is the upper pixel, background the lower one."""
-    total, rows = shutil.get_terminal_size()
-    left = total * slot // slots
-    columns = total * (slot + 1) // slots - left
+    screen_columns, rows = shutil.get_terminal_size()
+    left = screen_columns * slot // slots
+    columns = screen_columns * (slot + 1) // slots - left
+    # a character is two pixels high
     scale = max(width / columns, height / rows / 2)
+    shown_columns = int(width / scale)
+    shown_rows = int(height / scale / 2)
 
     def color(x: int, y: int) -> str:
+        """The red;green;blue of the pixel under a point of the screen."""
         i = (int(y * scale) * width + int(x * scale)) * 4
-        return '{};{};{}'.format(*rgbx[i : i + 3])
+        red, green, blue = rgbx[i : i + 3]
+        return f'{red};{green};{blue}'
 
-    shown = int(width / scale)
-    lines = [
-        ''.join(f'\033[38;2;{color(x, 2 * y)}m\033[48;2;{color(x, 2 * y + 1)}m▀' for x in range(shown))
-        for y in range(int(height / scale / 2))
-    ]
-    # pads with blanks rather than clearing, which would erase the other columns
-    lines = [line + '\033[0m' + ' ' * (columns - shown) for line in lines]
+    def line(y: int) -> str:
+        cells = ''.join(f'\033[38;2;{color(x, 2 * y)}m\033[48;2;{color(x, 2 * y + 1)}m▀' for x in range(shown_columns))
+        # pads with blanks rather than clearing, which would erase the other columns
+        return cells + '\033[0m' + ' ' * (columns - shown_columns)
+
+    lines = [line(y) for y in range(shown_rows)]
     lines += [' ' * columns] * (rows - len(lines))
-    sys.stdout.write(''.join(f'\033[{y + 1};{left + 1}H{line}' for y, line in enumerate(lines)))
+    sys.stdout.write(''.join(f'\033[{y + 1};{left + 1}H{text}' for y, text in enumerate(lines)))
     sys.stdout.flush()
 
 
@@ -222,38 +235,40 @@ def fullscreen() -> Generator[None, None, None]:
 async def watch(track: webrtc.MediaStreamTrack, videos: list[webrtc.MediaStreamTrack]) -> None:
     """Draws the frames of the video track until it ends, side by side with the other videos."""
     # a buffer of one frame drops the frames the terminal is too slow for
-    async for frame in webrtc.MediaStreamTrackProcessor(
-        webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=1)
-    ).readable:
+    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=1))
+    options = webrtc.VideoFrameCopyToOptions(format='RGBX')
+    async for frame in processor.readable:
         if not isinstance(frame, webrtc.VideoFrame):
             msg = f'expected a video frame, not {frame!r}'
             raise TypeError(msg)
+
         with frame:
-            options = webrtc.VideoFrameCopyToOptions(format='RGBX')
             rgbx = bytearray(frame.allocation_size(options))
             await frame.copy_to(rgbx, options)
             size = frame.visible_rect
         if size is None:
             msg = 'the frame has no visible rect'
             raise RuntimeError(msg)
+
         draw(rgbx, int(size.width), int(size.height), slot=videos.index(track), slots=len(videos))
 
 
 async def listen(track: webrtc.MediaStreamTrack) -> None:
     """Plays the audio track until it ends."""
+    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=50))
+    options = webrtc.AudioDataCopyToOptions(plane_index=0, format='s16')
     speakers = Speakers()
     try:
-        async for data in webrtc.MediaStreamTrackProcessor(
-            webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=50)
-        ).readable:
+        async for data in processor.readable:
             if not isinstance(data, webrtc.AudioData):
                 msg = f'expected audio data, not {data!r}'
                 raise TypeError(msg)
+
             with data:
-                options = webrtc.AudioDataCopyToOptions(plane_index=0, format='s16')
                 samples = bytearray(data.allocation_size(options))
                 data.copy_to(samples, options)
-                rate, channels = int(data.sample_rate), data.number_of_channels
+                rate = int(data.sample_rate)
+                channels = data.number_of_channels
             # the first frames of a stereo stream are mono, until the decoder gets its packets
             speakers.play(samples, rate, channels)
     finally:
@@ -270,12 +285,18 @@ def with_stereo(sdp: str) -> str:
 async def answer(pc: webrtc.RTCPeerConnection, offer: Jsep) -> Jsep:
     """Answers with all the ICE candidates in the SDP, since there is no trickling."""
     gathered = asyncio.Event()
-    pc.on('icegatheringstatechange', lambda _: pc.ice_gathering_state == 'complete' and gathered.set())
+
+    @pc.on('icegatheringstatechange')
+    def on_gathering_state(_event: webrtc.Event) -> None:
+        if pc.ice_gathering_state == 'complete':
+            gathered.set()
+
     await pc.set_remote_description(webrtc.RTCSessionDescriptionInit.from_json(offer))
     local = await pc.create_answer()
     if 'stereo=1' in offer['sdp']:
         local = webrtc.RTCSessionDescriptionInit('answer', with_stereo(local.sdp))
     await pc.set_local_description(local)
+
     with contextlib.suppress(asyncio.TimeoutError):
         await asyncio.wait_for(gathered.wait(), 5)
     if pc.local_description is None:
@@ -304,12 +325,13 @@ async def pick_stream(janus: Janus) -> int:
 
 async def main(stream_id: int | None) -> None:
     """Watches the stream until interrupted."""
-    pc = webrtc.RTCPeerConnection()
-    tasks: list[asyncio.Future[None]] = []
-    videos: list[webrtc.MediaStreamTrack] = []
     speakers = speakers_found()
     if not speakers:
         print('No audio output, playing the video only')
+
+    pc = webrtc.RTCPeerConnection()
+    tasks: list[asyncio.Future[None]] = []
+    videos: list[webrtc.MediaStreamTrack] = []
 
     @pc.on('track')
     def on_track(event: webrtc.RTCTrackEvent) -> None:
@@ -326,7 +348,8 @@ async def main(stream_id: int | None) -> None:
         event = await janus.event()
         while 'jsep' not in event:
             event = await janus.event()
-        await janus.request({'request': 'start'}, jsep=await answer(pc, event['jsep']))
+        jsep = await answer(pc, event['jsep'])
+        await janus.request({'request': 'start'}, jsep=jsep)
 
         with fullscreen():
             try:
@@ -339,5 +362,6 @@ async def main(stream_id: int | None) -> None:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Watch a stream of the Janus demo server in the terminal.')
     parser.add_argument('--id', type=int, help='the stream to watch, default: the first one')
+    args = parser.parse_args()
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(main(parser.parse_args().id))
+        asyncio.run(main(args.id))

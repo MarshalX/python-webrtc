@@ -24,6 +24,7 @@ def test_1(pc: webrtc.RTCPeerConnection) -> None:
     assert transceiver.current_direction is None
 
     transceiver.direction = webrtc.RTCRtpTransceiverDirection.recvonly
+
     assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.recvonly
     assert transceiver.current_direction is None, 'Expect transceiver.currentDirection to not change'
 
@@ -34,7 +35,9 @@ def test_2(pc: webrtc.RTCPeerConnection) -> None:
     transceiver = pc.add_transceiver(webrtc.MediaType.audio, init)
 
     assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.sendonly
+
     transceiver.direction = webrtc.RTCRtpTransceiverDirection.sendonly
+
     assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.sendonly
 
 
@@ -49,18 +52,20 @@ async def test_3(pc: webrtc.RTCPeerConnection) -> None:
 
     offer = await pc.create_offer()
     await pc.set_local_description(offer)
-    await pc.set_remote_description(await generate_answer(offer))
+    answer = await generate_answer(offer)
+    await pc.set_remote_description(answer)
 
     assert transceiver.current_direction == webrtc.RTCRtpTransceiverDirection.inactive
 
     transceiver.direction = webrtc.RTCRtpTransceiverDirection.sendrecv
-    assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.sendrecv
 
+    assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.sendrecv
     assert transceiver.current_direction == webrtc.RTCRtpTransceiverDirection.inactive
 
 
 def test_setting_stopped_raises_type_error(pc: webrtc.RTCPeerConnection) -> None:
     """Setting stopped is a TypeError."""
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
+
     with pytest.raises(TypeError):
         transceiver.direction = webrtc.RTCRtpTransceiverDirection.stopped

@@ -90,10 +90,12 @@ async def _use() -> None:
     track = (await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=True))).get_tracks()[0]
     caller.add_track(track)
     await asyncio.wait_for(connect(caller, callee), seconds(10))
+
     reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
     frame = (await asyncio.wait_for(reader.read(), seconds(5))).value
     assert frame is not None
     frame.close()
+
     track.stop()
     caller.close()
     callee.close()
@@ -118,6 +120,7 @@ def test_forked_child_leaves_the_objects_of_its_parent_alone() -> None:
     constraints = webrtc.MediaStreamConstraints(audio=True, video=True)
     parent = [webrtc.RTCPeerConnection(), asyncio.run(webrtc.media_devices.get_user_media(constraints))]
     asyncio.run(_use())
+
     pid = os.fork()
     if pid == 0:
         parent.clear()

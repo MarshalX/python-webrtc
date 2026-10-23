@@ -37,6 +37,8 @@ if TYPE_CHECKING:
 SNAP = {'WebRTC-Sctp-Snap': 'Enabled'}
 SPED = {'WebRTC-IceHandshakeDtls': 'Enabled'}
 WARP = SNAP | SPED
+#: the TLS version stats report for DTLS 1.3
+DTLS_1_3 = 'FEFC'
 
 
 @isolated
@@ -55,8 +57,10 @@ def test_delete() -> None:
 
     del webrtc.field_trials['WebRTC-Sctp-Snap']
     assert dict(webrtc.field_trials) == SPED
+
     assert webrtc.field_trials.pop('WebRTC-IceHandshakeDtls') == 'Enabled'
     assert len(webrtc.field_trials) == 0
+
     with pytest.raises(KeyError):
         del webrtc.field_trials['WebRTC-Sctp-Snap']
 
@@ -96,6 +100,7 @@ def test_invalid_trial(name: str, group: str, error: type[Exception]) -> None:
         webrtc.field_trials[name] = group
     with pytest.raises(error):
         webrtc.field_trials.update({'WebRTC-Bar': 'Enabled', name: group})
+
     assert dict(webrtc.field_trials) == SNAP
 
 
@@ -120,6 +125,7 @@ def test_fixed_once_a_connection_is_created() -> None:
         webrtc.field_trials.update(SPED)
     with pytest.raises(webrtc.InvalidStateError):
         webrtc.field_trials.clear()
+
     assert dict(webrtc.field_trials) == SNAP
 
 
@@ -165,6 +171,7 @@ async def _tls_version() -> str | None:
     caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
     caller.create_data_channel('channel')
     await connect(caller, callee)
+
     stats = await caller.get_stats()
     caller.close()
     callee.close()
@@ -173,14 +180,14 @@ async def _tls_version() -> str | None:
 
 @isolated
 def test_dtls_13_by_default() -> None:
-    # DTLS 1.3
-    assert asyncio.run(_tls_version()) == 'FEFC'
+    assert asyncio.run(_tls_version()) == DTLS_1_3
 
 
 async def _offer() -> str:
     pc = webrtc.RTCPeerConnection()
     pc.create_data_channel('channel')
     await pc.set_local_description()
+
     assert pc.local_description is not None
     sdp = pc.local_description.sdp
     pc.close()
@@ -204,28 +211,43 @@ async def _gathered(pc: webrtc.RTCPeerConnection) -> str:
     return pc.local_description.sdp
 
 
+async def _offer_over(pipe: Pipe, pc: webrtc.RTCPeerConnection) -> webrtc.RTCDataChannel:
+    """Offers through the pipe; returns the announced channel."""
+    channel = pc.create_data_channel('announced')
+    await pc.set_local_description()
+    pipe.send(await _gathered(pc))
+
+    answer: str = await asyncio.to_thread(pipe.recv)
+    await pc.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', answer))
+    return channel
+
+
+async def _answer_over(pipe: Pipe, pc: webrtc.RTCPeerConnection) -> webrtc.RTCDataChannel:
+    """Answers through the pipe; returns the announced channel."""
+    announced = wait_for_event(pc, 'datachannel')
+    offer: str = await asyncio.to_thread(pipe.recv)
+    await pc.set_remote_description(webrtc.RTCSessionDescriptionInit('offer', offer))
+
+    await pc.set_local_description()
+    pipe.send(await _gathered(pc))
+    return cast('webrtc.RTCDataChannelEvent', await announced).channel
+
+
 async def _talk(pipe: Pipe, *, offerer: bool) -> None:
     pc = webrtc.RTCPeerConnection()
     channels = [pc.create_data_channel('negotiated', webrtc.RTCDataChannelInit(negotiated=True, id=4))]
     if offerer:
-        channels.append(pc.create_data_channel('announced'))
-        await pc.set_local_description()
-        pipe.send(await _gathered(pc))
-        answer: str = await asyncio.to_thread(pipe.recv)
-        await pc.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', answer))
+        channels.append(await _offer_over(pipe, pc))
     else:
-        announced = wait_for_event(pc, 'datachannel')
-        offer: str = await asyncio.to_thread(pipe.recv)
-        await pc.set_remote_description(webrtc.RTCSessionDescriptionInit('offer', offer))
-        await pc.set_local_description()
-        pipe.send(await _gathered(pc))
-        channels.append(cast('webrtc.RTCDataChannelEvent', await announced).channel)
+        channels.append(await _answer_over(pipe, pc))
 
     for channel in channels:
         if channel.ready_state != webrtc.RTCDataChannelState.open:
             await wait_for_event(channel, 'open')
+
     assert pc.remote_description is not None
-    pipe.send(('a=sctp-init:' in pc.remote_description.sdp, [c.ready_state for c in channels]))
+    sctp_init_offered = 'a=sctp-init:' in pc.remote_description.sdp
+    pipe.send((sctp_init_offered, [c.ready_state for c in channels]))
     await asyncio.to_thread(pipe.recv)
     pc.close()
 
@@ -249,11 +271,13 @@ def _interop(offerer_trials: dict[str, str], answerer_trials: dict[str, str]) ->
         peer.start()
         pipes.append(ours)
         peers.append(peer)
+
     offerer_pipe, answerer_pipe = pipes
     try:
         answerer_pipe.send(_receive(offerer_pipe))
         offerer_pipe.send(_receive(answerer_pipe))
         results = [_receive(pipe) for pipe in pipes]
+
         for pipe in pipes:
             pipe.send('done')
         for peer in peers:
@@ -268,7 +292,10 @@ def _interop(offerer_trials: dict[str, str], answerer_trials: dict[str, str]) ->
 @pytest.mark.parametrize('trials', [SNAP, SPED, WARP], ids=['snap', 'sped', 'warp'])
 @pytest.mark.parametrize('side', ['both', 'offerer', 'answerer'])
 def test_interop(trials: dict[str, str], side: str) -> None:
-    offerer, answerer = _interop(trials if side != 'answerer' else {}, trials if side != 'offerer' else {})
+    offerer_trials: dict[str, str] = {} if side == 'answerer' else trials
+    answerer_trials: dict[str, str] = {} if side == 'offerer' else trials
+
+    offerer, answerer = _interop(offerer_trials, answerer_trials)
 
     snap = 'WebRTC-Sctp-Snap' in trials
     assert offerer == (snap and side == 'both', ['open', 'open'])
@@ -282,6 +309,7 @@ async def _relayed_handshakes() -> set[int]:
     opened = wait_for_event(channel, 'open')
     await relay.connect(caller, callee)
     await opened
+
     caller.close()
     callee.close()
     relay.close()
@@ -336,6 +364,7 @@ async def _flood(count: int) -> None:
     assert isinstance(event, webrtc.RTCDataChannelEvent)
     remote = event.channel
     await wait_until(lambda: channel.ready_state == webrtc.RTCDataChannelState.open, 'the channel to open')
+
     received = 0
     all_received = asyncio.Event()
 
@@ -349,6 +378,7 @@ async def _flood(count: int) -> None:
     for _ in range(count):
         channel.send(bytes(1024))
     await asyncio.wait_for(all_received.wait(), seconds(10))
+
     caller.close()
     callee.close()
 

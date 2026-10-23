@@ -284,7 +284,9 @@ class Watchdog:
         size = self.output.stat().st_size
         if size == self.size:
             return False
-        self.size, self.quiet_since = size, time.monotonic()
+        self.size = size
+        self.quiet_since = time.monotonic()
+
         with self.output.open('rb') as output:
             output.seek(self.searched_to)
             text = output.read(size - self.searched_to)
@@ -296,16 +298,22 @@ class Watchdog:
         now = time.monotonic()
         if now - self.quiet_since > self.job.silence_s:
             return 'silent'
-        return 'wall' if now - self.started > self.job.wall_s else None
+        if now - self.started > self.job.wall_s:
+            return 'wall'
+        return None
 
 
 def _argv(job: Job, seed: int | None) -> list[str]:
-    return [*job.argv, *(['--seed', str(seed)] if seed is not None else [])]
+    if seed is None:
+        return list(job.argv)
+    return [*job.argv, '--seed', str(seed)]
 
 
 def _wrapped(job: Job, argv: list[str], python: list[str]) -> list[str]:
     run = [SANITIZERS, '--exec', *argv] if job.build is not None else [*python, *argv[1:]]
-    return ['taskpolicy', '-b', *run] if job.ecores else run
+    if job.ecores:
+        return ['taskpolicy', '-b', *run]
+    return run
 
 
 def command(job: Job, seed: int | None) -> list[str]:
@@ -344,6 +352,7 @@ def _kill_tree(process: subprocess.Popen[bytes], *, abort: bool) -> list[int]:
     pids = [process.pid]
     if sys.platform == 'win32':
         return pids
+
     # until the root is reaped, its pid (and so the tree) can't belong to another process
     if process.returncode is None:
         pids += [member.pid for member in stacks.tree(process.pid) if member.pid != process.pid]
@@ -354,6 +363,7 @@ def _kill_tree(process: subprocess.Popen[bytes], *, abort: bool) -> list[int]:
                 process.wait(ABORT_WAIT)
         for pid in pids[1:]:
             stacks.send(pid, signal.SIGKILL)
+
     with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(process.pid, signal.SIGKILL)
     process.wait()
@@ -374,16 +384,22 @@ def _watch(process: subprocess.Popen[bytes], job: Job, paths: Paths) -> tuple[st
     return None, watchdog.peak_rss_kb
 
 
+def _disk_room_for_cores() -> bool:
+    cores_dir = '/cores' if sys.platform == 'darwin' else ROOT
+    return shutil.disk_usage(cores_dir).free >= CORES_MIN_FREE_GB * GB
+
+
 def _room_for_cores() -> bool:
     if _cores_off() is not None:
         return True
-    return shutil.disk_usage('/cores' if sys.platform == 'darwin' else ROOT).free >= CORES_MIN_FREE_GB * GB
+    return _disk_room_for_cores()
 
 
 def run_job(job: Job, seed: int | None, paths: Paths, *, extra_env: Mapping[str, str]) -> Run:
     """Runs a job until it exits, hangs or holds too much memory; takes the stacks of a hang, and kills what is left."""
     shutil.rmtree(paths.output.parent, ignore_errors=True)
     paths.output.parent.mkdir(parents=True)
+
     run = Run(job, seed, command(job, seed), time.time())
     with paths.output.open('wb') as output:
         # a session of its own: Ctrl-C reaches only the runner, which then stops the job
@@ -397,6 +413,7 @@ def run_job(job: Job, seed: int | None, paths: Paths, *, extra_env: Mapping[str,
             start_new_session=True,
         )
     run.pid = process.pid
+
     try:
         run.killed, run.peak_rss_kb = _watch(process, job, paths)
         run.exited = time.time()
@@ -404,6 +421,7 @@ def run_job(job: Job, seed: int | None, paths: Paths, *, extra_env: Mapping[str,
         # also what an exited job left running
         run.aborted = run.killed not in {None, 'memory'} and _room_for_cores()
         run.pids = _kill_tree(process, abort=run.aborted)
+
     run.returncode = process.returncode
     run.duration = time.time() - run.started
     return run
@@ -437,21 +455,26 @@ def _modified_since(path: pathlib.Path, since: float) -> bool:
         return False
 
 
+def _glob_of(core_pattern: str) -> str:
+    """A core pattern with every %-specifier as a wildcard."""
+    return re.sub(r'%.', '*', core_pattern)
+
+
 def _cores(run: Run) -> tuple[list[pathlib.Path], list[pathlib.Path]]:
     """The cores written during the run: of the job's processes (the root's first), and of others."""
     pattern = _core_pattern()
     if pattern is None:
         return [], []
-    written = [
-        path
-        for path in pathlib.Path('/').glob(re.sub(r'%.', '*', pattern).lstrip('/'))
-        if _modified_since(path, run.started)
-    ]
+
+    candidates = pathlib.Path('/').glob(_glob_of(pattern).lstrip('/'))
+    written = [path for path in candidates if _modified_since(path, run.started)]
     if '%p' not in pattern:
         return written, []
-    globs = [re.sub(r'%.', '*', pattern.replace('%p', str(pid))) for pid in run.pids]
+
+    globs = [_glob_of(pattern.replace('%p', str(pid))) for pid in run.pids]
     ours = [path for glob in globs for path in written if fnmatch.fnmatch(str(path), glob)]
-    return ours, [path for path in written if path not in ours]
+    others = [path for path in written if path not in ours]
+    return ours, others
 
 
 def _crash_report_of(run: Run) -> pathlib.Path | None:
@@ -462,6 +485,7 @@ def _crash_report_of(run: Run) -> pathlib.Path | None:
     for path, mtime in modified.items():
         if mtime >= run.started and crash_report_pid(path) == run.pid:
             return path
+
     # macOS doesn't write a repeated crash again, it touches the report of the first one
     touched = [path for path, mtime in modified.items() if mtime >= run.exited - POLL_INTERVAL]
     return max(touched, key=modified.__getitem__, default=None)
@@ -482,6 +506,7 @@ def _worktree_sha1() -> str | None:
     untracked = _git('ls-files', '--others', '--exclude-standard', '-z')
     if diff is None or untracked is None:
         return None
+
     digest = hashlib.sha1(diff, usedforsecurity=False)
     for name in sorted(name for name in untracked.split(b'\0') if name != b''):
         digest.update(name)
@@ -492,6 +517,7 @@ def _worktree_sha1() -> str | None:
 
 def _info(run: Run, found: Found, cores: list[pathlib.Path]) -> BundleInfo:
     head = _git('rev-parse', 'HEAD')
+    git_head = head.decode().strip() if head is not None else None
     return BundleInfo(
         job=run.job.name,
         seed=run.seed,
@@ -502,7 +528,7 @@ def _info(run: Run, found: Found, cores: list[pathlib.Path]) -> BundleInfo:
         repro=found['repro'],
         env_added=_env(run.job),
         cwd=str(ROOT),
-        git_head=head.decode().strip() if head is not None else None,
+        git_head=git_head,
         worktree_sha1=_worktree_sha1(),
         started=_format(run.started),
         duration_s=round(run.duration, 1),
@@ -515,14 +541,17 @@ def _info(run: Run, found: Found, cores: list[pathlib.Path]) -> BundleInfo:
 
 
 def _bundle_name(run: Run) -> str:
-    stamp = time.strftime('%Y%m%d-%H%M%S', time.localtime(run.started))
-    return '-'.join([stamp, run.job.name, *([str(run.seed)] if run.seed is not None else [])])
+    parts = [time.strftime('%Y%m%d-%H%M%S', time.localtime(run.started)), run.job.name]
+    if run.seed is not None:
+        parts.append(str(run.seed))
+    return '-'.join(parts)
 
 
 def _write_bundle(bundle: pathlib.Path, evidence: Evidence, info: BundleInfo, *, cores: list[pathlib.Path]) -> None:
     bundle.mkdir(parents=True)
     tail = evidence.output.splitlines()[-OUTPUT_LINES:]
     (bundle / 'output.txt').write_text('\n'.join(tail) + '\n', encoding='utf-8')
+
     if evidence.stacks is not None and evidence.stacks.exists():
         shutil.move(str(evidence.stacks), str(bundle / 'stacks'))
     if evidence.crash_report is not None:
@@ -546,6 +575,37 @@ def _notify(message: str) -> None:
 
 def _cell(text: str) -> str:
     return text.replace('|', '\\|')
+
+
+def _without_year_and_seconds(timestamp: str) -> str:
+    """``2026-10-23 07:30:15`` -> ``10-23 07:30``."""
+    return timestamp[5:16]
+
+
+def _severity(item: tuple[str, Found]) -> tuple[int, int]:
+    """The most severe outcome first, then the most hits."""
+    _name, found = item
+    return FAILURES.index(found['outcome']), -found['hits']
+
+
+def _signature_table(found: list[tuple[str, Found]], new: list[str]) -> list[str]:
+    lines = ['| Signature | Outcome | Hits | First seen | Repro |', '|---|---|---|---|---|']
+    for name, entry in found:
+        mark = '**new** ' if name in new else ''
+        lines.append(
+            f'| {mark}[{name}]({name}/) `{_cell(entry["signature"])}` | {entry["outcome"]} | {entry["hits"]} '
+            f'| {_without_year_and_seconds(entry["first_seen"])} | `{_cell(entry["repro"])}` |'
+        )
+    return lines
+
+
+def _job_table(jobs: Mapping[str, JobStats]) -> list[str]:
+    lines = ['| Job | Runs | Hours | Pass | Fail |', '|---|---|---|---|---|']
+    for name, stats in jobs.items():
+        passed = stats['runs'] - stats['failures']
+        hours = stats['seconds'] / 3600
+        lines.append(f'| {name} | {stats["runs"]} | {hours:.1f} | {passed} | {stats["failures"]} |')
+    return lines
 
 
 class Results:
@@ -578,11 +638,13 @@ class Results:
         _remove(others)
         if outcome == 'crash' and run.returncode < 0:
             evidence = self._crash_evidence(run, evidence, cores)
+
         stats = self.state.stats(run.job)
         stats['runs'] += 1
         if run.job.seeded:
             stats['next_seed'] += 1
         self.runs += 1
+
         line = f'{run.job.name} seed {run.seed}: {outcome} in {run.duration:.0f} s'
         if run.killed not in {None, 'memory'} and not run.aborted:
             line += ', no core: low on disk'
@@ -593,7 +655,10 @@ class Results:
             stats['failures'] += 1
             self.failures += 1
             name, new = self._file_failure(run, outcome, evidence, cores=cores)
-            line += f', {name}' + (' NEW' if new else '')
+            line += f', {name}'
+            if new:
+                line += ' NEW'
+
         # the triage and the bundle too, or a job that fails in a second would run over and over
         stats['seconds'] += time.time() - run.started
         self.state.save(self.paths.state)
@@ -629,13 +694,14 @@ class Results:
             self.state.signatures[name] = found
         found['hits'] += 1
         found['last_seen'] = _now()
+
         if len(found['bundles']) < BUNDLES_PER_SIGNATURE:
-            found['bundles'].append(_bundle_name(run))
-            _write_bundle(
-                self.paths.root / name / found['bundles'][-1], evidence, _info(run, found, cores), cores=cores
-            )
+            bundle = _bundle_name(run)
+            found['bundles'].append(bundle)
+            _write_bundle(self.paths.root / name / bundle, evidence, _info(run, found, cores), cores=cores)
         else:
             _remove(cores)
+
         self.write_report()
         if new and not self.self_test:
             _notify(f'{run.job.name}: {text}')
@@ -643,7 +709,10 @@ class Results:
 
     def _track_streak(self, job: Job, name: str | None) -> None:
         last, count = self.streaks.get(job.name, (None, 0))
-        count = count + 1 if name is not None and name == last else 1
+        if name is not None and name == last:
+            count += 1
+        else:
+            count = 1
         self.streaks[job.name] = (name, count)
         if name is not None and count == SAME_FAILURE_LIMIT:
             self.benched.add(job.name)
@@ -651,35 +720,19 @@ class Results:
 
     def write_report(self) -> None:
         """The signatures found, the most severe and most frequent first, and the time each job got."""
-        found = sorted(
-            self.state.signatures.items(), key=lambda item: (FAILURES.index(item[1]['outcome']), -item[1]['hits'])
-        )
+        found = sorted(self.state.signatures.items(), key=_severity)
         started = _format(self.started)
         new = [name for name, entry in found if entry['first_seen'] >= started]
         hours = (time.time() - self.started) / 3600
-        lines = [
-            '# Hunt report',
-            '',
-            (
-                f'Session {started} to {_now()}: {hours:.1f} h, {self.runs} runs, {self.failures} failures, '
-                f'{len(found)} signatures ({len(new)} new)'
-            ),
-            '',
-            '| Signature | Outcome | Hits | First seen | Repro |',
-            '|---|---|---|---|---|',
-        ]
-        for name, entry in found:
-            mark = '**new** ' if name in new else ''
-            lines.append(
-                f'| {mark}[{name}]({name}/) `{_cell(entry["signature"])}` | {entry["outcome"]} | {entry["hits"]} '
-                f'| {entry["first_seen"][5:16]} | `{_cell(entry["repro"])}` |'
-            )
-        lines += ['', '| Job | Runs | Hours | Pass | Fail |', '|---|---|---|---|---|']
-        for name, stats in self.state.jobs.items():
-            passed = stats['runs'] - stats['failures']
-            lines.append(
-                f'| {name} | {stats["runs"]} | {stats["seconds"] / 3600:.1f} | {passed} | {stats["failures"]} |'
-            )
+        session = (
+            f'Session {started} to {_now()}: {hours:.1f} h, {self.runs} runs, {self.failures} failures, '
+            f'{len(found)} signatures ({len(new)} new)'
+        )
+
+        lines = ['# Hunt report', '', session, '']
+        lines += _signature_table(found, new)
+        lines += ['']
+        lines += _job_table(self.state.jobs)
         summary = None if self.self_test else cover.summary_line()
         if summary is not None:
             lines += ['', summary]
@@ -702,8 +755,12 @@ def _linux_memory() -> tuple[int, int]:
         stat = dict(line.split() for line in (cgroup / 'memory.stat').read_text(encoding='utf-8').splitlines())
         # the inactive page cache is reclaimed before anything is killed
         return limit - used + int(stat['inactive_file']), limit
-    meminfo = pathlib.Path('/proc/meminfo').read_text(encoding='utf-8')
-    kb = {line.split(':')[0]: int(line.split()[1]) for line in meminfo.splitlines() if line.endswith(' kB')}
+
+    kb: dict[str, int] = {}
+    for line in pathlib.Path('/proc/meminfo').read_text(encoding='utf-8').splitlines():
+        if line.endswith(' kB'):
+            name, _, value = line.partition(':')
+            kb[name] = int(value.split()[0])
     return kb['MemAvailable'] * 1024, kb['MemTotal'] * 1024
 
 
@@ -737,10 +794,12 @@ def hunt(jobs: Sequence[Job], deadline: float, results: Results) -> None:
             if _memory_critical():
                 _pause_for_memory(results, deadline)
                 continue
+
             runnable = [job for job in jobs if job.name not in results.benched]
             if runnable == []:
                 results.log('every job keeps failing the same way, stopping')
                 break
+
             job = _next_job(runnable, results.state)
             seed = results.state.stats(job)['next_seed'] if job.seeded else None
             results.record(run_job(job, seed, results.paths, extra_env=_coverage_env(job)))
@@ -782,10 +841,12 @@ def build(jobs: Sequence[Job], results: Results) -> None:
     steps: list[tuple[list[str], dict[str, str]]] = [([sys.executable, '-c', 'import webrtc'], {})]
     builds = sorted({job.build for job in jobs if job.build is not None}, key=lambda build: build.env.items())
     steps += [([SANITIZERS, '--build-only'], _build_env(build)) for build in builds]
+
     build_log = results.paths.build_log
     with build_log.open('ab') as log:
         for argv, env in steps:
-            results.log(f'building: {shlex.join([*(f"{name}={value}" for name, value in env.items()), *argv])}')
+            assignments = [f'{name}={value}' for name, value in env.items()]
+            results.log(f'building: {shlex.join([*assignments, *argv])}')
             if _build_step(argv, env, log) != 0:
                 sys.exit(f'hunt: the build failed, see {build_log}')
     cover.collect()
@@ -805,11 +866,16 @@ def _cores_off() -> str | None:
 def _enable_cores(results: Results) -> None:
     if sys.platform == 'win32':
         return
+
     _soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
-    room = shutil.disk_usage('/cores' if sys.platform == 'darwin' else ROOT).free >= CORES_MIN_FREE_GB * GB
+    room = _disk_room_for_cores()
     resource.setrlimit(resource.RLIMIT_CORE, (hard if room else 0, hard))
+
     off = _cores_off() if room else f'less than {CORES_MIN_FREE_GB} GB free for them'
-    results.log(f'cores: off, {off}' if off is not None else f'cores: on, {_core_pattern()}')
+    if off is not None:
+        results.log(f'cores: off, {off}')
+    else:
+        results.log(f'cores: on, {_core_pattern()}')
 
 
 def _attach_problem() -> str | None:
@@ -836,6 +902,7 @@ def _linux_attach_problem() -> str | None:
 def _check_tools(results: Results) -> None:
     if shutil.which('ps') is None:
         sys.exit('hunt: needs ps (procps)')
+
     debuggers = ['lldb', 'sample'] if sys.platform == 'darwin' else ['gdb']
     missing = [tool for tool in debuggers if shutil.which(tool) is None]
     if missing != []:
@@ -849,20 +916,26 @@ def _deadline(hours: float, until: str | None) -> float:
     deadline = time.time() + hours * 3600
     if until is None:
         return deadline
+
     hour, minute = (int(part) for part in until.split(':'))
     now = time.localtime()
     at = time.mktime((now.tm_year, now.tm_mon, now.tm_mday, hour, minute, 0, 0, 0, -1))
-    return min(deadline, at if at > time.time() else at + 24 * 3600)
+    if at <= time.time():
+        at += 24 * 3600
+    return min(deadline, at)
 
 
 def _select(names: str | None) -> list[Job]:
     jobs = [job for job in JOBS if job.runs_here]
     if names is None:
         return jobs
-    chosen = [job for job in jobs if job.name in names.split(',')]
-    unknown = set(names.split(',')) - {job.name for job in chosen}
+
+    wanted = names.split(',')
+    chosen = [job for job in jobs if job.name in wanted]
+    unknown = set(wanted) - {job.name for job in chosen}
     if unknown != set():
-        sys.exit(f'hunt: no job {", ".join(sorted(unknown))} here; there are {", ".join(job.name for job in jobs)}')
+        available = ', '.join(job.name for job in jobs)
+        sys.exit(f'hunt: no job {", ".join(sorted(unknown))} here; there are {available}')
     return chosen
 
 
@@ -880,6 +953,7 @@ def _check_self_test_job(job: Job, results: Results, report: str) -> list[tuple[
     found = [(name, entry) for name, entry in results.state.signatures.items() if entry['job'] == job.name]
     if len(found) != 1:
         return [(False, f'{job.name}: one signature, not {len(found)}')]
+
     name, entry = found[0]
     bundles = [results.paths.root / name / bundle for bundle in entry['bundles']]
     complete = all((bundle / 'info.json').exists() and (bundle / 'output.txt').exists() for bundle in bundles)
@@ -892,6 +966,7 @@ def _check_self_test_job(job: Job, results: Results, report: str) -> list[tuple[
         (results.state.stats(job)['next_seed'] == SELF_TEST_RUNS + 1, f'{job.name}: next seed {SELF_TEST_RUNS + 1}'),
         (in_report, f'{job.name}: in the report'),
     ]
+
     if job.name == 'segfault':
         checks.append(('SIGSEGV' in entry['signature'], 'segfault: SIGSEGV in the signature'))
         if sys.platform == 'darwin':
@@ -906,12 +981,15 @@ def self_test(results: Results) -> bool:
     """Runs each synthetic failure twice and checks what the hunt made of them; True if all is right."""
     for job in SELF_TEST_JOBS:
         for _ in range(SELF_TEST_RUNS):
-            results.record(run_job(job, results.state.stats(job)['next_seed'], results.paths, extra_env={}))
+            seed = results.state.stats(job)['next_seed']
+            results.record(run_job(job, seed, results.paths, extra_env={}))
     results.write_report()
+
     report = results.paths.report.read_text(encoding='utf-8')
     checks = [check for job in SELF_TEST_JOBS for check in _check_self_test_job(job, results, report)]
     for passed, what in checks:
-        print(f'{"ok  " if passed else "FAIL"} {what}')
+        mark = 'ok  ' if passed else 'FAIL'
+        print(f'{mark} {what}')
     return all(passed for passed, _what in checks)
 
 
@@ -933,17 +1011,20 @@ def main() -> None:
     if sys.platform == 'win32':
         sys.exit('hunt: not supported on Windows')
     args = _parse_args()
+
     paths = Paths(ROOT / 'build' / ('hunt-self-test' if args.self_test else 'hunt'))
     if args.self_test:
         shutil.rmtree(paths.root, ignore_errors=True)
     paths.root.mkdir(parents=True, exist_ok=True)
     results = Results(paths, State.load(paths.state), self_test=args.self_test)
+
     signal.signal(signal.SIGTERM, _interrupt)
     # a closed terminal, else the job would outlive the runner
     signal.signal(signal.SIGHUP, _interrupt)
     if sys.platform == 'darwin':
         # exits with the runner, even a killed one
         subprocess.Popen(['caffeinate', '-i', '-w', str(os.getpid())])
+
     _check_tools(results)
     _enable_cores(results)
     jobs = _select(args.jobs)

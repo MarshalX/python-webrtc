@@ -13,9 +13,9 @@ import asyncio
 import copy
 import json
 import math
-from typing import TYPE_CHECKING, Literal, TypeVar, Union, cast
+from typing import TYPE_CHECKING, Callable, Literal, NamedTuple, TypeVar, Union, cast
 
-from typing_extensions import override
+from typing_extensions import TypeGuard, override
 
 import wrtc
 from webrtc.base import WebRTCObject
@@ -66,13 +66,14 @@ _CAMERA_CAPABILITIES = MediaTrackCapabilities(
     device_id=CAMERA_DEVICE_ID,
     group_id=_GROUP_ID,
 )
-# sample rate, sample size, channel count
-_MICROPHONE_FORMAT = (48000, 16, 1)
+_MICROPHONE_SAMPLE_RATE = 48000
+_MICROPHONE_SAMPLE_SIZE = 16
+_MICROPHONE_CHANNEL_COUNT = 1
 _MICROPHONE_LATENCY = 0.01  # a 10 ms libwebrtc frame
 _MICROPHONE_CAPABILITIES = MediaTrackCapabilities(
-    sample_rate=ULongRange(_MICROPHONE_FORMAT[0], _MICROPHONE_FORMAT[0]),
-    sample_size=ULongRange(_MICROPHONE_FORMAT[1], _MICROPHONE_FORMAT[1]),
-    channel_count=ULongRange(_MICROPHONE_FORMAT[2], _MICROPHONE_FORMAT[2]),
+    sample_rate=ULongRange(_MICROPHONE_SAMPLE_RATE, _MICROPHONE_SAMPLE_RATE),
+    sample_size=ULongRange(_MICROPHONE_SAMPLE_SIZE, _MICROPHONE_SAMPLE_SIZE),
+    channel_count=ULongRange(_MICROPHONE_CHANNEL_COUNT, _MICROPHONE_CHANNEL_COUNT),
     echo_cancellation=[False],
     auto_gain_control=[False],
     noise_suppression=[False],
@@ -134,6 +135,18 @@ _PARAMETERS = (
 _RANGES = (ConstrainULongRange, ConstrainDoubleRange)
 
 
+class _CameraMode(NamedTuple):
+    width: float
+    height: float
+    frame_rate: float
+
+
+def _has_required_parts(value: object) -> TypeGuard[_Parameters]:
+    if not isinstance(value, _PARAMETERS):
+        return False
+    return any(getattr(value, name, None) is not None for name in ('exact', 'min', 'max'))
+
+
 def _satisfied(value: object, capability: object, current: float | str | None) -> bool:
     """Whether the required parts of a constraint (exact, min, max) are satisfiable.
 
@@ -142,10 +155,7 @@ def _satisfied(value: object, capability: object, current: float | str | None) -
     Returns:
         :obj:`bool`: Whether they are.
     """
-    required = isinstance(value, _PARAMETERS) and any(
-        getattr(value, name, None) is not None for name in ('exact', 'min', 'max')
-    )
-    if not required:
+    if not _has_required_parts(value):
         return True
     if isinstance(value, _RANGES) and isinstance(capability, (ULongRange, DoubleRange)):
         return _within_range(value, capability)
@@ -160,7 +170,8 @@ def _within_range(value: ConstrainULongRange | ConstrainDoubleRange, capability:
     high_cap = capability.max if capability.max is not None else float('inf')
     exact_within = exact is None or low_cap <= exact <= high_cap
     bounds_within = (low is None or low <= high_cap) and (high is None or high >= low_cap)
-    return exact_within and bounds_within and (low is None or high is None or low <= high)
+    bounds_ordered = low is None or high is None or low <= high
+    return exact_within and bounds_within and bounds_ordered
 
 
 def _matches(exact: object, capability: object) -> bool:
@@ -187,6 +198,7 @@ def _selected(
     if isinstance(capability, (ULongRange, DoubleRange)):
         low = capability.min if capability.min is not None else low
         high = capability.max if capability.max is not None else high
+
     if value is None:
         selected = current
     elif not isinstance(value, _RANGES):
@@ -235,13 +247,20 @@ def _converted_set(constraint_set: _SetT) -> _SetT:
         value = getattr(constraint_set, name)
         convert = _clamped if name in _ULONG_CONSTRAINTS else _restricted
         if isinstance(value, _RANGES):
-            value = copy.copy(value)
-            parts = {part: getattr(value, part) for part in ('exact', 'ideal', 'min', 'max')}
-            for part, member in ((p, m) for p, m in parts.items() if m is not None):
-                setattr(value, part, convert(member, name))
-            setattr(converted, name, value)
+            setattr(converted, name, _converted_range(value, name, convert))
         elif value is not None:
             setattr(converted, name, convert(value, name))
+    return converted
+
+
+def _converted_range(
+    value: ConstrainULongRange | ConstrainDoubleRange, name: str, convert: Callable[[object, str], float]
+) -> ConstrainULongRange | ConstrainDoubleRange:
+    converted = copy.copy(value)
+    for part in ('exact', 'ideal', 'min', 'max'):
+        member = getattr(converted, part)
+        if member is not None:
+            setattr(converted, part, convert(member, name))
     return converted
 
 
@@ -287,19 +306,20 @@ def _camera_mode(
     capabilities: MediaTrackCapabilities,
     settings: MediaTrackSettings,
     *,
-    current: tuple[float, float, float],
-) -> tuple[float, float, float]:
+    current: _CameraMode,
+) -> _CameraMode:
     """The camera size and frame rate: the basic set, then each satisfiable advanced set."""
-    width, height, frame_rate = current
     advanced: list[MediaTrackConstraintSet] = []
     if constraints.advanced is not None:
         advanced = [_as_exact(c) for c in constraints.advanced]
     satisfiable = [c for c in advanced if _unsatisfied(c, capabilities, settings, kind='video') is None]
+
+    width, height, frame_rate = current
     for constraint_set in [constraints, *satisfiable]:
         width = _selected(constraint_set.width, width, capabilities.width)
         height = _selected(constraint_set.height, height, capabilities.height)
         frame_rate = _selected(constraint_set.frame_rate, frame_rate, capabilities.frame_rate)
-    return width, height, frame_rate
+    return _CameraMode(width, height, frame_rate)
 
 
 def _keep_constraints(native: wrtc.MediaStreamTrack, constraints: MediaTrackConstraints | None) -> None:
@@ -311,6 +331,27 @@ def _kept_constraints(native: wrtc.MediaStreamTrack) -> MediaTrackConstraints | 
     """The constraints stored on the native track."""
     text = native._constraints
     return MediaTrackConstraints.from_json(json.loads(text)) if text is not None else None
+
+
+def _add_camera_settings(settings: MediaTrackSettings) -> None:
+    settings.resize_mode = 'none'
+    settings.device_id = CAMERA_DEVICE_ID
+    settings.group_id = _GROUP_ID
+
+
+def _add_microphone_settings(settings: MediaTrackSettings) -> None:
+    """Adds the settings of the synthetic microphone, and its format before media flows."""
+    settings.device_id = MICROPHONE_DEVICE_ID
+    settings.group_id = _GROUP_ID
+    settings.echo_cancellation = False
+    settings.auto_gain_control = False
+    settings.noise_suppression = False
+    settings.voice_isolation = False
+    settings.latency = _MICROPHONE_LATENCY
+    if settings.sample_rate is None:
+        settings.sample_rate = _MICROPHONE_SAMPLE_RATE
+        settings.sample_size = _MICROPHONE_SAMPLE_SIZE
+        settings.channel_count = _MICROPHONE_CHANNEL_COUNT
 
 
 class MediaStreamTrack(
@@ -441,27 +482,25 @@ class MediaStreamTrack(
         """
         native = self._native_obj._settings()
         settings = MediaTrackSettings()
+
         # the size, and the format of the audio, come together
-        width, height = native.get('width'), native.get('height')
+        width = native.get('width')
+        height = native.get('height')
         if width is not None and height is not None:
-            settings.width, settings.height = width, height
+            settings.width = width
+            settings.height = height
             settings.aspect_ratio = width / height if height != 0 else None
             settings.frame_rate = native.get('frame_rate')
         if 'sample_rate' in native:
             settings.sample_rate = native.get('sample_rate')
             settings.sample_size = native.get('sample_size')
             settings.channel_count = native.get('channel_count')
+
         device = native.get('device')
         if device == 'camera':
-            settings.resize_mode = 'none'
-            settings.device_id, settings.group_id = CAMERA_DEVICE_ID, _GROUP_ID
+            _add_camera_settings(settings)
         elif device == 'microphone':
-            settings.device_id, settings.group_id = MICROPHONE_DEVICE_ID, _GROUP_ID
-            settings.echo_cancellation = settings.auto_gain_control = settings.noise_suppression = False
-            settings.voice_isolation = False
-            settings.latency = _MICROPHONE_LATENCY
-            if settings.sample_rate is None:
-                settings.sample_rate, settings.sample_size, settings.channel_count = _MICROPHONE_FORMAT
+            _add_microphone_settings(settings)
         return settings
 
     def get_capabilities(self) -> MediaTrackCapabilities:
@@ -522,6 +561,7 @@ class MediaStreamTrack(
         constraints = _converted(constraints)
         if self.ready_state == 'ended':
             return
+
         capabilities = self.get_capabilities()
         settings = self.get_settings()
         failed = _unsatisfied(constraints, capabilities, settings, kind=self.kind)
@@ -530,9 +570,10 @@ class MediaStreamTrack(
 
         camera = self._native_obj._camera()
         if camera is not None:
-            width, height, frame_rate = _camera_mode(constraints, capabilities, settings, current=camera)
-            if (width, height, frame_rate) != camera:
-                _ = self._native_obj._reconfigureCamera(int(width), int(height), float(frame_rate))
+            current = _CameraMode(*camera)
+            mode = _camera_mode(constraints, capabilities, settings, current=current)
+            if mode != current:
+                _ = self._native_obj._reconfigureCamera(int(mode.width), int(mode.height), float(mode.frame_rate))
         _keep_constraints(self._native_obj, constraints)
 
     def clone(self) -> webrtc.MediaStreamTrack:

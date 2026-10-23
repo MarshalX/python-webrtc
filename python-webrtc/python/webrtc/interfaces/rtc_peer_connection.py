@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import re
 import threading
-from typing import TYPE_CHECKING, Callable, ClassVar, Literal, TypeVar, Union, cast, overload
+from typing import TYPE_CHECKING, Callable, ClassVar, Literal, NamedTuple, TypeVar, Union, cast, overload
 
 from typing_extensions import override
 
@@ -53,15 +53,6 @@ if TYPE_CHECKING:
     from webrtc.enums import RTCDtlsTransportState, RTCIceConnectionState, RTCIceTransportState, RTCPeerConnectionState
     from webrtc.models.rtc_certificate import AlgorithmIdentifier
 
-    # transport, state, dispatch, ice connection state, connection state
-    _TransportStateChange = tuple[
-        Union[wrtc.RTCIceTransport, wrtc.RTCDtlsTransport, None],
-        Union[RTCIceTransportState, RTCDtlsTransportState, None],
-        bool,
-        Union[RTCIceConnectionState, None],
-        Union[RTCPeerConnectionState, None],
-    ]
-
 # guards lazy creation of a connection's operations chain
 _chains_lock = threading.Lock()
 
@@ -94,6 +85,16 @@ _PeerConnectionStateEvent = Literal[
 ]
 _PeerConnectionEvent = Literal[_PeerConnectionStateEvent, 'icecandidate', 'icecandidateerror', 'track', 'datachannel']
 _R = TypeVar('_R')
+
+
+class _TransportStateChange(NamedTuple):
+    """The arguments of the native ``_transportstatechange`` event."""
+
+    transport: wrtc.RTCIceTransport | wrtc.RTCDtlsTransport | None
+    state: RTCIceTransportState | RTCDtlsTransportState | None
+    dispatch: bool
+    ice_connection_state: RTCIceConnectionState | None
+    connection_state: RTCPeerConnectionState | None
 
 
 def _surface_transport_state(
@@ -276,7 +277,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         return self._add(name, handler, once=True)
 
     def __init__(self, configuration: webrtc.RTCConfiguration | None = None) -> None:
-        super().__init__(wrtc.RTCPeerConnection(configuration._to_native() if configuration is not None else None))
+        native_configuration = configuration._to_native() if configuration is not None else None
+        super().__init__(wrtc.RTCPeerConnection(native_configuration))
         _ = self._attach()
 
     @override
@@ -304,6 +306,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
         except RuntimeError:
             loop = None
+
         if self._deferred_negotiation_id is not None and loop is not None:
             event_id, self._deferred_negotiation_id = self._deferred_negotiation_id, None
             _ = loop.call_soon(self._dispatch, 'negotiationneeded', event_id)
@@ -341,13 +344,15 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             self._complete_gathering(transports, state)
             return
         if name == '_transportstatechange':
-            self._change_transport_state(cast('_TransportStateChange', args))
+            self._change_transport_state(_TransportStateChange._make(args))
             return
+
         # the state attributes change along with their events
         surface = self._STATE_EVENTS.get(name)
         if surface is not None:
             state = args[0]
             getattr(self._native_obj, surface)(state)
+
         if name == 'signalingstatechange':
             _, descriptions = cast('tuple[RTCSignalingState, int]', args)
             # the descriptions as the change left them
@@ -376,22 +381,23 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         """Changes a transport's state and the connection's in one task, so every handler sees all of them."""
         if self._native_obj.signalingState == RTCSignalingState.closed:
             return
-        transport, state, dispatch, ice_connection_state, connection_state = change
-        _surface_transport_state(transport, state)
-        if ice_connection_state is not None:
-            self._native_obj._surfaceIceConnectionState(ice_connection_state)
-        if connection_state is not None:
-            self._native_obj._surfaceConnectionState(connection_state)
+
+        _surface_transport_state(change.transport, change.state)
+        if change.ice_connection_state is not None:
+            self._native_obj._surfaceIceConnectionState(change.ice_connection_state)
+        if change.connection_state is not None:
+            self._native_obj._surfaceConnectionState(change.connection_state)
+
         # see RTCPeerConnection::EmitTransportState
-        wrapper = lifetime.find(transport) if transport is not None else None
+        wrapper = lifetime.find(change.transport) if change.transport is not None else None
         if isinstance(wrapper, (webrtc.RTCIceTransport, webrtc.RTCDtlsTransport)):
-            if dispatch:
-                wrapper._dispatch('statechange', state)
+            if change.dispatch:
+                wrapper._dispatch('statechange', change.state)
             wrapper._update()
-        if ice_connection_state is not None:
-            self._dispatch('iceconnectionstatechange', ice_connection_state)
-        if connection_state is not None:
-            self._dispatch('connectionstatechange', connection_state)
+        if change.ice_connection_state is not None:
+            self._dispatch('iceconnectionstatechange', change.ice_connection_state)
+        if change.connection_state is not None:
+            self._dispatch('connectionstatechange', change.connection_state)
 
     @override
     def _open(self) -> bool:
@@ -420,19 +426,16 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         if candidate is None:
             return RTCPeerConnectionIceEvent('icecandidate')
         kwargs = candidate.kwargs()
-        return RTCPeerConnectionIceEvent(
-            'icecandidate', RTCPeerConnectionIceEventInit(RTCIceCandidate(**kwargs), kwargs['url'])
-        )
+        init = RTCPeerConnectionIceEventInit(RTCIceCandidate(**kwargs), kwargs['url'])
+        return RTCPeerConnectionIceEvent('icecandidate', init)
 
     @staticmethod
     def _ice_candidate_error_event(*native: object) -> webrtc.Event:
         address, port, url, error_code, error_text = cast('tuple[str, int, str, int, str]', native)
-        return RTCPeerConnectionIceErrorEvent(
-            'icecandidateerror',
-            RTCPeerConnectionIceErrorEventInit(
-                error_code, address if address != '' else None, port if port != 0 else None, url, error_text
-            ),
-        )
+        known_address = address if address != '' else None
+        known_port = port if port != 0 else None
+        init = RTCPeerConnectionIceErrorEventInit(error_code, known_address, known_port, url, error_text)
+        return RTCPeerConnectionIceErrorEvent('icecandidateerror', init)
 
     def _data_channel_event(self, channel: wrtc.RTCDataChannel) -> webrtc.Event:
         remote = webrtc.RTCDataChannel._wrap(channel, connection=self)
@@ -442,15 +445,11 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         self, transceiver: wrtc.RTCRtpTransceiver, receiver: wrtc.RTCRtpReceiver, streams: list[wrtc.MediaStream]
     ) -> webrtc.Event:
         wrapped_receiver = webrtc.RTCRtpReceiver._wrap(receiver, connection=self)
-        return RTCTrackEvent(
-            'track',
-            RTCTrackEventInit(
-                wrapped_receiver,
-                wrapped_receiver.track,
-                webrtc.RTCRtpTransceiver._wrap(transceiver, connection=self),
-                webrtc.MediaStream._wrap_many(streams, connection=self),
-            ),
-        )
+        track = wrapped_receiver.track
+        wrapped_transceiver = webrtc.RTCRtpTransceiver._wrap(transceiver, connection=self)
+        wrapped_streams = webrtc.MediaStream._wrap_many(streams, connection=self)
+        init = RTCTrackEventInit(wrapped_receiver, track, wrapped_transceiver, wrapped_streams)
+        return RTCTrackEvent('track', init)
 
     def _apply_legacy_offer_option(self, kind: webrtc.MediaType, *, receive: bool | None) -> None:
         """Applies ``offer_to_receive_audio`` or ``offer_to_receive_video`` of :meth:`create_offer`.
@@ -459,6 +458,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         """
         if receive is None:
             return
+
         directions = RTCRtpTransceiverDirection
         transceivers = [t for t in self.get_transceivers() if not t.stopped and t.receiver.track.kind == kind]
         if not receive:
@@ -527,7 +527,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
                 'create an answer', RTCSignalingState.have_remote_offer, RTCSignalingState.have_local_pranswer
             )
             await later()
-            return _init_of(cast('wrtc.RTCSessionDescription', await call_native(self._native_obj.createAnswer)))
+            answer = await call_native(self._native_obj.createAnswer)
+            return _init_of(cast('wrtc.RTCSessionDescription', answer))
 
     async def set_local_description(
         self, description: _Description | RTCLocalSessionDescriptionInit | None = None
@@ -579,7 +580,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         """
         init = _description_init(description, allow_implicit=False)
         async with self._operation():
-            self._check_state('set the remote description', *_REMOTE_DESCRIPTION_STATES.get(init.type, ()))
+            allowed = _REMOTE_DESCRIPTION_STATES.get(init.type, ())
+            self._check_state('set the remote description', *allowed)
             await later()
             await call_native(self._native_obj.setRemoteDescription, init)
             self._completed_description()
@@ -603,7 +605,6 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         """
         native_streams = [stream._native_obj for stream in streams] if len(streams) > 0 else None
         sender = self._native_obj.addTrack(track._native_obj, native_streams)
-
         return webrtc.RTCRtpSender._wrap(sender, connection=self)
 
     def add_transceiver(
@@ -634,6 +635,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
             msg = f'{kind!r} is not a kind of track'
             raise TypeError(msg)
         self._check_state('add a transceiver')
+
         native_init = None
         if init is not None:
             _check_send_encodings(init.send_encodings, kind)
@@ -750,6 +752,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         label = usv_string(label)
         check_utf8_length('label', label)
         init._check()
+
         native = self._native_obj.createDataChannel(
             label,
             init.ordered,
@@ -787,6 +790,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
                 msg = f'{len(matches)} senders and receivers have the track, not exactly one'
                 raise webrtc.InvalidAccessError(msg)
             return await matches[0].get_stats()
+
         report = await call_native_batched(
             self,
             self._native_obj.getStats,
@@ -1051,10 +1055,12 @@ def _description_init(
     if isinstance(description, RTCSessionDescription):
         return wrtc.RTCSessionDescriptionInit(description.type, description.sdp)
     if allow_implicit and isinstance(description, RTCLocalSessionDescriptionInit):
-        if description.type is None and description.sdp != '':
-            msg = 'the type of a description is required'
-            raise TypeError(msg)
-        description = None if description.type is None else RTCSessionDescriptionInit(description.type, description.sdp)
+        if description.type is None:
+            if description.sdp != '':
+                msg = 'the type of a description is required'
+                raise TypeError(msg)
+            return None
+        description = RTCSessionDescriptionInit(description.type, description.sdp)
     if isinstance(description, RTCSessionDescriptionInit):
         return description._to_native()
     if allow_implicit and description is None:
@@ -1079,7 +1085,8 @@ def _check_send_encodings(encodings: list[webrtc.RTCRtpEncodingParameters], kind
         if rid is not None and _RID.fullmatch(rid) is None:
             msg = f'{rid!r} is not a valid rid: 1 to 16 letters and digits'
             raise TypeError(msg)
-    if len(encodings) > 1 and (None in rids or len(set(rids)) != len(rids)):
+    all_distinct = None not in rids and len(set(rids)) == len(rids)
+    if len(encodings) > 1 and not all_distinct:
         msg = 'every encoding needs a distinct rid when there are several'
         raise TypeError(msg)
 

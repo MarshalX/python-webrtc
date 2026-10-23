@@ -79,14 +79,25 @@ def title_of(module: str) -> str:
 def write_page(path: Path, module: str) -> None:
     """Writes the page of a module."""
     title = title_of(module)
+    underline = '=' * len(title)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f'{title}\n{"=" * len(title)}\n\n.. automodule:: webrtc.{module}\n', encoding='UTF-8')
+    path.write_text(f'{title}\n{underline}\n\n.. automodule:: webrtc.{module}\n', encoding='UTF-8')
 
 
 def write_index(path: Path, title: str, docnames: list[str]) -> None:
     """Writes the page listing the pages of a section."""
+    underline = '=' * len(title)
     entries = '\n'.join(f'   {name}' for name in docnames)
-    path.write_text(f'{title}\n{"=" * len(title)}\n\n.. toctree::\n   :maxdepth: 1\n\n{entries}\n', encoding='UTF-8')
+    path.write_text(f'{title}\n{underline}\n\n.. toctree::\n   :maxdepth: 1\n\n{entries}\n', encoding='UTF-8')
+
+
+def check_utils_listed() -> None:
+    """Fails on a webrtc.utils module that is neither documented nor known to be internal."""
+    for path in (PACKAGE / 'utils').glob('*.py'):
+        module = f'utils.{path.stem}'
+        if path.stem != '__init__' and module not in TOP_LEVEL and module not in INTERNAL:
+            msg = f'list webrtc.{module} in TOP_LEVEL or INTERNAL'
+            raise SystemExit(msg)
 
 
 def main() -> None:
@@ -96,6 +107,7 @@ def main() -> None:
         page.unlink()
 
     for section, title in SECTIONS.items():
+        # by title, and by module name between equal titles
         modules = sorted(p.stem for p in (PACKAGE / section).glob('*.py') if p.stem != '__init__')
         modules.sort(key=lambda name: title_of(f'{section}.{name}').lower())
         for name in modules:
@@ -103,13 +115,10 @@ def main() -> None:
         write_index(OUT / section / 'index.rst', title, modules)
 
     for module in TOP_LEVEL:
-        write_page(OUT / f'{module.rsplit(".", 1)[-1]}.rst', module)
+        page = module.rsplit('.', 1)[-1]
+        write_page(OUT / f'{page}.rst', module)
 
-    for path in (PACKAGE / 'utils').glob('*.py'):
-        module = f'utils.{path.stem}'
-        if path.stem != '__init__' and module not in TOP_LEVEL and module not in INTERNAL:
-            msg = f'list webrtc.{module} in TOP_LEVEL or INTERNAL'
-            raise SystemExit(msg)
+    check_utils_listed()
 
 
 if __name__ == '__main__':

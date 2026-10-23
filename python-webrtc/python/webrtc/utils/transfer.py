@@ -31,6 +31,7 @@ class Transfer:
         if isinstance(transfer, (str, bytes, bytearray, memoryview)):
             msg = 'transfer is a sequence of buffers'
             raise TypeError(msg)
+
         self._views: list[memoryview] = []
         for item in transfer:
             try:
@@ -39,13 +40,15 @@ class Transfer:
                 msg = f'transfer takes buffers, not {type(item).__name__}'
                 raise TypeError(msg) from None
             except ValueError:
-                # a released memoryview is the detached buffer of Python
+                # a released memoryview is Python's detached buffer
                 msg = 'A buffer in transfer is released'
                 raise DataCloneError(msg) from None
+
             if self.has(view):
                 msg = 'A buffer is in transfer more than once'
                 raise DataCloneError(msg)
             self._views.append(view)
+
         self._items = list(transfer)
 
     def has(self, data: Buffer) -> bool:
@@ -57,7 +60,9 @@ class Transfer:
         """Releases the transferred memoryviews, once the object is created."""
         for view in self._views:
             view.release()
+
         for item in self._items:
             if isinstance(item, memoryview):
-                with contextlib.suppress(BufferError):  # views of it are exported, like to numpy
+                # its buffer may still be exported, e.g. to numpy
+                with contextlib.suppress(BufferError):
                     item.release()

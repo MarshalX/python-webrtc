@@ -39,6 +39,7 @@ def _format(trials: dict[str, str]) -> str:
 
 
 def _parse(trials: str) -> dict[str, str]:
+    # 'Name/Group/' splits into its parts and a trailing empty string
     *parts, rest = trials.split('/')
     if rest != '' or len(parts) % 2 != 0:
         msg = f"{trials!r} isn't a list of 'Name/Group/'"
@@ -46,9 +47,10 @@ def _parse(trials: str) -> dict[str, str]:
     trials_by_name: dict[str, str] = {}
     for name, group in zip(parts[::2], parts[1::2]):
         _validate(name, group)
-        if trials_by_name.setdefault(name, group) != group:
+        if trials_by_name.get(name, group) != group:
             msg = f'{name!r} has two groups in {trials!r}'
             raise ValueError(msg)
+        trials_by_name[name] = group
     return trials_by_name
 
 
@@ -129,7 +131,8 @@ field_trials = FieldTrials()
 #: Alias for :data:`field_trials`
 fieldTrials = field_trials
 
-if (_environment := os.environ.get('WRTC_FIELD_TRIALS', '')) != '':
+_environment = os.environ.get('WRTC_FIELD_TRIALS', '')
+if _environment != '':
     try:
         _apply(_parse(_environment))
     except ValueError as e:

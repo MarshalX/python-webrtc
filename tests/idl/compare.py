@@ -66,6 +66,11 @@ def python_name(name: str) -> str:
     return f'{name}_' if keyword.iskeyword(name) else name
 
 
+def _is_self_attribute(target: object) -> TypeGuard[ast.Attribute]:
+    """Whether an assignment target is ``self.<name>``."""
+    return isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == 'self'
+
+
 @functools.cache
 def _assigned(cls: type) -> frozenset[str]:
     """The attributes the methods of a class assign to ``self``."""
@@ -73,14 +78,11 @@ def _assigned(cls: type) -> frozenset[str]:
         tree = ast.parse(textwrap.dedent(inspect.getsource(cls)))
     except (OSError, TypeError):
         return frozenset()
+
     names = set()
     for node in ast.walk(tree):
         targets = node.targets if isinstance(node, ast.Assign) else [getattr(node, 'target', None)]
-        names.update(
-            target.attr
-            for target in targets
-            if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == 'self'
-        )
+        names.update(target.attr for target in targets if _is_self_attribute(target))
     return frozenset(names)
 
 
@@ -96,7 +98,9 @@ def _text(annotation: object) -> str | None:
     """An annotation as text, the way ``from __future__ import annotations`` keeps it."""
     if annotation is _P.empty:
         return None
-    return annotation if isinstance(annotation, str) else getattr(annotation, '__name__', str(annotation))
+    if isinstance(annotation, str):
+        return annotation
+    return getattr(annotation, '__name__', str(annotation))
 
 
 def _mentions(pattern: str | re.Pattern[str], annotation: object) -> bool:
@@ -126,6 +130,15 @@ def _is_handler(member: Member) -> TypeGuard[Attribute]:
     )
 
 
+def _star_prefix(parameter: inspect.Parameter) -> str:
+    """The ``*`` or ``**`` that marks a variadic parameter."""
+    if parameter.kind is _P.VAR_POSITIONAL:
+        return '*'
+    if parameter.kind is _P.VAR_KEYWORD:
+        return '**'
+    return ''
+
+
 def _default(label: str, *, required: bool, has_default: bool) -> list[str]:
     if required and has_default:
         return [f'{label}: should be required']
@@ -148,7 +161,9 @@ class _Types:
             return re.search(rf'\b{name}\b', text) is not None
 
         missing = sorted(name for name in self.spec.named_types(idl_type, named) if not named(name))
-        return [f'{label}: type lacks {", ".join(missing)}'] if len(missing) > 0 else []
+        if len(missing) == 0:
+            return []
+        return [f'{label}: type lacks {", ".join(missing)}']
 
 
 class _Arguments(_Types):
@@ -169,11 +184,11 @@ class _Arguments(_Types):
             self.argument(index, argument)
         if self.order != sorted(self.order):
             self.found.append(f'{self.label}: arguments out of order')
+
         for parameter in self.unused.values():
             if self.merged(parameter):
                 continue
-            prefix = '*' if parameter.kind is _P.VAR_POSITIONAL else '**' if parameter.kind is _P.VAR_KEYWORD else ''
-            self.found.append(f'{self.label}({prefix}{parameter.name}): extra argument')
+            self.found.append(f'{self.label}({_star_prefix(parameter)}{parameter.name}): extra argument')
         return self.found
 
     def merged(self, parameter: inspect.Parameter) -> bool:
@@ -183,7 +198,9 @@ class _Arguments(_Types):
 
     def take(self, name: str) -> inspect.Parameter | None:
         parameter = self.unused.pop(python_name(snake_case(name)), None)
-        return parameter if parameter is not None else self.unused.pop(python_name(name), None)
+        if parameter is not None:
+            return parameter
+        return self.unused.pop(python_name(name), None)
 
     def argument(self, index: int, argument: Argument) -> None:
         path = f'{self.label}({argument["name"]})'
@@ -207,6 +224,7 @@ class _Arguments(_Types):
             self.found.append(f'{path}: should be positional')
         else:
             self.order.append(self.parameters.index(parameter))
+
         has_default = parameter.default is not _P.empty or parameter.kind is _P.VAR_POSITIONAL
         optional = argument['optional'] or argument['variadic']
         self.found += _default(path, required=not optional, has_default=has_default)
@@ -226,15 +244,18 @@ class _Arguments(_Types):
         dictionary = self.spec.dictionary(argument['idlType'])
         if dictionary is None:
             return None
+
         members = self.spec.fields(dictionary.name)
         matched = [
             self.unused[name]
             for member in members
             for name in {member['name'], snake_case(member['name'])} & self.unused.keys()
         ]
+        if len(matched) == 0:
+            return None
         # a lone positional parameter named like a member but annotated as a dictionary is the argument, renamed
         lone = len(matched) == 1 and matched[0].kind is not _P.KEYWORD_ONLY
-        if len(matched) == 0 or (lone and _mentions(rf'\b(dict|Mapping|{dictionary.name})\b', matched[0].annotation)):
+        if lone and _mentions(rf'\b(dict|Mapping|{dictionary.name})\b', matched[0].annotation):
             return None
         return members
 
@@ -263,8 +284,10 @@ class _Class(_Types):
 
     def resolve(self, idl_name: str, kind: str) -> str | None:
         """Checks the snake_case name and the camelCase alias of a member, returning the one to inspect."""
-        snake, camel = python_name(snake_case(idl_name)), python_name(idl_name)
+        snake = python_name(snake_case(idl_name))
+        camel = python_name(idl_name)
         self.expected |= {camel, snake}
+
         if snake not in self.names and camel not in self.names:
             self.found.append(f'{idl_name}: missing {kind}')
             return None
@@ -290,22 +313,28 @@ class _Class(_Types):
         if any(base.__name__ == 'EventTarget' for base in self.cls.__mro__):
             inherited |= {'on', 'once'}
         extra = self.names - self.expected - inherited
-        # a snake_case name and its camelCase alias are one member
-        return [f'{name}: extra member' for name in extra if snake_case(name) == name or snake_case(name) not in extra]
+
+        def reported(name: str) -> bool:
+            # a snake_case name and its camelCase alias are one member
+            snake = snake_case(name)
+            return snake == name or snake not in extra
+
+        return [f'{name}: extra member' for name in extra if reported(name)]
 
     def check_enum(self) -> list[str]:
         if not issubclass(self.cls, enum.Enum):
             return ['is not an enum']
         values = {member.value for member in self.cls}
         wanted = self.definition.values
-        return [f'missing value {value!r}' for value in wanted if value not in values] + [
-            f'extra value {value!r}' for value in values - set(wanted)
-        ]
+        missing = [f'missing value {value!r}' for value in wanted if value not in values]
+        extra = [f'extra value {value!r}' for value in values - set(wanted)]
+        return missing + extra
 
     def check_dictionary(self) -> list[str]:
-        fields: dict[str, dataclasses.Field[object]] = (
-            {field.name: field for field in dataclasses.fields(self.cls)} if dataclasses.is_dataclass(self.cls) else {}
-        )
+        fields: dict[str, dataclasses.Field[object]] = {}
+        if dataclasses.is_dataclass(self.cls):
+            fields = {field.name: field for field in dataclasses.fields(self.cls)}
+
         for member in self.spec.fields(self.definition.name):
             name = self.resolve(member['name'], 'member')
             if name is None:
@@ -365,6 +394,7 @@ class _Class(_Types):
         if inspect.isfunction(attribute):
             self.found.append(f'{idl_name}: should be an attribute, not a method')
             return
+
         annotation = self.annotation(name)
         if isinstance(attribute, property):
             if member['readonly'] and attribute.fset is not None:
@@ -385,6 +415,7 @@ class _Class(_Types):
         if not callable(function) or isinstance(attribute, property):
             self.found.append(f'{idl_name}: should be a method')
             return
+
         static = overloads[0]['special'] == 'static'
         if static != is_static:
             self.found.append(f'{idl_name}: should {"" if static else "not "}be static')
@@ -415,6 +446,7 @@ class _Class(_Types):
             parameters = list(signature().parameters.values())
         except (TypeError, ValueError):
             return
+
         span = max(len(overload['arguments']) for overload in overloads) if len(overloads) > 1 else 0
         results = [
             _Arguments(self.spec, label, parameters, span=span).check(overload['arguments']) for overload in overloads
@@ -428,6 +460,7 @@ def _differences(spec: Spec, definition: Definition, module: object) -> list[str
         return [f'missing {definition.kind}']
     if not isinstance(obj, type):
         return ['is not a class']
+
     checker = _Class(spec, definition, obj)
     checks = {'enum': checker.check_enum, 'dictionary': checker.check_dictionary}
     return checks.get(definition.kind, checker.check_interface)()

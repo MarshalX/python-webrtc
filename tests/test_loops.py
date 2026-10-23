@@ -50,6 +50,15 @@ def _in_thread(target: Callable[[], None]) -> None:
     thread.join()
 
 
+def _post_by(use: str, state: LoopState, ran: list[str]) -> list[str]:
+    """Posts a callback, with a drop handler or not; returns what is expected to run."""
+    if use == 'post':
+        state.post(lambda: ran.append('posted'))
+        return []
+    state.post(lambda: ran.append('posted'), dropped=lambda: ran.append('dropped'))
+    return ['dropped']
+
+
 @pytest.mark.asyncio
 async def test_posted_callbacks_run_before_later_timers() -> None:
     """Callbacks posted before a timer run before it."""
@@ -59,6 +68,7 @@ async def test_posted_callbacks_run_before_later_timers() -> None:
     for i in range(10):
         state.post(lambda i=i: order.append(i))
     wrtc._testing.dispatcher_idle()
+
     timer = loop.create_future()
 
     def on_timer() -> None:
@@ -67,6 +77,7 @@ async def test_posted_callbacks_run_before_later_timers() -> None:
 
     loop.call_later(0, on_timer)
     await timer
+
     assert order == [*range(10), 'timer']
 
 
@@ -85,6 +96,7 @@ async def test_completions_from_native_threads_settle_in_order() -> None:
 
     _in_thread(complete_all)
     results = await asyncio.gather(*(future for _, future in started))
+
     assert results == [i * 10 for i in range(10)]
     assert order == list(range(10))
     assert state.pending == {}
@@ -109,6 +121,7 @@ async def test_microtasks_of_a_callback_run_before_the_next_one() -> None:
     state.post(first)
     state.post(second)
     await done
+
     assert order == ['first', 'microtask', 'second']
 
 
@@ -128,18 +141,21 @@ async def test_resumed_code_runs_before_the_next_callback_only() -> None:
 
     task = loop.create_task(awaiting())
     await asyncio.sleep(0)
+
     after_next = loop.create_future()
     state.post(resumed.set, resumes=True)
     state.post(lambda: order.append('next'))
     state.post(lambda: after_next.set_result(None))
     await task
     await after_next
+
     assert order == ['resumed', 'resumed again', 'next']
 
     timer = loop.create_future()
     state.post(lambda: order.append('later'))
     loop.call_later(0, timer.set_result, None)
     await timer
+
     assert order[-1] == 'later'
 
 
@@ -158,12 +174,14 @@ async def test_code_awaiting_a_completion_runs_before_the_next_record() -> None:
 
     task = loop.create_task(awaiting())
     await asyncio.sleep(0)
+
     _in_thread(lambda: wrtc._testing.complete(state.mailbox, token, 1))
     after_next = loop.create_future()
     state.post(lambda: order.append('next'))
     state.post(lambda: after_next.set_result(None))
     await task
     await after_next
+
     assert order == ['result 1', 'resumed again', 'next']
 
 
@@ -194,6 +212,7 @@ def test_loops_are_collected_with_what_they_had_queued() -> None:
         loop.close()
         refs.extend(weakref.ref(obj) for obj in (loop, held, state, future, state.mailbox))
         del loop, held, state, future
+
     # an in-progress Dispatcher collection would skip this one
     wrtc._testing.dispatcher_idle()
     gc.collect()
@@ -206,6 +225,7 @@ def test_closed_loop_held_by_the_user_is_released_on_collection() -> None:
     loop = asyncio.new_event_loop()
     state = LoopState.of(loop)
     _, future = state.start(None)
+
     # an in-progress Dispatcher collection (--gc-on-emit) would skip this one
     wrtc._testing.dispatcher_idle()
     # no drain scheduled: closing alone releases nothing
@@ -219,6 +239,7 @@ def test_closed_loop_held_by_the_user_is_released_on_collection() -> None:
         gc.collect()
     finally:
         wrtc._testing.release('dispatcher.wake')
+
     assert state.mailbox.closed
     assert state.mailbox.dropped == 1
     assert state.pending == {}
@@ -256,6 +277,7 @@ def test_wake_of_a_closed_loop_releases_its_state() -> None:
     loop = asyncio.new_event_loop()
     state = LoopState.of(loop)
     loop.close()
+
     wrtc._testing.post(state.mailbox, 'event', 1)
     wrtc._testing.dispatcher_idle()
 
@@ -286,6 +308,7 @@ def test_pending_call_at_loop_close_is_released() -> None:
         assert len(mailbox) == 0
     finally:
         wrtc._testing.release('dispatcher.wake')
+
     wrtc._testing.dispatcher_idle()
 
 
@@ -310,6 +333,7 @@ def test_states_of_loops_without_a_dict_are_released_with_them() -> None:
 
     del state, loop
     gc.collect()
+
     assert state_ref() is None
     assert mailbox.closed
 
@@ -369,9 +393,11 @@ async def test_completion_re_evaluates_the_object_of_its_call() -> None:
     target = _Active(state)
     state.update(target)
     assert target in state.active
+
     token, future = state.start(target)
     target.reason = None
     _in_thread(lambda: wrtc._testing.complete(state.mailbox, token, 1))
+
     assert await future == 1
     assert target not in state.active
 
@@ -391,6 +417,7 @@ def test_release_of_a_closed_loop_drops_what_it_kept() -> None:
 
     state, pc = loop.run_until_complete(called(keep))
     wrtc._testing.dispatcher_idle()
+
     # no drain scheduled: closing alone releases nothing
     wrtc._testing.park('dispatcher.wake')
     try:
@@ -403,8 +430,11 @@ def test_release_of_a_closed_loop_drops_what_it_kept() -> None:
         gc.collect()
     finally:
         wrtc._testing.release('dispatcher.wake')
+
     assert state.mailbox.closed
-    assert (state.active, state.tasks, len(state.mailbox)) == ({}, set(), 0)
+    assert state.active == {}
+    assert state.tasks == set()
+    assert len(state.mailbox) == 0
     assert pc.listeners('negotiationneeded') == []
     pc.close()
 
@@ -514,6 +544,7 @@ def test_release_of_a_running_loop_cancels_its_calls() -> None:
         return state, future
 
     state, future = asyncio.run(called(release))
+
     assert future.cancelled()
     assert state.pending == {}
 
@@ -522,10 +553,12 @@ def test_only_the_loop_of_an_object_roots_it() -> None:
     """Only the bound loop roots an active object."""
     first, second = asyncio.new_event_loop(), asyncio.new_event_loop()
     try:
-        bound, unbound = _Active(LoopState.of(first)), _Active(None)
+        bound = _Active(LoopState.of(first))
+        unbound = _Active(None)
         for state in (LoopState.of(first), LoopState.of(second)):
             state.update(bound)
             state.update(unbound)
+
         assert LoopState.of(first).active == {bound: 'has handlers'}
         assert LoopState.of(second).active == {}
     finally:
@@ -564,10 +597,13 @@ def test_release_of_another_loop_keeps_the_binding() -> None:
 
     elsewhere = asyncio.run(called(handle_elsewhere))
     elsewhere.release()
+
     assert pc._state() is bound
     assert pc.event_names() == {'negotiationneeded'}
     assert bound.active == {pc: 'handlers'}
+
     first.run_until_complete(called(pc.close))
+
     assert bound.active == {}
     first.close()
 
@@ -584,8 +620,10 @@ async def test_events_without_root_checks(monkeypatch: pytest.MonkeyPatch) -> No
         pc.on('negotiationneeded', lambda event: fired.set_result(event.type))
         pc.add_transceiver(webrtc.MediaType.audio)
         assert await asyncio.wait_for(fired, TIMEOUT) == 'negotiationneeded'
+
         state = LoopState.of(asyncio.get_running_loop())
         assert pc in state.active
+
         pc.off()
         pc.close()
         assert pc not in state.active
@@ -604,10 +642,12 @@ def test_an_active_object_bound_to_no_loop_is_a_mismatch() -> None:
         target = _Active(None)
         with pytest.raises(AssertionError, match='_Active is active but unbound'):
             target._update()
+
         # with handlers registered from the loop
         state.remember(target)
         with pytest.raises(AssertionError, match='_Active is active but unbound'):
             state._check_roots()
+
         target.reason = None
         target._update()
         state._check_roots()
@@ -638,10 +678,12 @@ def test_a_pending_operation_binds_a_connection_bound_to_no_loop() -> None:
         await asyncio.wait_for(first.wait(), TIMEOUT)
         assert pc._state() is state
         assert state.active == {pc: 'pending operation'}
+
         # waits in the chain: still pending, still bound here
         waiting = asyncio.ensure_future(wait())
         await asyncio.sleep(0)
         assert state.active == {pc: 'pending operation'}
+
         release.set()
         await asyncio.wait_for(asyncio.gather(held, waiting), TIMEOUT)
         assert state.active == {}
@@ -659,7 +701,8 @@ def test_a_loop_made_while_another_is_released_never_sees_its_objects_active_and
     first = asyncio.new_event_loop()
     released, pc = _handled_on(first)
     swept, detached = threading.Event(), threading.Event()
-    sweep, unwatch = loops._sweep, LoopState._unwatch
+    sweep = loops._sweep
+    unwatch = LoopState._unwatch
 
     def sweep_then_wait() -> None:
         sweep()
@@ -738,6 +781,7 @@ def test_post_from_another_thread_runs_on_the_loop() -> None:
         loop_thread = threading.current_thread().name
         _in_thread(lambda: state.post(callback, dropped=lambda: ran.append('dropped')))
         await asyncio.wait_for(done.wait(), TIMEOUT)
+
         assert ran == [loop_thread]
 
     asyncio.run(schedule())
@@ -750,10 +794,12 @@ def test_post_of_a_released_loop_runs_the_drop_handler_instead() -> None:
     ran: list[str] = []
     # queued in the loop, which never runs again
     state.post(lambda: ran.append('queued'), dropped=lambda: ran.append('queued dropped'))
+
     loop.close()
     state.release()
     state.release()
     state.post(lambda: ran.append('late'), dropped=lambda: ran.append('late dropped'))
+
     assert ran == ['queued dropped', 'late dropped']
 
 
@@ -765,11 +811,14 @@ def test_post_held_at_release_runs_its_drop_handler() -> None:
     token, _ = state.start(None)
     wrtc._testing.complete(state.mailbox, token, 1)
     state.post(lambda: ran.append('posted'), after_ready=True, dropped=lambda: ran.append('dropped'))
+
     # runs the completion, then holds the callback for a later iteration
     state.drain()
     assert state._held is not None
+
     loop.close()
     state.release()
+
     assert ran == ['dropped']
 
 
@@ -782,8 +831,10 @@ def test_update_roots_by_activity() -> None:
         state.update(connection)
         state.update(child)
         assert state.active == {connection: 'has handlers', child: 'has handlers'}
+
         connection.reason = child.reason = None
         state.update(connection)
+
         assert state.active == {}
     finally:
         loop.close()
@@ -816,12 +867,10 @@ def test_a_state_outliving_its_loop_is_released_by_its_next_use(use: str) -> Non
     del loop
     _swept(lambda: gone() is None)
     ran: list[str] = []
-    if use == 'post':
-        state.post(lambda: ran.append('posted'))
-    else:
-        state.post(lambda: ran.append('posted'), dropped=lambda: ran.append('dropped'))
-    expected: list[str] = [] if use == 'post' else ['dropped']
+
+    expected = _post_by(use, state, ran)
     _swept(lambda: state.mailbox.closed and ran == expected)
+
     assert state._markers == {}
     with pytest.raises(RuntimeError, match='the loop of the state is gone'):
         state.start(None)
@@ -834,12 +883,10 @@ def test_a_post_to_a_closed_loop_releases_its_state(use: str) -> None:
     state = LoopState.of(loop)
     loop.close()
     ran: list[str] = []
-    if use == 'post':
-        state.post(lambda: ran.append('posted'))
-    else:
-        state.post(lambda: ran.append('posted'), dropped=lambda: ran.append('dropped'))
-    expected: list[str] = [] if use == 'post' else ['dropped']
+
+    expected = _post_by(use, state, ran)
     _swept(lambda: state.mailbox.closed and ran == expected)
+
     assert LoopState.find(state.mailbox.id) is None
     # released: later posts are dropped right away
     state.post(lambda: ran.append('late'))
@@ -858,6 +905,7 @@ def test_post_released_before_it_runs_runs_the_drop_handler_only() -> None:
         await asyncio.sleep(0)
 
     asyncio.run(release())
+
     assert ran == ['dropped']
 
 
@@ -868,6 +916,7 @@ async def test_completion_of_an_unknown_call_is_skipped() -> None:
     token, future = state.start(None)
     _in_thread(lambda: wrtc._testing.complete(state.mailbox, token + 1000, 1))
     _in_thread(lambda: wrtc._testing.complete(state.mailbox, token, 2))
+
     assert await asyncio.wait_for(future, TIMEOUT) == 2
     assert state.pending == {}
 
@@ -878,7 +927,9 @@ def test_released_state_roots_nothing() -> None:
     target = _Active(state)
     loop.close()
     state.release()
+
     state.update(target)
+
     assert state.active == {}
 
 
@@ -889,8 +940,10 @@ def test_unrooted_connection_re_evaluates_its_children_on_other_loops() -> None:
         child = _Active(LoopState.of(second), connection)
         LoopState.of(second).update(child)
         assert LoopState.of(second).active == {child: 'has handlers'}
+
         connection.reason = child.reason = None
         LoopState.of(first).update(connection)
+
         assert LoopState.of(second).active == {}
     finally:
         first.close()
@@ -907,6 +960,7 @@ def test_a_rooted_object_without_activity_is_a_mismatch() -> None:
         target.reason = None
         with pytest.raises(AssertionError, match='_Active is rooted with activity None'):
             state._check_roots()
+
         state.update(target)
         state._check_roots()
     finally:
@@ -947,6 +1001,7 @@ def test_lookup_of_a_closed_binding_rebinds_to_a_loop_with_handlers() -> None:
         assert pc._state() is state
     finally:
         gc.enable()
+
     assert pc.listeners('negotiationneeded') == []
     assert pc.listeners('icecandidate') == [on_icecandidate]
     assert state.active == {pc: 'handlers'}
@@ -979,6 +1034,7 @@ async def test_an_event_handled_while_neither_rooted_nor_active_is_a_mismatch() 
         calls.append(event.type)
 
     target._add('ping', on_ping, once=False)
+
     with pytest.raises(AssertionError, match=r"neither rooted nor active while 'ping' is handled by .*on_ping"):
         target._deliver(state, 'ping', ())
     assert calls == []

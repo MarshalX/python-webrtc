@@ -14,11 +14,10 @@ import functools
 
 import pytest
 
+from tests.aiortc.test_media import CONFIGURATION, TIMEOUT, close, local_description, negotiate, new_pair
 from tests.helpers import mistyped
-from tests.timing import seconds
 from webrtc.aiortc import (
     InvalidStateError,
-    RTCConfiguration,
     RTCDataChannel,
     RTCDtlsTransport,
     RTCIceCandidate,
@@ -29,23 +28,6 @@ from webrtc.aiortc import (
     VideoStreamTrack,
 )
 from webrtc.aiortc.sdp import candidate_from_sdp
-
-TIMEOUT = seconds(10)
-#: no STUN server, so gathering is local
-CONFIGURATION = RTCConfiguration(iceServers=[])
-
-
-def local_description(pc: RTCPeerConnection) -> RTCSessionDescription:
-    description = pc.localDescription
-    assert description is not None
-    return description
-
-
-async def negotiate(caller: RTCPeerConnection, callee: RTCPeerConnection) -> None:
-    await caller.setLocalDescription(await caller.createOffer())
-    await callee.setRemoteDescription(local_description(caller))
-    await callee.setLocalDescription(await callee.createAnswer())
-    await caller.setRemoteDescription(local_description(callee))
 
 
 def connected(pc: RTCPeerConnection) -> asyncio.Event:
@@ -58,11 +40,6 @@ def connected(pc: RTCPeerConnection) -> asyncio.Event:
 
     pc.on('connectionstatechange', on_change)
     return event
-
-
-async def close(*pcs: RTCPeerConnection) -> None:
-    for pc in pcs:
-        await pc.close()
 
 
 @pytest.mark.asyncio
@@ -83,7 +60,7 @@ async def test_offer_has_every_candidate() -> None:
 @pytest.mark.asyncio
 async def test_messages_round_trip() -> None:
     """Text, binary and empty messages arrive as sent; a remote channel never emits open."""
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     try:
         channel = caller.createDataChannel('chat')
         opened = asyncio.Event()
@@ -103,6 +80,7 @@ async def test_messages_round_trip() -> None:
 
         await negotiate(caller, callee)
         await asyncio.wait_for(opened.wait(), TIMEOUT)
+
         for message in ['text', '', b'\x00binary', b'']:
             channel.send(message)
             echoed = await asyncio.wait_for(received.get(), TIMEOUT)
@@ -116,11 +94,12 @@ async def test_messages_round_trip() -> None:
 @pytest.mark.asyncio
 async def test_handler_errors() -> None:
     """An exception of a message handler is emitted as 'error', and later handlers still run."""
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     errors: list[Exception] = []
     try:
         channel = caller.createDataChannel('chat')
-        opened, received = asyncio.Event(), asyncio.Event()
+        opened = asyncio.Event()
+        received = asyncio.Event()
         channel.on('open', opened.set)
 
         def fail(message: str | bytes) -> None:
@@ -148,14 +127,16 @@ async def test_handler_errors() -> None:
 @pytest.mark.asyncio
 async def test_state_events_and_transports() -> None:
     """State handlers take no arguments and see aiortc's states, and the transports follow."""
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     connection_states: list[str] = []
     ice_states: list[str] = []
     try:
         caller.on('connectionstatechange', lambda: connection_states.append(caller.connectionState))
         caller.on('iceconnectionstatechange', lambda: ice_states.append(caller.iceConnectionState))
-        caller_connected, callee_connected = connected(caller), connected(callee)
+        caller_connected = connected(caller)
+        callee_connected = connected(callee)
         caller.createDataChannel('chat')
+
         sctp = caller.sctp
         assert sctp is not None
         assert sctp.state == 'new'
@@ -179,11 +160,13 @@ async def test_state_events_and_transports() -> None:
 @pytest.mark.asyncio
 async def test_close() -> None:
     """close() can be repeated and emits the closed states once, and the remote peer closes too."""
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     events: list[str] = []
     try:
         channel = caller.createDataChannel('chat')
-        opened, closed, remote_closed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        opened = asyncio.Event()
+        closed = asyncio.Event()
+        remote_closed = asyncio.Event()
         channel.on('open', opened.set)
         channel.on('close', closed.set)
         await negotiate(caller, callee)
@@ -211,13 +194,14 @@ async def test_close() -> None:
 @pytest.mark.asyncio
 async def test_overlapping_closes() -> None:
     """A second close() waits for the first, which ends signaling before stopping the tracks."""
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     try:
         track = VideoStreamTrack()
         caller.addTrack(track)
         ready = connected(caller)
         await negotiate(caller, callee)
         await asyncio.wait_for(ready.wait(), TIMEOUT)
+
         events: list[tuple[str, str]] = []
         caller.on('signalingstatechange', lambda: events.append((caller.signalingState, track.readyState)))
         caller.on('connectionstatechange', lambda: events.append((caller.connectionState, track.readyState)))
@@ -256,13 +240,13 @@ def test_created_outside_a_loop() -> None:
 @pytest.mark.asyncio
 async def test_lenient_candidates() -> None:
     """Candidates added before the remote description are kept, and unknown media sections are ignored."""
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     try:
         callee_connected = connected(callee)
         caller.createDataChannel('chat')
         await caller.setLocalDescription(await caller.createOffer())
         lines = local_description(caller).sdp.splitlines(keepends=True)
-        candidates = [line.strip()[len('a=candidate:') :] for line in lines if line.startswith('a=candidate:')]
+        candidates = [line.strip().removeprefix('a=candidate:') for line in lines if line.startswith('a=candidate:')]
         stripped = ''.join(line for line in lines if not line.startswith(('a=candidate:', 'a=end-of-candidates')))
 
         for sdp in candidates:

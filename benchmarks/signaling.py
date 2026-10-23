@@ -27,7 +27,8 @@ class _Relay:
     """Passes candidates to a connection, holding them until it has the remote description."""
 
     def __init__(self, driver: Driver, pc: int) -> None:
-        self._driver, self._pc = driver, pc
+        self._driver = driver
+        self._pc = pc
         self._held: list[Candidate] | None = []
         self._sending: set[asyncio.Task[None]] = set()
 
@@ -61,8 +62,10 @@ class Connection:
     """A connection of an offering driver to an answering one, with a data channel."""
 
     def __init__(self, offerer: Driver, answerer: Driver, *, trickle: bool) -> None:
-        self.offerer, self.answerer = offerer, answerer
-        self.caller, self.callee = offerer.new_pc(), answerer.new_pc()
+        self.offerer = offerer
+        self.answerer = answerer
+        self.caller = offerer.new_pc()
+        self.callee = answerer.new_pc()
         #: Whether candidates trickle: only if asked and both drivers can
         self.trickle = trickle and offerer.info['trickle'] and answerer.info['trickle']
         self._relays: list[_Relay] = []
@@ -83,8 +86,8 @@ class Connection:
 
     async def exchange(self) -> Offer:
         """Exchanges the descriptions of the created ends; returns the offer of the caller."""
-        caller, callee = (self.offerer, self.caller), (self.answerer, self.callee)
-        to_callee, to_caller = self._relay(caller, callee), self._relay(callee, caller)
+        to_callee = self._relay(self.offerer, self.caller, to=self.answerer, to_pc=self.callee)
+        to_caller = self._relay(self.answerer, self.callee, to=self.offerer, to_pc=self.caller)
         offer = await self.offerer.offer(self.caller)
         answer = await self.answerer.answer(self.callee, offer['sdp'])
         to_callee.open()
@@ -113,11 +116,12 @@ class Connection:
             relay.stop()
         await asyncio.gather(_close(self.offerer, self.caller), _close(self.answerer, self.callee))
 
-    def _relay(self, source: tuple[Driver, int], target: tuple[Driver, int]) -> _Relay:
-        relay = _Relay(*target)
+    def _relay(self, source: Driver, source_pc: int, *, to: Driver, to_pc: int) -> _Relay:
+        """Relays the candidates of a connection to its remote end."""
+        relay = _Relay(to, to_pc)
         self._relays.append(relay)
         if self.trickle:
-            source[0].on_candidate(source[1], relay.push)
+            source.on_candidate(source_pc, relay.push)
         return relay
 
 

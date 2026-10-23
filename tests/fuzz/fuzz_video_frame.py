@@ -67,7 +67,8 @@ def frame_of_frame(inp: Input, frame: webrtc.VideoFrame) -> webrtc.VideoFrame:
         init.rotation = inp.number(360)
         init.flip = inp.flag()
     if inp.flag():
-        init.display_width, init.display_height = mistyped(inp.integer()), mistyped(inp.integer())
+        init.display_width = mistyped(inp.integer())
+        init.display_height = mistyped(inp.integer())
     return webrtc.VideoFrame(frame, init)
 
 
@@ -88,14 +89,22 @@ def exercise(inp: Input, frame: webrtc.VideoFrame) -> None:
             frame.metadata()
 
 
+def resized(data: Buffer, size: int) -> bytes:
+    """The first size bytes of data, padded with zeros."""
+    return bytes(data)[:size] + bytes(max(0, size - len(data)))
+
+
 def check_identity(format: webrtc.VideoPixelFormat, size: tuple[int, int], data: Buffer) -> None:
     """A packed frame copied out as it is gives the same bytes."""
     width, height = size
+    if width * height > 1024:
+        return
     init = webrtc.VideoFrameBufferInit(format=format, coded_width=width, coded_height=height, timestamp=0)
-    allocation = webrtc.VideoFrame(bytes(1 << 16), init).allocation_size() if width * height <= 1024 else 0
+    allocation = webrtc.VideoFrame(bytes(1 << 16), init).allocation_size()
     if allocation == 0:
         return
-    packed = bytes(data)[:allocation] + bytes(max(0, allocation - len(data)))
+
+    packed = resized(data, allocation)
     with webrtc.VideoFrame(packed, init) as frame:
         out = bytearray(allocation)
         copy_to(frame, out, None)
@@ -106,10 +115,13 @@ def test_one_input(data: bytes) -> None:
     inp = Input(data)
     format = inp.choice(FORMATS)
     if inp.flag():
-        width, height = inp.small(32) + 1, inp.small(32) + 1
+        width = inp.small(32) + 1
+        height = inp.small(32) + 1
         check_identity(format, (width, height), inp.buffer(width * height * 8))
         return
-    width, height = inp.integer(), inp.integer()
+
+    width = inp.integer()
+    height = inp.integer()
     init = webrtc.VideoFrameBufferInit(
         format=format, coded_width=mistyped(width), coded_height=mistyped(height), timestamp=mistyped(inp.integer())
     )
@@ -120,7 +132,9 @@ def test_one_input(data: bytes) -> None:
     if inp.flag():
         init.rotation = inp.number(360)
     if inp.flag():
-        init.display_width, init.display_height = mistyped(inp.integer()), mistyped(inp.integer())
+        init.display_width = mistyped(inp.integer())
+        init.display_height = mistyped(inp.integer())
+
     try:
         frame = webrtc.VideoFrame(inp.buffer(inp.small(1 << 15)), init)
         exercise(inp, frame)

@@ -24,15 +24,25 @@ from tests.idl.spec import load
 logger = logging.getLogger(__name__)
 
 
+def _mark(item: str, changed: set[str]) -> str:
+    """+ for a new difference, - for a gone one."""
+    if f'+ {item}' in changed:
+        return '+'
+    if f'- {item}' in changed:
+        return '-'
+    return ' '
+
+
 def report(differences: dict[str, list[str]]) -> None:
     expected = expectations.load()
     for name in sorted(differences.keys() | expected.keys()):
-        changed = set(expectations.mismatches(expected.get(name, []), differences.get(name, [])))
-        items = sorted(set(differences.get(name, [])) | set(expected.get(name, [])))
+        found = differences.get(name, [])
+        wanted = expected.get(name, [])
+        changed = set(expectations.mismatches(wanted, found))
         logger.info(name)
-        for item in items:
-            mark = '+' if f'+ {item}' in changed else '-' if f'- {item}' in changed else ' '
-            logger.info('  %s %s', mark, item)
+        for item in sorted(set(found) | set(wanted)):
+            logger.info('  %s %s', _mark(item, changed), item)
+
     total = sum(map(len, differences.values()))
     logger.info('%d differences in %d definitions', total, len(differences))
 

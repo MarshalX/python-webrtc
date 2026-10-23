@@ -81,9 +81,12 @@ class OperationsChain:
             if not waiter.done():
                 waiter.set_result(None)
 
-        # in order with the native records, once the code the previous one resumed ran (see LoopState.drain); if the
-        # loop is released first, this operation can't run, so it ends then
-        previous.add_done_callback(lambda _: state.post(resolve, after_ready=True, dropped=lambda: self._end(done)))
+        def on_previous_done(_: concurrent.futures.Future[None]) -> None:
+            # in order with the native records, once the code the previous one resumed ran (see LoopState.drain); if
+            # the loop is released first, this operation can't run, so it ends then
+            state.post(resolve, after_ready=True, dropped=lambda: self._end(done))
+
+        previous.add_done_callback(on_previous_done)
         return waiter
 
     def _end(self, done: concurrent.futures.Future[None]) -> None:
@@ -118,11 +121,14 @@ class Operation:
         chain = self._chain
         if chain._closed():
             return
+
         done: concurrent.futures.Future[None] = concurrent.futures.Future()
         with chain._changing(), chain._lock:
             previous = chain._last
             chain._last = done
-        self._done, self._previous = done, previous
+        self._done = done
+        self._previous = previous
+
         if previous is not None and not previous.done():
             try:
                 await chain._after(previous, done)
@@ -143,9 +149,12 @@ class Operation:
             self._end()
 
     def _end(self) -> None:
-        chain, done, previous = self._chain, self._done, self._previous
+        chain = self._chain
+        done = self._done
+        previous = self._previous
         if done is None:
             return
+
         if previous is not None and not previous.done():
             # cancelled while waiting: the next operations still wait for the previous one
             previous.add_done_callback(lambda _: chain._end(done))

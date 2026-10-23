@@ -39,6 +39,7 @@ class RTCDataChannelParameters:
 
 
 def _returned(value: object) -> object:
+    """Returns a handler's coroutine unchanged, so the emitter schedules it."""
     return value
 
 
@@ -89,11 +90,13 @@ class RTCDataChannel(AsyncIOEventEmitter):
     @override
     def _add_event_handler(self, event: str, k: Callable[..., object], v: Callable[..., object]) -> None:
         super()._add_event_handler(event, k, v)
+        if event not in _CHANNEL_EVENTS or event in self._heard:
+            return
         # a channel the remote peer created is open when announced
-        heard = event in _CHANNEL_EVENTS and (event != 'open' or self._local)
-        if heard and event not in self._heard:
-            self._heard.add(event)
-            self._pc._adopt(self)
+        if event == 'open' and not self._local:
+            return
+        self._heard.add(event)
+        self._pc._adopt(self)
 
     def _attach(self) -> None:
         handlers: dict[str, Callable[[Never], object]] = {

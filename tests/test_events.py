@@ -30,6 +30,7 @@ from tests.helpers import (
     exchange_answer,
     exchange_offer,
     exchange_offer_answer,
+    report_first_exception,
     undelivered,
     wait_for_event,
     wait_for_ice_gathering_complete,
@@ -110,8 +111,8 @@ async def test_unreachable_ice_server_fires_icecandidateerror(create_pc: CreateP
     error = wait_for_event(pc, 'icecandidateerror')
 
     await pc.set_local_description()
-
     event = await error
+
     assert isinstance(event, webrtc.RTCPeerConnectionIceErrorEvent)
     assert event.target is pc
     assert event.error_code == 701
@@ -132,6 +133,7 @@ async def test_async_handlers_run_as_tasks(pc: webrtc.RTCPeerConnection) -> None
             done.set_result(event.type)
 
     pc.create_data_channel('events')
+
     assert await asyncio.wait_for(done, TIMEOUT) == 'negotiationneeded'
 
 
@@ -185,8 +187,10 @@ async def test_off_of_an_event_without_handlers_does_nothing(pc: webrtc.RTCPeerC
             fired.set_result(event.type)
 
     _ = pc.on('negotiationneeded', first)
+
     pc.off('track', first)
     pc.remove_listener('track', first)
+
     assert pc.event_names() == {'negotiationneeded'}
     pc.add_transceiver(webrtc.MediaType.audio)
     assert await asyncio.wait_for(fired, TIMEOUT) == 'negotiationneeded'
@@ -195,6 +199,7 @@ async def test_off_of_an_event_without_handlers_does_nothing(pc: webrtc.RTCPeerC
 def test_off_before_any_handler_does_nothing(pc: webrtc.RTCPeerConnection) -> None:
     pc.off()
     pc.off('track')
+
     assert pc.event_names() == set()
 
 
@@ -204,11 +209,12 @@ async def test_off_everything_stops_delivery(pc: webrtc.RTCPeerConnection) -> No
     calls: list[str] = []
     _ = pc.on('negotiationneeded', lambda event: calls.append(event.type))
     _ = pc.on('signalingstatechange', lambda event: calls.append(event.type))
-    pc.off()
 
+    pc.off()
     pc.add_transceiver(webrtc.MediaType.audio)
     await pc.set_local_description(await pc.create_offer())
     await delivered()
+
     assert calls == []
 
 
@@ -239,11 +245,14 @@ def test_ice_candidate_error_event_constructor() -> None:
         'errorText': 'unreachable',
     })
     event = webrtc.RTCPeerConnectionIceErrorEvent('icecandidateerror', init)
+
     assert event.type == 'icecandidateerror'
     assert (event.address, event.port, event.url) == ('192.0.2.1', 50000, 'stun:stun.example.org')
     assert (event.error_code, event.error_text) == (701, 'unreachable')
     assert event.target is None
-    unknown = webrtc.RTCPeerConnectionIceErrorEvent('icecandidateerror', webrtc.RTCPeerConnectionIceErrorEventInit(701))
+
+    unknown_init = webrtc.RTCPeerConnectionIceErrorEventInit(701)
+    unknown = webrtc.RTCPeerConnectionIceErrorEvent('icecandidateerror', unknown_init)
     assert (unknown.address, unknown.port, unknown.url, unknown.error_text) == (None, None, '', '')
 
 
@@ -301,7 +310,8 @@ def test_transceivers_change_with_the_descriptions(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(LoopState, 'watches_pipe', False)
 
     async def scenario() -> None:
-        caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        caller = webrtc.RTCPeerConnection()
+        callee = webrtc.RTCPeerConnection()
         offered = caller.add_transceiver(webrtc.MediaType.audio)
         await delivered()
         with undelivered():
@@ -332,7 +342,9 @@ async def test_close_stops_the_transceivers_at_once(
     """close() stops every transceiver synchronously, though no description shows it."""
     caller.add_transceiver(webrtc.MediaType.audio)
     await exchange_offer_answer(caller, callee)
+
     callee.close()
+
     # read through a wrapper made after close(), which binds the connection again
     [transceiver] = callee.get_transceivers()
     assert (transceiver.mid, transceiver.stopped) == ('0', True)
@@ -358,11 +370,12 @@ async def test_answer_shows_its_transceivers_to_its_events(
     caller.on('signalingstatechange', on_event)
     caller.on('track', on_event)
     # the remote peer rejects the video section
-    await caller.set_remote_description(
-        webrtc.RTCSessionDescriptionInit('answer', answer.sdp.replace('m=video 9 ', 'm=video 0 '))
-    )
+    rejecting_video = answer.sdp.replace('m=video 9 ', 'm=video 0 ')
 
-    sendrecv, stopped = webrtc.RTCRtpTransceiverDirection.sendrecv, webrtc.RTCRtpTransceiverDirection.stopped
+    await caller.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', rejecting_video))
+
+    sendrecv = webrtc.RTCRtpTransceiverDirection.sendrecv
+    stopped = webrtc.RTCRtpTransceiverDirection.stopped
     assert seen == [('signalingstatechange', sendrecv, stopped, True), ('track', sendrecv, stopped, True)]
 
 
@@ -393,10 +406,13 @@ async def test_stopped_transceiver_through_a_negotiation(
     """stop() makes a transceiver stopping at once, the answer stops it, and it leaves the connection."""
     transceiver = caller.add_transceiver(webrtc.MediaType.audio)
     await exchange_offer_answer(caller, callee)
+
     transceiver.stop()
     assert (transceiver._native_obj.stopping, transceiver.stopped) == (True, False)
+
     await exchange_offer(caller, callee)
     assert not transceiver.stopped
+
     await exchange_answer(caller, callee)
     assert (transceiver.stopped, transceiver.current_direction) == (True, webrtc.RTCRtpTransceiverDirection.stopped)
     assert caller.get_transceivers() == []
@@ -420,6 +436,7 @@ async def test_close_while_a_description_waits_to_be_set(pc: webrtc.RTCPeerConne
     finally:
         wrtc._testing.release('description.completed')
     await closing
+
     # the specification aborts its steps
     with pytest.raises(asyncio.CancelledError):
         await setting
@@ -442,6 +459,7 @@ async def test_closed_connection_emits_nothing(
     caller.create_data_channel('media')
     await connect(caller, callee)
     events.clear()
+
     caller.close()
     callee.close()
     await delivered()
@@ -465,6 +483,7 @@ async def test_ice_candidates_and_end_of_candidates(pc: webrtc.RTCPeerConnection
     pc.on('icecandidate', on_candidate)
     gathered = wait_for_event(pc, 'icecandidate', predicate=end_of_candidates)
     pc.add_transceiver(webrtc.MediaType.audio)
+
     await pc.set_local_description()
     await gathered
 
@@ -486,6 +505,7 @@ async def test_reading_one_description_refreshes_only_its_own(create_pc: CreateP
     await pc.set_local_description()
     assert pc.remote_description is None
     assert pc.local_description is not None
+
     await wait_for_ice_gathering_complete(pc)
     assert pc.remote_description is None
 
@@ -509,6 +529,7 @@ async def test_descriptions_change_with_signaling_events(
         })
 
     caller.on('signalingstatechange', on_change)
+
     await caller.set_remote_description(await callee.create_offer())
 
     rolled_back, received = seen
@@ -525,8 +546,10 @@ async def test_restart_ice_before_negotiation_needs_nothing(pc: webrtc.RTCPeerCo
     """restart_ice before the first negotiation doesn't fire negotiationneeded."""
     events: list[webrtc.Event] = []
     pc.on('negotiationneeded', events.append)
+
     pc.restart_ice()
     await delivered()
+
     assert events == []
 
 
@@ -543,18 +566,22 @@ def test_objects_used_from_another_loop_see_their_events() -> None:
     objects = _LoopObjects()
 
     async def first() -> None:
-        caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        caller = webrtc.RTCPeerConnection()
+        callee = webrtc.RTCPeerConnection()
         channel = caller.create_data_channel('loops')
         opened = wait_for_event(channel, 'open')
         await connect(caller, callee)
         await opened
-        objects.caller, objects.callee, objects.channel = caller, callee, channel
+        objects.caller = caller
+        objects.callee = callee
+        objects.channel = channel
 
     async def second() -> None:
         channel = objects.channel
         closed = wait_for_event(channel, 'close')
         objects.callee.close()
         await closed
+
         assert channel.ready_state == webrtc.RTCDataChannelState.closed
         objects.caller.close()
 
@@ -577,11 +604,12 @@ async def test_event_after_its_wrapper_died_still_changes_the_state(
     collect()
     assert ref() is None
 
+    def closed() -> bool:
+        return webrtc.RTCDataChannel._wrap(native).ready_state == webrtc.RTCDataChannelState.closed
+
     callee.close()
-    await wait_until(
-        lambda: webrtc.RTCDataChannel._wrap(native).ready_state == webrtc.RTCDataChannelState.closed,
-        'the close event to reach the channel',
-    )
+
+    await wait_until(closed, 'the close event to reach the channel')
 
 
 @contextlib.contextmanager
@@ -623,7 +651,8 @@ def test_handlers_on_two_loops() -> None:
     seen: list[asyncio.AbstractEventLoop] = []
 
     async def main() -> asyncio.AbstractEventLoop:
-        caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        caller = webrtc.RTCPeerConnection()
+        callee = webrtc.RTCPeerConnection()
         channel = caller.create_data_channel('loops')
         opened = wait_for_event(channel, 'open')
         channel.on('close', lambda _event: seen.append(asyncio.get_running_loop()))
@@ -637,6 +666,7 @@ def test_handlers_on_two_loops() -> None:
 
     with _loop_in_a_thread() as other:
         main_loop = asyncio.run(main())
+
     assert sorted(seen, key=id) == sorted([main_loop, other], key=id)
 
 
@@ -645,7 +675,8 @@ def test_handler_registered_from_another_loop_than_the_binding_loop() -> None:
     seen: list[asyncio.AbstractEventLoop] = []
 
     async def main() -> None:
-        caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        caller = webrtc.RTCPeerConnection()
+        callee = webrtc.RTCPeerConnection()
         channel = caller.create_data_channel('elsewhere')
         _register_from(other, channel, 'open', seen=seen)
         await connect(caller, callee)
@@ -655,6 +686,7 @@ def test_handler_registered_from_another_loop_than_the_binding_loop() -> None:
 
     with _loop_in_a_thread() as other:
         asyncio.run(main())
+
     assert seen == [other]
 
 
@@ -673,10 +705,12 @@ async def test_off_from_a_handler(pc: webrtc.RTCPeerConnection) -> None:
     pc.on('negotiationneeded', first)
     pc.on('negotiationneeded', second)
     pc.on('signalingstatechange', lambda event: calls.append(event.type))
+
     pc.add_transceiver(webrtc.MediaType.audio)
     await wait_until(lambda: len(calls) > 0, 'the first handler')
     await pc.set_local_description()
     await delivered()
+
     assert calls == ['first']
     assert pc.event_names() == set()
 
@@ -685,8 +719,8 @@ async def test_off_from_a_handler(pc: webrtc.RTCPeerConnection) -> None:
 async def test_async_handler_exception_goes_to_the_loop(pc: webrtc.RTCPeerConnection) -> None:
     """An async handler's exception reaches the loop's exception handler."""
     loop = asyncio.get_running_loop()
-    reported = loop.create_future()
-    loop.set_exception_handler(lambda _loop, context: reported.done() or reported.set_result(context))
+    reported: asyncio.Future[dict[str, object]] = loop.create_future()
+    report_first_exception(reported)
     try:
 
         @pc.on('negotiationneeded')
@@ -697,6 +731,7 @@ async def test_async_handler_exception_goes_to_the_loop(pc: webrtc.RTCPeerConnec
 
         pc.create_data_channel('events')
         context = await asyncio.wait_for(reported, TIMEOUT)
+
         assert context['message'] == "Exception in 'negotiationneeded' event handler"
         assert isinstance(context['exception'], ValueError)
         assert isinstance(context['event'], webrtc.Event)
@@ -719,9 +754,11 @@ async def test_handler_removed_during_dispatch_is_skipped(pc: webrtc.RTCPeerConn
     pc.on('negotiationneeded', first)
     pc.on('negotiationneeded', second)
     negotiation = wait_for_event(pc, 'negotiationneeded')
+
     _ = pc.add_transceiver(webrtc.MediaType.audio)
     _ = await negotiation
     await delivered()
+
     assert calls == ['first']
 
 

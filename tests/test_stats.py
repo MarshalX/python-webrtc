@@ -29,7 +29,9 @@ async def send_audio(
     """Connects, sending the audio of the stream, and returns the remote track once media arrives."""
     caller.add_track(stream.get_tracks()[0], stream)
     track_event = wait_for_event(callee, 'track')
+
     await connect(caller, callee)
+
     event = await track_event
     assert isinstance(event, webrtc.RTCTrackEvent)
     remote = event.track
@@ -52,15 +54,18 @@ async def test_connection_stats(
     report = await caller.get_stats()
     assert isinstance(report, webrtc.RTCStatsReport)
     assert all(isinstance(stats, webrtc.RTCPeerConnectionStats) for stats in stats_of_type(report, 'peer-connection'))
+
     outbound = stats_of_type(report, webrtc.RTCStatsType.outbound_rtp)[0]
     assert isinstance(outbound, webrtc.RTCOutboundRtpStreamStats)
     assert outbound.kind == 'audio'
     assert outbound.type is webrtc.RTCStatsType.outbound_rtp
     assert abs(outbound.timestamp - time.time() * 1000) < 60_000
+
     [transport] = stats_of_type(report, 'transport')
     assert isinstance(transport, webrtc.RTCTransportStats)
     assert transport.dtls_state is webrtc.RTCDtlsTransportState.connected
     assert transport.dtlsState is transport.dtls_state
+
     [source] = stats_of_type(report, 'media-source')
     assert isinstance(source, webrtc.RTCAudioSourceStats)
 
@@ -79,9 +84,10 @@ async def test_sender_stats(
     await wait_until(has_remote_inbound, 'the first RTCP receiver report')
 
     sender_report = await sender.get_stats()
+    track_report = await caller.get_stats(audio_stream.get_tracks()[0])
+
     assert len(stats_of_type(sender_report, 'outbound-rtp')) > 0
     assert len(stats_of_type(sender_report, 'inbound-rtp')) == 0
-    track_report = await caller.get_stats(audio_stream.get_tracks()[0])
     assert ice_free_ids(track_report) == ice_free_ids(sender_report)
     # ICE may still switch the selected pair between the two reports
     assert len(stats_of_type(track_report, 'candidate-pair')) == 1
@@ -100,6 +106,7 @@ async def test_receiver_stats(
         return stats_of_type(await receiver.get_stats(), 'inbound-rtp')
 
     await wait_until(receives, 'inbound-rtp stats')
+
     [inbound] = await receives()
     assert isinstance(inbound, webrtc.RTCInboundRtpStreamStats)
     assert inbound.track_identifier == receiver.track.id
@@ -132,6 +139,7 @@ async def test_stats_of_a_track_the_connection_does_not_send(
 ) -> None:
     """Only the track of a sender of the connection selects stats."""
     pc.add_track(audio_stream.get_tracks()[0])
+
     with pytest.raises(webrtc.InvalidAccessError):
         await pc.get_stats(audio_stream2.get_tracks()[0])
 
@@ -142,7 +150,9 @@ async def test_closed_connection_has_stats(
 ) -> None:
     """A closed connection still has stats."""
     await send_audio(caller, callee, audio_stream)
+
     caller.close()
+
     assert len(stats_of_type(await caller.get_stats(), 'peer-connection')) > 0
 
 
@@ -150,7 +160,9 @@ async def test_closed_connection_has_stats(
 async def test_report_length_and_repr(pc: webrtc.RTCPeerConnection) -> None:
     """A report maps its stats ids."""
     report = await pc.get_stats()
-    assert len(report) == len(list(report)) == len(report.values()) > 0
+
+    assert len(report) > 0
+    assert len(report) == len(list(report)) == len(report.values())
     assert repr(report) == f'RTCStatsReport({len(report)} stats)'
 
 
@@ -166,8 +178,9 @@ async def test_remote_audio_is_played_out(
         inbound = stats_of_type(await receiver.get_stats(), 'inbound-rtp')
         if len(inbound) == 0:
             return False
-        assert isinstance(inbound[0], webrtc.RTCInboundRtpStreamStats)
-        received = inbound[0].total_samples_received
+        first = inbound[0]
+        assert isinstance(first, webrtc.RTCInboundRtpStreamStats)
+        received = first.total_samples_received
         return received is not None and received > 0
 
     await wait_until(decoded, 'decoded remote audio')
@@ -184,13 +197,14 @@ async def test_call_stats_are_the_dictionaries_of_their_types(
         caller.add_track(track, audio_stream)
     channel = caller.create_data_channel('stats')
     opened = wait_for_event(channel, 'open')
-    await connect(caller, callee)
-    await opened
 
     async def reported() -> bool:
         return len(stats_of_type(await caller.get_stats(), 'remote-inbound-rtp')) > 0
 
+    await connect(caller, callee)
+    await opened
     await wait_until(reported, 'RTCP reports', timeout=seconds(20))
+
     for pc in (caller, callee):
         for stats in (await pc.get_stats()).values():
             assert isinstance(stats, rtc_stats._dictionary(stats.to_json())), stats
@@ -246,7 +260,9 @@ CODEC = {
 def test_stats_are_the_dictionary_of_their_type(entry: dict[str, object], dictionary: type[webrtc.RTCStats]) -> None:
     """Each type of stats is the dictionary the specification defines for it."""
     report = report_of({**entry, 'id': 'S', 'timestamp': 1_500_000})
+
     stats = report['S']
+
     assert type(stats) is dictionary
     assert stats.id == 'S'
     assert stats.timestamp == 1500
@@ -276,6 +292,7 @@ def test_stats_members() -> None:
             'address': '',
         },
     )
+
     outbound = report['O']
     assert isinstance(outbound, webrtc.RTCOutboundRtpStreamStats)
     assert outbound.bytes_sent == outbound.bytesSent == 10
@@ -293,9 +310,10 @@ def test_stats_members() -> None:
         'qualityLimitationReason': 'cpu',
         'qualityLimitationDurations': {'cpu': 1.5, 'none': 0},
     }
+
     candidate = report['L']
     assert isinstance(candidate, webrtc.RTCIceCandidateStats)
-    # libwebrtc leaves addresses it doesn't expose empty
+    # libwebrtc leaves the addresses it doesn't expose empty
     assert candidate.address is None
     assert candidate.candidate_type is webrtc.RTCIceCandidateType.host
 
@@ -306,10 +324,12 @@ def test_unknown_values_are_kept() -> None:
         {'type': 'data-channel', 'id': 'D', 'timestamp': 0, 'state': 'opening'},
         {'type': 'csrc', 'id': 'X', 'timestamp': 0, 'contributorSsrc': 1},
     )
+
     channel = report['D']
     assert isinstance(channel, webrtc.RTCDataChannelStats)
     assert channel.state == 'opening'
     assert not isinstance(channel.state, webrtc.RTCDataChannelState)
+
     unknown = report['X']
     assert type(unknown) is webrtc.RTCStats
     assert unknown.type == 'csrc'
@@ -319,8 +339,10 @@ def test_unknown_values_are_kept() -> None:
 def test_stats_lacking_a_required_member(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stats libwebrtc reports without a required member of their dictionary have the common members only."""
     monkeypatch.setattr(rtc_stats, '_DOWNGRADED', set())
+
     with pytest.warns(RuntimeWarning, match="'codec' stats lack a required member"):
         report = report_of({'type': 'codec', 'id': 'C', 'timestamp': 0, 'payloadType': 111})
+
     assert type(report['C']) is webrtc.RTCStats
 
 
@@ -328,16 +350,19 @@ def test_stats_lacking_a_required_member_warn_once_per_type(monkeypatch: pytest.
     """The fallback warns once per type of stats."""
     monkeypatch.setattr(rtc_stats, '_DOWNGRADED', set())
     entry = {'type': 'certificate', 'timestamp': 0, 'fingerprint': 'AB'}
+
     with warnings.catch_warnings(record=True) as warned:
         warnings.simplefilter('always')
         report_of({**entry, 'id': 'A'}, {**entry, 'id': 'B'})
         report_of({**entry, 'id': 'C'})
+
     assert [warning.category for warning in warned] == [RuntimeWarning]
 
 
 def test_stats_dictionaries() -> None:
     """Stats dictionaries take keyword members, require the required ones, and convert from and to JSON."""
     codec = webrtc.RTCCodecStats.from_json({**CODEC, 'clockRate': 48000})
+
     assert codec == webrtc.RTCCodecStats(
         id='C',
         type='codec',
@@ -350,6 +375,7 @@ def test_stats_dictionaries() -> None:
     assert codec.type is webrtc.RTCStatsType.codec
     assert codec.channels is None
     assert webrtc.RTCCodecStats.from_json(codec.to_json()) == codec
+
     with pytest.raises(TypeError, match='missing the required member'):
         webrtc.RTCCodecStats(id='C', type='codec', timestamp=0, payload_type=111, transport_id='T')
     with pytest.raises(TypeError, match='has no member'):

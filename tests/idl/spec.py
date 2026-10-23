@@ -233,18 +233,25 @@ def _path(name: str) -> Path:
     return vendored if vendored.exists() else WPT_ROOT / 'interfaces' / name
 
 
+def _parse_nodes(texts: dict[str, str]) -> list[Node]:
+    """The definitions of IDL texts, parsed in a child process."""
+    child = subprocess.run(
+        [sys.executable, '-m', 'tests.idl.child'],
+        input=json.dumps(texts),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    nodes: list[Node] = json.loads(child.stdout)
+    return nodes
+
+
 def parse(texts: dict[str, str], files: dict[str, set[str] | None]) -> Spec:
     """Parses IDL texts by file name and keeps the definitions each file takes, as in :data:`FILES`."""
-    nodes: list[Node] = json.loads(
-        subprocess.run(
-            [sys.executable, '-m', 'tests.idl.child'],
-            input=json.dumps(texts),
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-    )
-    spec = Spec(_merge(nodes, files), {node['name']: node['idlType'] for node in nodes if node['type'] == 'typedef'})
+    nodes = _parse_nodes(texts)
+    typedefs = {node['name']: node['idlType'] for node in nodes if node['type'] == 'typedef'}
+    spec = Spec(_merge(nodes, files), typedefs)
+
     taken: set[str] = set()
     for node in nodes:
         if node['type'] == 'includes' or node['name'] not in spec.definitions or _is_partial(node):
@@ -252,6 +259,7 @@ def parse(texts: dict[str, str], files: dict[str, set[str] | None]) -> Spec:
         wanted = files[node['file']]
         if wanted is None or node['name'] in wanted:
             taken.add(node['name'])
+
     return Spec({name: spec.definitions[name] for name in sorted(_used(spec, taken))}, spec.typedefs)
 
 
@@ -267,9 +275,8 @@ def _definitions(nodes: list[Node]) -> dict[str, Definition]:
     definitions: dict[str, Definition] = {}
     for node in nodes:
         if node['type'] in {'interface', 'dictionary'} and not node['partial']:
-            definitions[node['name']] = Definition(
-                node['name'], node['type'], node['inheritance'], list(node['members'])
-            )
+            members = list(node['members'])
+            definitions[node['name']] = Definition(node['name'], node['type'], node['inheritance'], members)
         elif node['type'] == 'enum':
             values = [value['value'] for value in node['values']]
             definitions[node['name']] = Definition(node['name'], node['type'], values=values)
@@ -283,6 +290,7 @@ def _merge(nodes: list[Node], files: dict[str, set[str] | None]) -> dict[str, De
     for node in nodes:
         if node['type'] == 'interface mixin':
             mixins.setdefault(node['name'], []).extend(node['members'])
+
     # partials and mixins extend definitions of any file, but only those that exist
     for node in nodes:
         if node['type'] == 'includes':

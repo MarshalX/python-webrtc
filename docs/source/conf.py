@@ -269,6 +269,14 @@ def _literal_names(node: ast.expr, aliases: dict[str, ast.expr]) -> list[str]:
     return names
 
 
+def _decorated_event_type(method: ast.FunctionDef) -> str | None:
+    """The ``X`` of a ``HandlerDecorator[X]`` return type, which an overload of ``on`` has."""
+    returns = method.returns
+    if not isinstance(returns, ast.Subscript) or ast.unparse(returns.value) != 'HandlerDecorator':
+        return None
+    return ast.unparse(returns.slice)
+
+
 def _event_types(cls: type) -> dict[str, str]:
     """The event object of each event of a class, from the overloads of its ``on``."""
     tree = ast.parse(inspect.getsource(sys.modules[cls.__module__]))
@@ -277,22 +285,20 @@ def _event_types(cls: type) -> dict[str, str]:
         for node in tree.body
         if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
     }
+    classes = [node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == cls.__name__]
+
     types: dict[str, str] = {}
-    for node in tree.body:
-        if not (isinstance(node, ast.ClassDef) and node.name == cls.__name__):
-            continue
-        for method in node.body:
-            returns = getattr(method, 'returns', None)
-            if not (
-                isinstance(method, ast.FunctionDef)
-                and method.name == 'on'
-                and isinstance(returns, ast.Subscript)
-                and ast.unparse(returns.value) == 'HandlerDecorator'
-            ):
+    for node in classes:
+        overloads = [method for method in node.body if isinstance(method, ast.FunctionDef) and method.name == 'on']
+        for method in overloads:
+            event_type = _decorated_event_type(method)
+            if event_type is None:
                 continue
             annotation = method.args.args[1].annotation
-            for name in _literal_names(annotation, aliases) if annotation is not None else []:
-                types[name] = ast.unparse(returns.slice)
+            if annotation is None:
+                continue
+            for name in _literal_names(annotation, aliases):
+                types[name] = event_type
     return types
 
 
@@ -329,9 +335,11 @@ def register_short_aliases(app: Sphinx, env: BuildEnvironment) -> None:
         module = getattr(obj, '__module__', None)
         if not module or module == 'webrtc' or not (inspect.isclass(obj) or inspect.isfunction(obj)):
             continue
+
         canonical = f'{module}.{obj.__qualname__}'
         # the object and its members
-        for target in [key for key in py_objects if key == canonical or key.startswith(f'{canonical}.')]:
+        targets = [key for key in py_objects if key == canonical or key.startswith(f'{canonical}.')]
+        for target in targets:
             short = f'webrtc.{name}{target[len(canonical) :]}'
             if short not in py_objects:
                 entry = py_objects[target]

@@ -95,17 +95,21 @@ def _sdp_of(description: webrtc.RTCSessionDescription | None) -> str:
 
 
 def _split(sdp: str) -> tuple[str, list[str]]:
+    """The session part of an SDP and its media sections."""
     parts: list[str] = []
-    start, index = 0, sdp.find('\nm=')
+    start = 0
+    index = sdp.find('\nm=')
     while index >= 0:
         parts.append(sdp[start : index + 1])
-        start, index = index + 1, sdp.find('\nm=', index + 1)
+        start = index + 1
+        index = sdp.find('\nm=', start)
     parts.append(sdp[start:])
     return parts[0], parts[1:]
 
 
 def _media_section(sdp: str, mid: str | None) -> str:
-    for section in _split(sdp)[1]:
+    _, sections = _split(sdp)
+    for section in sections:
         found = _MID.search(section)
         if found is not None and found.group(1) == mid:
             return section
@@ -117,9 +121,17 @@ def _found(pattern: re.Pattern[str], text: str) -> str | None:
     return found.group(1) if found is not None else None
 
 
+def _media_kind(section: str) -> str:
+    """The media of an ``m=`` section: audio, video or application."""
+    return section[2:].split(' ', 1)[0]
+
+
 def _media_lines(sdp: str) -> list[tuple[str, str | None]]:
-    return [(section[2:].split(' ', 1)[0], _found(_MID, section)) for section in _split(sdp)[1]]
+    _, sections = _split(sdp)
+    return [(_media_kind(section), _found(_MID, section)) for section in sections]
 
 
 def _media_formats(section: str) -> list[str]:
-    return section.partition('\n')[0].split()[3:]
+    """The payload types of an ``m=`` line, which follow its media, port and protocol."""
+    m_line = section.partition('\n')[0]
+    return m_line.split()[3:]

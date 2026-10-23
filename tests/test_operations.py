@@ -13,7 +13,7 @@ import asyncio
 import contextlib
 import gc
 import threading
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, NamedTuple
 
 import pytest
 
@@ -55,6 +55,7 @@ async def test_cancelled_waiting_operation_leaves_the_running_one() -> None:
 
     release.set()
     await asyncio.wait_for(asyncio.gather(first, third), seconds(5))
+
     with pytest.raises(asyncio.CancelledError):
         await waiting
     assert order == ['first', 'third']
@@ -65,8 +66,8 @@ async def test_cancelled_waiting_operation_leaves_the_running_one() -> None:
 async def test_next_operation_waits_for_the_code_the_previous_one_resumed() -> None:
     """Code awaiting an operation resumes before the next one chained behind it, even over a few iterations.
 
-    Like a browser's microtasks run before a task: a callback chain the completion started, as a JS bridge's promise
-    jobs are, starts its work first.
+    A callback chain the completion started, such as a JS bridge's promise jobs, starts its work first, as microtasks
+    run before the next task.
     """
     chain = OperationsChain(lambda: None, lambda: False)
     release = asyncio.Event()
@@ -91,6 +92,7 @@ async def test_next_operation_waits_for_the_code_the_previous_one_resumed() -> N
     await asyncio.sleep(0)
     release.set()
     await asyncio.wait_for(asyncio.gather(resumed, second), seconds(5))
+
     assert order == ['first', 'resumed', 'second']
 
 
@@ -108,9 +110,11 @@ async def test_operations_of_a_closed_chain_run_at_once() -> None:
     held = asyncio.ensure_future(hold())
     await asyncio.sleep(0)
     closed = True
+
     ran = False
     async with chain.operation():
         ran = True
+
     assert ran
     assert chain.busy
     release.set()
@@ -126,6 +130,7 @@ async def test_add_ice_candidate_without_a_remote_description_rejects_at_once() 
     try:
         added = asyncio.ensure_future(pc.add_ice_candidate())
         await asyncio.sleep(0)
+
         assert added.done()
         with pytest.raises(webrtc.InvalidStateError, match='remote description'):
             added.result()
@@ -146,12 +151,14 @@ def test_operations_stranded_by_a_closed_loop_end_quietly() -> None:
     operations = [operation() for _ in range(3)]
     tasks = [loop.create_task(coroutine) for coroutine in operations]
     loop.run_until_complete(asyncio.sleep(0))
+
     # as asyncio.run and pytest-asyncio close a loop: its async generators first
     loop.run_until_complete(loop.shutdown_asyncgens())
     loop.close()
     for coroutine in operations:
         # as collecting it does
         coroutine.close()
+
     assert not any(task.done() for task in tasks)
 
 
@@ -182,6 +189,7 @@ def test_operation_waiting_for_one_of_another_loop_resumes() -> None:
 
     asyncio.run(second())
     other.join(seconds(5))
+
     assert not chain.busy
 
 
@@ -213,6 +221,7 @@ def test_operation_waiting_in_a_closed_loop_lets_the_chain_go_on(caplog: pytest.
     loop.close()
     release.set()
     other.join(seconds(5))
+
     assert not chain.busy
     # collected later, its code may end the operation again (3.10+)
     del waiting
@@ -254,6 +263,7 @@ async def pending_at_close(name: str) -> asyncio.Future[object]:
         await pc.set_local_description()
     elif state == webrtc.RTCSignalingState.have_remote_offer:
         await pc.set_remote_description(offer)
+
     task = asyncio.ensure_future(start(pc, offer))
     # the operation passes its checks and waits for its task
     await asyncio.sleep(0)
@@ -279,6 +289,7 @@ async def test_operations_after_close_do_not_wait_for_pending_ones() -> None:
     pending = asyncio.ensure_future(pc.set_local_description())
     queued = asyncio.ensure_future(pc.create_offer())
     await asyncio.sleep(0)
+
     pc.close()
 
     with pytest.raises(webrtc.InvalidStateError):
@@ -302,12 +313,20 @@ async def created_connection() -> webrtc.RTCPeerConnection:  # ruff: ignore[unus
     return webrtc.RTCPeerConnection()
 
 
+class IdleEvents(NamedTuple):
+    pc: webrtc.RTCPeerConnection
+    #: The loop of the connection's events, run only by the test
+    events: asyncio.AbstractEventLoop
+    #: The loop operations run on
+    other: asyncio.AbstractEventLoop
+
+
 @pytest.fixture
-def idle_events() -> Iterator[tuple[webrtc.RTCPeerConnection, asyncio.AbstractEventLoop, asyncio.AbstractEventLoop]]:
+def idle_events() -> Iterator[IdleEvents]:
     """A connection whose events wait on a loop only the test runs."""
     events, other = asyncio.new_event_loop(), asyncio.new_event_loop()
     pc = events.run_until_complete(created_connection())
-    yield pc, events, other
+    yield IdleEvents(pc, events, other)
     pc.close()
     events.close()
     other.close()
@@ -317,9 +336,7 @@ async def signaling_change(pc: webrtc.RTCPeerConnection, state: webrtc.RTCSignal
     return wait_for_event(pc, 'signalingstatechange', predicate=lambda _event: pc.signaling_state == state)
 
 
-def test_descriptions_of_an_operation_of_another_loop(
-    idle_events: tuple[webrtc.RTCPeerConnection, asyncio.AbstractEventLoop, asyncio.AbstractEventLoop],
-) -> None:
+def test_descriptions_of_an_operation_of_another_loop(idle_events: IdleEvents) -> None:
     """The descriptions show with the operation's event."""
     pc, events, other = idle_events
     pc.add_transceiver(webrtc.MediaType.audio)
@@ -336,9 +353,7 @@ def test_descriptions_of_an_operation_of_another_loop(
 @pytest.mark.xfail(
     strict=True, reason='lifetime model: an operation of another loop applies its descriptions before its state'
 )
-def test_descriptions_and_state_of_an_operation_of_another_loop_change_together(
-    idle_events: tuple[webrtc.RTCPeerConnection, asyncio.AbstractEventLoop, asyncio.AbstractEventLoop],
-) -> None:
+def test_descriptions_and_state_of_an_operation_of_another_loop_change_together(idle_events: IdleEvents) -> None:
     """webrtc-pc: a description and its signaling state change in one step."""
     pc, _events, other = idle_events
     pc.add_transceiver(webrtc.MediaType.audio)
@@ -377,9 +392,7 @@ async def signaling_changes(pc: webrtc.RTCPeerConnection, count: int) -> Awaitab
     return asyncio.wait_for(done, TIMEOUT)
 
 
-def test_negotiations_while_the_events_wait(
-    idle_events: tuple[webrtc.RTCPeerConnection, asyncio.AbstractEventLoop, asyncio.AbstractEventLoop],
-) -> None:
+def test_negotiations_while_the_events_wait(idle_events: IdleEvents) -> None:
     """Unapplied negotiations show the last descriptions once fired."""
     pc, events, other = idle_events
     changes = events.run_until_complete(signaling_changes(pc, 2 * NEGOTIATIONS))
@@ -394,6 +407,7 @@ def test_negotiations_while_the_events_wait(
     other.run_until_complete(negotiate())
 
     states = events.run_until_complete(changes)
+
     assert states == [webrtc.RTCSignalingState.have_remote_offer, webrtc.RTCSignalingState.stable] * NEGOTIATIONS
     assert pc.local_description is not None
     assert pc.local_description.type == webrtc.RTCSdpType.answer
@@ -401,11 +415,19 @@ def test_negotiations_while_the_events_wait(
     assert pc.remote_description.type == webrtc.RTCSdpType.offer
 
 
-def test_operations_of_another_loop_meet_the_actual_state(
-    idle_events: tuple[webrtc.RTCPeerConnection, asyncio.AbstractEventLoop, asyncio.AbstractEventLoop],
+def _run_until_shown(
+    idle_events: IdleEvents, state: webrtc.RTCSignalingState, operation: Callable[[], Awaitable[object]]
 ) -> None:
-    """The shown state lets them through; the engine's state refuses them."""
+    """Runs an operation on the other loop, then the events until the state is shown."""
     pc, events, other = idle_events
+    shown = events.run_until_complete(signaling_change(pc, state))
+    other.run_until_complete(operation())
+    _ = events.run_until_complete(shown)
+
+
+def test_operations_of_another_loop_meet_the_actual_state(idle_events: IdleEvents) -> None:
+    """The shown state lets them through; the engine's state refuses them."""
+    pc, _events, other = idle_events
 
     async def behind_stable() -> None:
         own = await pc.create_offer()
@@ -415,21 +437,15 @@ def test_operations_of_another_loop_meet_the_actual_state(
         with pytest.raises(webrtc.InvalidStateError):
             await pc.set_local_description(own)
 
-    shown = events.run_until_complete(signaling_change(pc, webrtc.RTCSignalingState.have_remote_offer))
-    other.run_until_complete(behind_stable())
-    _ = events.run_until_complete(shown)
+    _run_until_shown(idle_events, webrtc.RTCSignalingState.have_remote_offer, behind_stable)
 
     async def behind_remote_offer() -> None:
         await pc.set_local_description()
         with pytest.raises(webrtc.InvalidStateError):
             _ = await pc.create_answer()
 
-    shown = events.run_until_complete(signaling_change(pc, webrtc.RTCSignalingState.stable))
-    other.run_until_complete(behind_remote_offer())
-    _ = events.run_until_complete(shown)
-    shown = events.run_until_complete(signaling_change(pc, webrtc.RTCSignalingState.have_local_offer))
-    other.run_until_complete(pc.set_local_description())
-    _ = events.run_until_complete(shown)
+    _run_until_shown(idle_events, webrtc.RTCSignalingState.stable, behind_remote_offer)
+    _run_until_shown(idle_events, webrtc.RTCSignalingState.have_local_offer, pc.set_local_description)
 
     async def behind_local_offer() -> None:
         assert pc.local_description is not None

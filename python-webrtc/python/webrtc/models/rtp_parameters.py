@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 import math
 from dataclasses import dataclass, field
+from itertools import starmap
 from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 from typing_extensions import TypedDict
@@ -38,6 +39,8 @@ _BITRATE_PRIORITY = {
     RTCPriorityType.medium: 2.0,
     RTCPriorityType.high: 4.0,
 }
+# libwebrtc stores max_bitrate in an int
+_MAX_NATIVE_BITRATE = 2**31 - 1
 
 
 def _is_unsigned_long(value: object) -> bool:
@@ -46,8 +49,11 @@ def _is_unsigned_long(value: object) -> bool:
 
 
 def _parse_fmtp(line: str | None) -> dict[str, str]:
+    if line is None:
+        return {}
+
     parameters: dict[str, str] = {}
-    for raw_item in (line if line is not None else '').split(';'):
+    for raw_item in line.split(';'):
         item = raw_item.strip()
         if item == '':
             continue
@@ -63,7 +69,13 @@ def _parse_fmtp(line: str | None) -> dict[str, str]:
 def _format_fmtp(parameters: dict[str, str]) -> str | None:
     if len(parameters) == 0:
         return None
-    return ';'.join(f'{key}={value}' if key != '' else value for key, value in parameters.items())
+    return ';'.join(starmap(_format_fmtp_item, parameters.items()))
+
+
+def _format_fmtp_item(key: str, value: str) -> str:
+    if key == '':
+        return value
+    return f'{key}={value}'
 
 
 class _CodecMembers(TypedDict, closed=True):
@@ -74,7 +86,14 @@ class _CodecMembers(TypedDict, closed=True):
 
 
 def _channels_or_one(channels: int | None) -> int:
-    return channels if channels is not None and channels != 0 else 1
+    if channels is None or channels == 0:
+        return 1
+    return channels
+
+
+def _nearest_priority(bitrate_priority: float) -> RTCPriorityType:
+    """The priority level whose bitrate priority is the closest to a native one."""
+    return min(_BITRATE_PRIORITY, key=lambda level: abs(_BITRATE_PRIORITY[level] - bitrate_priority))
 
 
 def _codec_members(native: wrtc.RtpCodec) -> _CodecMembers:
@@ -124,6 +143,7 @@ class RTCRtpCodec(Dictionary):
         if name == '':
             msg = f'{self.mime_type!r} is not a valid MIME type of a codec'
             raise ValueError(msg)
+
         native = native_class()
         native.kind = MediaType.video if kind.lower() == 'video' else MediaType.audio
         native.name = name
@@ -272,18 +292,19 @@ class RTCRtpEncodingParameters(RTCRtpCodingParameters):
 
     @classmethod
     def _from_native(cls, native: wrtc.RtpEncodingParameters) -> RTCRtpEncodingParameters:
-        priority = min(_BITRATE_PRIORITY, key=lambda p: abs(_BITRATE_PRIORITY[p] - native.bitratePriority))
+        rid = native.rid if native.rid != '' else None
+        codec = RTCRtpCodec._from_native(native.codec) if native.codec is not None else None
         return cls(
             active=native.active,
             max_bitrate=native.maxBitrate,
             max_framerate=native.maxFramerate,
             scale_resolution_down_by=native.scaleResolutionDownBy,
-            rid=native.rid if native.rid != '' else None,
-            priority=priority,
+            rid=rid,
+            priority=_nearest_priority(native.bitratePriority),
             network_priority=native.networkPriority,
             scalability_mode=native.scalabilityMode,
             adaptive_ptime=native.adaptivePtime,
-            codec=RTCRtpCodec._from_native(native.codec) if native.codec is not None else None,
+            codec=codec,
         )
 
     def _for_kind(self, kind: MediaType) -> RTCRtpEncodingParameters:
@@ -298,18 +319,11 @@ class RTCRtpEncodingParameters(RTCRtpCodingParameters):
 
     def _apply(self, native: wrtc.RtpEncodingParameters) -> wrtc.RtpEncodingParameters:
         """:meth:`_to_native` into an existing native encoding: sets the members that can be changed."""
-        # the WebIDL types: an [EnforceRange] unsigned long and restricted doubles
+        self._check_numbers()
+
         bitrate = self.max_bitrate
-        if bitrate is not None and not _is_unsigned_long(bitrate):
-            msg = f'max_bitrate must be an unsigned 32-bit integer, not {bitrate!r}'
-            raise TypeError(msg)
-        for name in ('max_framerate', 'scale_resolution_down_by'):
-            value = getattr(self, name)
-            if value is not None and (not isinstance(value, (int, float)) or not math.isfinite(value)):
-                msg = f'{name} must be a finite number, not {value!r}'
-                raise TypeError(msg)
         native.active = bool(self.active)
-        native.maxBitrate = min(bitrate, 2**31 - 1) if bitrate is not None else None
+        native.maxBitrate = min(bitrate, _MAX_NATIVE_BITRATE) if bitrate is not None else None
         native.maxFramerate = self.max_framerate
         native.scaleResolutionDownBy = self.scale_resolution_down_by
         native.bitratePriority = _BITRATE_PRIORITY[RTCPriorityType(self.priority)]
@@ -318,6 +332,21 @@ class RTCRtpEncodingParameters(RTCRtpCodingParameters):
         native.adaptivePtime = bool(self.adaptive_ptime)
         native.codec = self.codec._to_native(wrtc.RtpCodec) if self.codec is not None else None
         return native
+
+    def _check_numbers(self) -> None:
+        """Checks the WebIDL types: an [EnforceRange] unsigned long and restricted doubles."""
+        bitrate = self.max_bitrate
+        if bitrate is not None and not _is_unsigned_long(bitrate):
+            msg = f'max_bitrate must be an unsigned 32-bit integer, not {bitrate!r}'
+            raise TypeError(msg)
+
+        for name in ('max_framerate', 'scale_resolution_down_by'):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if not isinstance(value, (int, float)) or not math.isfinite(value):
+                msg = f'{name} must be a finite number, not {value!r}'
+                raise TypeError(msg)
 
     def _to_native(self) -> wrtc.RtpEncodingParameters:
         native = self._apply(wrtc.RtpEncodingParameters())

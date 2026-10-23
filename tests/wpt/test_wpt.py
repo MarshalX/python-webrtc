@@ -34,12 +34,15 @@ expectations = Expectations.load()
 def _cases() -> list[str | ParameterSet]:
     if not WPT_ROOT.is_dir():
         return []
-    return [
-        pytest.param(case, marks=pytest.mark.skip(reason=reason))
-        if (reason := expectations.skip_reason(case)) is not None and reason != ''
-        else case
-        for case in discover()
-    ]
+
+    cases: list[str | ParameterSet] = []
+    for case in discover():
+        reason = expectations.skip_reason(case)
+        if reason is not None and reason != '':
+            cases.append(pytest.param(case, marks=pytest.mark.skip(reason=reason)))
+        else:
+            cases.append(case)
+    return cases
 
 
 @pytest.mark.parametrize('case', _cases())

@@ -59,7 +59,9 @@ class Controlled:
 async def test_read_until_done() -> None:
     """A reader reads each chunk, then done."""
     stream = webrtc.ReadableStream(Chunks([1, 2]))
+
     reader = stream.get_reader()
+
     assert stream.locked
     assert await reader.read() == webrtc.ReadableStreamReadResult(value=1, done=False)
     assert await reader.read() == webrtc.ReadableStreamReadResult(value=2, done=False)
@@ -72,10 +74,13 @@ async def test_reads_are_requested_when_called() -> None:
     """Reads are pending from the call on, like promises, and settled in order."""
     source = Controlled()
     reader = webrtc.ReadableStream(source, webrtc.QueuingStrategy(high_water_mark=0)).get_reader()
+
     reads = [reader.read() for _ in range(3)]
     for i in range(3):
         source.controller.enqueue(i)
-    assert [r.value for r in await asyncio.gather(*reads)] == [0, 1, 2]
+
+    results = await asyncio.gather(*reads)
+    assert [result.value for result in results] == [0, 1, 2]
 
 
 @pytest.mark.asyncio
@@ -84,10 +89,12 @@ async def test_async_iteration_and_cancel() -> None:
     source = Chunks(range(10))
     stream = webrtc.ReadableStream(source)
     seen: list[object] = []
+
     async for chunk in stream:
         seen.append(chunk)
         if chunk == 2:
             break
+
     assert seen == [0, 1, 2]
     # the loop finalizes the iterator
     await wait_until(lambda: not stream.locked, 'the iterator to release the stream')
@@ -107,7 +114,9 @@ async def test_cancel_reaches_source() -> None:
     stream = webrtc.ReadableStream(source, webrtc.QueuingStrategy(high_water_mark=0))
     reader = stream.get_reader()
     read = reader.read()
+
     await reader.cancel('stop')
+
     assert (await read).done
     assert source.canceled == 'stop'
 
@@ -118,7 +127,9 @@ async def test_errored_stream_rejects_reads() -> None:
     source = Controlled()
     reader = webrtc.ReadableStream(source).get_reader()
     read = reader.read()
+
     source.controller.error(ValueError('broken'))
+
     with pytest.raises(ValueError, match='broken'):
         await read
     with pytest.raises(ValueError, match='broken'):
@@ -130,11 +141,14 @@ async def test_locked_stream() -> None:
     """A locked stream has no second reader until the first one is released."""
     stream = webrtc.ReadableStream(Chunks([1]))
     reader = stream.get_reader()
+
     with pytest.raises(TypeError):
         stream.get_reader()
     with pytest.raises(TypeError):
         await stream.cancel()
+
     reader.release_lock()
+
     with pytest.raises(TypeError):
         await reader.closed
     assert (await stream.get_reader().read()).value == 1
@@ -153,11 +167,14 @@ async def test_writer_backpressure_and_order() -> None:
 
     writer = webrtc.WritableStream(Sink()).get_writer()
     await writer.ready
+
     writes = [writer.write(i) for i in range(5)]
     assert not writer.ready.done()
+
     await asyncio.gather(*writes)
     assert written == [0, 1, 2, 3, 4]
     assert writer.ready.done()
+
     await writer.close()
     assert await writer.closed is None
 
@@ -173,6 +190,7 @@ async def test_failed_write_errors_the_stream() -> None:
             raise TypeError(msg)
 
     writer = webrtc.WritableStream(Sink()).get_writer()
+
     with pytest.raises(TypeError):
         await writer.write(1)
     with pytest.raises(TypeError):
@@ -196,8 +214,11 @@ async def test_abort_drops_queued_writes() -> None:
             reasons.append(reason)
 
     writer = webrtc.WritableStream(Sink()).get_writer()
-    first, second = writer.write(1), writer.write(2)
+    first = writer.write(1)
+    second = writer.write(2)
+
     await writer.abort('enough')
+
     await first
     with pytest.raises(asyncio.CancelledError):
         await second
@@ -220,7 +241,9 @@ async def test_pipe_through_transform() -> None:
             written.append(chunk)
 
     readable = webrtc.ReadableStream(Chunks([1, 2, 3])).pipe_through(webrtc.TransformStream(Double()))
+
     await readable.pipe_to(webrtc.WritableStream(Sink()))
+
     assert written == [2, 4, 6]
 
 
@@ -241,6 +264,7 @@ async def test_pipe_to_aborts_on_error() -> None:
 
     with pytest.raises(ValueError, match='source failed'):
         await webrtc.ReadableStream(Source()).pipe_to(webrtc.WritableStream(Sink()))
+
     assert isinstance(aborted[0], ValueError)
 
 
@@ -304,12 +328,13 @@ async def test_pipe_goes_on_when_nothing_references_it() -> None:
 
     await wait_progressing(collect_and_wake, done.done, 'the pipe', stall=5)
     await done
+
     assert written == list(range(50))
 
 
 @pytest.mark.asyncio
 async def test_sources_sinks_and_transformers_as_dictionaries() -> None:
-    """As in browsers, methods may be members of a dictionary: they were ignored, a transform changed nothing."""
+    """Sources, sinks and transformers may be dictionaries of their methods, which once were ignored."""
     written: list[int] = []
 
     def pull(controller: webrtc.ReadableStreamDefaultController) -> None:
@@ -324,9 +349,11 @@ async def test_sources_sinks_and_transformers_as_dictionaries() -> None:
     source = webrtc.ReadableStream({'pull': pull})
     transform_stream = webrtc.TransformStream({'transform': transform})
     sink = webrtc.WritableStream({'write': write})
+
     pipe = source.pipe_through(transform_stream).pipe_to(sink)
     await wait_until(lambda: len(written) >= 3, 'chunks written')
     pipe.cancel()
+
     assert written[:3] == [20, 20, 20]
 
 
@@ -337,16 +364,20 @@ async def test_strategy_size_counts_the_queue() -> None:
     strategy: webrtc.QueuingStrategy[str] = webrtc.QueuingStrategy(high_water_mark=10, size=len)
     stream = webrtc.ReadableStream(source, strategy)
     await asyncio.sleep(0)
+
     source.controller.enqueue('abc')
     assert source.controller.desired_size == 7
+
     reader = stream.get_reader()
     assert (await reader.read()).value == 'abc'
     assert source.controller.desired_size == 10
+
     # what the size raises errors the stream
     with pytest.raises(TypeError):
         source.controller.enqueue(None)
     with pytest.raises(TypeError):
         await reader.read()
+
     with pytest.raises(webrtc.InvalidRangeError):
         webrtc.ReadableStream(strategy=webrtc.QueuingStrategy(high_water_mark=-1))
 
@@ -364,11 +395,14 @@ async def test_writable_strategy_size() -> None:
     stream = webrtc.WritableStream(Sink(), webrtc.QueuingStrategy(high_water_mark=4, size=sizes.__getitem__))
     writer = stream.get_writer()
     await writer.ready
+
     first = writer.write('small')
     second = writer.write('big')
     assert writer.desired_size == -2
+
     await asyncio.gather(first, second)
     assert writer.desired_size == 4
+
     with pytest.raises(webrtc.InvalidRangeError):
         await writer.write('bad')
 
@@ -378,19 +412,23 @@ async def test_tee() -> None:
     """Both branches read every chunk, and the stream is canceled once both branches are."""
     source = Chunks([1, 2, 3])
     stream = webrtc.ReadableStream(source)
+
     first, second = stream.tee()
+
     assert stream.locked
     assert [chunk async for chunk in first] == [1, 2, 3]
     assert [chunk async for chunk in second] == [1, 2, 3]
 
     source = Chunks(range(100))
-    branches = webrtc.ReadableStream(source).tee()
+    first_branch, second_branch = webrtc.ReadableStream(source).tee()
+
     # canceling a branch is done once the other is canceled too
-    first_canceled = branches[0].cancel('first')
+    first_canceled = first_branch.cancel('first')
     await asyncio.sleep(0.01)
     assert not first_canceled.done()
     assert source.canceled is None
-    await asyncio.gather(first_canceled, branches[1].cancel('second'))
+
+    await asyncio.gather(first_canceled, second_branch.cancel('second'))
     assert source.canceled == ['first', 'second']
 
 
@@ -400,7 +438,9 @@ async def test_tee_errors_both_branches() -> None:
     source = Controlled()
     branches = webrtc.ReadableStream(source).tee()
     readers = [branch.get_reader() for branch in branches]
+
     source.controller.error(ValueError('broken'))
+
     for reader in readers:
         with pytest.raises(ValueError, match='broken'):
             await reader.read()
@@ -425,6 +465,7 @@ async def test_from_iterables() -> None:
     assert (await reader.read()).value == 0
     await reader.cancel()
     assert closed == [True]
+
     with pytest.raises(TypeError):
         webrtc.ReadableStream.from_(cast('Iterable[int]', 1))
 
@@ -433,10 +474,12 @@ async def test_from_iterables() -> None:
 async def test_get_reader_options() -> None:
     """Only default readers exist: a BYOB one is for byte streams."""
     stream = webrtc.ReadableStream(Chunks([1]))
+
     with pytest.raises(TypeError):
         stream.get_reader(webrtc.ReadableStreamGetReaderOptions(mode='byob'))
     with pytest.raises(ValueError, match='nope'):
         webrtc.ReadableStreamGetReaderOptions.from_json({'mode': 'nope'})
+
     reader = stream.get_reader(webrtc.ReadableStreamGetReaderOptions())
     assert (await reader.read()).value == 1
 
@@ -448,8 +491,10 @@ async def test_pipe_options_and_locked_pipe_through() -> None:
     await webrtc.ReadableStream(Chunks([1])).pipe_to(stream, webrtc.StreamPipeOptions(prevent_close=True))
     writer = stream.get_writer()
     await writer.write(2)
+
     transform = webrtc.TransformStream()
     _ = transform.writable.get_writer()
+
     with pytest.raises(TypeError):
         webrtc.ReadableStream(Chunks([1])).pipe_through(transform)
 
@@ -466,11 +511,16 @@ async def test_pending_start_is_not_collected() -> None:
             self.started.set()
             await asyncio.get_running_loop().create_future()
 
+    def runs_source_start(task: asyncio.Task[object]) -> bool:
+        return getattr(task.get_coro(), '__qualname__', '').endswith('Source.start')
+
     source = Source()
     stream = webrtc.ReadableStream(source)
     await source.started.wait()
+
     gc.collect()
-    tasks = [t for t in asyncio.all_tasks() if getattr(t.get_coro(), '__qualname__', '').endswith('Source.start')]
+
+    tasks = [task for task in asyncio.all_tasks() if runs_source_start(task)]
     assert len(tasks) == 1
     tasks[0].cancel()
     assert stream is not None
@@ -483,7 +533,9 @@ async def test_transform_write_settles_on_readable_cancel() -> None:
     writer = transform.writable.get_writer()
     write = writer.write(1)
     await asyncio.sleep(0)
+
     await transform.readable.cancel(ValueError('stop'))
+
     with pytest.raises(ValueError, match='stop'):
         await asyncio.wait_for(write, seconds(1))
 
@@ -498,7 +550,9 @@ async def test_transform_async_start_runs() -> None:
             controller.enqueue('hi')
 
     transform = webrtc.TransformStream(Transformer())
+
     result = await asyncio.wait_for(transform.readable.get_reader().read(), seconds(1))
+
     assert result.value == 'hi'
 
 
@@ -519,8 +573,10 @@ async def test_iterator_return_releases_on_cancel_error() -> None:
     stream = webrtc.ReadableStream(Source())
     iterator = stream.values()
     assert await iterator.__anext__() == 1
+
     with pytest.raises(ValueError, match='cancel failed'):
         await cast('AsyncGenerator[int, None]', iterator).aclose()
+
     assert not stream.locked
 
 
@@ -533,6 +589,7 @@ async def test_cancel_rejects_when_source_cancel_raises() -> None:
         raise ValueError(msg)
 
     future = webrtc.ReadableStream({'cancel': cancel}).cancel('x')
+
     with pytest.raises(ValueError, match='cancel failed'):
         await future
 
@@ -546,6 +603,7 @@ async def test_abort_rejects_when_sink_abort_raises() -> None:
         raise ValueError(msg)
 
     future = webrtc.WritableStream({'abort': abort}).abort('x')
+
     with pytest.raises(ValueError, match='abort failed'):
         await future
 
@@ -560,8 +618,10 @@ async def test_failed_write_does_not_call_sink_abort() -> None:
         raise ValueError(msg)
 
     writer = webrtc.WritableStream({'write': write, 'abort': aborted.append}).get_writer()
+
     with pytest.raises(ValueError, match='write failed'):
         await writer.write(1)
+
     assert aborted == []
 
 
@@ -583,6 +643,7 @@ async def test_stream_belongs_to_the_open_loop_using_it() -> None:
             _ = readable.get_reader()
 
     await asyncio.get_running_loop().run_in_executor(None, asyncio.run, from_another_loop())
+
     await writer.write(1)
     await writer.close()
 
@@ -598,12 +659,14 @@ def test_every_stream_method_checks_its_loop() -> None:
         webrtc.WritableStreamDefaultWriter,
         webrtc.TransformStreamDefaultController,
     )
+
     unchecked = [
         f'{cls.__name__}.{name}'
         for cls in classes
         for name, member in vars(cls).items()
         if not name.startswith('_') and inspect.isfunction(member) and member not in streams.loop_checked
     ]
+
     assert unchecked == []
 
 
@@ -612,7 +675,9 @@ async def test_readable_controller_after_close_and_error() -> None:
     """The desired size is 0 once closed and None once errored."""
     source = Controlled()
     stream = webrtc.ReadableStream(source)
+
     source.controller.close()
+
     assert source.controller.desired_size == 0
     with pytest.raises(TypeError):
         source.controller.enqueue(1)
@@ -624,7 +689,9 @@ async def test_readable_controller_after_close_and_error() -> None:
 
     source = Controlled()
     stream = webrtc.ReadableStream(source)
+
     source.controller.error('broken')
+
     assert source.controller.desired_size is None
     with pytest.raises(TypeError, match='broken'):
         await stream.cancel()
@@ -635,7 +702,9 @@ async def test_error_without_a_reason_is_a_type_error() -> None:
     """An error that isn't an exception is raised as a TypeError."""
     source = Controlled()
     reader = webrtc.ReadableStream(source).get_reader()
+
     source.controller.error()
+
     with pytest.raises(TypeError, match='The stream errored'):
         await reader.read()
 
@@ -646,8 +715,10 @@ async def test_released_reader() -> None:
     source = Chunks([1])
     stream = webrtc.ReadableStream(source)
     reader = stream.get_reader()
+
     reader.release_lock()
     reader.release_lock()
+
     with pytest.raises(TypeError):
         await reader.read()
     with pytest.raises(TypeError):
@@ -662,10 +733,13 @@ async def test_pipe_to_locked_streams_rejects() -> None:
     readable = webrtc.ReadableStream(Chunks([1]))
     writable = webrtc.WritableStream()
     writer = writable.get_writer()
+
     with pytest.raises(TypeError):
         await readable.pipe_to(writable)
+
     writer.release_lock()
     reader = readable.get_reader()
+
     with pytest.raises(TypeError):
         await readable.pipe_to(writable)
     assert (await reader.read()).value == 1
@@ -681,7 +755,10 @@ async def test_pipe_prevent_cancel_keeps_the_source() -> None:
         raise ValueError(msg)
 
     readable = webrtc.ReadableStream(source)
-    pipe = readable.pipe_to(webrtc.WritableStream({'write': write}), webrtc.StreamPipeOptions(prevent_cancel=True))
+    writable = webrtc.WritableStream({'write': write})
+
+    pipe = readable.pipe_to(writable, webrtc.StreamPipeOptions(prevent_cancel=True))
+
     with pytest.raises(ValueError, match='sink failed'):
         await pipe
     assert source.canceled is None
@@ -697,8 +774,11 @@ async def test_pipe_prevent_abort_keeps_the_destination() -> None:
     def pull(controller: webrtc.ReadableStreamDefaultController) -> None:
         controller.error(ValueError('source failed'))
 
+    readable = webrtc.ReadableStream({'pull': pull})
     writable = webrtc.WritableStream({'abort': aborted.append})
-    pipe = webrtc.ReadableStream({'pull': pull}).pipe_to(writable, webrtc.StreamPipeOptions(prevent_abort=True))
+
+    pipe = readable.pipe_to(writable, webrtc.StreamPipeOptions(prevent_abort=True))
+
     with pytest.raises(ValueError, match='source failed'):
         await pipe
     assert aborted == []
@@ -711,7 +791,9 @@ async def test_tee_canceled_branches_with_a_pending_read() -> None:
     source = Controlled()
     stream = webrtc.ReadableStream(source)
     first, second = stream.tee()
+
     await asyncio.gather(first.cancel('a'), second.cancel('b'))
+
     assert (await first.get_reader().read()).done
     assert (await second.get_reader().read()).done
     with pytest.raises(TypeError):
@@ -723,8 +805,10 @@ async def test_tee_canceled_as_the_stream_errors() -> None:
     """Both branches get the stream's error from the cancel."""
     source = Controlled()
     first, second = webrtc.ReadableStream(source).tee()
+
     source.controller.error(ValueError('broken'))
     canceled = asyncio.gather(first.cancel(), second.cancel())
+
     with pytest.raises(ValueError, match='broken'):
         await canceled
     assert (await first.get_reader().read()).done
@@ -762,6 +846,7 @@ async def test_sink_start_rejection_errors_the_stream() -> None:
         raise ValueError(msg)
 
     writer = webrtc.WritableStream({'start': start}).get_writer()
+
     with pytest.raises(ValueError, match='start failed'):
         await writer.closed
     with pytest.raises(ValueError, match='start failed'):
@@ -780,13 +865,17 @@ async def test_error_during_a_write_errors_once_it_is_done() -> None:
         await release
 
     writer = webrtc.WritableStream({'write': write}).get_writer()
-    first, second = writer.write(1), writer.write(2)
+    first = writer.write(1)
+    second = writer.write(2)
     await wait_until(lambda: len(controllers) == 1, 'the first write to start')
-    controllers[0].error('stop')
+    controller = controllers[0]
+
+    controller.error('stop')
     assert writer.desired_size is None
     # a second error is ignored
-    controllers[0].error('ignored')
+    controller.error('ignored')
     release.set_result(None)
+
     await first
     with pytest.raises(TypeError, match='stop'):
         await second
@@ -800,15 +889,18 @@ async def test_writable_stream_close_and_abort() -> None:
     closed: list[bool] = []
     stream: webrtc.WritableStream[int] = webrtc.WritableStream({'close': lambda: closed.append(True)})
     writer = stream.get_writer()
+
     with pytest.raises(TypeError):
         await stream.close()
     with pytest.raises(TypeError):
         await stream.abort()
+
     writer.release_lock()
     await stream.close()
     assert closed == [True]
     with pytest.raises(TypeError):
         await stream.close()
+
     # aborting a closed stream is done right away
     await stream.abort('late')
     writer = stream.get_writer()
@@ -822,8 +914,10 @@ async def test_writable_controller_error_without_a_writer() -> None:
     """Erroring an unlocked stream fails a later writer."""
     controllers: list[webrtc.WritableStreamDefaultController] = []
     stream: webrtc.WritableStream[int] = webrtc.WritableStream({'start': controllers.append})
+
     controllers[0].error(ValueError('broken'))
     writer = stream.get_writer()
+
     with pytest.raises(TypeError):
         stream.get_writer()
     with pytest.raises(ValueError, match='broken'):
@@ -841,8 +935,10 @@ async def test_writer_without_room_waits_to_be_ready() -> None:
     writer = stream.get_writer()
     assert writer.desired_size == 0
     assert not writer.ready.done()
+
     writer.release_lock()
     close = stream.close()
+
     writer = stream.get_writer()
     await writer.ready
     await close
@@ -853,8 +949,10 @@ async def test_released_writer() -> None:
     """A released writer rejects with TypeError."""
     stream: webrtc.WritableStream[int] = webrtc.WritableStream()
     writer = stream.get_writer()
+
     writer.release_lock()
     writer.release_lock()
+
     with pytest.raises(TypeError):
         _ = writer.desired_size
     with pytest.raises(TypeError):
@@ -865,6 +963,7 @@ async def test_released_writer() -> None:
         await writer.abort()
     with pytest.raises(TypeError):
         await writer.ready
+
     await stream.get_writer().write(1)
 
 
@@ -876,10 +975,13 @@ async def test_transform_desired_size_follows_the_readable_queue() -> None:
     )
     controller = controllers[0]
     assert controller.desired_size == 2
+
     controller.enqueue('a')
     assert controller.desired_size == 1
+
     assert (await transform.readable.get_reader().read()).value == 'a'
     assert controller.desired_size == 2
+
     controller.terminate()
     assert controller.desired_size == 0
 
@@ -891,13 +993,17 @@ async def test_terminate_closes_readable_and_errors_writable() -> None:
     transform = webrtc.TransformStream(
         {'start': controllers.append}, readable_strategy=webrtc.QueuingStrategy(high_water_mark=1)
     )
-    controllers[0].enqueue('last')
-    controllers[0].terminate()
+    controller = controllers[0]
+
+    controller.enqueue('last')
+    controller.terminate()
     # terminating again does nothing more
-    controllers[0].terminate()
+    controller.terminate()
+
     reader = transform.readable.get_reader()
     assert (await reader.read()).value == 'last'
     assert (await reader.read()).done
+
     writer = transform.writable.get_writer()
     with pytest.raises(TypeError):
         await writer.write(1)
@@ -919,7 +1025,9 @@ async def test_terminate_unblocks_a_waiting_write() -> None:
     writer = transform.writable.get_writer()
     write = writer.write(1)
     await asyncio.sleep(0)
+
     transformer.controller.terminate()
+
     with pytest.raises(TypeError):
         await write
     assert (await transform.readable.get_reader().read()).done
@@ -933,6 +1041,7 @@ async def test_transform_async_start_rejection_errors_both_sides() -> None:
         raise ValueError(msg)
 
     transform = webrtc.TransformStream({'start': start})
+
     with pytest.raises(ValueError, match='start failed'):
         await transform.readable.get_reader().read()
     with pytest.raises(ValueError, match='start failed'):
@@ -951,9 +1060,10 @@ async def test_async_transform_and_flush() -> None:
         await asyncio.sleep(0)
         controller.enqueue('end')
 
-    stream = webrtc.ReadableStream(Chunks([1, 2])).pipe_through(
-        webrtc.TransformStream({'transform': transform, 'flush': flush})
-    )
+    transform_stream = webrtc.TransformStream({'transform': transform, 'flush': flush})
+
+    stream = webrtc.ReadableStream(Chunks([1, 2])).pipe_through(transform_stream)
+
     assert [chunk async for chunk in stream] == [2, 3, 'end']
 
 
@@ -967,6 +1077,7 @@ async def test_flush_failure_errors_the_readable_side() -> None:
 
     transform = webrtc.TransformStream({'flush': flush})
     reader = transform.readable.get_reader()
+
     with pytest.raises(ValueError, match='flush failed'):
         await transform.writable.get_writer().close()
     with pytest.raises(ValueError, match='flush failed'):
@@ -981,5 +1092,7 @@ async def test_flush_that_terminates_closes_once() -> None:
 
     transform = webrtc.TransformStream({'flush': flush})
     reader = transform.readable.get_reader()
+
     await transform.writable.get_writer().close()
+
     assert (await reader.read()).done

@@ -97,23 +97,33 @@ def newest(paths: Iterable[pathlib.Path]) -> dict[str, Newest]:
         with_suite = [run for run in runs if name in run['suites']]
         full = [run for run in with_suite if not run['manifest']['quick']]
         chosen = full if len(full) != 0 else with_suite
-        if len(chosen) == 0:
-            continue
-
-        data: object = None
-        versions: dict[str, Hello] = {}
-        given: dict[str, int] = {}
-        for index, run in enumerate(chosen):
-            part = run['suites'][name]
-            data = part if data is None else suite.merge(data, part)
-            versions.update(run['manifest']['libraries'])
-            given.update(dict.fromkeys(suite.libraries(part), index))
-
-        sources = [
-            (run['manifest'], [lib for lib, at in given.items() if at == index]) for index, run in enumerate(chosen)
-        ]
-        found[name] = Newest(data, versions, [(manifest, libs) for manifest, libs in sources if len(libs) != 0])
+        if len(chosen) != 0:
+            found[name] = _merged(name, suite, chosen)
     return found
+
+
+def _merged(name: str, suite: Suite, runs: list[Run]) -> Newest:
+    """The suite's results of the runs, oldest first, each library's from the newest run that has it."""
+    data: object = None
+    versions: dict[str, Hello] = {}
+    given: dict[str, int] = {}
+    for index, run in enumerate(runs):
+        part = run['suites'][name]
+        data = part if data is None else suite.merge(data, part)
+        versions.update(run['manifest']['libraries'])
+        given.update(dict.fromkeys(suite.libraries(part), index))
+
+    sources: list[tuple[Manifest, list[str]]] = []
+    for index, run in enumerate(runs):
+        libraries = [library for library, at in given.items() if at == index]
+        if len(libraries) != 0:
+            sources.append((run['manifest'], libraries))
+    return Newest(data, versions, sources)
+
+
+def _run_details(row: list[str]) -> list[str]:
+    """The date, the runs, the machine and the commit of a row of the runs table."""
+    return row[2:]
 
 
 def _run_rows(name: str, found: Newest) -> list[list[str]]:
@@ -137,9 +147,9 @@ def render(paths: Iterable[pathlib.Path]) -> str:
         f"Medians; % columns are of {markdown.BASELINE}'s. How: [README](README.md#method).",
         '',
     ]
-    if len({tuple(row[2:]) for row in runs}) == 1:
+    if len({tuple(_run_details(row)) for row in runs}) == 1:
         # one run for every suite and library: a line
-        date, repeats, machine, commit = runs[0][2:]
+        date, repeats, machine, commit = _run_details(runs[0])
         lines += [f'{date}, {repeats} runs a case, {machine}, commit {commit}.', '']
     else:
         lines += markdown.table(['Suite', 'Libraries', 'Date', 'Runs', 'Machine', 'Commit'], runs)

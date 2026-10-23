@@ -29,6 +29,6 @@ def save(differences: dict[str, list[str]]) -> None:
 
 def mismatches(expected: list[str], actual: list[str]) -> list[str]:
     """The differences that are new, marked with +, and those that are gone, marked with -."""
-    return [f'+ {item}' for item in sorted(set(actual) - set(expected))] + [
-        f'- {item}' for item in sorted(set(expected) - set(actual))
-    ]
+    new = [f'+ {item}' for item in sorted(set(actual) - set(expected))]
+    gone = [f'- {item}' for item in sorted(set(expected) - set(actual))]
+    return new + gone

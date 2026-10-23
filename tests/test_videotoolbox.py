@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from typing import TypeVar
 
 import pytest
 
@@ -32,6 +33,8 @@ pytestmark = pytest.mark.skipif(sys.platform != 'darwin', reason='macOS only')
 RECEIVED = 90
 SAMPLES = range(10, RECEIVED, 10)
 
+_RtpStats = TypeVar('_RtpStats', webrtc.RTCInboundRtpStreamStats, webrtc.RTCOutboundRtpStreamStats)
+
 
 @dataclasses.dataclass
 class _Arrived:
@@ -41,11 +44,11 @@ class _Arrived:
 
 
 async def _arrived(track: webrtc.MediaStreamTrack) -> _Arrived:
-    reader = webrtc.MediaStreamTrackProcessor(
-        webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=RECEIVED)
-    ).readable.get_reader()
+    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=RECEIVED))
+    reader = processor.readable.get_reader()
     arrived = _Arrived(set(), [])
     options = webrtc.VideoFrameCopyToOptions(format='I420')
+
     for i in range(RECEIVED):
         frame = (await asyncio.wait_for(reader.read(), seconds(20))).value
         assert isinstance(frame, webrtc.VideoFrame)
@@ -55,6 +58,7 @@ async def _arrived(track: webrtc.MediaStreamTrack) -> _Arrived:
             await frame.copy_to(data, options)
             arrived.pictures.append((frame.metadata().rtp_timestamp, bytes(data)))
         frame.close()
+
     await reader.cancel()
     return arrived
 
@@ -77,20 +81,23 @@ class _Sent:
     first_key_after_request: int | None
 
 
+def _video_stats(report: webrtc.RTCStatsReport, stats_type: str, cls: type[_RtpStats]) -> _RtpStats | None:
+    """The RTP stats of a type of the video stream in a report, if any."""
+    return next(
+        (stats for stats in stats_of_type(report, stats_type) if isinstance(stats, cls) and stats.kind == 'video'),
+        None,
+    )
+
+
 async def _implementations(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> _Implementations:
-    outbound = next(
-        s
-        for s in stats_of_type(await caller.get_stats(), 'outbound-rtp')
-        if isinstance(s, webrtc.RTCOutboundRtpStreamStats) and s.kind == 'video'
-    )
-    stats = await callee.get_stats()
-    inbound = next(
-        s
-        for s in stats_of_type(stats, 'inbound-rtp')
-        if isinstance(s, webrtc.RTCInboundRtpStreamStats) and s.kind == 'video'
-    )
+    outbound = _video_stats(await caller.get_stats(), 'outbound-rtp', webrtc.RTCOutboundRtpStreamStats)
+    report = await callee.get_stats()
+    inbound = _video_stats(report, 'inbound-rtp', webrtc.RTCInboundRtpStreamStats)
+    assert outbound is not None
+    assert inbound is not None
     assert inbound.codec_id is not None
-    codec = stats[inbound.codec_id]
+
+    codec = report[inbound.codec_id]
     assert isinstance(codec, webrtc.RTCCodecStats)
     return _Implementations(codec.sdp_fmtp_line, outbound.encoder_implementation, inbound.decoder_implementation)
 
@@ -100,20 +107,24 @@ def _track(event: webrtc.Event) -> webrtc.MediaStreamTrack:
     return event.track
 
 
-def _videotoolbox_sender(caller: webrtc.RTCPeerConnection, recorder: Recorder, profile: str) -> webrtc.RTCRtpSender:
-    sender = caller.add_track(recorder.generator.track)
+def _prefer_h264_profile(caller: webrtc.RTCPeerConnection, sender: webrtc.RTCRtpSender, profile: str) -> None:
+    """Makes the transceiver of a sender negotiate H.264 of a profile only."""
     transceiver = next(t for t in caller.get_transceivers() if t.sender == sender)
     fmtp = f'profile-level-id={profile}'
-    transceiver.set_codec_preferences([
-        c for c in h264_codecs() if c.sdp_fmtp_line is not None and fmtp in c.sdp_fmtp_line
-    ])
+    codecs = [codec for codec in h264_codecs() if codec.sdp_fmtp_line is not None and fmtp in codec.sdp_fmtp_line]
+    transceiver.set_codec_preferences(codecs)
+
+
+def _videotoolbox_sender(caller: webrtc.RTCPeerConnection, recorder: Recorder, profile: str) -> webrtc.RTCRtpSender:
+    sender = caller.add_track(recorder.generator.track)
+    _prefer_h264_profile(caller, sender, profile)
     sender.transform = webrtc.RTCRtpScriptTransform(recorder.tap)
     return sender
 
 
 def _psnrs(recorder: Recorder, arrived: _Arrived) -> list[float]:
     # the source of a received frame is one of the last ones written before it was encoded
-    written_by = {e.rtp_timestamp: e.written for e in recorder.encoded}
+    written_by = {encoded.rtp_timestamp: encoded.written for encoded in recorder.encoded}
     return [min(recorder.best_psnr(picture, written_by[timestamp]), 99.0) for timestamp, picture in arrived.pictures]
 
 
@@ -129,9 +140,11 @@ def _probe(ffprobe: str, stream: bytes) -> dict[str, object]:
 
 async def _send(ffmpeg: str, ffprobe: str, profile: str, *, format: webrtc.VideoPixelFormatValue) -> _Sent:
     recorder = Recorder(ffmpeg, format)
-    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    caller = webrtc.RTCPeerConnection()
+    callee = webrtc.RTCPeerConnection()
     sender = _videotoolbox_sender(caller, recorder, profile)
     track_event = wait_for_event(callee, 'track', 20)
+
     async with writing(recorder.write):
         await connect(caller, callee, 20)
         arrived = await _arrived(_track(await track_event))
@@ -140,7 +153,7 @@ async def _send(ffmpeg: str, ffprobe: str, profile: str, *, format: webrtc.Video
     caller.close()
     callee.close()
 
-    probe = _probe(ffprobe, b''.join(e.data for e in recorder.encoded))
+    probe = _probe(ffprobe, b''.join(encoded.data for encoded in recorder.encoded))
     return _Sent(
         implementations=implementations,
         profile=probe.get('profile'),
@@ -159,7 +172,8 @@ def _sent(ffmpeg: str, ffprobe: str, profile: str, *, format: webrtc.VideoPixelF
 
 @functools.cache
 def result(profile: str, format: webrtc.VideoPixelFormatValue = 'I420') -> _Sent:
-    ffmpeg, ffprobe = shutil.which('ffmpeg'), shutil.which('ffprobe')
+    ffmpeg = shutil.which('ffmpeg')
+    ffprobe = shutil.which('ffprobe')
     if ffmpeg is None or ffprobe is None:
         pytest.skip('no ffmpeg and ffprobe')
     return _sent(ffmpeg, ffprobe, profile, format=format)
@@ -209,14 +223,7 @@ def test_key_frame_on_request(profile: str) -> None:
 
 
 async def _outbound(caller: webrtc.RTCPeerConnection) -> webrtc.RTCOutboundRtpStreamStats | None:
-    return next(
-        (
-            s
-            for s in stats_of_type(await caller.get_stats(), 'outbound-rtp')
-            if isinstance(s, webrtc.RTCOutboundRtpStreamStats) and s.kind == 'video'
-        ),
-        None,
-    )
+    return _video_stats(await caller.get_stats(), 'outbound-rtp', webrtc.RTCOutboundRtpStreamStats)
 
 
 @pytest.mark.asyncio
@@ -225,12 +232,11 @@ async def test_sends_above_the_offered_level(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, profile: str
 ) -> None:
     """1080p exceeds level 3.1 of the SDP, VideoToolbox still encodes it, at its own level."""
+    width, height = 1920, 1080
+    gray = bytes([128]) * (width * height * 3 // 2)
     generator = webrtc.VideoTrackGenerator()
     sender = caller.add_track(generator.track)
-    transceiver = next(t for t in caller.get_transceivers() if t.sender == sender)
-    transceiver.set_codec_preferences([
-        c for c in h264_codecs() if c.sdp_fmtp_line is not None and f'profile-level-id={profile}' in c.sdp_fmtp_line
-    ])
+    _prefer_h264_profile(caller, sender, profile)
     await connect(caller, callee, 20)
     parameters = sender.get_parameters()
     # the start bitrate would make libwebrtc scale the frames down
@@ -241,11 +247,10 @@ async def test_sends_above_the_offered_level(
         outbound = await _outbound(caller)
         return outbound is not None and bool(outbound.frames_encoded)
 
-    gray = bytes([128]) * (1920 * 1080 * 3 // 2)
-    async with writing(write_video, generator, gray, (1920, 1080)):
+    async with writing(write_video, generator, gray, (width, height)):
         await wait_until(encoded, 'an encoded 1080p frame', 20)
     outbound = await _outbound(caller)
 
     assert outbound is not None
     assert outbound.encoder_implementation == 'VideoToolbox'
-    assert (outbound.frame_width, outbound.frame_height) == (1920, 1080)
+    assert (outbound.frame_width, outbound.frame_height) == (width, height)

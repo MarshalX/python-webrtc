@@ -22,6 +22,12 @@ from webrtc.utils.events import UniformEventTarget
 
 _TONES = re.compile(r'[0-9A-Da-d#*,]*')
 
+# the ranges of the duration and the inter-tone gap, in milliseconds
+_MIN_DURATION = 40
+_MAX_DURATION = 6000
+_MIN_INTER_TONE_GAP = 30
+_MAX_INTER_TONE_GAP = 6000
+
 
 class RTCDTMFSender(
     WebRTCObject[wrtc.RTCDTMFSender], UniformEventTarget[Literal['tonechange'], RTCDTMFToneChangeEvent]
@@ -77,8 +83,9 @@ class RTCDTMFSender(
         if _TONES.fullmatch(tones) is None:
             msg = f'{tones!r} has characters that are not DTMF tones'
             raise webrtc.InvalidCharacterError(msg)
-        duration = min(max(int(duration), 40), 6000)
-        inter_tone_gap = min(max(int(inter_tone_gap), 30), 6000)
+
+        duration = min(max(int(duration), _MIN_DURATION), _MAX_DURATION)
+        inter_tone_gap = min(max(int(inter_tone_gap), _MIN_INTER_TONE_GAP), _MAX_INTER_TONE_GAP)
         with self._changing():
             self._native_obj.insertDTMF(tones.upper(), duration, inter_tone_gap)
 

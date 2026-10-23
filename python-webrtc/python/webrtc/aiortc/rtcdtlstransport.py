@@ -100,8 +100,10 @@ class RTCDtlsTransport(AsyncIOEventEmitter):
         return self._ice
 
     def getLocalParameters(self) -> RTCDtlsParameters:
-        found = _FINGERPRINT.findall(_sdp_of(self._pc._native.local_description))
-        return RTCDtlsParameters(fingerprints=list(starmap(RTCDtlsFingerprint, dict.fromkeys(found))))
+        sdp = _sdp_of(self._pc._native.local_description)
+        # every media section repeats the fingerprints
+        unique = dict.fromkeys(_FINGERPRINT.findall(sdp))
+        return RTCDtlsParameters(fingerprints=list(starmap(RTCDtlsFingerprint, unique)))
 
 
 __all__ = ['RTCCertificate', 'RTCDtlsFingerprint', 'RTCDtlsParameters', 'RTCDtlsTransport']

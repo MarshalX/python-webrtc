@@ -28,13 +28,18 @@ def camel_case(name: str) -> str:
 @functools.lru_cache(maxsize=1024)
 def snake_case(name: str) -> str:
     """``'namedCurve'`` -> ``'named_curve'``."""
-    return ''.join(f'_{c.lower()}' if c.isupper() else c for c in name)
+    return ''.join(f'_{char.lower()}' if char.isupper() else char for char in name)
 
 
 def members(value: Mapping[str, object], names: Iterable[str]) -> dict[str, object]:
     """The members of a dictionary, with snake_case or camelCase names: unknown ones are ignored, as in WebIDL."""
     wanted = set(names)
-    return {snake: member for name, member in value.items() if (snake := snake_case(name)) in wanted}
+    found: dict[str, object] = {}
+    for name, member in value.items():
+        snake = snake_case(name)
+        if snake in wanted:
+            found[snake] = member
+    return found
 
 
 class Alias(Generic[_T]):

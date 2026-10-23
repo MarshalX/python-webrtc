@@ -47,7 +47,8 @@ def run(args: argparse.Namespace) -> None:
 
 def update(args: argparse.Namespace) -> None:
     expectations = Expectations.load()
-    cases = [c for c in args.cases or discover() if expectations.skip_reason(c) in {None, ''}]
+    candidates = args.cases or discover()
+    cases = [case for case in candidates if expectations.skip_reason(case) in {None, ''}]
 
     tests: Counter[str] = Counter()
     harness: Counter[str] = Counter()
@@ -57,13 +58,14 @@ def update(args: argparse.Namespace) -> None:
         return [runner.run(case) for _ in range(args.repeat)]
 
     with ThreadPoolExecutor(args.jobs) as pool:
-        for done, (case, results) in enumerate(zip(cases, pool.map(run_repeatedly, cases)), 1):
+        runs = pool.map(run_repeatedly, cases)
+        for done, (case, results) in enumerate(zip(cases, runs), 1):
             expectations.record(case, results)
             first = results[0]
             harness[first['harness']['status']] += 1
-            tests.update(t['status'] for t in first['tests'])
+            tests.update(test['status'] for test in first['tests'])
             unsupported.update(first['unsupported'])
-            statuses = '/'.join(sorted({r['harness']['status'] for r in results}))
+            statuses = '/'.join(sorted({result['harness']['status'] for result in results}))
             logger.info('[%d/%d] %-8s %s', done, len(cases), statuses, case)
 
     expectations.save()

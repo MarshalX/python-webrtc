@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import multiprocessing
 import multiprocessing.context
@@ -52,6 +53,7 @@ def _child(
         outcome = ('skipped', str(e.msg))
     connection.send(outcome)
     connection.close()
+
     # don't import the library: import tests must not find it loaded
     mismatches: list[str] = getattr(sys.modules.get('webrtc.utils.loops'), 'mismatches', [])
     if len(mismatches) > 0:
@@ -68,6 +70,12 @@ def _end(process: multiprocessing.context.SpawnProcess, timeout: float | None) -
         process.join()
 
 
+def _time_left(deadline: float | None) -> float | None:
+    if deadline is None:
+        return None
+    return max(0.0, deadline - time.monotonic())
+
+
 def _run(
     function: Callable[..., object], args: tuple[object, ...], kwargs: dict[str, object], *, timeout: float | None
 ) -> object:
@@ -79,16 +87,16 @@ def _run(
     with mock.patch.dict(os.environ, {'PYTHONFAULTHANDLER': '1', 'LIBC_FATAL_STDERR_': '1'}):
         process.start()
     sender.close()
+
     deadline = time.monotonic() + timeout if timeout is not None else None
     outcome: _Outcome | None = None
     stuck = True
     try:
-        try:
+        # the child may exit without sending its outcome
+        with contextlib.suppress(EOFError):
             if receiver.poll(timeout):
                 outcome = receiver.recv()
-        except EOFError:
-            pass
-        process.join(max(0.0, deadline - time.monotonic()) if deadline is not None else None)
+        process.join(_time_left(deadline))
         stuck = process.exitcode is None
     finally:
         if process.exitcode is None:
@@ -99,9 +107,12 @@ def _run(
         pytest.fail(f'still running after {timeout:g} s', pytrace=False)
     if process.exitcode != 0:
         pytest.fail(f'exit code {process.exitcode}, see its output', pytrace=False)
-    if outcome is not None and outcome[0] == 'skipped':
-        pytest.skip(outcome[1])
-    return outcome[1] if outcome is not None else None
+    if outcome is None:
+        return None
+    kind, value = outcome
+    if kind == 'skipped':
+        pytest.skip(str(value))
+    return value
 
 
 @overload

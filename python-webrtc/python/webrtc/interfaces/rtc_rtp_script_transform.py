@@ -44,8 +44,13 @@ EncodedFrame = Union[RTCEncodedVideoFrame, RTCEncodedAudioFrame]
 _RID = re.compile(r'[A-Za-z0-9]{1,255}')
 
 # native association states, shared with SFrame transforms
-_ASSOCIATED, _DISASSOCIATED = 1, 2
-_KEY_FRAME_INVALID_STATE, _KEY_FRAME_NOT_FOUND = 1, 2
+_ASSOCIATED = 1
+_DISASSOCIATED = 2
+_KEY_FRAME_INVALID_STATE = 1
+_KEY_FRAME_NOT_FOUND = 2
+
+_REMOVED_MESSAGE = 'The transform was removed from its sender or receiver'
+_NOT_VIDEO_SENDER_MESSAGE = 'generate_key_frame() is for the transform of a video sender'
 
 
 @dataclass
@@ -196,13 +201,14 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
 
     def _end(self) -> None:
         self._ended = True
-        message = 'The transform was removed from its sender or receiver'
-        error = InvalidStateError(message)
+        error = InvalidStateError(_REMOVED_MESSAGE)
+
         requests = self._key_frame_requests
         self._key_frame_requests = []
         for request in requests:
             if not request.future.done() and not request.future.get_loop().is_closed():
-                request.future.set_exception(InvalidStateError(message))
+                request.future.set_exception(InvalidStateError(_REMOVED_MESSAGE))
+
         _ = _handled(self._readable._cancel(error))
         _ = _handled(self._writable._abort(error))
 
@@ -272,18 +278,16 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
             webrtc.NotAllowedError: If the rid isn't alphanumeric or is longer than 255 characters.
             webrtc.NotFoundError: If the sender has no layer of that rid.
         """
-        kind = self._native_obj.sourceKind
-        if kind is None or not kind[0] or not kind[1]:
-            msg = 'generate_key_frame() is for the transform of a video sender'
-            raise self._invalid_state(msg)
+        if not self._of_video_sender():
+            raise self._invalid_state(_NOT_VIDEO_SENDER_MESSAGE)
         if rid is not None and _RID.fullmatch(rid) is None:
             msg = f'{rid!r} is not a valid rid'
             raise webrtc.NotAllowedError(msg)
+
         future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         result = self._native_obj.generateKeyFrame(rid)
         if result == _KEY_FRAME_INVALID_STATE:
-            msg = 'generate_key_frame() is for the transform of a video sender'
-            raise self._invalid_state(msg)
+            raise self._invalid_state(_NOT_VIDEO_SENDER_MESSAGE)
         if result == _KEY_FRAME_NOT_FOUND:
             msg = f'The sender has no layer of rid {rid!r}'
             raise webrtc.NotFoundError(msg)
@@ -302,10 +306,17 @@ class RTCRtpScriptTransformer(UniformEventTarget[Literal['keyframerequest'], Key
             msg = 'send_key_frame_request() is for the transform of a video receiver'
             raise self._invalid_state(msg)
 
+    def _of_video_sender(self) -> bool:
+        source_kind = self._native_obj.sourceKind
+        if source_kind is None:
+            return False
+        sender, video = source_kind
+        return sender and video
+
     def _invalid_state(self, message: str) -> webrtc.InvalidStateError:
         # a removed transform still has its source kind
         if self._native_obj.state == _DISASSOCIATED:
-            message = 'The transform was removed from its sender or receiver'
+            message = _REMOVED_MESSAGE
         return webrtc.InvalidStateError(message)
 
     #: Alias for :meth:`generate_key_frame`
@@ -360,18 +371,10 @@ class RTCRtpScriptTransform(WebRTCObject[wrtc.RTCRtpScriptTransform]):
         options: object = None,
         transfer: Iterable[object] | None = None,
     ) -> None:
-        if isinstance(worker_or_worker_and_parameters, WorkerAndParameters):
-            worker = worker_or_worker_and_parameters.worker
-            if worker_or_worker_and_parameters.type == RTCRtpScriptTransformType.sframe:
-                msg = 'SFrame packetization of RTP is not supported'
-                raise NotSupportedError(msg)
-        else:
-            worker = worker_or_worker_and_parameters
-        if not callable(worker):
-            msg = f'the worker must be callable, not {type(worker).__name__}'
-            raise TypeError(msg)
+        worker = _worker_of(worker_or_worker_and_parameters)
         _check_transfer(transfer)
         loop = asyncio.get_running_loop()
+
         super().__init__()
         transformer = self._transformer = RTCRtpScriptTransformer(self, options)
         _ = transformer._attach()
@@ -390,6 +393,20 @@ class RTCRtpScriptTransform(WebRTCObject[wrtc.RTCRtpScriptTransform]):
     def _fire(worker: Worker, transformer: RTCRtpScriptTransformer, loop: asyncio.AbstractEventLoop) -> None:
         event = RTCTransformEvent('rtctransform', transformer)
         call_handler(loop, worker, event, message='Exception in the worker of an RTCRtpScriptTransform')
+
+
+def _worker_of(worker_or_worker_and_parameters: Worker | WorkerAndParameters) -> Worker:
+    if isinstance(worker_or_worker_and_parameters, WorkerAndParameters):
+        worker = worker_or_worker_and_parameters.worker
+        if worker_or_worker_and_parameters.type == RTCRtpScriptTransformType.sframe:
+            msg = 'SFrame packetization of RTP is not supported'
+            raise NotSupportedError(msg)
+    else:
+        worker = worker_or_worker_and_parameters
+    if not callable(worker):
+        msg = f'the worker must be callable, not {type(worker).__name__}'
+        raise TypeError(msg)
+    return worker
 
 
 def _check_transfer(transfer: Iterable[object] | None) -> None:

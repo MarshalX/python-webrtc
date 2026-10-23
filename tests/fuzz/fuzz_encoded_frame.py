@@ -72,7 +72,13 @@ asyncio.set_event_loop(loop)
 def metadata(inp: Input, *, video: bool) -> Metadata:
     cls = webrtc.RTCEncodedVideoFrameMetadata if video else webrtc.RTCEncodedAudioFrameMetadata
     fields = [name for name in cls.__dataclass_fields__ if inp.flag()]
-    return cls(**{name: mistyped(inp.choice(MEMBERS)(inp)) for name in fields})
+    return cls(**{name: mistyped(member(inp)) for name in fields})
+
+
+def member(inp: Input) -> object:
+    """A value of any kind for a metadata member."""
+    make = inp.choice(MEMBERS)
+    return make(inp)
 
 
 def same(got: object, member: object) -> bool:
@@ -96,6 +102,16 @@ def check_metadata(frame: Frame) -> None:
         assert meta.audio_level is None or 0 <= meta.audio_level <= 1
 
 
+def is_valid_error_event(event: webrtc.SFrameTransformErrorEvent) -> bool:
+    """A known error type, a key id only for an unknown key, and the frame that failed."""
+    if not isinstance(event.error_type, webrtc.SFrameTransformErrorEventType):
+        return False
+    is_key_id_error = event.error_type == webrtc.SFrameTransformErrorEventType.key_id
+    if (event.key_id is not None) != is_key_id_error:
+        return False
+    return isinstance(event.frame, (webrtc.RTCEncodedVideoFrame, webrtc.RTCEncodedAudioFrame))
+
+
 class Session:
     """A connected pair sending audio and video through transforms that the fuzz data drives."""
 
@@ -111,7 +127,8 @@ class Session:
         self.keys: list[bytes] = [bytes(16)]
 
     async def start(self) -> None:
-        self.caller, self.callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        self.caller = webrtc.RTCPeerConnection()
+        self.callee = webrtc.RTCPeerConnection()
         receivers: list[webrtc.RTCRtpReceiver] = []
         self.callee.on('track', lambda event: receivers.append(event.receiver))
         stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True, video=True))
@@ -133,7 +150,9 @@ class Session:
         return self.inp.choice(self.keys)
 
     def key_id(self) -> int:
-        return self.inp.choice([0, 1, 2**64 - 1]) if self.inp.small(7) < 7 else mistyped(self.inp.integer(16))
+        if self.inp.small(7) < 7:
+            return self.inp.choice([0, 1, 2**64 - 1])
+        return mistyped(self.inp.integer(16))
 
     async def keyed(self, transform: SFrameTransform) -> None:
         for _ in range(self.inp.small(3)):
@@ -145,11 +164,7 @@ class Session:
                 await transform.remove_decryption_key(self.key_id())
 
     def on_error(self, event: webrtc.SFrameTransformErrorEvent) -> None:
-        if not (
-            isinstance(event.error_type, webrtc.SFrameTransformErrorEventType)
-            and (event.key_id is not None) == (event.error_type == webrtc.SFrameTransformErrorEventType.key_id)
-            and isinstance(event.frame, (webrtc.RTCEncodedVideoFrame, webrtc.RTCEncodedAudioFrame))
-        ):
+        if not is_valid_error_event(event):
             self.failures.append(AssertionError(f'a wrong error event: {vars(event)}'))
 
     async def sframe_transform(self, *, sending: bool) -> SFrameTransform:
@@ -167,8 +182,10 @@ class Session:
         worker: Callable[[webrtc.RTCTransformEvent], object] = Worker(self)
         if self.inp.flag():
             worker = functools.partial(self.piped, stream=self.sframe_stream(sending=sending))
+
         if self.inp.flag():
-            return webrtc.RTCRtpScriptTransform(worker, self.inp.maybe(lambda: self.inp.small(4)))
+            options = self.inp.maybe(lambda: self.inp.small(4))
+            return webrtc.RTCRtpScriptTransform(worker, options)
         parameters = webrtc.WorkerAndParameters(worker, mistyped(self.inp.choice([None, 'sframe', 'other'])))
         return webrtc.RTCRtpScriptTransform(parameters)
 
@@ -216,16 +233,19 @@ class Session:
         elif mode == 1:
             slot.transform = mistyped(self.inp.choice(slots).transform)
         else:
-            sending = isinstance(slot, webrtc.RTCRtpSender) != (self.inp.small(7) == 7)
+            flipped = self.inp.small(7) == 7
+            sending = isinstance(slot, webrtc.RTCRtpSender) != flipped
             slot.transform = mistyped(await self.transform_of(sending=sending))
 
     async def run(self, inp: Input) -> None:
         if any(pc.connection_state != webrtc.RTCPeerConnectionState.connected for pc in (self.caller, self.callee)):
             self.stop()
             await self.start()
+
         self.inp = inp
         await self.configure()
         await asyncio.sleep(SLICE)
+
         failures = self.failures
         self.failures = []
         if len(failures) > 0:
@@ -274,11 +294,16 @@ class Worker:
     async def handle(self, frame: Frame, transformer: Transformer, writer: Writer) -> None:
         inp = self.session.inp
         try:
-            written = frame if inp.exhausted() else inp.choice(self.actions)(frame, transformer)
+            if inp.exhausted():
+                written = frame
+            else:
+                action = inp.choice(self.actions)
+                written = action(frame, transformer)
         except EXPECTED:
             written = frame
         if written is None:
             return
+
         # a frame of a previous transform of the sender or receiver is written as its own, as the specification says,
         # which drops the frames read after it until their counters catch up
         fresh = written is frame and frame._counter > transformer._last_received
@@ -304,7 +329,9 @@ class Worker:
 
     def enlarge(self, frame: Frame, _transformer: Transformer) -> Frame | None:
         inp = self.session.inp
-        frame.data = (b'\0' + bytes(inp.contiguous(inp.small(64)))) * (inp.choice(LARGE) // 64 + 1)
+        pattern = b'\0' + bytes(inp.contiguous(inp.small(64)))
+        repeats = inp.choice(LARGE) // 64 + 1
+        frame.data = pattern * repeats
         return frame
 
     def edit(self, frame: Frame, _transformer: Transformer) -> Frame | None:
@@ -318,7 +345,8 @@ class Worker:
 
     def mistype(self, frame: Frame, _transformer: Transformer) -> Frame | None:
         """Data of another type, or strided: TypeError."""
-        frame.data = mistyped(self.session.inp.choice([None, 1, 'data', memoryview(b'abcd')[::2], memoryview(b'ab')]))
+        wrong = [None, 1, 'data', memoryview(b'abcd')[::2], memoryview(b'ab')]
+        frame.data = mistyped(self.session.inp.choice(wrong))
         return frame
 
     def copied(self, frame: Frame, _transformer: Transformer) -> Frame | None:
@@ -330,6 +358,7 @@ class Worker:
         else:
             copy = webrtc.RTCEncodedAudioFrame(frame, webrtc.RTCEncodedAudioFrameOptions(mistyped(meta)))
         assert copy.data == frame.data
+
         if meta is not None:
             got = copy.get_metadata()
             for name in type(meta).__dataclass_fields__:
@@ -340,13 +369,17 @@ class Worker:
 
     def foreign(self, frame: Frame, _transformer: Transformer) -> Frame | None:
         """A frame read before, maybe written, or by another worker: dropped."""
-        return self.session.inp.choice(self.session.history) if self.session.inp.flag() else frame
+        inp = self.session.inp
+        if inp.flag():
+            return inp.choice(self.session.history)
+        return frame
 
     def reorder(self, frame: Frame, _transformer: Transformer) -> Frame | None:
         """Held, and one held written later: older than the last written, it's dropped."""
         inp = self.session.inp
         self.held.append(frame)
         del self.held[:-8]
+
         if inp.flag():
             return None
         return self.held.pop(inp.small(len(self.held) - 1))

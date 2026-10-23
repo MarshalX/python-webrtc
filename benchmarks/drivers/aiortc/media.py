@@ -49,7 +49,8 @@ class ToneTrack(aiortc.MediaStreamTrack):
         """The next frame, once it's due."""
         if self._start is None:
             self._start = time.monotonic()
-        await asyncio.sleep(max(0.0, self._start + self._count * AUDIO_FRAMES / AUDIO_RATE - time.monotonic()))
+        due = self._start + self._count * AUDIO_FRAMES / AUDIO_RATE
+        await asyncio.sleep(max(0.0, due - time.monotonic()))
 
         frame = av.AudioFrame(format='s16', layout='mono', samples=AUDIO_FRAMES)
         frame.planes[0].update(self._chunk)
@@ -69,7 +70,10 @@ class VideoTrack(aiortc.MediaStreamTrack):
     def __init__(self, raw: list[bytes], *, size: tuple[int, int], fps: float, numbered: bool) -> None:
         super().__init__()
         self.tally = frames.Tally()
-        self._raw, self._size, self._fps, self._numbered = raw, size, fps, numbered
+        self._raw = raw
+        self._size = size
+        self._fps = fps
+        self._numbered = numbered
         self._start: float | None = None
 
     async def recv(self) -> av.VideoFrame:
@@ -77,7 +81,8 @@ class VideoTrack(aiortc.MediaStreamTrack):
         count = self.tally.frames
         if self._start is None:
             self._start = time.monotonic()
-        await asyncio.sleep(max(0.0, self._start + count / self._fps - time.monotonic()))
+        due = self._start + count / self._fps
+        await asyncio.sleep(max(0.0, due - time.monotonic()))
 
         width, height = self._size
         data = self._raw[count % len(self._raw)]
@@ -96,8 +101,11 @@ class VideoTrack(aiortc.MediaStreamTrack):
 
 def _i420(data: bytes, width: int, height: int) -> av.VideoFrame:
     frame = av.VideoFrame(width, height, 'yuv420p')
-    luma, chroma = width * height, width * height // 4
-    for plane, start, size in zip(frame.planes, (0, luma, luma + chroma), (luma, chroma, chroma)):
+    luma = width * height
+    chroma = luma // 4
+    offsets = (0, luma, luma + chroma)
+    sizes = (luma, chroma, chroma)
+    for plane, start, size in zip(frame.planes, offsets, sizes):
         plane.update(data[start : start + size])
     return frame
 

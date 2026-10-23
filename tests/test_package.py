@@ -31,8 +31,10 @@ def test_facade_import_order_does_not_matter() -> None:
     last = [node for node in rest if node not in first]
 
     for seed in range(20):
-        for name in [name for name in sys.modules if name == 'webrtc' or name.startswith('webrtc.')]:
+        loaded = [name for name in sys.modules if name == 'webrtc' or name.startswith('webrtc.')]
+        for name in loaded:
             del sys.modules[name]
+
         random.Random(seed).shuffle(submodules)
         module = importlib.util.module_from_spec(spec)
         sys.modules['webrtc'] = module
@@ -42,4 +44,5 @@ def test_facade_import_order_does_not_matter() -> None:
         except ImportError as e:
             msg = f'seed {seed}'
             raise AssertionError(msg) from e
+
         assert all(hasattr(module, name) for name in vars(module)['__all__'])

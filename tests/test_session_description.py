@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 def test_type_is_required() -> None:
     """The init of a description needs its type, as its WebIDL dictionary does."""
     no_arguments: Callable[[], object] = mistyped(webrtc.RTCSessionDescription)
+
     with pytest.raises(TypeError):
         no_arguments()
     with pytest.raises(TypeError):
@@ -47,6 +48,7 @@ def test_type_is_required() -> None:
 def test_sdp_is_empty_by_default(init: webrtc.RTCSessionDescriptionInit | webrtc.RTCSdpType) -> None:
     """A description from the JSON form, an init or a type has an empty SDP."""
     description = webrtc.RTCSessionDescription(init)
+
     assert description.type == webrtc.RTCSdpType.rollback
     assert description.sdp == ''
     assert description.to_json() == {'type': 'rollback', 'sdp': ''}
@@ -55,8 +57,10 @@ def test_sdp_is_empty_by_default(init: webrtc.RTCSessionDescriptionInit | webrtc
 def test_type_and_sdp_can_be_changed() -> None:
     """The type and the SDP of a description can be set, and are validated."""
     description = webrtc.RTCSessionDescription('offer', 'v=0\r\n')
+
     description.type = 'answer'
     description.sdp += 'a=x\r\n'
+
     assert description.type == webrtc.RTCSdpType.answer
     assert description.to_json() == {'type': 'answer', 'sdp': 'v=0\r\na=x\r\n'}
     with pytest.raises(ValueError, match='not a valid RTCSdpType'):
@@ -68,18 +72,23 @@ def test_type_and_sdp_can_be_changed() -> None:
 @pytest.mark.asyncio
 async def test_changed_description_is_set(create_pc: CreatePC) -> None:
     """A changed description is set with its new values; the connection's own doesn't change."""
-    caller, callee = create_pc(), create_pc()
+    caller = create_pc()
+    callee = create_pc()
     caller.add_transceiver(webrtc.MediaType.audio)
     await caller.set_local_description()
     offer = caller.local_description
     assert offer is not None
     ufrag = re.search(r'a=ice-ufrag:(\S+)', offer.sdp)
     assert ufrag is not None
+
     offer.sdp = offer.sdp.replace(f'a=ice-ufrag:{ufrag[1]}', 'a=ice-ufrag:munged')
+
     local = caller.local_description
     assert local is not None
     assert 'a=ice-ufrag:munged' not in local.sdp
+
     await callee.set_remote_description(offer)
+
     remote = callee.remote_description
     assert remote is not None
     assert 'a=ice-ufrag:munged' in remote.sdp
@@ -87,6 +96,7 @@ async def test_changed_description_is_set(create_pc: CreatePC) -> None:
     answer = webrtc.RTCSessionDescription(await callee.create_answer())
     answer.type = webrtc.RTCSdpType.pranswer
     await callee.set_local_description(answer)
+
     assert callee.signaling_state == webrtc.RTCSignalingState.have_local_pranswer
 
 
@@ -111,10 +121,13 @@ def test_local_description_init() -> None:
 async def test_set_local_description_of_a_local_init(pc: webrtc.RTCPeerConnection) -> None:
     """A local init without a type sets the implicit description."""
     pc.add_transceiver(webrtc.MediaType.audio)
+
     with pytest.raises(TypeError, match='type of a description is required'):
         await pc.set_local_description(webrtc.RTCLocalSessionDescriptionInit(sdp='v=0\r\n'))
+
     await pc.set_local_description(webrtc.RTCLocalSessionDescriptionInit())
     assert pc.signaling_state == webrtc.RTCSignalingState.have_local_offer
+
     await pc.set_local_description(webrtc.RTCLocalSessionDescriptionInit('rollback'))
     assert pc.signaling_state == webrtc.RTCSignalingState.stable
 
@@ -148,18 +161,22 @@ async def test_descriptions_stay_after_close(
     caller.add_transceiver(webrtc.MediaType.audio)
     await exchange_offer_answer(caller, callee)
     await exchange_offer(caller, callee)
-    local, remote = caller.local_description, caller.current_remote_description
+    local = caller.local_description
+    remote = caller.current_remote_description
     assert local is not None
     assert remote is not None
 
     caller.close()
 
-    def ufrag(description: webrtc.RTCSessionDescription | None) -> tuple[str, str] | None:
-        # candidates gathered meanwhile may come along
-        return None if description is None else (description.type, re.findall(r'a=ice-ufrag:\S+', description.sdp)[0])
+    # compared by type and ufrag, as candidates gathered meanwhile may be added to the SDP
+    def type_and_ufrag(description: webrtc.RTCSessionDescription | None) -> tuple[str, str] | None:
+        if description is None:
+            return None
+        return description.type, re.findall(r'a=ice-ufrag:\S+', description.sdp)[0]
 
-    assert ufrag(caller.local_description) == ufrag(caller.pending_local_description) == ufrag(local)
-    assert ufrag(caller.current_remote_description) == ufrag(remote)
+    assert type_and_ufrag(caller.local_description) == type_and_ufrag(caller.pending_local_description)
+    assert type_and_ufrag(caller.pending_local_description) == type_and_ufrag(local)
+    assert type_and_ufrag(caller.current_remote_description) == type_and_ufrag(remote)
     assert caller.pending_remote_description is None
 
 
@@ -204,12 +221,12 @@ async def test_final_answer_after_a_provisional_one(
     caller.add_transceiver(webrtc.MediaType.audio)
     await exchange_offer(caller, callee)
     answer = await callee.create_answer()
+
     await callee.set_local_description(webrtc.RTCSessionDescriptionInit('pranswer', answer.sdp))
     await caller.set_remote_description(webrtc.RTCSessionDescriptionInit('pranswer', answer.sdp))
     assert callee.signaling_state == webrtc.RTCSignalingState.have_local_pranswer
     assert caller.signaling_state == webrtc.RTCSignalingState.have_remote_pranswer
 
-    # webrtc-pc: no rollback of a provisional answer
     with pytest.raises(
         webrtc.InvalidStateError, match='Can not set the local description in the have-local-pranswer signaling state'
     ):

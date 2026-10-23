@@ -96,11 +96,14 @@ def _command(parser: argparse.ArgumentParser) -> Command:
     namespace = parser.parse_args()
     quick: bool = namespace.quick
     repeat: int | None = namespace.repeat
+    if repeat is None:
+        repeat = 1 if quick else 3
+
     command = Command(
         suites=namespace.suite,
         libraries=namespace.libs,
         quick=quick,
-        repeat=repeat if repeat is not None else (1 if quick else 3),
+        repeat=repeat,
         cases=namespace.case,
         out=namespace.out,
     )
@@ -115,17 +118,24 @@ def _select(parser: argparse.ArgumentParser, command: Command) -> Command:
     # nothing runs yet, so nothing logs
     options = command.options(io.BytesIO())
     names = {suite: SUITES[suite].cases(options) for suite in command.suites}
+    every_name = [name for cases in names.values() for name in cases]
     unmatched = [
-        pattern
-        for pattern in command.cases
-        if not any(fnmatch.fnmatchcase(name, pattern) for suite in names.values() for name in suite)
+        pattern for pattern in command.cases if not any(fnmatch.fnmatchcase(name, pattern) for name in every_name)
     ]
     if len(unmatched) != 0:
-        listing = ''.join(f'\n{suite}:' + ''.join(f'\n  {name}' for name in cases) for suite, cases in names.items())
-        parser.error(f'--case {", ".join(unmatched)} matches no case; the cases are:{listing}')
+        parser.error(f'--case {", ".join(unmatched)} matches no case; the cases are:{_listing(names)}')
 
     suites = [suite for suite, cases in names.items() if any(options.selects(name) for name in cases)]
     return dataclasses.replace(command, suites=suites)
+
+
+def _listing(names: dict[str, list[str]]) -> str:
+    """The cases of each suite, a line each, under the suite's name."""
+    lines: list[str] = []
+    for suite, cases in names.items():
+        lines.append(f'{suite}:')
+        lines += [f'  {name}' for name in cases]
+    return ''.join(f'\n{line}' for line in lines)
 
 
 async def _versions(libraries: Sequence[str], log: IO[bytes]) -> dict[str, Hello]:
@@ -171,6 +181,7 @@ def main() -> None:
     command = _command(_parser())
     directory = command.out if command.out is not None else RESULTS
     directory.mkdir(parents=True, exist_ok=True)
+
     stamp = dt.datetime.now().astimezone().strftime('%Y-%m-%dT%H%M%S')
     name = f'{stamp}-{platform.system().lower()}-{platform.machine().lower()}'
     with (directory / f'{name}.log').open('ab') as log:

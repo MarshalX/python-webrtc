@@ -18,6 +18,8 @@ from benchmarks.protocol import now
 
 AUDIO_RATE = 48_000
 AUDIO_FRAMES = 960
+#: the length of a 20 ms chunk of the tone, in microseconds
+CHUNK_US = 20_000
 #: the MIME type and the parts of the fmtp line of each codec name of the protocol
 CODECS: dict[str, tuple[str, tuple[str, ...]]] = {
     'VP8': ('video/VP8', ()),
@@ -38,7 +40,9 @@ class ToneSource:
     async def _write(self) -> None:
         writer = self.track.writable.get_writer()
         loop = asyncio.get_running_loop()
-        chunk, start, written = frames.tone(AUDIO_RATE, AUDIO_FRAMES), loop.time(), 0
+        chunk = frames.tone(AUDIO_RATE, AUDIO_FRAMES)
+        start = loop.time()
+        written = 0
 
         while True:
             init = webrtc.AudioDataInit(
@@ -46,14 +50,14 @@ class ToneSource:
                 sample_rate=AUDIO_RATE,
                 number_of_frames=AUDIO_FRAMES,
                 number_of_channels=1,
-                timestamp=written * 20_000,
+                timestamp=written * CHUNK_US,
                 data=chunk,
             )
             await writer.write(webrtc.AudioData(init))
             written += 1
 
-            # the next chunk is due 20 ms after the last
-            await asyncio.sleep(max(0.0, start + written / 50 - loop.time()))
+            due = start + written * CHUNK_US / 1_000_000
+            await asyncio.sleep(max(0.0, due - loop.time()))
 
 
 class VideoSource:
@@ -68,7 +72,8 @@ class VideoSource:
         width, height = size
         writer = self.generator.writable.get_writer()
         loop = asyncio.get_running_loop()
-        start, count = loop.time(), 0
+        start = loop.time()
+        count = 0
 
         while True:
             data = raw[count % len(raw)]
@@ -97,11 +102,12 @@ def codecs(codec: str) -> list[webrtc.RTCRtpCodec]:
     mime, parts = CODECS[codec]
     if capabilities is None:
         return []
-    return [c for c in capabilities.codecs if c.mime_type == mime and all(p in _fmtp(c) for p in parts)]
+    return [c for c in capabilities.codecs if c.mime_type == mime and _has_parts(c, parts)]
 
 
-def _fmtp(codec: webrtc.RTCRtpCodec) -> str:
-    return codec.sdp_fmtp_line if codec.sdp_fmtp_line is not None else ''
+def _has_parts(codec: webrtc.RTCRtpCodec, parts: tuple[str, ...]) -> bool:
+    fmtp = codec.sdp_fmtp_line if codec.sdp_fmtp_line is not None else ''
+    return all(part in fmtp for part in parts)
 
 
 async def read_number(frame: webrtc.VideoFrame) -> int:

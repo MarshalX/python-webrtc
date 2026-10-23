@@ -17,16 +17,20 @@ import webrtc
 from tests.helpers import wait_until
 from tests.isolation import isolated
 
+#: the field of a candidate line with its address
+ADDRESS_FIELD = 4
+
 
 async def _candidate_addresses() -> set[str]:
     pc = webrtc.RTCPeerConnection()
     pc.create_data_channel('channel')
     await pc.set_local_description()
     await wait_until(lambda: pc.ice_gathering_state == webrtc.RTCIceGatheringState.complete, 'ICE gathering')
+
     assert pc.local_description is not None
     lines = pc.local_description.sdp.splitlines()
     pc.close()
-    return {line.split()[4] for line in lines if line.startswith('a=candidate:')}
+    return {line.split()[ADDRESS_FIELD] for line in lines if line.startswith('a=candidate:')}
 
 
 @isolated

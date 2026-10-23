@@ -19,7 +19,7 @@ import contextlib
 import random
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Generic, Literal, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Generic, Literal, NamedTuple, TypedDict, TypeVar
 
 from benchmarks import fixtures, markdown
 from benchmarks.figures import Detail, Figure
@@ -167,7 +167,29 @@ class Case:
 def _counter(stats: MediaStats, key: Literal['frames', 'bytes', 'audio_ms']) -> float:
     if key == 'frames':
         return stats['frames']
-    return stats.get('bytes', 0) if key == 'bytes' else stats.get('audio_ms', 0.0)
+    if key == 'bytes':
+        return stats.get('bytes', 0)
+    return stats.get('audio_ms', 0.0)
+
+
+class _Counted(NamedTuple):
+    """The connections of a driver whose stats give the frames and the audio of a window."""
+
+    driver: Driver
+    pcs: list[int]
+
+    async def stats(self) -> list[MediaStats]:
+        return [await self.driver.media_stats(pc) for pc in self.pcs]
+
+
+class _Endpoint(NamedTuple):
+    """A connection of a driver."""
+
+    driver: Driver
+    pc: int
+
+    async def stats(self) -> MediaStats:
+        return await self.driver.media_stats(self.pc)
 
 
 @dataclass(frozen=True)
@@ -178,8 +200,9 @@ class Window:
     after: list[MediaStats]
     usage: list[Usage]
     lag_p95_ms: float | None
-    #: the stats of the connection whose bytes give the bitrate, before and after
-    rate: tuple[MediaStats, MediaStats]
+    #: the stats of the connection whose bytes give the bitrate, at the start and the end
+    rate_before: MediaStats
+    rate_after: MediaStats
 
     @property
     def seconds(self) -> float:
@@ -193,32 +216,36 @@ class Window:
     @property
     def kbps(self) -> float:
         """The bitrate of the window."""
-        before, after = self.rate
-        return (after.get('bytes', 0) - before.get('bytes', 0)) * 8 / (after['t'] - before['t']) / 1000
+        before, after = self.rate_before, self.rate_after
+        bits = (after.get('bytes', 0) - before.get('bytes', 0)) * 8
+        return bits / (after['t'] - before['t']) / 1000
 
     def per_frame_ms(self, process: int) -> float:
         """The CPU of a measured process a frame of the window."""
         frames = self.delta('frames')
-        return self.usage[process].cpu_seconds * 1000 / frames if frames > 0 else float('nan')
+        if frames <= 0:
+            return float('nan')
+        return self.usage[process].cpu_seconds * 1000 / frames
 
 
 async def _measure(
-    stats: tuple[Driver, list[int]], measured: list[Driver], *, rate: tuple[Driver, int], warmup: float, seconds: float
+    counted: _Counted, measured: list[Driver], *, rate: _Endpoint, warmup: float, seconds: float
 ) -> Window:
     """Reads the stats around a window after a warmup, and what the measured processes used in it."""
-    driver, pcs = stats
     await asyncio.sleep(warmup)
     await measured[0].probe()
 
-    rate_before, before = await rate[0].media_stats(rate[1]), [await driver.media_stats(pc) for pc in pcs]
+    rate_before = await rate.stats()
+    before = await counted.stats()
     for process in measured:
         process.sampler.start()
     await asyncio.sleep(seconds)
     usage = [process.sampler.stop() for process in measured]
 
-    after, rate_after = [await driver.media_stats(pc) for pc in pcs], await rate[0].media_stats(rate[1])
+    after = await counted.stats()
+    rate_after = await rate.stats()
     lag = (await measured[0].probe()).get('lag_p95_ms')
-    return Window(before, after, usage, lag, (rate_before, rate_after))
+    return Window(before, after, usage, lag, rate_before, rate_after)
 
 
 def _video_run(window: Window, implementation: str) -> VideoRun:
@@ -255,27 +282,32 @@ async def _start_video(connection: Connection, case: Case, path: str, *, numbere
 async def _receive(case: Case, plan: Plan, log: IO[bytes]) -> VideoRun:
     async with _connection(NEUTRAL, log, answering=case.library) as connection:
         await _start_video(connection, case, fixtures.encoded(case.video, case.codec))
+
         pion, measured = connection.offerer, connection.answerer
-        stats, rate = (measured, [connection.callee]), (pion, connection.caller)
-        window = await _measure(stats, [measured], rate=rate, warmup=plan.warmup, seconds=plan.measured)
+        counted = _Counted(measured, [connection.callee])
+        rate = _Endpoint(pion, connection.caller)
+        window = await _measure(counted, [measured], rate=rate, warmup=plan.warmup, seconds=plan.measured)
         return _video_run(window, window.after[0]['implementation'])
 
 
 async def _send(case: Case, plan: Plan, log: IO[bytes]) -> VideoRun:
     async with _connection(case.library, log, answering=NEUTRAL) as connection:
         await _start_video(connection, case, fixtures.raw(case.video), remb=case.video.bitrate)
+
         measured, pion = connection.offerer, connection.answerer
-        stats = (pion, [connection.callee])
-        window = await _measure(
-            stats, [measured], rate=(pion, connection.callee), warmup=plan.send_warmup, seconds=plan.measured
-        )
-        return _video_run(window, (await measured.media_stats(connection.caller))['implementation'])
+        counted = _Counted(pion, [connection.callee])
+        rate = _Endpoint(pion, connection.callee)
+        window = await _measure(counted, [measured], rate=rate, warmup=plan.send_warmup, seconds=plan.measured)
+
+        sent = await measured.media_stats(connection.caller)
+        return _video_run(window, sent['implementation'])
 
 
 def _latencies(sent: MediaStats, window: Window) -> list[float]:
     """From writing to reading each numbered frame read in the window, by the system-wide monotonic clock."""
     written = dict(sent.get('numbers', []))
-    start, end = window.before[0]['t'], window.after[0]['t']
+    start = window.before[0]['t']
+    end = window.after[0]['t']
     read = [(number, time) for number, time in window.after[0].get('numbers', []) if start <= time <= end]
     return [(time - written[number]) * 1000 for number, time in read if number in written]
 
@@ -285,18 +317,19 @@ async def _call(case: Case, plan: Plan, log: IO[bytes]) -> VideoRun:
         await _start_video(connection, case, fixtures.raw(case.video), numbered=True)
 
         sender, receiver = connection.offerer, connection.answerer
-        stats, rate = (receiver, [connection.callee]), (sender, connection.caller)
-        window = await _measure(stats, [receiver, sender], rate=rate, warmup=plan.send_warmup, seconds=plan.measured)
+        counted = _Counted(receiver, [connection.callee])
+        rate = _Endpoint(sender, connection.caller)
+        window = await _measure(counted, [receiver, sender], rate=rate, warmup=plan.send_warmup, seconds=plan.measured)
 
+        sent = await sender.media_stats(connection.caller)
         run = _video_run(window, window.after[0]['implementation'])
-        run['latencies_ms'] = _latencies(await sender.media_stats(connection.caller), window)
+        run['latencies_ms'] = _latencies(sent, window)
         run['sender_cpu_ms_per_frame'] = window.per_frame_ms(1)
         return run
 
 
-async def _connect_audio(drivers: tuple[Driver, Driver], streams: int) -> list[Connection]:
+async def _connect_audio(offerer: Driver, answerer: Driver, streams: int) -> list[Connection]:
     """Connections in batches, each sending the offerer's audio to a sink on the answerer."""
-    offerer, answerer = drivers
     path = fixtures.opus()
 
     async def add() -> Connection:
@@ -310,32 +343,41 @@ async def _connect_audio(drivers: tuple[Driver, Driver], streams: int) -> list[C
 
     connections: list[Connection] = []
     while len(connections) < streams:
-        connections += await asyncio.gather(*(add() for _ in range(min(BATCH, streams - len(connections)))))
+        batch = min(BATCH, streams - len(connections))
+        connections += await asyncio.gather(*(add() for _ in range(batch)))
     return connections
+
+
+async def _audio_window(case: Case, plan: Plan, log: IO[bytes], *, sending: bool) -> Window:
+    """The window of the case's streams between a fresh pair of processes, read on the answering side."""
+    if sending:
+        offering, answering = case.library, NEUTRAL
+    else:
+        offering, answering = NEUTRAL, case.library
+
+    async with pair(offering, log, answering=answering) as (offerer, answerer):
+        connections = await _connect_audio(offerer, answerer, case.streams)
+        try:
+            pcs = [connection.callee for connection in connections]
+            measured = offerer if sending else answerer
+            counted = _Counted(answerer, pcs)
+            rate = _Endpoint(answerer, pcs[0])
+            return await _measure(counted, [measured], rate=rate, warmup=plan.warmup, seconds=plan.measured)
+        finally:
+            await asyncio.gather(*(connection.close() for connection in connections))
 
 
 async def _audio(case: Case, plan: Plan, log: IO[bytes]) -> AudioRun:
     """Audio streams from Pion to the library (receive) or the other way (send), read on the answering side."""
     sending = case.kind == 'audio_send'
-    offering, answering = (case.library, NEUTRAL) if sending else (NEUTRAL, case.library)
-    async with pair(offering, log, answering=answering) as (offerer, answerer):
-        connections = await _connect_audio((offerer, answerer), case.streams)
-        try:
-            pcs = [connection.callee for connection in connections]
-            measured = offerer if sending else answerer
-            window = await _measure(
-                (answerer, pcs), [measured], rate=(answerer, pcs[0]), warmup=plan.warmup, seconds=plan.measured
-            )
-        finally:
-            await asyncio.gather(*(connection.close() for connection in connections))
+    window = await _audio_window(case, plan, log, sending=sending)
 
     expected_seconds = case.streams * window.seconds
     # Pion counts the packets it gets, 50 a second, the libraries the audio they read
-    delivered = (
-        window.delta('frames') / (expected_seconds * PACKETS_PER_SECOND)
-        if sending
-        else window.delta('audio_ms') / (expected_seconds * 1000)
-    )
+    if sending:
+        delivered = window.delta('frames') / (expected_seconds * PACKETS_PER_SECOND)
+    else:
+        delivered = window.delta('audio_ms') / (expected_seconds * 1000)
 
     return {
         'cpu_percent_per_stream': window.usage[0].cpu_seconds / expected_seconds * 100,
@@ -366,9 +408,8 @@ def _every(options: Options, plan: Plan) -> list[Case]:
     for library in _measured(options):
         for kind, codecs in CODECS.items():
             videos = plan.call_videos if kind == 'video_call' else plan.videos
-            cases += [
-                _case(kind, library, codec=codec, video=video) for codec in codecs.get(library, ()) for video in videos
-            ]
+            for codec in codecs.get(library, ()):
+                cases += [_case(kind, library, codec=codec, video=video) for video in videos]
         cases += [Case(kind, library, streams=n) for kind in AUDIO_KINDS for n in plan.streams]
     return cases
 
@@ -451,6 +492,14 @@ class Column(Generic[Run]):
     title: str
     cell: Callable[[list[Run]], str]
 
+    def render(self, runs: list[Run]) -> str:
+        """The cell of the runs, or a dash without any."""
+        return self.cell(runs) if len(runs) != 0 else '-'
+
+
+def _succeeded(runs: list[Run | None]) -> list[Run]:
+    return [run for run in runs if run is not None]
+
 
 def _median_of(values: Iterable[float | None]) -> float:
     return median([value for value in values if value is not None])
@@ -488,9 +537,26 @@ def _latency(runs: list[VideoRun]) -> str:
     return markdown.spread([latency for run in runs for latency in run['latencies_ms']])
 
 
+def _cpu_cell(runs: list[VideoRun]) -> str:
+    return markdown.number(_cpu(runs))
+
+
 def _cpus(runs: list[VideoRun]) -> str:
     sender = markdown.number(_median_of(run['sender_cpu_ms_per_frame'] for run in runs))
     return f'{markdown.number(_cpu(runs))} / {sender}'
+
+
+def _audio_cpu_cell(runs: list[AudioRun]) -> str:
+    return markdown.number(_audio_cpu(runs), 2)
+
+
+def _delivered_cell(runs: list[AudioRun]) -> str:
+    delivered = _median_of(run['delivered'] for run in runs)
+    return f'{delivered:.0%}'
+
+
+def _lag_cell(runs: list[AudioRun]) -> str:
+    return markdown.number(_median_of(run['lag_p95_ms'] for run in runs))
 
 
 def _columns(codec: str) -> list[Column[VideoRun]]:
@@ -499,8 +565,8 @@ def _columns(codec: str) -> list[Column[VideoRun]]:
 
 
 VIDEO_COLUMNS: dict[str, list[Column[VideoRun]]] = {
-    'video_receive': [*_columns('decoder'), Column('CPU/frame (ms)', lambda runs: markdown.number(_cpu(runs)))],
-    'video_send': [*_columns('encoder'), Column('CPU/frame (ms)', lambda runs: markdown.number(_cpu(runs)))],
+    'video_receive': [*_columns('decoder'), Column('CPU/frame (ms)', _cpu_cell)],
+    'video_send': [*_columns('encoder'), Column('CPU/frame (ms)', _cpu_cell)],
     'video_call': [
         *_columns('decoder'),
         Column('latency p50 / p95 (ms)', _latency),
@@ -508,9 +574,9 @@ VIDEO_COLUMNS: dict[str, list[Column[VideoRun]]] = {
     ],
 }
 AUDIO_COLUMNS: list[Column[AudioRun]] = [
-    Column('CPU per stream (% of a core)', lambda runs: markdown.number(_audio_cpu(runs), 2)),
-    Column('delivered', lambda runs: f'{_median_of(run["delivered"] for run in runs):.0%}'),
-    Column('loop lag p95 (ms)', lambda runs: markdown.number(_median_of(run['lag_p95_ms'] for run in runs))),
+    Column('CPU per stream (% of a core)', _audio_cpu_cell),
+    Column('delivered', _delivered_cell),
+    Column('loop lag p95 (ms)', _lag_cell),
 ]
 
 
@@ -529,18 +595,20 @@ def _table(
 
     rows: list[list[str]] = []
     for case in cases:
-        runs = {name: [run for run in by_library[name].get(case, []) if run is not None] for name in names}
-        cells = [column.cell(runs[name]) if len(runs[name]) != 0 else '-' for name in names for column in columns]
-
-        baseline = compare(runs[BASELINE]) if len(runs.get(BASELINE, [])) != 0 else float('nan')
-        compared = [
-            markdown.percent_of(compare(runs[name]), baseline) if len(runs[name]) != 0 else '-' for name in others
-        ]
-        rows.append([case, *_reference(reference, case), *cells, *compared])
+        runs = {name: _succeeded(by_library[name].get(case, [])) for name in names}
+        cells = [column.render(runs[name]) for name in names for column in columns]
+        rows.append([case, *_reference(reference, case), *cells, *_compared(runs, others, compare)])
 
     header = [f'{name} {column.title}' for name in names for column in columns]
     compared_header = [f'{name}, % of {BASELINE}' for name in others]
     return markdown.table(['Case', *_reference(reference), *header, *compared_header], rows)
+
+
+def _compared(runs: dict[str, list[Run]], others: list[str], compare: Callable[[list[Run]], float]) -> list[str]:
+    """The other libraries' cells compared to the baseline's, a dash for one without runs."""
+    baseline_runs = runs.get(BASELINE, [])
+    baseline = compare(baseline_runs) if len(baseline_runs) != 0 else float('nan')
+    return [markdown.percent_of(compare(runs[name]), baseline) if len(runs[name]) != 0 else '-' for name in others]
 
 
 def _reference(reference: dict[str, float] | None, case: str | None = None) -> list[str]:
@@ -637,7 +705,7 @@ def _values(
     values: dict[str, dict[str, float]] = {}
     for case in order:
         for name, cases in by_library.items():
-            runs = [run for run in cases.get(case, []) if run is not None]
+            runs = _succeeded(cases.get(case, []))
             if len(runs) != 0:
                 values.setdefault(case, {})[name] = metric(runs)
     return values
@@ -659,10 +727,11 @@ def _audio_values(data: MediaResults) -> dict[str, dict[str, float]]:
 
 def _videos(kind: str) -> dict[str, Video]:
     """The video of each case of a kind in either plan, by case name: a send's bitrate is its cap."""
+    codecs = {codec for library_codecs in CODECS[kind].values() for codec in library_codecs}
     videos: dict[str, Video] = {}
     for plan in (QUICK, FULL):
         for video in plan.call_videos if kind == 'video_call' else plan.videos:
-            for codec in {codec for codecs in CODECS[kind].values() for codec in codecs}:
+            for codec in codecs:
                 case = _case(kind, '', codec=codec, video=video)
                 videos[case.name] = case.video
     return videos
@@ -673,11 +742,12 @@ def _of_target(
 ) -> dict[str, dict[str, float]]:
     """A metric of each case over its target, like the fps sent over the source's."""
     videos = _videos(kind)
-    return {
-        case: {name: value / target(videos[case]) for name, value in by.items()}
-        for case, by in _video_values(data, kind, metric).items()
-        if case in videos
-    }
+    ratios: dict[str, dict[str, float]] = {}
+    for case, by_library in _video_values(data, kind, metric).items():
+        if case in videos:
+            goal = target(videos[case])
+            ratios[case] = {name: value / goal for name, value in by_library.items()}
+    return ratios
 
 
 def _latency_p50(runs: list[VideoRun]) -> float:

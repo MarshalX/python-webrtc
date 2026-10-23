@@ -136,11 +136,14 @@ def build_libdatachannel() -> pathlib.Path:
         subprocess.run([*configure, *_openssl_root()], check=True, stdout=subprocess.DEVNULL)
 
         compile_ = [cmake, '--build', str(build), '--config', 'Release', '--target', 'libdatachannel-driver']
-        # every core, as cargo does, unless CMAKE_BUILD_PARALLEL_LEVEL says otherwise
-        cores = os.cpu_count()
-        jobs = os.environ.get('CMAKE_BUILD_PARALLEL_LEVEL', str(cores if cores is not None else 1))
-        subprocess.run([*compile_, '--parallel', jobs], check=True)
+        subprocess.run([*compile_, '--parallel', _build_jobs()], check=True)
     return LIBDATACHANNEL_BINARY
+
+
+def _build_jobs() -> str:
+    """Every core, as cargo uses, unless ``CMAKE_BUILD_PARALLEL_LEVEL`` says otherwise."""
+    cores = os.cpu_count()
+    return os.environ.get('CMAKE_BUILD_PARALLEL_LEVEL', str(cores if cores is not None else 1))
 
 
 def build_webrtc_rs() -> pathlib.Path:
@@ -367,7 +370,8 @@ class Driver:  # ruff: ignore[too-many-public-methods] - a method a command of t
         try:
             await self._request('close', pc=pc)
         finally:
-            for key in [key for key in self._events if key[0] == pc]:
+            closed = [(event_pc, name) for event_pc, name in self._events if event_pc == pc]
+            for key in closed:
                 del self._events[key]
 
     async def collect(self) -> None:
@@ -384,10 +388,12 @@ class Driver:  # ruff: ignore[too-many-public-methods] - a method a command of t
 
     async def event(self, pc: int, name: str, timeout: float) -> float:
         """The time of an event of a connection, waiting for it or for the connection to fail."""
-        wanted, failed = self._event(pc, name), self._event(pc, 'failed')
+        wanted = self._event(pc, name)
+        failed = self._event(pc, 'failed')
         done, _ = await asyncio.wait({wanted, failed}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
         if wanted in done:
             return wanted.result()
+
         reason = 'the connection failed' if failed in done else f'no {name} in {timeout} s'
         msg = f'{self.library}: {reason}'
         raise DriverError(msg)
@@ -412,9 +418,11 @@ class Driver:  # ruff: ignore[too-many-public-methods] - a method a command of t
             raise DriverError(msg)
 
         command_id = next(self._ids)
-        reply = self._replies[command_id] = asyncio.get_running_loop().create_future()
+        reply = asyncio.get_running_loop().create_future()
+        self._replies[command_id] = reply
         try:
-            stdin.write((encode({'id': command_id, 'cmd': command, **arguments}) + '\n').encode())
+            line = encode({'id': command_id, 'cmd': command, **arguments}) + '\n'
+            stdin.write(line.encode())
             await stdin.drain()
             return cast('Message', await reply)
         finally:

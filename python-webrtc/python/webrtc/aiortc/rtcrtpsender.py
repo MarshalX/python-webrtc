@@ -34,14 +34,14 @@ _CORE_PIXEL_FORMATS = {
     'rgb0': webrtc.VideoPixelFormat.RGBX,
     'bgr0': webrtc.VideoPixelFormat.BGRX,
 }
-
-
 _SENDABLE_CHANNELS = (1, 2)
+_MIN_SAMPLE_RATE = 8000
+_MAX_SAMPLE_RATE = 384000
+
+# PyMemoryView_FromMemory: a read-only view of a frame's planes, without copying them
 _PYBUF_READ = 0x100
 _MEMORY_VIEW = ctypes.PYFUNCTYPE(ctypes.py_object, ctypes.c_void_p, ctypes.c_ssize_t, ctypes.c_int)
 _memory_view = _MEMORY_VIEW(('PyMemoryView_FromMemory', ctypes.pythonapi))
-_MIN_SAMPLE_RATE = 8000
-_MAX_SAMPLE_RATE = 384000
 
 
 def _microseconds(frame: Frame) -> int:
@@ -54,20 +54,22 @@ def _native_video_frame(frame: av.VideoFrame) -> webrtc.VideoFrame:
     if format is None:
         frame = frame.reformat(format='yuv420p')
         format = webrtc.VideoPixelFormat.I420
+
     # a view from the first plane to the last: the core copies only the rows of the planes, never the gaps between
     addresses = [plane.buffer_ptr for plane in frame.planes]
     start = min(addresses)
     end = max(address + plane.buffer_size for address, plane in zip(addresses, frame.planes))
+    view = cast('memoryview', _memory_view(start, end - start, _PYBUF_READ))
+
+    layout = [webrtc.PlaneLayout(address - start, plane.line_size) for address, plane in zip(addresses, frame.planes)]
     init = webrtc.VideoFrameBufferInit(
         format=format,
         coded_width=frame.width,
         coded_height=frame.height,
         timestamp=_microseconds(frame),
-        layout=[
-            webrtc.PlaneLayout(address - start, plane.line_size) for address, plane in zip(addresses, frame.planes)
-        ],
+        layout=layout,
     )
-    return webrtc.VideoFrame(cast('memoryview', _memory_view(start, end - start, _PYBUF_READ)), init)
+    return webrtc.VideoFrame(view, init)
 
 
 def _native_audio_data(frame: av.AudioFrame) -> webrtc.AudioData:
@@ -94,7 +96,11 @@ class _NativeMedia:
 
     async def convert(self, media: Frame | Packet[Stream]) -> list[webrtc.VideoFrame | webrtc.AudioData]:
         loop = asyncio.get_running_loop()
-        frames = await loop.run_in_executor(None, self._decode, media) if isinstance(media, Packet) else [media]
+        if isinstance(media, Packet):
+            frames = await loop.run_in_executor(None, self._decode, media)
+        else:
+            frames = [media]
+
         converted: list[webrtc.VideoFrame | webrtc.AudioData] = []
         for frame in frames:
             if isinstance(frame, av.VideoFrame) and frame.format.name in _CORE_PIXEL_FORMATS:
@@ -110,9 +116,8 @@ class _NativeMedia:
         if self._decoder is None:
             # the stream's own decoder isn't safe to share between the threads that decode for each sender
             stream = packet.stream.codec_context
-            self._decoder = cast(
-                'av.AudioCodecContext | av.VideoCodecContext', av.CodecContext.create(stream.name, 'r')
-            )
+            decoder = av.CodecContext.create(stream.name, 'r')
+            self._decoder = cast('av.AudioCodecContext | av.VideoCodecContext', decoder)
             self._decoder.extradata = stream.extradata
             if isinstance(stream, av.AudioCodecContext) and isinstance(self._decoder, av.AudioCodecContext):
                 self._decoder.sample_rate = stream.sample_rate
@@ -121,8 +126,10 @@ class _NativeMedia:
 
     def _audio(self, frame: av.AudioFrame) -> list[av.AudioFrame]:
         channels = len(frame.layout.channels)
-        if frame.format.name == 's16' and channels in _SENDABLE_CHANNELS and _sendable_rate(frame.sample_rate):
+        sendable = frame.format.name == 's16' and channels in _SENDABLE_CHANNELS and _sendable_rate(frame.sample_rate)
+        if sendable:
             return [frame]
+
         layout = 'mono' if channels == 1 else 'stereo'
         rate = frame.sample_rate if _sendable_rate(frame.sample_rate) else _DEFAULT_SAMPLE_RATE
         return self._resampler.resample(frame, layout, rate, None)
@@ -166,7 +173,9 @@ def _relayed_source(track: MediaStreamTrack | None) -> _RelayedSource | None:
     source = track._source
     relayed = _RELAYED.get(source)
     if relayed is None:
-        relayed = _RELAYED[source] = _RelayedSource(track._relay.subscribe(source, track._buffered), source)
+        subscription = track._relay.subscribe(source, track._buffered)
+        relayed = _RelayedSource(subscription, source)
+        _RELAYED[source] = relayed
     return relayed
 
 
@@ -227,7 +236,11 @@ class RTCRtpSender(_RtpEndpoint[webrtc.RTCRtpSender]):
 
     def replaceTrack(self, track: MediaStreamTrack | None) -> None:
         self._stop_pump()
-        sent, generator = _source(track, self._generator) if track is not None else (None, self._generator)
+        if track is not None:
+            sent, generator = _source(track, self._generator)
+        else:
+            sent, generator = None, self._generator
+
         if sent != self._sent:
             task = asyncio.ensure_future(self._native.replace_track(sent))
             task.add_done_callback(functools.partial(_log_failure, 'RTCRtpSender.replaceTrack'))
@@ -268,7 +281,8 @@ class RTCRtpSender(_RtpEndpoint[webrtc.RTCRtpSender]):
         self._start()
 
     def _start(self) -> None:
-        track, generator = self._track, self._generator
+        track = self._track
+        generator = self._generator
         if track is None or self._pump is not None or not self._transceiver._sending():
             return
         self._started = True

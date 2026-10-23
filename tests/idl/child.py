@@ -23,6 +23,7 @@ from tests.idl.spec import WPT_ROOT
 def main() -> None:
     pm.eval((WPT_ROOT / 'resources' / 'webidl2' / 'lib' / 'webidl2.js').read_text())
     parse = pm.eval('(text) => JSON.stringify(globalThis.WebIDL2.parse(text))')
+
     definitions: list[dict[str, object]] = []
     for name, text in json.load(sys.stdin).items():
         ast: object = parse(text)
@@ -32,6 +33,7 @@ def main() -> None:
         for definition in json.loads(ast):
             definition['file'] = name
             definitions.append(definition)
+
     json.dump(definitions, sys.stdout)
 
 

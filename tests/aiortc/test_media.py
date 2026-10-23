@@ -62,6 +62,11 @@ class CountingTrack(VideoStreamTrack):
         return frame.reformat(format='bgr24')
 
 
+def new_pair() -> tuple[RTCPeerConnection, RTCPeerConnection]:
+    """A caller and a callee gathering local candidates only."""
+    return RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+
+
 def local_description(pc: RTCPeerConnection) -> RTCSessionDescription:
     description = pc.localDescription
     assert description is not None
@@ -107,15 +112,18 @@ async def close(*pcs: RTCPeerConnection) -> None:
 @pytest.mark.asyncio
 async def test_python_tracks_reach_the_remote() -> None:
     """Frames of recv() tracks arrive as aiortc's decoders give them."""
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     tracks = received_tracks(callee)
     try:
         caller.addTrack(VideoStreamTrack())
         caller.addTrack(AudioStreamTrack())
         await negotiate(caller, callee)
-        video, audio = await next_track(tracks), await next_track(tracks)
+        video = await next_track(tracks)
+        audio = await next_track(tracks)
 
         frames = [await recv_video(video) for _ in range(3)]
+        chunks = [await recv_audio(audio) for _ in range(3)]
+
         assert [(f.format.name, f.width, f.height) for f in frames] == [('yuv420p', 640, 480)] * 3
         timestamps = [f.pts for f in frames if f.pts is not None]
         assert len(timestamps) == 3
@@ -123,10 +131,8 @@ async def test_python_tracks_reach_the_remote() -> None:
         assert timestamps == sorted(timestamps)
         assert frames[0].time_base == fractions.Fraction(1, 90000)
 
-        chunks = [await recv_audio(audio) for _ in range(3)]
-        assert [(c.format.name, c.layout.name, c.sample_rate, c.samples) for c in chunks] == [
-            ('s16', 'stereo', 48000, 960)
-        ] * 3
+        chunk_shapes = [(c.format.name, c.layout.name, c.sample_rate, c.samples) for c in chunks]
+        assert chunk_shapes == [('s16', 'stereo', 48000, 960)] * 3
         assert [c.pts for c in chunks] == [0, 960, 1920]
     finally:
         await close(caller, callee)
@@ -135,9 +141,10 @@ async def test_python_tracks_reach_the_remote() -> None:
 @pytest.mark.asyncio
 async def test_relay_of_a_remote_track_stays_native() -> None:
     """A relayed remote track is sent on natively: no reader and no pump."""
-    source, relay_in = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
-    relay_out, sink = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
-    incoming, outgoing = received_tracks(relay_in), received_tracks(sink)
+    source, relay_in = new_pair()
+    relay_out, sink = new_pair()
+    incoming = received_tracks(relay_in)
+    outgoing = received_tracks(sink)
     try:
         source.addTrack(VideoStreamTrack())
         await negotiate(source, relay_in)
@@ -162,12 +169,13 @@ async def test_relay_of_a_remote_track_stays_native() -> None:
 @pytest.mark.asyncio
 async def test_unbuffered_relay_reads_the_latest_frame() -> None:
     """An unbuffered relay of a remote track skips the frames nobody read."""
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     tracks = received_tracks(callee)
     try:
         caller.addTrack(VideoStreamTrack())
         await negotiate(caller, callee)
         latest = MediaRelay().subscribe(await next_track(tracks), buffered=False)
+
         first = await recv_video(latest)
         await asyncio.sleep(0.5)
         second = await recv_video(latest)
@@ -180,7 +188,8 @@ async def test_unbuffered_relay_reads_the_latest_frame() -> None:
 
 
 async def relayed_call(relay: MediaRelay, source: MediaStreamTrack, pcs: list[RTCPeerConnection]) -> RTCRtpSender:
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    """Sends a proxy of the source on a new connection, adding the connections to pcs."""
+    caller, callee = new_pair()
     pcs += [caller, callee]
     tracks = received_tracks(callee)
     sender = caller.addTrack(relay.subscribe(source))
@@ -193,9 +202,12 @@ async def relayed_call(relay: MediaRelay, source: MediaStreamTrack, pcs: list[RT
 async def test_relay_of_a_python_track_pumps_once() -> None:
     """The proxies of a relayed Python track share one pump, and each can stop alone."""
     pcs: list[RTCPeerConnection] = []
-    relay, source = MediaRelay(), AudioStreamTrack()
+    relay = MediaRelay()
+    source = AudioStreamTrack()
     try:
-        first, second = [await relayed_call(relay, source, pcs) for _ in range(2)]
+        first = await relayed_call(relay, source, pcs)
+        second = await relayed_call(relay, source, pcs)
+
         shared = first._relayed
         assert shared is not None
         assert second._relayed is shared
@@ -220,9 +232,10 @@ async def test_relay_of_a_python_track_pumps_once() -> None:
 @pytest.mark.asyncio
 async def test_native_relay_carries_video() -> None:
     """A remote video track sent on another connection carries its frames."""
-    source, relay_in = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
-    relay_out, sink = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
-    incoming, outgoing = received_tracks(relay_in), received_tracks(sink)
+    source, relay_in = new_pair()
+    relay_out, sink = new_pair()
+    incoming = received_tracks(relay_in)
+    outgoing = received_tracks(sink)
     try:
         source.addTrack(VideoStreamTrack())
         await negotiate(source, relay_in)
@@ -240,13 +253,14 @@ async def test_native_relay_carries_video() -> None:
 @pytest.mark.asyncio
 async def test_blackhole_of_a_remote_track_reads_nothing() -> None:
     """A blackhole leaves a remote track unread, and reads Python tracks."""
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     tracks = received_tracks(callee)
     try:
         local = CountingTrack()
         caller.addTrack(VideoStreamTrack())
         await negotiate(caller, callee)
         remote = await next_track(tracks)
+
         blackhole = MediaBlackhole()
         blackhole.addTrack(remote)
         blackhole.addTrack(local)
@@ -263,16 +277,18 @@ async def test_blackhole_of_a_remote_track_reads_nothing() -> None:
 @pytest.mark.asyncio
 async def test_codec_preferences() -> None:
     """A preferred codec is negotiated, and others raise aiortc's error."""
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     tracks = received_tracks(callee)
     try:
         sender = caller.addTrack(AudioStreamTrack())
         transceiver = next(t for t in caller.getTransceivers() if t.sender == sender)
         pcmu = next(c for c in RTCRtpSender.getCapabilities('audio').codecs if c.mimeType == 'audio/PCMU')
+
         with pytest.raises(ValueError, match='Codec is not in capabilities'):
             transceiver.setCodecPreferences([RTCRtpCodecCapability('audio/bogus', 8000, 1)])
         with pytest.raises(ValueError, match='unknown media'):
             RTCRtpSender.getCapabilities('bogus')
+
         transceiver.setCodecPreferences([pcmu, pcmu])
         await negotiate(caller, callee)
         chunk = await recv_audio(await next_track(tracks))
@@ -287,7 +303,7 @@ async def test_codec_preferences() -> None:
 @pytest.mark.asyncio
 async def test_stats() -> None:
     """getStats() gives aiortc's stats types only, with datetimes."""
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     tracks = received_tracks(callee)
     try:
         track = VideoStreamTrack()
@@ -295,7 +311,9 @@ async def test_stats() -> None:
         await negotiate(caller, callee)
         _ = await recv_video(await next_track(tracks))
 
-        sent, received = await caller.getStats(), await callee.getStats()
+        sent = await caller.getStats()
+        received = await callee.getStats()
+
         assert isinstance(sent, RTCStatsReport)
         assert {s.type for s in sent.values()} <= {'outbound-rtp', 'remote-inbound-rtp', 'transport'}
         assert all(isinstance(s.timestamp, dt.datetime) for s in [*sent.values(), *received.values()])
@@ -313,10 +331,11 @@ async def test_stats() -> None:
 @pytest.mark.asyncio
 async def test_replace_track() -> None:
     """replaceTrack() is sync, feeds the same sender and leaves the old track live."""
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     tracks = received_tracks(callee)
     try:
-        first, second = CountingTrack(), CountingTrack()
+        first = CountingTrack()
+        second = CountingTrack()
         sender = caller.addTrack(first)
         await negotiate(caller, callee)
         remote = await next_track(tracks)
@@ -336,7 +355,7 @@ async def test_replace_track() -> None:
 @pytest.mark.asyncio
 async def test_close_stops_tracks_and_pumps() -> None:
     """close() stops the local tracks and their pumps, and ends the remote ones."""
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     tracks = received_tracks(callee)
     try:
         local = VideoStreamTrack()
@@ -346,6 +365,7 @@ async def test_close_stops_tracks_and_pumps() -> None:
         _ = await recv_video(remote)
         ended = asyncio.Event()
         remote.on('ended', ended.set)
+
         pump = sender._pump
         assert pump is not None
 
@@ -357,29 +377,36 @@ async def test_close_stops_tracks_and_pumps() -> None:
         assert remote.readyState == 'ended'
         assert ended.is_set()
         assert sender.track is None
-        assert [t for t in asyncio.all_tasks() if t is not asyncio.current_task()] == []
+        others = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        assert others == []
     finally:
         await close(caller, callee)
 
 
 def write_media(path: Path) -> None:
+    """Writes a second of blank video and silent audio."""
     with av.open(str(path), 'w', format='webm') as container:
         video = container.add_stream('libvpx', rate=30)
-        video.width, video.height, video.pix_fmt = 320, 240, 'yuv420p'
+        video.width = 320
+        video.height = 240
+        video.pix_fmt = 'yuv420p'
         audio = container.add_stream('libopus', rate=48000)
         audio.layout = 'stereo'
+
         for index in range(30):
             picture = av.VideoFrame(320, 240, 'yuv420p')
             for plane in picture.planes:
                 plane.update(bytes(plane.buffer_size))
             picture.pts = index
             container.mux(video.encode(picture))
+
         for index in range(50):
             sound = av.AudioFrame(format='s16', layout='stereo', samples=960)
             sound.planes[0].update(bytes(sound.planes[0].buffer_size))
             sound.sample_rate = 48000
             sound.pts = index * 960
             container.mux(audio.encode(sound))
+
         container.mux(video.encode())
         container.mux(audio.encode())
 
@@ -390,7 +417,7 @@ async def test_player_without_decoding(tmp_path: Path) -> None:
     path = tmp_path / 'media.webm'
     write_media(path)
     player = MediaPlayer(str(path), decode=False)
-    caller, callee = RTCPeerConnection(CONFIGURATION), RTCPeerConnection(CONFIGURATION)
+    caller, callee = new_pair()
     tracks = received_tracks(callee)
     try:
         assert player.video is not None
@@ -398,7 +425,9 @@ async def test_player_without_decoding(tmp_path: Path) -> None:
         caller.addTrack(player.video)
         caller.addTrack(player.audio)
         await negotiate(caller, callee)
-        received = {track.kind: track for track in [await next_track(tracks), await next_track(tracks)]}
+        first = await next_track(tracks)
+        second = await next_track(tracks)
+        received = {track.kind: track for track in (first, second)}
 
         assert (await recv_video(received['video'])).width == 320
         assert (await recv_audio(received['audio'])).sample_rate == 48000

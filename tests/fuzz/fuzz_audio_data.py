@@ -27,11 +27,18 @@ EXPECTED = (TypeError, ValueError, BufferError, webrtc.NotSupportedError, webrtc
 SAMPLE_BYTES = {'u8': 1, 's16': 2, 's32': 4, 'f32': 4}
 
 
+def sample_bytes(format: webrtc.AudioSampleFormat) -> int:
+    """The size of one sample, interleaved or planar."""
+    interleaved, _, _planar = format.value.partition('-')
+    return SAMPLE_BYTES[interleaved]
+
+
 def check_identity(audio: webrtc.AudioData, data: bytes) -> None:
     """Interleaved samples copied out in their own format are the same bytes."""
     assert audio.format is not None
     if audio.format.value.endswith('-planar'):
         return
+
     out = bytearray(audio.allocation_size(webrtc.AudioDataCopyToOptions(plane_index=0)))
     audio.copy_to(out, webrtc.AudioDataCopyToOptions(plane_index=0))
     assert bytes(out) == data[: len(out)], f'{audio!r} copied out differently'
@@ -40,14 +47,17 @@ def check_identity(audio: webrtc.AudioData, data: bytes) -> None:
 def test_one_input(data: bytes) -> None:
     inp = Input(data)
     format = inp.choice(FORMATS)
-    frames, channels = inp.integer(512), inp.integer(8)
+    frames = inp.integer(512)
+    channels = inp.integer(8)
     sample_rate = inp.number(96000) if inp.flag() else 48000
     size = inp.small(1 << 14)
     if isinstance(frames, int) and isinstance(channels, int) and inp.flag():
+        exact = frames * channels * sample_bytes(format)
         # exactly enough samples, when it's not too many
-        exact = frames * channels * SAMPLE_BYTES[format.value.split('-')[0]]
-        size = exact if 0 <= exact < 1 << 16 else size
+        if 0 <= exact < 1 << 16:
+            size = exact
     source = inp.buffer(size)
+
     try:
         audio = webrtc.AudioData(
             webrtc.AudioDataInit(
@@ -61,6 +71,7 @@ def test_one_input(data: bytes) -> None:
         )
     except EXPECTED:
         return
+
     check_identity(audio, bytes(source))
     exercise(inp, audio)
 
@@ -74,11 +85,13 @@ def exercise(inp: Input, audio: webrtc.AudioData) -> None:
             options.frame_count = mistyped(inp.integer(512))
         if inp.flag():
             options.format = inp.choice(FORMATS)
+
         try:
             size = audio.allocation_size(options)
             audio.copy_to(mistyped(inp.destination(min(size, 1 << 20))), options)
         except EXPECTED:
             pass
+
         if inp.small(8) == 0:
             audio = audio.clone()
 

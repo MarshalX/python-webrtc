@@ -25,6 +25,9 @@ if TYPE_CHECKING:
     from webrtc.enums import MediaTypeValue
     from webrtc.streams import WritableStreamDefaultController
 
+_S16_BYTES_PER_SAMPLE = 2
+_MAX_INT32 = 2**31 - 1
+
 
 class _TrackSink:
     """The underlying sink of a generator's writable stream: sends each chunk on the track, closing it."""
@@ -45,7 +48,9 @@ class _TrackSink:
         if frame._resource is None:
             msg = 'The frame is closed'
             raise TypeError(msg)
-        timestamp, rotation = frame.timestamp, frame.rotation
+        # read before taking the resource closes the frame
+        timestamp = frame.timestamp
+        rotation = frame.rotation
         self._native.writeVideo(frame._take_resource(), timestamp, rotation)
 
     def _write_audio(self, data: object) -> None:
@@ -63,12 +68,13 @@ class _TrackSink:
         if audio.format == AudioSampleFormat.s16 and data_bytes is not None:
             samples = bytes(data_bytes)
         else:
-            # closed, copy_to() raises
-            buffer = bytearray(audio.number_of_frames * audio.number_of_channels * 2)
+            # copy_to() raises if the data is closed
+            buffer = bytearray(audio.number_of_frames * audio.number_of_channels * _S16_BYTES_PER_SAMPLE)
             audio.copy_to(buffer, AudioDataCopyToOptions(plane_index=0, format=AudioSampleFormat.s16))
             samples = bytes(buffer)
-        # rates beyond an int are unsupported too: the native check rejects them
-        rate = min(int(audio.sample_rate), 2**31 - 1)
+
+        # clamped, since the native check rejects rates this large as unsupported too
+        rate = min(int(audio.sample_rate), _MAX_INT32)
         try:
             self._native.writeAudio(samples, rate, audio.number_of_channels, audio.number_of_frames)
         except ValueError as e:

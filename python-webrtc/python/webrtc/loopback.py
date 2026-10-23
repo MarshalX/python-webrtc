@@ -5,7 +5,7 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""Loopback candidates, skipped unless allowed, as in the browsers."""
+"""Loopback ICE candidates, which are skipped unless allowed."""
 
 from __future__ import annotations
 

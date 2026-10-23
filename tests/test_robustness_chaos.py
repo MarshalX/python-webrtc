@@ -31,6 +31,7 @@ def run_chaos(seed: int, steps: int, timeout: float, *, transforms: bool = False
         command.append('--transforms')
     if HUNTING:
         command.append('--wait-when-stuck')
+
     try:
         # under make hunt, faulthandler's dump of a hang goes to the job's output
         result = subprocess.run(
@@ -43,8 +44,11 @@ def run_chaos(seed: int, steps: int, timeout: float, *, transforms: bool = False
             check=False,
         )
     except subprocess.TimeoutExpired as e:
-        pytest.fail(f'seed {seed} is stuck after:\n{(e.stdout if e.stdout is not None else b"")[-3000:]}')
-    output = result.stdout + (result.stderr if result.stderr is not None else '')
+        printed = e.stdout if e.stdout is not None else b''
+        pytest.fail(f'seed {seed} is stuck after:\n{printed[-3000:]}')
+
+    errors = result.stderr if result.stderr is not None else ''
+    output = result.stdout + errors
     assert result.returncode == 0, f'seed {seed}, exit code {result.returncode}:\n{output[-5000:]}'
     assert 'done' in result.stdout, output[-3000:]
 
@@ -65,8 +69,10 @@ async def test_sender_steps_survive_a_close_from_another_worker(step: str, monke
     _ = pc.add_transceiver(webrtc.MediaType.audio)
     state.connections.append(pc)
     monkeypatch.setattr(webrtc.RTCPeerConnection, 'get_senders', closing_get_senders)
+
     with contextlib.suppress(*chaos.MISUSE):
         await getattr(state, step)()
+
     assert pc.connection_state == webrtc.RTCPeerConnectionState.closed
 
 

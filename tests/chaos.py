@@ -26,7 +26,7 @@ import random
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING, ClassVar, Literal, NoReturn, TypeVar
+from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple, NoReturn, TypeVar
 
 import webrtc
 from tests.helpers import connect, copy_frame, register_stack_dump, settled_alive
@@ -44,7 +44,26 @@ STEP_TIMEOUT = 20
 #: What misusing the API raises
 MISUSE = (webrtc.PythonWebRTCExceptionBase, ValueError, TypeError, RuntimeError)
 
+#: The directions a transceiver can be set to: all but stopped
+SETTABLE_DIRECTIONS = list(webrtc.RTCRtpTransceiverDirection)[:4]
+
 T = TypeVar('T')
+
+
+class ProcessorReader(NamedTuple):
+    processor: webrtc.MediaStreamTrackProcessor
+    reader: webrtc.ReadableStreamDefaultReader[webrtc.VideoFrame | webrtc.AudioData]
+
+
+class GeneratorWriter(NamedTuple):
+    writer: webrtc.WritableStreamDefaultWriter
+    kind: str
+
+
+def _ignore_rejection(future: asyncio.Future[None]) -> None:
+    """Marks the exception of a rejected write as retrieved."""
+    if not future.cancelled():
+        _ = future.exception()
 
 
 class State:
@@ -57,13 +76,8 @@ class State:
         self.connections: list[webrtc.RTCPeerConnection] = []
         self.channels: list[webrtc.RTCDataChannel] = []
         self.tracks: list[webrtc.MediaStreamTrack] = []
-        self.processors: list[
-            tuple[
-                webrtc.MediaStreamTrackProcessor,
-                webrtc.ReadableStreamDefaultReader[webrtc.VideoFrame | webrtc.AudioData],
-            ]
-        ] = []
-        self.generators: list[tuple[webrtc.WritableStreamDefaultWriter, str]] = []
+        self.processors: list[ProcessorReader] = []
+        self.generators: list[GeneratorWriter] = []
         self.frames: list[webrtc.VideoFrame] = []
         self.tasks: list[threading.Thread | asyncio.Future[None]] = []
         self.transformers: list[webrtc.RTCRtpScriptTransformer] = []
@@ -79,7 +93,9 @@ class State:
         if pc is None:
             return None
         senders = pc.get_senders()
-        return (pc, self.random.choice(senders)) if len(senders) > 0 else None
+        if len(senders) == 0:
+            return None
+        return pc, self.random.choice(senders)
 
     def drop(self, pool: list[T]) -> None:
         with self.lock:
@@ -90,17 +106,21 @@ class State:
         """A handler doing something to a random object: closing, raising, referencing (a cycle), collecting."""
         target = self.pick([*self.connections, *self.channels, *self.tracks])
         action = self.random.randrange(5)
-        collected = [float('-inf')]
+        last_collected = float('-inf')
 
         def handle(_event: webrtc.Event) -> str | None:
+            nonlocal last_collected
             if action == 0 and target is not None:
-                target.stop() if isinstance(target, webrtc.MediaStreamTrack) else target.close()
+                if isinstance(target, webrtc.MediaStreamTrack):
+                    target.stop()
+                else:
+                    target.close()
             elif action == 1:
                 msg = 'a handler raises'
                 raise RuntimeError(msg)
             # at most once a second: per event, as SFrame errors come for every frame, it would starve the loop
-            elif action == 2 and time.monotonic() - collected[0] > 1:
-                collected[0] = time.monotonic()
+            elif action == 2 and time.monotonic() - last_collected > 1:
+                last_collected = time.monotonic()
                 gc.collect()
             elif action == 3:
                 return repr(target)
@@ -129,12 +149,14 @@ class ConnectionSteps(State):
 
     async def connect_two(self) -> None:
         with self.lock:
-            pair = self.random.sample(self.connections, 2) if len(self.connections) >= 2 else None
-        if pair is not None:
-            await connect(pair[0], pair[1], timeout=seconds(5))
+            if len(self.connections) < 2:
+                return
+            caller, callee = self.random.sample(self.connections, 2)
+        await connect(caller, callee, timeout=seconds(5))
 
     async def add_track(self) -> None:
-        pc, track = self.pick(self.connections), self.pick(self.tracks)
+        pc = self.pick(self.connections)
+        track = self.pick(self.tracks)
         if pc is not None and track is not None:
             pc.add_track(track)
 
@@ -146,12 +168,14 @@ class ConnectionSteps(State):
 
     async def add_transceiver(self) -> None:
         pc = self.pick(self.connections)
-        if pc is not None:
-            transceiver = pc.add_transceiver(self.random.choice(['audio', 'video']))
-            if self.random.random() < 0.3:
-                transceiver.stop()
-            elif self.random.random() < 0.3:
-                transceiver.direction = self.random.choice(list(webrtc.RTCRtpTransceiverDirection)[:4])
+        if pc is None:
+            return
+
+        transceiver = pc.add_transceiver(self.random.choice(['audio', 'video']))
+        if self.random.random() < 0.3:
+            transceiver.stop()
+        elif self.random.random() < 0.3:
+            transceiver.direction = self.random.choice(SETTABLE_DIRECTIONS)
 
     async def negotiate(self) -> None:
         pc = self.pick(self.connections)
@@ -160,16 +184,19 @@ class ConnectionSteps(State):
 
     async def create_channel(self) -> None:
         pc = self.pick(self.connections)
-        if pc is not None:
-            channel = pc.create_data_channel(f'chaos{self.random.randrange(1000)}')
-            names: list[Literal['open', 'message', 'close']] = ['open', 'message', 'close']
-            _ = channel.on(self.random.choice(names), self.handler())
-            self.channels.append(channel)
+        if pc is None:
+            return
+
+        channel = pc.create_data_channel(f'chaos{self.random.randrange(1000)}')
+        names: list[Literal['open', 'message', 'close']] = ['open', 'message', 'close']
+        _ = channel.on(self.random.choice(names), self.handler())
+        self.channels.append(channel)
 
     async def send(self) -> None:
         channel = self.pick(self.channels)
         if channel is not None:
-            channel.send(self.random.choice(['text', b'\x00' * self.random.randrange(70000), bytearray(10)]))
+            messages = ['text', bytes(self.random.randrange(70000)), bytearray(10)]
+            channel.send(self.random.choice(messages))
 
     async def close_channel(self) -> None:
         channel = self.pick(self.channels)
@@ -188,40 +215,43 @@ class ConnectionSteps(State):
 
     async def handle_connection_event(self) -> None:
         pc = self.pick(self.connections)
-        if pc is not None:
-            names: list[Literal['connectionstatechange', 'icecandidate', 'track', 'datachannel']] = [
-                'connectionstatechange',
-                'icecandidate',
-                'track',
-                'datachannel',
-            ]
-            _ = pc.on(self.random.choice(names), self.handler())
+        if pc is None:
+            return
+
+        names: list[Literal['connectionstatechange', 'icecandidate', 'track', 'datachannel']] = [
+            'connectionstatechange',
+            'icecandidate',
+            'track',
+            'datachannel',
+        ]
+        _ = pc.on(self.random.choice(names), self.handler())
 
     async def replace_track(self) -> None:
         picked = self.pick_sender()
         if picked is not None:
-            await picked[1].replace_track(self.pick([*self.tracks, None]))
+            _, sender = picked
+            await sender.replace_track(self.pick([*self.tracks, None]))
 
     async def set_parameters(self) -> None:
         picked = self.pick_sender()
-        if picked is not None:
-            sender = picked[1]
-            parameters = sender.get_parameters()
-            for encoding in parameters.encodings:
-                encoding.active = self.random.random() < 0.8
-                encoding.max_bitrate = self.random.choice([None, 30000, 2**31])
-            await sender.set_parameters(parameters)
+        if picked is None:
+            return
+
+        _, sender = picked
+        parameters = sender.get_parameters()
+        for encoding in parameters.encodings:
+            encoding.active = self.random.random() < 0.8
+            encoding.max_bitrate = self.random.choice([None, 30000, 2**31])
+        await sender.set_parameters(parameters)
 
 
 class MediaSteps(State):
     """Steps of tracks, processors, generators and frames."""
 
     async def get_user_media(self) -> None:
-        self.tracks.extend(
-            (
-                await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True, video=True))
-            ).get_tracks()
-        )
+        constraints = webrtc.MediaStreamConstraints(audio=True, video=True)
+        stream = await webrtc.media_devices.get_user_media(constraints)
+        self.tracks.extend(stream.get_tracks())
 
     async def stop_track(self) -> None:
         track = self.pick(self.tracks)
@@ -243,19 +273,21 @@ class MediaSteps(State):
 
     async def new_processor(self) -> None:
         track = self.pick(self.tracks)
-        if track is not None:
-            processor = webrtc.MediaStreamTrackProcessor(
-                webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=self.random.randrange(4))
-            )
-            track.on('ended', self.handler())
-            self.processors.append((processor, processor.readable.get_reader()))
+        if track is None:
+            return
+
+        init = webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=self.random.randrange(4))
+        processor = webrtc.MediaStreamTrackProcessor(init)
+        track.on('ended', self.handler())
+        self.processors.append(ProcessorReader(processor, processor.readable.get_reader()))
 
     async def read(self) -> None:
-        processor = self.pick(self.processors)
-        if processor is None:
+        picked = self.pick(self.processors)
+        if picked is None:
             return
+
         try:
-            result = await asyncio.wait_for(processor[1].read(), 0.2)
+            result = await asyncio.wait_for(picked.reader.read(), 0.2)
         except asyncio.TimeoutError:
             return
         if not result.done:
@@ -264,9 +296,9 @@ class MediaSteps(State):
             result.value.close()
 
     async def cancel_processor(self) -> None:
-        processor = self.pick(self.processors)
-        if processor is not None:
-            await processor[1].cancel()
+        picked = self.pick(self.processors)
+        if picked is not None:
+            await picked.reader.cancel()
 
     async def drop_processor(self) -> None:
         self.drop(self.processors)
@@ -274,18 +306,19 @@ class MediaSteps(State):
     async def new_generator(self) -> None:
         if self.random.random() < 0.5:
             generator = webrtc.VideoTrackGenerator()
-            self.generators.append((generator.writable.get_writer(), 'video'))
+            self.generators.append(GeneratorWriter(generator.writable.get_writer(), 'video'))
             self.tracks.append(generator.track)
         else:
             generator = webrtc.MediaStreamTrackGenerator('audio')
-            self.generators.append((generator.writable.get_writer(), 'audio'))
+            self.generators.append(GeneratorWriter(generator.writable.get_writer(), 'audio'))
             self.tracks.append(generator)
 
     async def write(self) -> None:
-        generator = self.pick(self.generators)
-        if generator is None:
+        picked = self.pick(self.generators)
+        if picked is None:
             return
-        writer, kind = generator
+
+        writer, kind = picked
         if kind == 'video':
             width, height = self.random.choice([(2, 2), (33, 17), (320, 240)])
             chunk = webrtc.VideoFrame(
@@ -308,48 +341,62 @@ class MediaSteps(State):
         await writer.write(chunk)
 
     async def close_generator(self) -> None:
-        generator = self.pick(self.generators)
-        if generator is not None:
-            await generator[0].close()
+        picked = self.pick(self.generators)
+        if picked is not None:
+            await picked.writer.close()
 
     async def drop_generator(self) -> None:
         self.drop(self.generators)
 
     async def frame(self) -> None:
         fmt = self.random.choice(list(webrtc.VideoPixelFormat))
-        width, height = self.random.randrange(1, 40), self.random.randrange(1, 40)
-        frame = webrtc.VideoFrame(
-            bytes(width * height * 8),
-            webrtc.VideoFrameBufferInit(format=fmt, coded_width=width, coded_height=height, timestamp=0),
-        )
-        options = self.random.choice([None, *(webrtc.VideoFrameCopyToOptions(format=f) for f in ('RGBA', 'BGRX'))])
+        width = self.random.randrange(1, 40)
+        height = self.random.randrange(1, 40)
+        init = webrtc.VideoFrameBufferInit(format=fmt, coded_width=width, coded_height=height, timestamp=0)
+        frame = webrtc.VideoFrame(bytes(width * height * 8), init)
+
+        options = self.random.choice([
+            None,
+            webrtc.VideoFrameCopyToOptions(format='RGBA'),
+            webrtc.VideoFrameCopyToOptions(format='BGRX'),
+        ])
         await frame.copy_to(bytearray(frame.allocation_size(options)), options)
         self.frames.append(frame)
 
     async def use_frame(self) -> None:
         frame = self.pick(self.frames)
-        if frame is not None:
-            self.random.choice([frame.close, lambda: self.frames.append(frame.clone())])()
+        if frame is None:
+            return
+
+        def keep_a_clone() -> None:
+            self.frames.append(frame.clone())
+
+        use = self.random.choice([frame.close, keep_a_clone])
+        use()
 
     async def pipe(self) -> None:
         track = self.pick([video for video in self.tracks if video.kind == 'video'])
-        if track is not None:
-            processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
-            generator = webrtc.VideoTrackGenerator()
-            self.tracks.append(generator.track)
-            self.tasks.append(processor.readable.pipe_through(webrtc.TransformStream()).pipe_to(generator.writable))
+        if track is None:
+            return
+
+        processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
+        generator = webrtc.VideoTrackGenerator()
+        self.tracks.append(generator.track)
+        transformed = processor.readable.pipe_through(webrtc.TransformStream())
+        self.tasks.append(transformed.pipe_to(generator.writable))
 
     async def constraints(self) -> None:
         track = self.pick(self.tracks)
-        if track is not None:
-            track.get_settings()
-            track.apply_constraints(
-                self.random.choice([
-                    webrtc.MediaTrackConstraints(width=320),
-                    webrtc.MediaTrackConstraints(frame_rate=5),
-                    webrtc.MediaTrackConstraints(width=webrtc.ConstrainULongRange(exact=7)),
-                ])
-            )
+        if track is None:
+            return
+
+        track.get_settings()
+        constraints = self.random.choice([
+            webrtc.MediaTrackConstraints(width=320),
+            webrtc.MediaTrackConstraints(frame_rate=5),
+            webrtc.MediaTrackConstraints(width=webrtc.ConstrainULongRange(exact=7)),
+        ])
+        track.apply_constraints(constraints)
 
     async def stream(self) -> None:
         with self.lock:
@@ -385,7 +432,7 @@ class TransformSteps(State):
                     self.encoded.append(result.value)
                 elif mode == 'pass':
                     # rejected once the transform is removed
-                    writer.write(result.value).add_done_callback(lambda f: f.cancelled() or f.exception())
+                    writer.write(result.value).add_done_callback(_ignore_rejection)
 
         return worker
 
@@ -399,7 +446,8 @@ class TransformSteps(State):
         if part is None:
             return
         suite = self.random.choice(list(webrtc.SFrameCipherSuite))
-        key = bytes(self.random.randrange(256) for _ in range(self.random.choice([0, 16, 32])))
+        key_length = self.random.choice([0, 16, 32])
+        key = bytes(self.random.randrange(256) for _ in range(key_length))
         if isinstance(part, webrtc.RTCRtpSender):
             encryptor = webrtc.RTCRtpSFrameEncryptor(webrtc.RTCRtpSFrameEncryptorOptions(suite))
             if self.random.random() < 0.8:
@@ -423,7 +471,8 @@ class TransformSteps(State):
     async def rotate_key(self) -> None:
         part = self.pick(self._parts())
         transform = part.transform if part is not None else None
-        key, key_id = bytes(range(self.random.choice([1, 16]))), self.random.randrange(4)
+        key = bytes(range(self.random.choice([1, 16])))
+        key_id = self.random.randrange(4)
         if isinstance(transform, webrtc.RTCRtpSFrameEncryptor):
             await transform.set_encryption_key(key, key_id)
         elif isinstance(transform, webrtc.RTCRtpSFrameDecryptor):
@@ -434,9 +483,11 @@ class TransformSteps(State):
 
     async def write_frame(self) -> None:
         """Writes a held frame, or a copy, to any transformer: frames of others are dropped."""
-        frame, transformer = self.pick(self.encoded), self.pick(self.transformers)
+        frame = self.pick(self.encoded)
+        transformer = self.pick(self.transformers)
         if frame is None or transformer is None:
             return
+
         if self.random.random() < 0.3:
             frame = copy_frame(frame)
         if self.random.random() < 0.5:
@@ -447,17 +498,20 @@ class TransformSteps(State):
             return
         if not transformer.writable.locked:
             writer = transformer.writable.get_writer()
-            writer.write(frame).add_done_callback(lambda f: f.cancelled() or f.exception())
+            writer.write(frame).add_done_callback(_ignore_rejection)
             writer.release_lock()
 
     async def use_encoded_frame(self) -> None:
         frame = self.pick(self.encoded)
-        if frame is not None:
-            _ = frame.data, frame.get_metadata()
-            if self.random.random() < 0.3:
-                self.encoded.append(copy_frame(frame))
-            if self.random.random() < 0.3:
-                self.drop(self.encoded)
+        if frame is None:
+            return
+
+        _ = frame.data
+        _ = frame.get_metadata()
+        if self.random.random() < 0.3:
+            self.encoded.append(copy_frame(frame))
+        if self.random.random() < 0.3:
+            self.drop(self.encoded)
 
     async def key_frame(self) -> None:
         transformer = self.pick(self.transformers)
@@ -473,10 +527,12 @@ class TransformSteps(State):
         decryptor.on('error', self.handler())
         await encryptor.set_encryption_key(b'key', 5)
         await decryptor.add_decryption_key(b'key', self.random.choice([5, 6]))
+
         writer = encryptor.writable.get_writer()
-        chunks = [bytes(self.random.randrange(100)), *(f for f in self.encoded[-3:] if self.random.random() < 0.5)]
-        for chunk in chunks:
-            writer.write(chunk).add_done_callback(lambda f: f.cancelled() or f.exception())
+        blank = bytes(self.random.randrange(100))
+        held = [frame for frame in self.encoded[-3:] if self.random.random() < 0.5]
+        for chunk in [blank, *held]:
+            writer.write(chunk).add_done_callback(_ignore_rejection)
         if self.random.random() < 0.5:
             reader = encryptor.readable.pipe_through(decryptor).get_reader()
             with contextlib.suppress(asyncio.TimeoutError):
@@ -491,7 +547,8 @@ class LoopSteps(State):
 
     async def reader_thread(self) -> None:
         """A thread reading the objects while the loop goes on."""
-        connections, tracks = list(self.connections), list(self.tracks)
+        connections = list(self.connections)
+        tracks = list(self.tracks)
 
         def read() -> None:
             for _ in range(50):
@@ -559,7 +616,8 @@ class Chaos(ConnectionSteps, MediaSteps, TransformSteps, LoopSteps):
                     self._stuck('a reader thread')
 
     async def step(self, index: int, name: str, worker: int = 0) -> None:
-        log.info('%s%d %s', f'worker {worker} ' if self.workers > 1 else '', index, name)
+        prefix = f'worker {worker} ' if self.workers > 1 else ''
+        log.info('%s%d %s', prefix, index, name)
         started = time.monotonic()
         try:
             run: Callable[[], Coroutine[object, object, None]] = getattr(self, name)
@@ -596,11 +654,16 @@ def _run(args: argparse.Namespace) -> None:
 
     workers: int = args.workers
     share, extra = divmod(int(args.steps), workers)
+    counts = [share + 1 if worker < extra else share for worker in range(workers)]
     with concurrent.futures.ThreadPoolExecutor(workers) as pool:
-        runs = [pool.submit(work, worker, share + (1 if worker < extra else 0)) for worker in range(workers)]
+        runs = [pool.submit(work, worker, count) for worker, count in enumerate(counts)]
         # a failed or exited worker (stuck step) ends the run too
         for run in runs:
             run.result()
+
+
+def _all_released(alive: dict[str, int], factories: int) -> bool:
+    return factories == 0 and not any(alive.values())
 
 
 def main() -> None:
@@ -617,14 +680,16 @@ def main() -> None:
         help='on a deadlock, wait to be inspected (make hunt) instead of exiting',
     )
     args = parser.parse_args()
+
     register_stack_dump()
     logging.basicConfig(stream=sys.stdout, format='%(message)s', level=logging.INFO)
     log.info('seed %d, %d steps', args.seed, args.steps)
     if args.workers > 1:
         log.info('%d workers', args.workers)
     _run(args)
+
     # the last references may be released on helper threads
-    alive, factories = settled_alive(lambda alive, factories: factories == 0 and not any(alive.values()))
+    alive, factories = settled_alive(_all_released)
     alive = {name: count for name, count in alive.items() if count != 0}
     log.info('done, %d factories alive, native objects alive: %s', factories, alive)
     # a closed loop releases everything; make hunt files this as a leak

@@ -80,8 +80,10 @@ async def connected_pair() -> None:
     opened = wait_for_event(channel, 'open')
     await connect(caller, callee, timeout=TIMEOUT)
     await opened
+
     channel.send('hello')
     assert await asyncio.wait_for(received, TIMEOUT) == 'hello'
+
     caller.close()
     callee.close()
 
@@ -89,7 +91,9 @@ async def connected_pair() -> None:
 def test_a_loop_per_thread_with_a_connected_pair_each() -> None:
     """Eight concurrent pairs leave nothing alive."""
     baseline = settled_alive()
+
     run_threads(*(lambda: asyncio.run(connected_pair()) for _ in range(THREADS)))
+
     assert settled_alive() == baseline
 
 
@@ -119,6 +123,7 @@ def test_handlers_from_two_loops_while_a_third_thread_closes() -> None:
         lambda: asyncio.run(register('negotiationneeded')),
         close,
     )
+
     assert pc.signaling_state == webrtc.RTCSignalingState.closed
     assert pc.event_names() == set()
 
@@ -143,4 +148,5 @@ def test_close_races_create_offer() -> None:
             pc.close()
 
     run_threads(lambda: asyncio.run(offers()), close)
+
     assert all(pc.signaling_state == webrtc.RTCSignalingState.closed for pc in connections)
