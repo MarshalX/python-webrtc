@@ -839,7 +839,7 @@ def _build_env(build: Build) -> dict[str, str]:
 def build(jobs: Sequence[Job], results: Results) -> None:
     """Builds the editable install and the sanitizer builds the jobs need, once."""
     steps: list[tuple[list[str], dict[str, str]]] = [([sys.executable, '-c', 'import webrtc'], {})]
-    builds = sorted({job.build for job in jobs if job.build is not None}, key=lambda build: build.env.items())
+    builds = sorted({job.build for job in jobs if job.build is not None}, key=lambda build: sorted(build.env.items()))
     steps += [([SANITIZERS, '--build-only'], _build_env(build)) for build in builds]
 
     build_log = results.paths.build_log

@@ -327,14 +327,20 @@ def _per_connection_row(name: str, data: dict[str, Results], libraries: dict[str
     ]
 
 
-def _levels_rows(name: str, result: Results, libraries: dict[str, Hello]) -> list[list[str]]:
+def _median_total_at(runs: list[StateRun], connections: int) -> float:
+    """The median RSS of the runs that reached a count of connections."""
+    totals = [_total(reading) for run in runs for reading in run['levels'] if reading['connections'] == connections]
+    return median(totals)
+
+
+def _levels_rows(name: str, result: Results, libraries: dict[str, Hello], *, levels: list[int]) -> list[list[str]]:
     rows: list[list[str]] = []
     for state in STATES:
         runs = _runs(result, state)
         if len(runs) == 0:
             continue
-        levels = len(runs[0]['levels'])
-        totals = [median([_total(run['levels'][level]) for run in runs]) for level in range(levels)]
+
+        totals = [_median_total_at(runs, level) for level in levels]
         rows.append([markdown.library(name, libraries), state, *(markdown.number(total, 0) for total in totals)])
     return rows
 
@@ -355,8 +361,9 @@ def _growth_row(name: str, result: Results, libraries: dict[str, Hello]) -> list
 
 
 def _levels(data: dict[str, Results]) -> list[int]:
+    """Every count of connections a run reached, as runs stop early at the memory limit."""
     runs = [run for result in data.values() for state in STATES for run in _runs(result, state)]
-    return [] if len(runs) == 0 else [reading['connections'] for reading in runs[0]['levels']]
+    return sorted({reading['connections'] for run in runs for reading in run['levels']})
 
 
 def _per_connection_table(data: dict[str, Results], libraries: dict[str, Hello]) -> list[str]:
@@ -389,8 +396,9 @@ def _retained_table(data: dict[str, Results], libraries: dict[str, Hello]) -> li
 
 
 def _levels_table(data: dict[str, Results], libraries: dict[str, Hello]) -> list[str]:
-    header = ['Library', 'State', *(str(level) for level in _levels(data))]
-    rows = [row for name, result in data.items() for row in _levels_rows(name, result, libraries)]
+    levels = _levels(data)
+    header = ['Library', 'State', *(str(level) for level in levels)]
+    rows = [row for name, result in data.items() for row in _levels_rows(name, result, libraries, levels=levels)]
     return ['### RSS of both processes by connections (MB)', '', *markdown.table(header, rows)]
 
 
