@@ -1,0 +1,17 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "Python WebRTC",
+  "description": "Chrome's WebRTC engine (libwebrtc M152) with the W3C browser API, in Python and asyncio: peer connections, data channels, tracks, WebCodecs frames, encoded transforms and stats.",
+  "folders": ["docs/source", "examples"],
+  "excludeFolders": ["docs/source/_static"],
+  "excludeFiles": ["LICENSE.md", "THIRD_PARTY_LICENSES.md", "llms-txt.md"],
+  "rules": [
+    "Install with `pip install wrtc` and import as `webrtc`.",
+    "The API is the browser's WebRTC API with snake_case names: `pc.create_offer()`, `pc.set_local_description(offer)`, `pc.create_data_channel('chat')`.",
+    "Methods that return a promise in the browser are coroutines: await them inside a running asyncio event loop.",
+    "Register handlers with `target.on('event', handler)` or the `@target.on('event')` decorator; handlers can be coroutines.",
+    "Dictionaries are dataclasses: `webrtc.RTCConfiguration(ice_servers=[webrtc.RTCIceServer(urls='stun:stun.l.google.com:19302')])`.",
+    "Close connections with `pc.close()` when done.",
+    "To run code written for aiortc, install `wrtc[aiortc]` and change `from aiortc` to `from webrtc.aiortc`."
+  ]
+}

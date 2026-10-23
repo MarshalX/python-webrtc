@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from docutils import nodes
 from pygments.formatters import HtmlFormatter
 from sphinx.ext.autodoc.mock import mock
 from sphinxawesome_theme.postprocess import Icons
@@ -54,6 +55,7 @@ extensions = [
     'sphinx_sitemap',
     'sphinx_favicon',
     'myst_parser',
+    'sphinx_llm.txt',
 ]
 
 DOCSEARCH_APP_ID = os.environ.get('DOCSEARCH_APP_ID')
@@ -198,6 +200,14 @@ html_theme_options = {
 # -- Sitemap ---------------------------------------------------
 sitemap_locales = [None]
 sitemap_url_scheme = '{link}'
+sitemap_excludes = ['llms-txt/']
+
+# -- llms.txt ---------------------------------------------------
+# a Markdown copy of every page, e.g. /quickstart.md, for agents
+llms_txt_override_source = 'llms-txt'
+llms_txt_nested_enabled = False
+llms_txt_full_build = True
+LLMS_MARKDOWN_BUILDER = 'llms-markdown'
 
 # -- Favicons ---------------------------------------------------
 favicons = [
@@ -374,8 +384,48 @@ def scope_pygments_to_theme(app: Sphinx, exception: Exception | None) -> None:
     (Path(app.outdir) / '_static' / 'pygments.css').write_text('\n'.join(blocks), encoding='UTF-8')
 
 
+def _design_components(root: nodes.Element, component: str) -> list[nodes.container]:
+    return [node for node in root.findall(nodes.container) if node.get('design_component') == component]
+
+
+def _flat_card(card: nodes.container) -> list[nodes.Node]:
+    """A card as its title, linked to the card's target, and its text."""
+    title = next(iter(_design_components(card, 'card-title')), None)
+    links = [node for node in card.findall(nodes.reference) if 'sd-stretched-link' in node['classes']]
+
+    label: nodes.Element = nodes.strong(text=title.astext().strip() if title else '')
+    if links:
+        target = {key: links[0][key] for key in ('refuri', 'refid', 'internal') if key in links[0]}
+        label = nodes.reference('', '', label, **target)
+
+    body = next(iter(_design_components(card, 'card-body')), None)
+    text = [child.deepcopy() for child in body.children if child is not title] if body else []
+    return [nodes.paragraph('', '', label), *text]
+
+
+def simplify_for_markdown(app: Sphinx, doctree: nodes.document, _docname: str) -> None:
+    """Rewrite the nodes the Markdown builder of llms.txt drops or can't render.
+
+    Cards become a linked title and their text, captions of code blocks a line above them, and the raw HTML of icons,
+    the abbreviations of signatures and the meta tags are dropped.
+    """
+    if app.builder.name != LLMS_MARKDOWN_BUILDER:
+        return
+
+    for node in [*doctree.findall(nodes.raw), *doctree.findall(nodes.meta)]:
+        if node.parent is not None:
+            node.parent.remove(node)
+    for abbreviation in list(doctree.findall(nodes.abbreviation)):
+        abbreviation.replace_self(nodes.Text(abbreviation.astext()))
+    for caption in list(doctree.findall(nodes.caption)):
+        caption.replace_self(nodes.paragraph('', '', nodes.literal(text=caption.astext())))
+    for card in _design_components(doctree, 'card'):
+        card.replace_self(_flat_card(card))
+
+
 def setup(app: Sphinx) -> None:
     """Connects the handlers of the build events."""
+    app.connect('doctree-resolved', simplify_for_markdown)
     app.connect('builder-inited', disable_search_index)
     app.connect('autodoc-skip-member', skip_member)
     # after Napoleon, which connects at the default priority

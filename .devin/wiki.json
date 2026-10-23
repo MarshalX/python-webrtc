@@ -1,0 +1,109 @@
+{
+  "repo_notes": [
+    {
+      "content": "Python WebRTC binds libwebrtc M152, the WebRTC engine of Chrome, and exposes it through the W3C browser APIs in asyncio. It is installed with `pip install wrtc` and imported as `webrtc`. Descriptions of it as bindings to WebRTC M92 that aren't ready for use are about its versions from 2023 and are out of date."
+    },
+    {
+      "content": "The public API follows the specifications: WebRTC, Media Capture and Streams, WebCodecs (VideoFrame, AudioData), WebRTC Encoded Transform with SFrame, WHATWG Streams and WebRTC Statistics. Describe it in the terms of those specifications and of MDN, with snake_case names (`create_offer`). The camelCase originals (`createOffer`) are aliases. Dictionaries are typed dataclasses, enums compare equal to the strings of the specifications, and handlers are registered with `on`."
+    },
+    {
+      "content": "Layout: `python-webrtc/python/webrtc` is the Python package (`interfaces`, `models`, `enums.py`, `exceptions.py`, `streams.py`, `utils`, and the `aiortc` compatibility layer). `python-webrtc/cpp/src` is the native extension module `wrtc`, written with pybind11. `docs/source` is the Sphinx documentation published at https://wrtc.marshal.dev. `tests` holds the pytest suite, web-platform-tests, the WebIDL comparison and fuzzing. `benchmarks` and `examples` are at the root."
+    },
+    {
+      "content": "`python-webrtc/cpp/NATIVE.md` is the authoritative description of the native threads, the Dispatcher and mailboxes, ownership and lifetime: native threads never run Python and only post records to the mailbox of an event loop. Benchmark numbers come only from `benchmarks/RESULTS.md`. H.264 isn't compiled into the package: macOS uses VideoToolbox, and elsewhere Cisco's OpenH264 binary is downloaded at runtime on request."
+    }
+  ],
+  "pages": [
+    {
+      "title": "Overview",
+      "purpose": "What Python WebRTC is, what it covers, the supported Python versions and platforms, and how the repository is organised."
+    },
+    {
+      "title": "Getting started",
+      "parent": "Overview",
+      "purpose": "Installing `wrtc`, connecting two peers with a data channel as in docs/source/quickstart.md, and how the API maps from the browser's JavaScript to Python."
+    },
+    {
+      "title": "Python API",
+      "purpose": "The layout of the `webrtc` package: interfaces, models (dictionaries), enums, exceptions and streams, and the conventions they share."
+    },
+    {
+      "title": "Peer connections and signaling",
+      "parent": "Python API",
+      "purpose": "RTCPeerConnection, RTCConfiguration and ICE servers, offers and answers, session descriptions, ICE candidates and the ICE and DTLS transports."
+    },
+    {
+      "title": "Data channels",
+      "parent": "Python API",
+      "purpose": "RTCDataChannel and RTCSctpTransport: text and binary messages, reliability options, negotiated channels and back pressure."
+    },
+    {
+      "title": "Events",
+      "parent": "Python API",
+      "purpose": "The event targets in `webrtc/utils/events.py`: registering handlers with `on` and `once`, coroutine handlers, decorators, and the event objects."
+    },
+    {
+      "title": "Media tracks and transceivers",
+      "parent": "Python API",
+      "purpose": "MediaStream, MediaStreamTrack, the synthetic camera and microphone of MediaDevices, track constraints, transceivers, senders, receivers and RTP parameters."
+    },
+    {
+      "title": "Media processing",
+      "parent": "Python API",
+      "purpose": "Reading and writing frames: MediaStreamTrackProcessor, VideoTrackGenerator and MediaStreamTrackGenerator, VideoFrame and AudioData, and the streams in `webrtc/streams.py`."
+    },
+    {
+      "title": "Encoded transforms and SFrame",
+      "parent": "Python API",
+      "purpose": "RTCRtpScriptTransform and encoded frames, and end-to-end encryption with the SFrame transforms."
+    },
+    {
+      "title": "Stats",
+      "parent": "Python API",
+      "purpose": "`get_stats` and the stats dictionaries of WebRTC Statistics in `webrtc/models/rtc_stats.py`."
+    },
+    {
+      "title": "Field trials and WARP",
+      "parent": "Python API",
+      "purpose": "FieldTrials, which turns on experimental features of the engine, and WARP (DTLS 1.3, SNAP and SPED) for faster connection setup."
+    },
+    {
+      "title": "Codecs and H.264",
+      "purpose": "The supported codecs, the video codec factories in `cpp/src/codecs`, VideoToolbox on macOS, and the OpenH264 binary downloaded at runtime by `webrtc/openh264.py`."
+    },
+    {
+      "title": "aiortc compatibility layer",
+      "purpose": "`webrtc.aiortc`, which runs code written for aiortc on this engine, and the differences documented in docs/source/guides/aiortc.md."
+    },
+    {
+      "title": "Native extension",
+      "purpose": "The pybind11 module in `python-webrtc/cpp/src`: its modules (interfaces, media, codecs, models, utils) and how Python wrappers map to native objects."
+    },
+    {
+      "title": "Threads, the Dispatcher and mailboxes",
+      "parent": "Native extension",
+      "purpose": "The threading model of `python-webrtc/cpp/NATIVE.md`: libwebrtc's threads, mailboxes of event loops, the Dispatcher, locking rules and free-threaded Python."
+    },
+    {
+      "title": "Ownership and lifetime",
+      "parent": "Native extension",
+      "purpose": "Who owns native objects and when they are released, as described in the Ownership and Lifetime sections of `python-webrtc/cpp/NATIVE.md` and in `webrtc/utils/lifetime.py`."
+    },
+    {
+      "title": "Build and release",
+      "purpose": "Building from sources with scikit-build-core and CMake, the prebuilt libwebrtc downloaded by `cmake/libwebrtc.cmake`, wheels built with cibuildwheel, and the steps in CONTRIBUTING.md."
+    },
+    {
+      "title": "Testing",
+      "purpose": "The pytest suite in `tests`, the web-platform-tests in `tests/wpt`, the WebIDL comparison in `tests/idl`, fuzzing in `tests/fuzz`, and the sanitizer and clang-tidy scripts in `.github/scripts`."
+    },
+    {
+      "title": "Benchmarks",
+      "purpose": "The benchmark suites and drivers in `benchmarks`, their method and caveats from benchmarks/README.md, and the results in benchmarks/RESULTS.md."
+    },
+    {
+      "title": "Examples",
+      "purpose": "The runnable programs in `examples`: the echo peer, the recorder, the Janus live stream in the terminal and the voice chat with OpenAI."
+    }
+  ]
+}
