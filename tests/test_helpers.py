@@ -27,7 +27,12 @@ async def gather_as_the_loop_closes(caller: webrtc.RTCPeerConnection, callee: we
         await asyncio.sleep(3600)
     except asyncio.CancelledError:
         gathered = asyncio.get_running_loop().create_future()
-        caller.on('icecandidate', lambda _event: gathered.done() or gathered.set_result(None))
+
+        def on_candidate(_event: webrtc.RTCPeerConnectionIceEvent) -> None:
+            if not gathered.done():
+                gathered.set_result(None)
+
+        caller.on('icecandidate', on_candidate)
         await caller.set_local_description()
         offer = caller.local_description
         assert offer is not None
@@ -74,12 +79,14 @@ async def test_delivered_waits_for_queued_events(pc: webrtc.RTCPeerConnection) -
     transceiver = pc.add_transceiver(webrtc.MediaType.audio)
     calls: list[str] = []
     transceiver.receiver.track.on('ended', lambda event: calls.append(event.type))
+
     # the event's record waits in the mailbox: nothing wakes the loop for it
     wrtc._testing.park('dispatcher.wake')
     try:
         transceiver.stop()
         await next_task()
         assert calls == []
+
         await delivered()
         assert calls == ['ended']
     finally:

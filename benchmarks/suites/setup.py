@@ -7,8 +7,8 @@
 
 """Connection establishment: a fresh pair of connections a trial, timed on the offerer from ``createOffer``.
 
-Two modes: ``trickle`` sends the descriptions right away and relays the candidates as they're gathered, as browsers
-do; aiortc can't, so it connects as in ``complete``, where each side sends its description once gathering completes.
+Two modes: ``trickle`` sends the descriptions right away and relays the candidates as they're gathered; aiortc can't,
+so it connects as in ``complete``, where each side sends its description once gathering completes.
 Cold trials are the first connection of fresh processes, so they include starting the library (its factory, threads);
 warm trials follow a discarded one in the same processes.
 """
@@ -148,8 +148,9 @@ class _Case:
 
 
 def _every(options: Options) -> list[_Case]:
-    kinds = [True] * (3 if options.quick else 10) + [False] * options.repeat
-    return [_Case(library, mode, cold) for library in options.libraries for mode in MODES for cold in kinds]
+    cold_trials = 3 if options.quick else 10
+    colds = [True] * cold_trials + [False] * options.repeat
+    return [_Case(library, mode, cold) for library in options.libraries for mode in MODES for cold in colds]
 
 
 def _cases(options: Options) -> list[_Case]:
@@ -170,14 +171,16 @@ async def run(options: Options) -> dict[Mode, dict[str, Results]]:
     Returns:
         The trials by mode, then by library.
     """
-    per_run = math.ceil((10 if options.quick else 100) / options.repeat)
+    warm_trials = 10 if options.quick else 100
+    per_run = math.ceil(warm_trials / options.repeat)
     results: dict[Mode, dict[str, Results]] = {
         mode: {library: {'cold': [], 'warm': []} for library in options.libraries} for mode in MODES
     }
 
     for case in _cases(options):
         options.progress(f'setup: {case.library} {case.name}')
-        result, trickle = results[case.mode][case.library], case.mode == 'trickle'
+        result = results[case.mode][case.library]
+        trickle = case.mode == 'trickle'
         if case.cold:
             result['cold'].append(await cold_trial(case.library, options.log, trickle=trickle))
         else:
@@ -215,8 +218,10 @@ def _timings(
     rows: list[list[str]] = []
     for name, result in data.items():
         trials = kind(result)
-        cells = [markdown.library(name, libraries), *(markdown.spread(_step(trials, step)) for step, _ in STEP_TITLES)]
-        rows.append([*cells, markdown.percent_of(median(_step(trials, 'dc_open')), baseline)])
+        spreads = [markdown.spread(_step(trials, step)) for step, _ in STEP_TITLES]
+        compared = markdown.percent_of(median(_step(trials, 'dc_open')), baseline)
+        rows.append([markdown.library(name, libraries), *spreads, compared])
+
     header = ['Library', *(title for _, title in STEP_TITLES), f'Open, % of {BASELINE}']
     return markdown.table(header, rows)
 
@@ -269,14 +274,9 @@ def render(data: dict[Mode, dict[str, Results]], libraries: dict[str, Hello]) ->
     for mode, title in MODES.items():
         lines += _mode(title, data[mode], libraries)
 
+    header = ['Library', 'CPU, both (ms)', 'Peak RSS, offerer (MB)', 'Loop lag p95 (ms)', 'Failed trials']
     costs = [_cost(name, result, libraries) for name, result in data['trickle'].items()]
-    lines += [
-        '### Cost of a warm trial, trickle',
-        '',
-        *markdown.table(
-            ['Library', 'CPU, both (ms)', 'Peak RSS, offerer (MB)', 'Loop lag p95 (ms)', 'Failed trials'], costs
-        ),
-    ]
+    lines += ['### Cost of a warm trial, trickle', '', *markdown.table(header, costs)]
 
     return lines
 

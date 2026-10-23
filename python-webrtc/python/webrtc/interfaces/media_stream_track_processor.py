@@ -55,6 +55,19 @@ class MediaStreamTrackProcessorInit(Dictionary):
     maxBufferSize: ClassVar[Alias[int | None]] = alias('max_buffer_size')
 
 
+def _max_buffer_size(max_buffer_size: int | None, *, video: bool) -> int:
+    """The validated ``max_buffer_size``, or the default for the kind of track."""
+    if max_buffer_size is None:
+        return DEFAULT_VIDEO_BUFFER_SIZE if video else DEFAULT_AUDIO_BUFFER_SIZE
+    if isinstance(max_buffer_size, bool) or not isinstance(max_buffer_size, int):
+        msg = f'max_buffer_size must be an integer, not {max_buffer_size!r}'
+        raise TypeError(msg)
+    if not 0 <= max_buffer_size <= _MAX_BUFFER_SIZE:
+        msg = f'max_buffer_size must be from 0 to {_MAX_BUFFER_SIZE}, not {max_buffer_size}'
+        raise TypeError(msg)
+    return max_buffer_size
+
+
 class _TrackSource:
     """The underlying source of :attr:`MediaStreamTrackProcessor.readable`.
 
@@ -123,18 +136,10 @@ class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], Ev
     _source: _TrackSource | None
 
     def __init__(self, init: MediaStreamTrackProcessorInit) -> None:
-        track, max_buffer_size = init.track, init.max_buffer_size
-        video = track.kind == MediaType.video
-        if max_buffer_size is None:
-            max_buffer_size = DEFAULT_VIDEO_BUFFER_SIZE if video else DEFAULT_AUDIO_BUFFER_SIZE
-        if isinstance(max_buffer_size, bool) or not isinstance(max_buffer_size, int):
-            msg = f'max_buffer_size must be an integer, not {max_buffer_size!r}'
-            raise TypeError(msg)
-        if not 0 <= max_buffer_size <= _MAX_BUFFER_SIZE:
-            msg = f'max_buffer_size must be from 0 to {_MAX_BUFFER_SIZE}, not {max_buffer_size}'
-            raise TypeError(msg)
-
-        super().__init__(wrtc.MediaStreamTrackProcessor(track._native_obj, max(1, max_buffer_size)))
+        video = init.track.kind == MediaType.video
+        max_buffer_size = _max_buffer_size(init.max_buffer_size, video=video)
+        native = wrtc.MediaStreamTrackProcessor(init.track._native_obj, max(1, max_buffer_size))
+        super().__init__(native)
         self._source = _TrackSource(self)
         self._readable: ReadableStream[VideoFrame | AudioData] = ReadableStream(
             self._source, QueuingStrategy(high_water_mark=0)

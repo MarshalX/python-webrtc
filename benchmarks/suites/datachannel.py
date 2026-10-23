@@ -106,8 +106,7 @@ def _rate(before: Sequence[Count], after: Sequence[Count], key: Literal['bytes',
     return sum((b[key] - a[key]) / (b['t'] - a['t']) for a, b in zip(before, after))
 
 
-async def _measure(drivers: tuple[Driver, Driver], connections: list[Connection], timing: Timing) -> FloodRun:
-    offerer, answerer = drivers
+async def _measure(offerer: Driver, answerer: Driver, connections: list[Connection], *, timing: Timing) -> FloodRun:
     await asyncio.sleep(timing.warmup)
 
     # a count a second over the measured seconds, and the CPU of both processes over them
@@ -117,21 +116,21 @@ async def _measure(drivers: tuple[Driver, Driver], connections: list[Connection]
     for _ in range(timing.measured):
         await asyncio.sleep(INTERVAL)
         samples.append(await _counts(answerer, connections))
-    usage = offerer.sampler.stop(), answerer.sampler.stop()
+    usage = [offerer.sampler.stop(), answerer.sampler.stop()]
 
     pairs = list(zip(samples, samples[1:]))
+    first, last = samples[0], samples[-1]
     return {
         'mbps': [_rate(before, after, 'bytes') * 8 / 1e6 for before, after in pairs],
         'messages_per_second': [_rate(before, after, 'messages') for before, after in pairs],
-        'megabytes': sum(b['bytes'] - a['bytes'] for a, b in zip(samples[0], samples[-1])) / 1e6,
+        'megabytes': sum(b['bytes'] - a['bytes'] for a, b in zip(first, last)) / 1e6,
         'cpu_seconds': sum(u.cpu_seconds for u in usage),
     }
 
 
 async def _flood(
-    drivers: tuple[Driver, Driver], connections: list[Connection], *, cell: Cell, timing: Timing
+    offerer: Driver, answerer: Driver, connections: list[Connection], *, cell: Cell, timing: Timing
 ) -> FloodRun:
-    offerer = drivers[0]
     await asyncio.gather(*(c.open(ordered=cell.ordered) for c in connections))
 
     # the floods outlast the warmup and the measured seconds
@@ -144,7 +143,7 @@ async def _flood(
     )
 
     try:
-        run = await _measure(drivers, connections, timing)
+        run = await _measure(offerer, answerer, connections, timing=timing)
     except BaseException:
         floods.cancel()
         raise
@@ -157,7 +156,7 @@ async def flood_run(library: str, cell: Cell, *, timing: Timing, log: IO[bytes])
     async with pair(library, log) as (offerer, answerer):
         connections = [Connection(offerer, answerer, trickle=True) for _ in range(cell.connections)]
         try:
-            return await _flood((offerer, answerer), connections, cell=cell, timing=timing)
+            return await _flood(offerer, answerer, connections, cell=cell, timing=timing)
         except DriverError as error:
             print(f'  flood failed: {error}', file=sys.stderr)
             return None
@@ -216,7 +215,8 @@ async def run(options: Options) -> dict[str, Results]:
         if cell is None:
             results[library]['ping'].append(await ping_run(library, timing, options.log))
         else:
-            results[library]['flood'][cell.name].append(await flood_run(library, cell, timing=timing, log=options.log))
+            flood = await flood_run(library, cell, timing=timing, log=options.log)
+            results[library]['flood'][cell.name].append(flood)
 
     return results
 
@@ -246,14 +246,12 @@ def _table(
     data: dict[str, Results], libraries: dict[str, Hello], metric: Callable[[list[FloodRun]], float]
 ) -> list[str]:
     others = [name for name in data if name != BASELINE]
-    rows = [
-        [
-            cell,
-            *(markdown.number(value, 0) for value in values.values()),
-            *(markdown.percent_of(values[name], values.get(BASELINE, math.nan)) for name in others),
-        ]
-        for cell, values in _by_cell(data, metric).items()
-    ]
+    rows: list[list[str]] = []
+    for cell, values in _by_cell(data, metric).items():
+        baseline = values.get(BASELINE, math.nan)
+        cells = [markdown.number(value, 0) for value in values.values()]
+        compared = [markdown.percent_of(values[name], baseline) for name in others]
+        rows.append([cell, *cells, *compared])
 
     header = [
         'Flood',

@@ -128,7 +128,8 @@ def _load_js(path: Path) -> TestFile:
         match = _META.match(line.strip())
         if match is None:
             continue
-        key, value = match.group(1), match.group(2).strip()
+        key = match.group(1)
+        value = match.group(2).strip()
         if key == 'script':
             test_file.scripts.append(('src', value))
         elif key == 'variant':
@@ -137,6 +138,7 @@ def _load_js(path: Path) -> TestFile:
             test_file.title = value
         elif key == 'timeout':
             test_file.long_timeout = value == 'long'
+
     test_file.scripts.append(('src', '/' + path.relative_to(WPT_ROOT).as_posix()))
     return test_file
 
@@ -145,6 +147,7 @@ def load(path: Path) -> TestFile:
     test_file = _load_js(path) if path.name.endswith('.js') else _load_html(path)
     if len(test_file.variants) == 0:
         test_file.variants = ['']
+
     title = test_file.title.strip()
     test_file.title = title if title != '' else path.name
     return test_file
@@ -154,6 +157,7 @@ def _is_test(path: Path) -> bool:
     parts = path.relative_to(WPT_ROOT).parts
     if len(HELPER_DIRS.intersection(parts[:-1])) > 0:
         return False
+
     name = path.name
     if '-manual.' in name or name.endswith(('-ref.html', '-notref.html')):
         return False
@@ -178,7 +182,8 @@ def case_id(path: Path, variant: str = '') -> str:
 
 def split_case(case: str) -> tuple[Path, str]:
     path, _, variant = case.partition('?')
-    return WPT_ROOT / path, '?' + variant if variant != '' else ''
+    query = '?' + variant if variant != '' else ''
+    return WPT_ROOT / path, query
 
 
 def _resolve(src: str, test_path: Path) -> Path:
@@ -198,12 +203,14 @@ def build_scripts(test_file: TestFile) -> list[str]:
     """
     parts = [POLYFILLS.read_text(), SHIM.read_text()]
     test_src = '/' + test_file.path.relative_to(WPT_ROOT).as_posix()
+
     overrides_added = False
     for kind, value in test_file.scripts:
         is_test_code = kind == 'inline' or value == test_src
         if is_test_code and not overrides_added:
             parts.append(HELPER_OVERRIDES)
             overrides_added = True
+
         if kind == 'inline':
             parts.append(value)
             continue

@@ -53,7 +53,10 @@ class MediaStream(
     def __init__(self, tracks: list[webrtc.MediaStreamTrack] | webrtc.MediaStream | None = None) -> None:
         if isinstance(tracks, MediaStream):
             tracks = tracks.get_tracks()
-        super().__init__(wrtc.MediaStream.create([track._native_obj for track in tracks] if tracks is not None else []))
+        native_tracks: list[wrtc.MediaStreamTrack] = []
+        if tracks is not None:
+            native_tracks = [track._native_obj for track in tracks]
+        super().__init__(wrtc.MediaStream.create(native_tracks))
         self._keep_tracks()
 
     @classmethod

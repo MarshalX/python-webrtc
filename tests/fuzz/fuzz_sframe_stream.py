@@ -40,7 +40,8 @@ SUITES = list(webrtc.SFrameCipherSuite)
 MAX_U64 = 2**64 - 1
 # generous: the fuzz VM stalls for seconds under load, a hang is the timeout of libFuzzer
 TIMEOUT = 20
-DROPPED, ERRORED = object(), object()
+DROPPED = object()
+ERRORED = object()
 
 S = TypeVar('S', webrtc.SFrameEncryptorStream, webrtc.SFrameDecryptorStream)
 
@@ -77,6 +78,7 @@ class Pipe(Generic[S]):
         except TypeError:
             assert isinstance(await asyncio.wait_for(self._failure(), TIMEOUT), TypeError)
             return ERRORED
+
         # the read fulfilled is resolved in a later turn of the loop
         for _ in range(20):
             if self.read.done():
@@ -84,6 +86,7 @@ class Pipe(Generic[S]):
             await asyncio.sleep(0)
         if not self.read.done():
             return DROPPED
+
         result = self.read.result()
         assert not result.done
         self.read = asyncio.ensure_future(self.reader.read())
@@ -152,7 +155,8 @@ class Session:
         self.sent: list[tuple[bytes, bytes, int, bytes]] = []
 
     async def set_key(self) -> None:
-        raw, kid = key(self.inp), key_id(self.inp, list(self.keys))
+        raw = key(self.inp)
+        kid = key_id(self.inp, list(self.keys))
         await self.encryptor.stream.set_encryption_key(raw, kid)
         self.sending = (bytes(memoryview(raw)), kid)
         if self.inp.flag():
@@ -161,7 +165,8 @@ class Session:
 
     async def add_key(self) -> None:
         sending: list[int] = [self.sending[1]] if self.sending is not None else []
-        raw, kid = key(self.inp), key_id(self.inp, sending + list(self.keys))
+        raw = key(self.inp)
+        kid = key_id(self.inp, sending + list(self.keys))
         await self.decryptor.stream.add_decryption_key(raw, kid)
         self.keys[kid] = bytes(memoryview(raw))
 
@@ -179,6 +184,7 @@ class Session:
         if self.sending is None:
             assert out is DROPPED
             return
+
         assert isinstance(out, bytes)
         raw, kid = self.sending
         header = wrtc._sframeParseHeader(out)
@@ -191,12 +197,14 @@ class Session:
     async def decrypt_sent(self) -> None:
         if len(self.sent) == 0:
             return
+
         ciphertext, raw, kid, plaintext = self.inp.choice(self.sent)
         tampered = self.inp.small(3) == 3
         if tampered:
             changed = bytearray(ciphertext)
             changed[self.inp.small(len(changed) - 1)] ^= self.inp.small(254) + 1
             ciphertext = bytes(changed)
+
         out = await self.decryptor.write(ciphertext)
         assert out is not ERRORED
         if tampered:
@@ -230,6 +238,7 @@ class Session:
             assert isinstance(out, bytes)
             assert self.decryptor.errors == []
             return
+
         event = await self.decryptor.error()
         assert event.frame == bytes(memoryview(mistyped(data)))
         assert (event.key_id is not None) == (event.error_type == webrtc.SFrameTransformErrorEventType.key_id)
@@ -239,6 +248,7 @@ class Session:
     async def burst(self) -> None:
         if self.sending is None:
             return
+
         plaintexts = [bytes(self.inp.contiguous(self.inp.small(64))) for _ in range(self.inp.small(6) + 1)]
         writes = [self.encryptor.writer.write(plaintext) for plaintext in plaintexts]
         outs: list[object] = []
@@ -247,6 +257,7 @@ class Session:
             self.encryptor.read = asyncio.ensure_future(self.encryptor.reader.read())
             outs.append(result.value)
         await asyncio.wait_for(asyncio.gather(*writes), TIMEOUT)
+
         raw, kid = self.sending
         for out, plaintext in zip(outs, plaintexts):
             assert isinstance(out, bytes)
@@ -281,6 +292,7 @@ class Session:
             except ValueError:
                 failed = True
             assert failed
+
         if pipe is self.encryptor:
             self.restart_encryptor()
         else:
@@ -289,6 +301,7 @@ class Session:
     async def run(self) -> None:
         actions = [self.set_key, self.add_key, self.remove_key, self.encrypt, self.decrypt_sent, self.decrypt]
         actions += [self.burst, self.end]
+
         try:
             for _ in range(self.inp.small(24)):
                 if self.inp.exhausted():

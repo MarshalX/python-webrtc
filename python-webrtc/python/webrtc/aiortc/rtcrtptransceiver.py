@@ -71,8 +71,11 @@ class RTCRtpTransceiver:
         self._native.direction = webrtc.RTCRtpTransceiverDirection(direction)
 
     def setCodecPreferences(self, codecs: list[RTCRtpCodecCapability]) -> None:
-        sent, received = RTCRtpSender.getCapabilities(self.kind), RTCRtpReceiver.getCapabilities(self.kind)
+        sent = RTCRtpSender.getCapabilities(self.kind)
+        received = RTCRtpReceiver.getCapabilities(self.kind)
         capabilities = [*sent.codecs, *received.codecs]
+
+        # a repeated codec keeps its last position
         unique: list[RTCRtpCodecCapability] = []
         for codec in reversed(codecs):
             if codec not in capabilities:
@@ -80,6 +83,7 @@ class RTCRtpTransceiver:
                 raise ValueError(msg)
             if codec not in unique:
                 unique.insert(0, codec)
+
         try:
             self._native.set_codec_preferences([_native_codec(c) for c in unique])
         except webrtc.InvalidModificationError as e:
@@ -95,9 +99,11 @@ class RTCRtpTransceiver:
         self._stopped = True
 
     def _announced_track_id(self, sdp: str) -> str | None:
-        found = _MSID.search(_media_section(sdp, self.mid)) if self.mid is not None else None
-        if found is not None:
-            return found.group(1)
+        mid = self.mid
+        if mid is not None:
+            found = _MSID.search(_media_section(sdp, mid))
+            if found is not None:
+                return found.group(1)
         # before negotiation, the sender of a track the application added is announced with the track's id
         sent = self._sender._sent
         return sent.id if sent is not None else None

@@ -93,7 +93,7 @@ def dead(dropped: Sequence[Tracked]) -> bool:
 def kept_now(dropped: Sequence[Tracked], base: Alive) -> bool:
     """Whether the objects survive a collection."""
     collect()
-    return not any(t.ref() is None for t in dropped) and above(wrtc._alive(), base, dropped)
+    return all(t.ref() is not None for t in dropped) and above(wrtc._alive(), base, dropped)
 
 
 async def kept(dropped: Sequence[Tracked], base: Alive) -> bool:
@@ -101,6 +101,7 @@ async def kept(dropped: Sequence[Tracked], base: Alive) -> bool:
     loop = asyncio.get_running_loop()
     collect()
     alive = wrtc._alive()
+
     deadline = loop.time() + SETTLE_TIMEOUT
     while loop.time() < deadline:
         await asyncio.sleep(SETTLE_INTERVAL)
@@ -109,20 +110,25 @@ async def kept(dropped: Sequence[Tracked], base: Alive) -> bool:
         if current == alive:
             break
         alive = current
+
     return kept_now(dropped, base)
 
 
 async def collected(dropped: Sequence[Tracked]) -> bool:
     """Whether the wrappers die, unless nothing native was released for the settle wait."""
     loop = asyncio.get_running_loop()
-    deadline, fewest = loop.time() + SETTLE_TIMEOUT, sum(wrtc._alive().values())
+    deadline = loop.time() + SETTLE_TIMEOUT
+    fewest = sum(wrtc._alive().values())
     while True:
         collect()
         if dead(dropped):
             return True
+
         # a slow release goes on; a leak stays flat
-        if (total := sum(wrtc._alive().values())) < fewest:
-            deadline, fewest = loop.time() + SETTLE_TIMEOUT, total
+        total = sum(wrtc._alive().values())
+        if total < fewest:
+            deadline = loop.time() + SETTLE_TIMEOUT
+            fewest = total
         if loop.time() > deadline:
             return False
         await asyncio.sleep(SETTLE_INTERVAL)
@@ -142,7 +148,8 @@ def released_after_loop_close(dropped: Sequence[Tracked], base: Alive) -> bool:
 def describe(dropped: Sequence[Tracked], base: Alive) -> str:
     """Survivors and counts off the baseline."""
     alive = [t.native for t in dropped if t.ref() is not None]
-    counts = {name: (count, base.get(name, 0)) for name, count in wrtc._alive().items() if count != base.get(name, 0)}
+    off_baseline = {name: count for name, count in wrtc._alive().items() if count != base.get(name, 0)}
+    counts = {name: (count, base.get(name, 0)) for name, count in off_baseline.items()}
     return f'wrappers alive: {alive}, native counts (now, baseline): {counts}'
 
 
@@ -183,6 +190,19 @@ def pair() -> Pair:
 
 async def audio_stream() -> webrtc.MediaStream:
     return await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True))
+
+
+def until_drained(tracked: Tracked) -> Callable[[], Awaitable[None]]:
+    """Ends a row once the tracked channel's buffer drains."""
+
+    async def end() -> None:
+        def drained() -> bool:
+            item = tracked.ref()
+            return item is None or not isinstance(item, webrtc.RTCDataChannel) or item.buffered_amount == 0
+
+        await wait_until(drained, 'the buffer to drain', TIMEOUT)
+
+    return end
 
 
 async def negotiated_receiver(
@@ -278,16 +298,9 @@ async def channel_with_data_buffered_and_no_handlers() -> Scene:
     await opened
     channel.send(bytes(200_000))
     assert channel.buffered_amount > 0
+
     tracked = track(channel)
-
-    async def end() -> None:
-        def drained() -> bool:
-            item = tracked.ref()
-            return item is None or not isinstance(item, webrtc.RTCDataChannel) or item.buffered_amount == 0
-
-        await wait_until(drained, 'the buffer to drain', TIMEOUT)
-
-    return Scene([tracked], [caller, callee], end, ends_by_itself=True)
+    return Scene([tracked], [caller, callee], until_drained(tracked), ends_by_itself=True)
 
 
 async def channel_with_messages_queued_behind_others() -> Scene:
@@ -300,16 +313,9 @@ async def channel_with_messages_queued_behind_others() -> Scene:
     for _ in range(20):
         channel.send(bytes(20_000))
     assert channel.buffered_amount > 0
+
     tracked = track(channel)
-
-    async def end() -> None:
-        def drained() -> bool:
-            item = tracked.ref()
-            return item is None or not isinstance(item, webrtc.RTCDataChannel) or item.buffered_amount == 0
-
-        await wait_until(drained, 'the buffer to drain', TIMEOUT)
-
-    return Scene([tracked], [caller, callee], end, ends_by_itself=True)
+    return Scene([tracked], [caller, callee], until_drained(tracked), ends_by_itself=True)
 
 
 async def remote_track_with_an_ended_handler() -> Scene:
@@ -516,12 +522,15 @@ def test_kept_while_active_then_collected(build: Builder) -> None:
             assert kept_now(scene.dropped, base), describe(scene.dropped, base)
         else:
             assert await kept(scene.dropped, base), describe(scene.dropped, base)
+
         await called(scene.end)
+
         assert await collected(scene.dropped), describe(scene.dropped, base)
         finish(scene)
         return scene.dropped
 
     dropped = asyncio.run(scenario())
+
     assert released_after_loop_close(dropped, base), describe(dropped, base)
 
 
@@ -534,6 +543,7 @@ def test_collected_after_its_loop_closed(build: Builder) -> None:
         return (await called(build)).dropped
 
     dropped = asyncio.run(scenario())
+
     assert released_after_loop_close(dropped, base), describe(dropped, base)
 
 
@@ -549,6 +559,7 @@ def test_collected_while_active(build: Builder) -> None:
         return scene.dropped
 
     dropped = asyncio.run(scenario())
+
     assert released_after_loop_close(dropped, base), describe(dropped, base)
 
 
@@ -569,6 +580,15 @@ GATES: dict[str, str] = {
     'RTCSctpTransport': 'its connection closing',
     'SFrameDecryptorStream': 'never ends: errors of chunks written before',
 }
+#: the classes whose events end other than with their connection
+OWN_GATES = {
+    'MediaStreamTrack',
+    'MediaStreamTrackGenerator',
+    'RTCIceTransport',
+    'RTCPeerConnection',
+    'RTCRtpSFrameDecryptor',
+    'RTCRtpScriptTransformer',
+}
 
 
 def _event_targets() -> set[type[EventTarget[Never]]]:
@@ -582,15 +602,15 @@ def _event_targets() -> set[type[EventTarget[Never]]]:
     return {cls for cls in found if cls is not UniformEventTarget}
 
 
+def _gate_owner(cls: type) -> str:
+    """The name of the class whose ``_open()`` the class uses."""
+    return next(k for k in cls.__mro__ if '_open' in vars(k)).__name__
+
+
 def test_every_event_target_declares_its_delivery_gate() -> None:
     """Every event target has a reviewed gate: without one, queued events fire after its end."""
-    gates = {cls.__name__: next(k for k in cls.__mro__ if '_open' in vars(k)).__name__ for cls in _event_targets()}
+    gates = {cls.__name__: _gate_owner(cls) for cls in _event_targets()}
+    overriding = {name for name, owner in gates.items() if owner != 'EventTarget'}
+
     assert set(gates) == set(GATES), 'add the class to GATES with what stops its queued events'
-    assert {name for name, owner in gates.items() if owner != 'EventTarget'} == {
-        'MediaStreamTrack',
-        'MediaStreamTrackGenerator',
-        'RTCIceTransport',
-        'RTCPeerConnection',
-        'RTCRtpSFrameDecryptor',
-        'RTCRtpScriptTransformer',
-    }, 'a class ending other than with its connection overrides _open()'
+    assert overriding == OWN_GATES, 'a class ending other than with its connection overrides _open()'

@@ -165,19 +165,16 @@ class RTCRtpSender(WebRTCObject[wrtc.RTCRtpSender]):
         _check_unchanged(parameters, RTCRtpSendParameters._from_native(last), options)
         if self._kind == MediaType.video:
             _check_video_ranges(parameters.encodings)
+        _check_codec_mime_types(parameters.encodings)
 
         kind = self._kind
         # a copy (pybind returns one): changed, then set back
         encodings = last.encodings
-        for encoding in parameters.encodings:
-            # a codec without a valid MIME type matches no negotiated codec
-            if encoding.codec is not None and encoding.codec.mime_type.partition('/')[2] == '':
-                msg = f'{encoding.codec.mime_type!r} is not a valid MIME type of a codec'
-                raise webrtc.InvalidModificationError(msg)
         for native, encoding in zip(encodings, parameters.encodings):
             _ = encoding._for_kind(kind)._apply(native)
-        for native, option in zip(encodings, options if options is not None else ()):
-            native.requestKeyFrame = bool(option.key_frame)
+        if options is not None:
+            for native, option in zip(encodings, options):
+                native.requestKeyFrame = bool(option.key_frame)
         last.encodings = encodings
         last.degradationPreference = parameters.degradation_preference
         await call_native(self._native_obj.setParameters, last)
@@ -392,11 +389,26 @@ def _check_video_ranges(encodings: list[webrtc.RTCRtpEncodingParameters]) -> Non
             raise webrtc.InvalidRangeError(msg)
 
 
+def _check_codec_mime_types(encodings: list[webrtc.RTCRtpEncodingParameters]) -> None:
+    """Checks the codecs of the encodings, since one without a valid MIME type matches no negotiated codec.
+
+    Raises:
+        webrtc.InvalidModificationError: If a MIME type has no subtype.
+    """
+    for encoding in encodings:
+        if encoding.codec is None:
+            continue
+        _, _, subtype = encoding.codec.mime_type.partition('/')
+        if subtype == '':
+            msg = f'{encoding.codec.mime_type!r} is not a valid MIME type of a codec'
+            raise webrtc.InvalidModificationError(msg)
+
+
 def _default_scale_resolution_down_by(encodings: list[webrtc.RTCRtpEncodingParameters]) -> None:
     """Video encodings without scale_resolution_down_by scale by 1, or by descending powers of 2 if none has one."""
     if all(e.scale_resolution_down_by is None for e in encodings):
-        for i, encoding in enumerate(encodings):
-            encoding.scale_resolution_down_by = float(2 ** (len(encodings) - 1 - i))
+        for exponent, encoding in enumerate(reversed(encodings)):
+            encoding.scale_resolution_down_by = float(2**exponent)
     for encoding in encodings:
         if encoding.scale_resolution_down_by is None:
             encoding.scale_resolution_down_by = 1.0

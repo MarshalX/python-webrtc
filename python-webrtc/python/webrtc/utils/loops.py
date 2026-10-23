@@ -61,6 +61,15 @@ class _Call(NamedTuple):
     target: weakref.ref[EventTarget[Never]] | None
 
 
+class _Detached(NamedTuple):
+    """What a released state held."""
+
+    pending: dict[int, _Call]
+    #: drop handlers of the posted callbacks that didn't run
+    dropped: list[Callable[[], object]]
+    targets: list[EventTarget[Never]]
+
+
 #: by mailbox id, for Dispatcher wakes
 _states: weakref.WeakValueDictionary[int, LoopState] = weakref.WeakValueDictionary()
 # re-entrant: gc sweeps at any allocation, even under this lock
@@ -103,7 +112,10 @@ def record_mismatch(msg: str) -> None:
 
 def _unbound(target: EventTarget[Never]) -> str | None:
     """The mismatch of an active object bound to no loop, unless a released loop let go of it."""
-    if target._state() is not None or (reason := target._activity()) is None or target._native_obj._orphaned:
+    if target._state() is not None:
+        return None
+    reason = target._activity()
+    if reason is None or target._native_obj._orphaned:
         return None
     return f'{type(target).__name__} is active but unbound, with activity {reason!r}'
 
@@ -214,6 +226,7 @@ class LoopState:
             # atomic: racing threads keep the same state
             shared: LoopState = attributes.setdefault(_ATTRIBUTE, cls(loop))
             return shared
+
         key = id(loop)
         with _states_lock:
             state = _held_states.get(key)
@@ -274,6 +287,7 @@ class LoopState:
                 self._markers[key] = _Item(self._unless_dropped(key, callback), resumes, after_ready)
                 if dropped is not None:
                     self._soon[key] = dropped
+
         if released:
             if dropped is not None:
                 _ = dropped()
@@ -310,6 +324,7 @@ class LoopState:
         """Schedules one drain from any thread; releases the state if the loop is closed."""
         if not self._claim():
             return
+
         loop = self._loop_ref()
         if loop is None:
             self.release()
@@ -412,7 +427,10 @@ class LoopState:
             record: _Record | None = self.mailbox.take()
             if record is None:
                 return None
-            self._held = record if record[0] is not None else self._item(record)
+            if record[0] is None:
+                self._held = self._item(record)
+            else:
+                self._held = record
         return self._held
 
     def _item(self, record: _Record) -> _Item | None:
@@ -431,7 +449,9 @@ class LoopState:
     def _dispatch_event(self, record: _EventRecord) -> None:
         """Delivers an event record, its native object first, to that object's wrapper, recreating a dead one."""
         name, _, _, args = record
-        native, args = args[0], args[1:]
+        native = args[0]
+        args = args[1:]
+
         recent = self._recent
         if recent is not None and recent[0] is native:
             wrapper: WebRTCObject[object] | None = recent[1]
@@ -443,10 +463,12 @@ class LoopState:
         else:
             # kept for the batch, as a channel's messages come in a row; a fresh wrapper isn't
             self._recent = (native, wrapper)
+
         target = wrapper._target()
         if target is None:
             return
         target._deliver(self, name, args)
+
         # after handlers, so a terminal event's handlers run before unrooting; fresh wrappers aren't rooted
         if created or not target._rootable or not target._changes_activity(name):
             return
@@ -529,8 +551,10 @@ class LoopState:
             started = self._passes
             # a connection's close ends its children's activity
             targets = [target, *(c for c in self.active if c._connection is target)]
+
         # outside the lock: _activity() may block on libwebrtc; only the bound loop roots
-        reasons = [(t, t._activity() if t._state() is self else None) for t in targets]
+        reasons = [(each, each._activity() if each._state() is self else None) for each in targets]
+
         with self._lock:
             if self._released:
                 return
@@ -539,8 +563,10 @@ class LoopState:
                     return
             with _counts_lock:
                 self.generation += 1
+
         self._recheck(reasons)
-        if reasons[0][1] is None:
+        _, target_reason = reasons[0]
+        if target_reason is None:
             # children may be rooted on other loops
             for other in _states_elsewhere(self._loop_ref()):
                 other._update_children(target)
@@ -590,25 +616,39 @@ class LoopState:
                 return
             rooted = set(self.active)
             targets = rooted | set(self.targets)
+
         # a racing change voids this check; the next one sees it
         msgs: list[str] = []
         for target in targets:
-            binding = target._state()
-            if binding is not self and target not in rooted:
-                # its own loop checks it
-                if binding is None and (msg := _unbound(target)) is not None:
-                    msgs.append(msg)
-                continue
-            reason = target._activity() if binding is self else None
-            if (target in rooted) != (reason is not None):
-                rooting = 'rooted' if target in rooted else 'not rooted'
-                where = '' if binding is self else ' and bound elsewhere' if binding is not None else ' and unbound'
-                msgs.append(f'{type(target).__name__} is {rooting} with activity {reason!r}{where}')
+            msg = self._root_mismatch(target, is_rooted=target in rooted)
+            if msg is not None:
+                msgs.append(msg)
         if not self.settled(generation):
             return
+
         if len(msgs) > 0:
             record_mismatch(msgs[0])
             raise AssertionError(msgs[0])
+
+    def _root_mismatch(self, target: EventTarget[Never], *, is_rooted: bool) -> str | None:
+        """What's wrong with an object's root here, or None."""
+        binding = target._state()
+        if binding is not self and not is_rooted:
+            # its own loop checks it
+            return _unbound(target) if binding is None else None
+
+        reason = target._activity() if binding is self else None
+        if is_rooted == (reason is not None):
+            return None
+
+        rooting = 'rooted' if is_rooted else 'not rooted'
+        if binding is self:
+            where = ''
+        elif binding is not None:
+            where = ' and bound elsewhere'
+        else:
+            where = ' and unbound'
+        return f'{type(target).__name__} is {rooting} with activity {reason!r}{where}'
 
     def changing(self, delta: int) -> None:
         """Counts an activity change another thread starts (1) or ends (-1)."""
@@ -649,20 +689,19 @@ class LoopState:
             self.mailbox.close()
             return
 
-        pending, dropped, targets = detached
         if not sys.is_finalizing():
             self._unwatch()
 
         self.mailbox.close()
         if not sys.is_finalizing():
-            for drop in dropped:
+            for drop in detached.dropped:
                 _ = drop()
 
         loop = self._loop_ref()
         if loop is not None and not sys.is_finalizing():
-            _let_go(loop, list(pending.values()), targets)
+            _let_go(loop, list(detached.pending.values()), detached.targets)
 
-    def _detach(self) -> tuple[dict[int, _Call], list[Callable[[], object]], list[EventTarget[Never]]] | None:
+    def _detach(self) -> _Detached | None:
         """Marks the state released and takes what it holds, under the lock; None if it already was."""
         with _acquired(self._lock) as acquired:
             if not acquired or self._released:
@@ -682,7 +721,7 @@ class LoopState:
             targets = list(self.targets)
             self.targets.clear()
 
-            return pending, dropped, targets
+            return _Detached(pending, dropped, targets)
 
 
 class _Callback:
@@ -762,8 +801,10 @@ def states_elsewhere() -> list[LoopState]:
 
 def _forget(key: int) -> None:
     """Releases the state of a collected loop without a ``__dict__``."""
+    state: LoopState | None = None
     with _acquired(_states_lock) as acquired:
-        state = _held_states.pop(key, None) if acquired else None
+        if acquired:
+            state = _held_states.pop(key, None)
     if state is not None:
         state.release()
 
@@ -833,7 +874,8 @@ async def call_native_batched(
     state = LoopState.of(loop)
     batch = cast('asyncio.Future[_T] | None', state.batches.get(owner))
     if batch is None:
-        batch = asyncio.ensure_future(_converted(_start_native(state, method), convert))
+        started = _start_native(state, method)
+        batch = asyncio.ensure_future(_converted(started, convert))
         state.batches[owner] = cast('asyncio.Future[object]', batch)
         _ = loop.call_soon(state.batches.pop, owner, None)
 

@@ -30,33 +30,25 @@ def _create_and_test_transceiver(pc: webrtc.RTCPeerConnection, kind: webrtc.Medi
     transceiver = pc.add_transceiver(kind)
 
     assert isinstance(transceiver, webrtc.RTCRtpTransceiver), 'Expect transceiver to be instance of RTCRtpTransceiver'
-
     assert transceiver.mid is None
     assert transceiver.stopped is False
     assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.sendrecv
     assert transceiver.current_direction is None
-
     assert [transceiver] == pc.get_transceivers(), (
         "Expect added transceiver to be the only element in connection's list of transceivers"
     )
 
     sender = transceiver.sender
-
     assert isinstance(sender, webrtc.RTCRtpSender), 'Expect sender to be instance of RTCRtpSender'
-
     assert sender.track is None
-
     assert [sender] == pc.get_senders(), "Expect added sender to be the only element in connection's list of senders"
 
     receiver = transceiver.receiver
     assert isinstance(receiver, webrtc.RTCRtpReceiver)
-
     track = receiver.track
     assert isinstance(track, webrtc.MediaStreamTrack)
-
     assert track.kind == kind
     assert track.ready_state == webrtc.MediaStreamTrackState.live
-
     assert [receiver] == pc.get_receivers(), (
         "Expect added receiver to be the only element in connection's list of receivers"
     )
@@ -89,31 +81,28 @@ def test_5() -> None:
 def test_6(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
     """add_transceiver(track) should have result with sender.track be given track."""
     track, *_ = audio_stream.get_tracks()
-    transceiver = pc.add_transceiver(track)
-    sender, receiver = transceiver.sender, transceiver.receiver
 
+    transceiver = pc.add_transceiver(track)
+
+    sender = transceiver.sender
+    receiver = transceiver.receiver
     assert isinstance(sender, webrtc.RTCRtpSender), 'Expect sender to be instance of RTCRtpSender'
     assert isinstance(receiver, webrtc.RTCRtpReceiver), 'Expect receiver to be instance of RTCRtpReceiver'
-
     assert sender.track == track, 'Expect sender.track should be the track that is added'
 
     receiver_track = receiver.track
-
     assert isinstance(receiver_track, webrtc.MediaStreamTrack), (
         'Expect receiver.track to be instance of MediaStreamTrack'
     )
     assert receiver_track.kind == webrtc.MediaType.audio, (
         "receiver.track should have the same kind as added track's kind"
     )
-
     assert receiver_track.ready_state == webrtc.MediaStreamTrackState.live
 
     assert [transceiver] == pc.get_transceivers(), (
         "Expect added transceiver to be the only element in connection's list of transceivers"
     )
-
     assert [sender] == pc.get_senders(), "Expect added sender to be the only element in connection's list of senders"
-
     assert [receiver] == pc.get_receivers(), (
         "Expect added receiver to be the only element in connection's list of receivers"
     )
@@ -122,36 +111,37 @@ def test_6(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> No
 def test_7(pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream) -> None:
     """add_transceiver(track) multiple times should create multiple transceivers."""
     track, *_ = audio_stream.get_tracks()
+
     transceiver1 = pc.add_transceiver(track)
     transceiver2 = pc.add_transceiver(track)
 
     assert transceiver1 != transceiver2
-
     sender1 = transceiver1.sender
     sender2 = transceiver2.sender
-
     assert sender1 != sender2
     assert transceiver1.sender.track == track
     assert transceiver2.sender.track == track
 
     transceivers = pc.get_transceivers()
-
     assert len(transceivers) == 2
     assert transceiver1 in transceivers
     assert transceiver2 in transceivers
 
     senders = pc.get_senders()
-
     assert len(senders) == 2
     assert sender1 in senders
     assert sender2 in senders
 
 
+def _init_with_rids(*rids: str) -> webrtc.RTCRtpTransceiverInit:
+    encodings = [webrtc.RTCRtpEncodingParameters(rid=rid) for rid in rids]
+    return webrtc.RTCRtpTransceiverInit(send_encodings=encodings)
+
+
 @pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
 def test_8(pc: webrtc.RTCPeerConnection, kind: webrtc.MediaType) -> None:
     """add_transceiver with rid containing invalid non-alphanumeric characters should throw TypeError."""
-    encodings = [webrtc.RTCRtpEncodingParameters(rid='@Invalid!')]
-    init = webrtc.RTCRtpTransceiverInit(send_encodings=encodings)
+    init = _init_with_rids('@Invalid!')
 
     with pytest.raises(TypeError, match='is not a valid rid'):
         pc.add_transceiver(kind, init)
@@ -160,8 +150,7 @@ def test_8(pc: webrtc.RTCPeerConnection, kind: webrtc.MediaType) -> None:
 @pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
 def test_9(pc: webrtc.RTCPeerConnection, kind: webrtc.MediaType) -> None:
     """add_transceiver with rid longer than 16 characters should throw TypeError."""
-    encodings = [webrtc.RTCRtpEncodingParameters(rid='a' * 17)]
-    init = webrtc.RTCRtpTransceiverInit(send_encodings=encodings)
+    init = _init_with_rids('a' * 17)
 
     with pytest.raises(TypeError, match='is not a valid rid'):
         pc.add_transceiver(kind, init)
@@ -170,9 +159,7 @@ def test_9(pc: webrtc.RTCPeerConnection, kind: webrtc.MediaType) -> None:
 @pytest.mark.parametrize('kind', [webrtc.MediaType.video, webrtc.MediaType.audio])
 def test_10(pc: webrtc.RTCPeerConnection, kind: webrtc.MediaType) -> None:
     """add_transceiver with valid rid value should succeed."""
-    encodings = [webrtc.RTCRtpEncodingParameters(rid='foo')]
-    init = webrtc.RTCRtpTransceiverInit(send_encodings=encodings)
-    pc.add_transceiver(kind, init)
+    pc.add_transceiver(kind, _init_with_rids('foo'))
 
 
 def test_11(pc: webrtc.RTCPeerConnection) -> None:
@@ -193,9 +180,7 @@ def test_12(pc: webrtc.RTCPeerConnection) -> None:
 
 def test_13(pc: webrtc.RTCPeerConnection) -> None:
     """add_transceiver with multiple rid values should succeed."""
-    encodings = [webrtc.RTCRtpEncodingParameters(rid='a'), webrtc.RTCRtpEncodingParameters(rid='b')]
-    init = webrtc.RTCRtpTransceiverInit(send_encodings=encodings)
-    pc.add_transceiver(webrtc.MediaType.video, init)
+    pc.add_transceiver(webrtc.MediaType.video, _init_with_rids('a', 'b'))
 
 
 def test_scale_resolution_down_by_below_one_is_a_range_error(pc: webrtc.RTCPeerConnection) -> None:
@@ -206,12 +191,15 @@ def test_scale_resolution_down_by_below_one_is_a_range_error(pc: webrtc.RTCPeerC
     with pytest.raises(webrtc.InvalidRangeError, match=r'scale_resolution_down_by must be >= 1\.0'):
         pc.add_transceiver(webrtc.MediaType.video, init)
     pc.add_transceiver(webrtc.MediaType.audio, init)
+
     assert [t.receiver.track.kind for t in pc.get_transceivers()] == [webrtc.MediaType.audio]
 
 
 def test_unknown_scalability_mode_is_an_operation_error(pc: webrtc.RTCPeerConnection) -> None:
     encodings = [webrtc.RTCRtpEncodingParameters(scalability_mode='L9T9')]
+    init = webrtc.RTCRtpTransceiverInit(send_encodings=encodings)
 
     with pytest.raises(webrtc.OperationError, match='scalabilityMode'):
-        pc.add_transceiver(webrtc.MediaType.video, webrtc.RTCRtpTransceiverInit(send_encodings=encodings))
+        pc.add_transceiver(webrtc.MediaType.video, init)
+
     assert pc.get_transceivers() == []

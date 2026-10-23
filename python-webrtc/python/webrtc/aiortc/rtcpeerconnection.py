@@ -15,7 +15,7 @@ import re
 from typing import TYPE_CHECKING, Callable, TypeVar
 
 from pyee.asyncio import AsyncIOEventEmitter
-from typing_extensions import Never, override
+from typing_extensions import Never, TypedDict, override
 
 import webrtc
 from webrtc.aiortc._utils import (
@@ -28,6 +28,7 @@ from webrtc.aiortc._utils import (
     _ice_state,
     _log_failure,
     _media_formats,
+    _media_kind,
     _media_lines,
     _media_section,
     _ReadOnly,
@@ -67,26 +68,30 @@ if TYPE_CHECKING:
 
 # STUN and TURN servers get 5 seconds to answer
 _GATHERING_TIMEOUT = 5
-# attributes are never on the first line, and a newline before them is much faster to find than a line start
 _END_OF_CANDIDATES = 'a=end-of-candidates\r\n'
+_VIDEO_ORIENTATION = 'urn:3gpp:video-orientation'
+_DIRECTIONS = ('sendrecv', 'sendonly', 'recvonly', 'inactive')
+
+# attributes are never on the first line, and a newline before them is much faster to find than a line start
 _RTPMAP = re.compile(r'\na=rtpmap:(\d+) ([^/\s]+)/(\d+)')
 _FMTP = re.compile(r'\na=fmtp:(\d+) ([^\r\n]*)')
-_VIDEO_ORIENTATION = 'urn:3gpp:video-orientation'
 _ICE_UFRAG = re.compile(r'\na=ice-ufrag:\S')
 _ICE_PWD = re.compile(r'\na=ice-pwd:\S')
 _SETUP = re.compile(r'\na=setup:(\w+)')
 _RTCP_MUX = re.compile(r'\na=rtcp-mux[ \t\r]*(?:\n|$)')
 _SETUP_LINE = re.compile(r'\na=setup:[^\r\n]*\r?\n')
+
 _ENCODER_SETTINGS = {'vp8': vpx, 'h264': h264}
 _BITRATE_PARAMETERS = {
     'DEFAULT_BITRATE': 'x-google-start-bitrate',
     'MIN_BITRATE': 'x-google-min-bitrate',
     'MAX_BITRATE': 'x-google-max-bitrate',
 }
+# the bitrates of the codec modules at import, to tell the ones the application changed
 _UNCHANGED_BITRATES = {
     codec: {name: getattr(module, name) for name in _BITRATE_PARAMETERS} for codec, module in _ENCODER_SETTINGS.items()
 }
-_DIRECTIONS = ('sendrecv', 'sendonly', 'recvonly', 'inactive')
+
 # the signaling states that take a local (True) or remote description of a type
 _DESCRIPTION_STATES = {
     (True, 'offer'): ('stable', 'have-local-offer'),
@@ -110,54 +115,101 @@ def _or(value: _T | None, default: _T) -> _T:
     return value if value is not None else default
 
 
-def _stream(stats: webrtc.RTCRtpStreamStats) -> tuple[dt.datetime, str, str, int, str, str]:
-    return _datetime(stats.timestamp), str(stats.type), stats.id, stats.ssrc, stats.kind, _or(stats.transport_id, '')
+class _StreamFields(TypedDict, closed=True):
+    timestamp: dt.datetime
+    type: str
+    id: str
+    ssrc: int
+    kind: str
+    transportId: str
 
 
-def _received(stats: webrtc.RTCReceivedRtpStreamStats, report: webrtc.RTCStatsReport) -> tuple[int, int, int]:
+class _ReceivedFields(TypedDict, closed=True):
+    packetsReceived: int
+    packetsLost: int
+    jitter: int
+
+
+class _SentFields(TypedDict, closed=True):
+    packetsSent: int
+    bytesSent: int
+
+
+def _stream_fields(stats: webrtc.RTCRtpStreamStats) -> _StreamFields:
+    return _StreamFields(
+        timestamp=_datetime(stats.timestamp),
+        type=str(stats.type),
+        id=stats.id,
+        ssrc=stats.ssrc,
+        kind=stats.kind,
+        transportId=_or(stats.transport_id, ''),
+    )
+
+
+def _clock_rate(stats: webrtc.RTCReceivedRtpStreamStats, report: webrtc.RTCStatsReport) -> int:
     codec = report.get(stats.codec_id) if stats.codec_id is not None else None
     if isinstance(codec, webrtc.RTCCodecStats) and codec.clock_rate is not None:
-        clock_rate = codec.clock_rate
-    else:
-        clock_rate = VIDEO_CLOCK_RATE if stats.kind == 'video' else _DEFAULT_SAMPLE_RATE
-    # jitter is in RTP timestamp units, not seconds
-    return _or(stats.packets_received, 0), _or(stats.packets_lost, 0), round(_or(stats.jitter, 0.0) * clock_rate)
+        return codec.clock_rate
+    return VIDEO_CLOCK_RATE if stats.kind == 'video' else _DEFAULT_SAMPLE_RATE
 
 
-def _sent(stats: webrtc.RTCSentRtpStreamStats) -> tuple[int, int]:
-    return _or(stats.packets_sent, 0), _or(stats.bytes_sent, 0)
+def _received_fields(stats: webrtc.RTCReceivedRtpStreamStats, report: webrtc.RTCStatsReport) -> _ReceivedFields:
+    clock_rate = _clock_rate(stats, report)
+    return _ReceivedFields(
+        packetsReceived=_or(stats.packets_received, 0),
+        packetsLost=_or(stats.packets_lost, 0),
+        # jitter is in RTP timestamp units, not seconds
+        jitter=round(_or(stats.jitter, 0.0) * clock_rate),
+    )
+
+
+def _sent_fields(stats: webrtc.RTCSentRtpStreamStats) -> _SentFields:
+    return _SentFields(packetsSent=_or(stats.packets_sent, 0), bytesSent=_or(stats.bytes_sent, 0))
+
+
+def _transport_stats(stats: webrtc.RTCTransportStats) -> RTCTransportStats:
+    return RTCTransportStats(
+        timestamp=_datetime(stats.timestamp),
+        type=str(stats.type),
+        id=stats.id,
+        packetsSent=_or(stats.packets_sent, 0),
+        packetsReceived=_or(stats.packets_received, 0),
+        bytesSent=_or(stats.bytes_sent, 0),
+        bytesReceived=_or(stats.bytes_received, 0),
+        iceRole=str(stats.ice_role) if stats.ice_role is not None else '',
+        dtlsState=str(stats.dtls_state),
+    )
 
 
 def _converted_stats(  # ruff: ignore[too-many-return-statements]
     stats: webrtc.RTCStats, report: webrtc.RTCStatsReport, track_ids: dict[str | None, str]
 ) -> RTCStats | None:
     if isinstance(stats, webrtc.RTCInboundRtpStreamStats):
-        return RTCInboundRtpStreamStats(*_stream(stats), *_received(stats, report))
+        return RTCInboundRtpStreamStats(**_stream_fields(stats), **_received_fields(stats, report))
+
     if isinstance(stats, webrtc.RTCRemoteInboundRtpStreamStats):
         # fractionLost is RTCP's 8-bit fixed point
         fraction_lost = min(255, round(_or(stats.fraction_lost, 0.0) * 256))
         return RTCRemoteInboundRtpStreamStats(
-            *_stream(stats), *_received(stats, report), _or(stats.round_trip_time, 0.0), fraction_lost
+            **_stream_fields(stats),
+            **_received_fields(stats, report),
+            roundTripTime=_or(stats.round_trip_time, 0.0),
+            fractionLost=fraction_lost,
         )
+
     if isinstance(stats, webrtc.RTCOutboundRtpStreamStats):
-        return RTCOutboundRtpStreamStats(*_stream(stats), *_sent(stats), track_ids.get(stats.mid, ''))
+        track_id = track_ids.get(stats.mid, '')
+        return RTCOutboundRtpStreamStats(**_stream_fields(stats), **_sent_fields(stats), trackId=track_id)
+
     if isinstance(stats, webrtc.RTCRemoteOutboundRtpStreamStats):
         remote = stats.remote_timestamp
+        remote_timestamp = _datetime(remote) if remote is not None else None
         return RTCRemoteOutboundRtpStreamStats(
-            *_stream(stats), *_sent(stats), _datetime(remote) if remote is not None else None
+            **_stream_fields(stats), **_sent_fields(stats), remoteTimestamp=remote_timestamp
         )
+
     if isinstance(stats, webrtc.RTCTransportStats):
-        return RTCTransportStats(
-            _datetime(stats.timestamp),
-            str(stats.type),
-            stats.id,
-            _or(stats.packets_sent, 0),
-            _or(stats.packets_received, 0),
-            _or(stats.bytes_sent, 0),
-            _or(stats.bytes_received, 0),
-            str(stats.ice_role) if stats.ice_role is not None else '',
-            str(stats.dtls_state),
-        )
+        return _transport_stats(stats)
     return None
 
 
@@ -178,40 +230,57 @@ def _invalid_media(sdp: str, *, answer: bool) -> str | None:
     for section in sections:
         if _attribute(_ICE_UFRAG, head, section) is None or _attribute(_ICE_PWD, head, section) is None:
             return 'ICE username fragment or password is missing'
+
         setup = _attribute(_SETUP, head, section)
-        if answer and (setup is None or setup.group(1) not in {'active', 'passive'}):
+        role = setup.group(1) if setup is not None else None
+        if answer and role not in {'active', 'passive'}:
             return "DTLS setup attribute must be 'active' or 'passive' for an answer"
+
         if section.startswith(('m=audio', 'm=video')) and _RTCP_MUX.search(section) is None:
             return 'RTCP mux is not enabled'
     return None
 
 
 def _kind_without_common_codec(sdp: str) -> str | None:
-    for section in _split(sdp)[1]:
-        kind = section[2:].split(' ', 1)[0]
+    _, sections = _split(sdp)
+    for section in sections:
+        kind = _media_kind(section)
+        if kind not in _KINDS:
+            continue
+
         codecs = {pt: (name.lower(), int(clock)) for pt, name, clock in _RTPMAP.findall(section)}
         # a format with no rtpmap is a static payload type, which the engine resolves itself
-        if kind not in _KINDS or any(f not in codecs for f in _media_formats(section)):
+        if any(payload_type not in codecs for payload_type in _media_formats(section)):
             continue
+
         supported = {(c.name.lower(), c.clockRate) for c in RTCRtpReceiver.getCapabilities(kind).codecs}
-        if not any(codec in supported for codec in codecs.values() if codec[0] != 'rtx'):
+        offered = [(name, clock) for name, clock in codecs.values() if name != 'rtx']
+        if not any(codec in supported for codec in offered):
             return kind
     return None
 
 
 def _with_defaults(parameters: ParametersDict, defaults: ParametersDict) -> ParametersDict:
-    return {**parameters, **{k: v for k, v in defaults.items() if k not in parameters}}
+    merged = dict(parameters)
+    for key, value in defaults.items():
+        _ = merged.setdefault(key, value)
+    return merged
 
 
 def _remote_parameters(codec: str, parameters: ParametersDict) -> ParametersDict:
     # what the remote description allows shapes what we send
-    if codec in _ENCODER_SETTINGS:
-        # unchanged constants keep the adaptive bandwidth estimation's range
-        module, unchanged = _ENCODER_SETTINGS[codec], _UNCHANGED_BITRATES[codec]
-        bitrates = {name: getattr(module, name) for name in _BITRATE_PARAMETERS}
-        changed = {_BITRATE_PARAMETERS[k]: v // 1000 for k, v in bitrates.items() if v != unchanged[k]}
-        return _with_defaults(parameters, changed)
-    return parameters
+    module = _ENCODER_SETTINGS.get(codec)
+    if module is None:
+        return parameters
+
+    # unchanged constants keep the adaptive bandwidth estimation's range
+    unchanged = _UNCHANGED_BITRATES[codec]
+    changed: ParametersDict = {}
+    for name, sdp_name in _BITRATE_PARAMETERS.items():
+        bitrate: int = getattr(module, name)
+        if bitrate != unchanged[name]:
+            changed[sdp_name] = bitrate // 1000
+    return _with_defaults(parameters, changed)
 
 
 def _with_parameters(
@@ -220,27 +289,47 @@ def _with_parameters(
     added: dict[str, set[str]] = {}
     head, sections = _split(sdp)
     for index, section in enumerate(sections):
-        lines: dict[str, str] = dict(_FMTP.findall(section))
+        fmtps: dict[str, str] = dict(_FMTP.findall(section))
         codecs: list[tuple[str, str, str]] = _RTPMAP.findall(section)
         for payload_type, name, _ in codecs:
-            parameters = _parameters(lines.get(payload_type))
-            rewritten = rewrite(name.lower(), parameters)
-            if rewritten != parameters:
-                added.setdefault(name.lower(), set()).update(rewritten.keys() - parameters.keys())
-                new = parameters_to_sdp(rewritten)
-                sections[index] = _with_fmtp(sections[index], payload_type, lines.get(payload_type), new)
+            codec = name.lower()
+            old = fmtps.get(payload_type)
+            parameters = _parameters(old)
+            rewritten = rewrite(codec, parameters)
+            if rewritten == parameters:
+                continue
+
+            added.setdefault(codec, set()).update(rewritten.keys() - parameters.keys())
+            new = parameters_to_sdp(rewritten)
+            sections[index] = _with_fmtp(sections[index], payload_type, old, new)
     return head + ''.join(sections), added
 
 
 def _with_fmtp(section: str, payload_type: str, old: str | None, new: str) -> str:
-    if old is not None and new == '':
+    if old is None:
+        return _with_new_fmtp(section, payload_type, new)
+    if new == '':
         return re.sub(rf'\na=fmtp:{payload_type} [^\r\n]*\r?\n', '\n', section, count=1)
-    if old is not None:
-        return section.replace(f'\na=fmtp:{payload_type} {old}', f'\na=fmtp:{payload_type} {new}', 1)
+    return section.replace(f'\na=fmtp:{payload_type} {old}', f'\na=fmtp:{payload_type} {new}', 1)
+
+
+def _with_new_fmtp(section: str, payload_type: str, fmtp: str) -> str:
+    # right after the rtpmap line of the payload type, with the same line ending
     rtpmap = re.search(rf'\na=rtpmap:{payload_type} [^\r\n]*(\r?\n)', section)
     if rtpmap is None:
         return section
-    return f'{section[: rtpmap.end()]}a=fmtp:{payload_type} {new}{rtpmap.group(1)}{section[rtpmap.end() :]}'
+    end = rtpmap.end()
+    line_ending = rtpmap.group(1)
+    return f'{section[:end]}a=fmtp:{payload_type} {fmtp}{line_ending}{section[end:]}'
+
+
+def _with_setup_last(section: str) -> str:
+    # each media section ends with its DTLS role, for code that reads it from the last line
+    setup = _SETUP_LINE.search(section)
+    if setup is None or setup.end() == len(section):
+        return section
+    line = setup.group(0)[1:]
+    return section[: setup.start() + 1] + section[setup.end() :] + line
 
 
 def _description(
@@ -248,12 +337,10 @@ def _description(
 ) -> RTCSessionDescription:
     head, sections = _split(description.sdp)
     for index, section in enumerate(sections):
-        text = section + _END_OF_CANDIDATES if ended and _END_OF_CANDIDATES not in section else section
-        # each media section ends with its DTLS role, for code that reads it from the last line
-        setup = _SETUP_LINE.search(text)
-        if setup is not None and setup.end() != len(text):
-            text = text[: setup.start() + 1] + text[setup.end() :] + setup.group(0)[1:]
-        sections[index] = text
+        text = section
+        if ended and _END_OF_CANDIDATES not in text:
+            text += _END_OF_CANDIDATES
+        sections[index] = _with_setup_last(text)
     return RTCSessionDescription(sdp=head + ''.join(sections), type=str(description.type))
 
 
@@ -266,17 +353,18 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
 
     def __init__(self, configuration: RTCConfiguration | None = None) -> None:
         super().__init__()
-        configuration = configuration if configuration is not None else RTCConfiguration()
+        if configuration is None:
+            configuration = RTCConfiguration()
         servers = configuration.iceServers
         if servers is None:
             servers = RTCIceGatherer.getDefaultIceServers()
-        self._native = webrtc.RTCPeerConnection(
-            webrtc.RTCConfiguration(
-                ice_servers=[webrtc.RTCIceServer(s.urls, s.username, s.credential) for s in servers],
-                bundle_policy=webrtc.RTCBundlePolicy(configuration.bundlePolicy.value),
-                always_negotiate_data_channels=configuration.alwaysNegotiateDataChannels,
-            )
+        native_configuration = webrtc.RTCConfiguration(
+            ice_servers=[webrtc.RTCIceServer(s.urls, s.username, s.credential) for s in servers],
+            bundle_policy=webrtc.RTCBundlePolicy(configuration.bundlePolicy.value),
+            always_negotiate_data_channels=configuration.alwaysNegotiateDataChannels,
         )
+        self._native = webrtc.RTCPeerConnection(native_configuration)
+
         self._pending: list[RTCDataChannel] = []
         self._channels: list[RTCDataChannel] = []
         self._dtls: dict[webrtc.RTCDtlsTransport, RTCDtlsTransport] = {}
@@ -308,6 +396,7 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
         # the core takes handlers only on a running loop, which isn't needed to create a connection
         if _running_loop() is None or self._closed:
             return
+
         handlers: dict[str, Callable[[Never], object]] = {
             'signalingstatechange': lambda _event: self.emit('signalingstatechange'),
             'icegatheringstatechange': self._ice_gathering_state_changed,
@@ -322,6 +411,7 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
                 self._emitted[event] = self.iceConnectionState
             self._native.on(event, handlers[event])  # pyrefly: ignore[no-matching-overload]
         self._bound |= self._heard
+
         pending = self._pending.copy()
         self._pending.clear()
         for channel in pending:
@@ -362,14 +452,16 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
     def _track_added(self, event: webrtc.RTCTrackEvent) -> None:
         receiver = self._transceiver(event.transceiver).receiver
         if receiver._track is None:
-            track_id = _found(_MSID, _media_section(_sdp_of(self._native.remote_description), event.transceiver.mid))
+            remote_sdp = _sdp_of(self._native.remote_description)
+            track_id = _found(_MSID, _media_section(remote_sdp, event.transceiver.mid))
             receiver._track = RemoteStreamTrack._of(event.track, receiver, track_id)
             self.emit('track', receiver._track)
 
     def _transceiver(self, native: webrtc.RTCRtpTransceiver) -> RTCRtpTransceiver:
         transceiver = self._transceivers.get(native)
         if transceiver is None:
-            transceiver = self._transceivers[native] = RTCRtpTransceiver._of(native, self)
+            transceiver = RTCRtpTransceiver._of(native, self)
+            self._transceivers[native] = transceiver
         return transceiver
 
     def _local_stream(self) -> webrtc.MediaStream:
@@ -389,17 +481,19 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
             if transceiver.receiver.track.kind != 'video' or transceiver.direction == 'stopped':
                 continue
             extensions = transceiver.get_header_extensions_to_negotiate()
-            if any(e.uri == _VIDEO_ORIENTATION and e.direction != 'stopped' for e in extensions):
-                transceiver.set_header_extensions_to_negotiate([
-                    dataclasses.replace(e, direction='stopped') if e.uri == _VIDEO_ORIENTATION else e
-                    for e in extensions
-                ])
+            if not any(e.uri == _VIDEO_ORIENTATION and e.direction != 'stopped' for e in extensions):
+                continue
+            stopped = [
+                dataclasses.replace(e, direction='stopped') if e.uri == _VIDEO_ORIENTATION else e for e in extensions
+            ]
+            transceiver.set_header_extensions_to_negotiate(stopped)
 
     def _local_description(self, native: webrtc.RTCSessionDescriptionInit) -> RTCSessionDescription:
         description = _description(native)
         # the remote peer sees the ids of the tracks the application added
         for transceiver in self._transceivers.values():
-            track, announced = transceiver.sender._track, transceiver._announced_track_id(description.sdp)
+            track = transceiver.sender._track
+            announced = transceiver._announced_track_id(description.sdp)
             if track is not None and announced is not None:
                 description.sdp = description.sdp.replace(announced, track.id)
         return description
@@ -434,6 +528,7 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
         has_media = '\nm=' in _sdp_of(native.local_description)
         if native.ice_gathering_state == webrtc.RTCIceGatheringState.complete or not has_media:
             return
+
         wait = asyncio.get_running_loop().create_future()
         self._gathered.append(wait)
         try:
@@ -448,7 +543,8 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
     def _dtls_transport(self, native: webrtc.RTCDtlsTransport) -> RTCDtlsTransport:
         transport = self._dtls.get(native)
         if transport is None:
-            transport = self._dtls[native] = RTCDtlsTransport._of(native, self)
+            transport = RTCDtlsTransport._of(native, self)
+            self._dtls[native] = transport
             if _running_loop() is not None:
                 transport._watch()
         return transport
@@ -458,7 +554,8 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
             return
         natives = [t.sender.transport for t in self._native.get_transceivers()]
         sctp = self._native.sctp
-        natives.append(sctp.transport if sctp is not None else None)
+        if sctp is not None:
+            natives.append(sctp.transport)
         self._dtls = {native: self._dtls_transport(native) for native in natives if native is not None}
         for transport in self._dtls.values():
             transport._watch()
@@ -470,6 +567,11 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
         if all(t.state == 'closed' for t in self._dtls.values()):
             task = asyncio.ensure_future(self.close())
             task.add_done_callback(functools.partial(_log_failure, 'RTCPeerConnection.close'))
+
+    async def _send_first_answered_codecs(self, answer: str) -> None:
+        for transceiver in list(self._transceivers.values()):
+            if transceiver._preferred and transceiver.direction in {'sendrecv', 'sendonly'}:
+                await transceiver._send_first_answered_codec(answer)
 
     def _description_applied(self) -> None:
         current = set(self._native.get_transceivers())
@@ -492,25 +594,31 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
         if states is not None and self.signalingState not in states:
             msg = f'Cannot handle {description.type} in signaling state "{self.signalingState}"'
             raise InvalidStateError(msg)
+
         answer = description.type in {'answer', 'pranswer'}
         error = _invalid_media(description.sdp, answer=answer)
-        offer = self._native.remote_description if local else self._native.local_description
-        if error is None and answer and _media_lines(description.sdp) != _media_lines(_sdp_of(offer)):
-            error = 'Media sections in answer do not match offer'
+        if error is None and answer:
+            offer = self._native.remote_description if local else self._native.local_description
+            if _media_lines(description.sdp) != _media_lines(_sdp_of(offer)):
+                error = 'Media sections in answer do not match offer'
         if error is not None:
             raise ValueError(error)
-        kind = _kind_without_common_codec(description.sdp) if not local else None
+
+        if local:
+            return
+        kind = _kind_without_common_codec(description.sdp)
         if kind is not None:
             msg = f'Failed to set remote {kind} description send parameters'
             raise OperationError(msg)
 
     async def _add_candidate(self, candidate: RTCIceCandidate | None) -> None:
-        native = None
         if candidate is None:
             self._remote_candidates_ended = True
+            native = None
         else:
             sdp = 'candidate:' + candidate_to_sdp(candidate)
             native = webrtc.RTCIceCandidateInit(sdp, candidate.sdpMid, candidate.sdpMLineIndex)
+
         try:
             await self._native.add_ice_candidate(native)
         except webrtc.OperationError:
@@ -554,8 +662,10 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
     @property
     def localDescription(self) -> RTCSessionDescription | None:
         native = self._native.local_description
+        if native is None:
+            return None
         # the candidates end once STUN and TURN servers are no longer waited for
-        return _description(native, ended=self._gathering_timed_out) if native is not None else None
+        return _description(native, ended=self._gathering_timed_out)
 
     @property
     def remoteDescription(self) -> RTCSessionDescription | None:
@@ -577,6 +687,7 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
         if candidate is not None and candidate.sdpMid is None and candidate.sdpMLineIndex is None:
             msg = 'Candidate must have either sdpMid or sdpMLineIndex'
             raise ValueError(msg)
+
         self._attach()
         if self._native.remote_description is None:
             logger.warning('RTCPeerConnection addIceCandidate called without remote description')
@@ -588,10 +699,14 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
         self._check_open()
         _ = _track_kind(track.kind)
         self._check_no_sender(track)
+
         sent, generator = _source(track, None)
-        native = self._native.add_track(sent, self._local_stream())
-        sender = self._transceiver(next(t for t in self._native.get_transceivers() if t.sender == native)).sender
-        sender._use(track, sent, generator if generator is not None else sender._generator)
+        native_sender = self._native.add_track(sent, self._local_stream())
+        native_transceiver = next(t for t in self._native.get_transceivers() if t.sender == native_sender)
+        sender = self._transceiver(native_transceiver).sender
+        if generator is None:
+            generator = sender._generator
+        sender._use(track, sent, generator)
         return sender
 
     def addTransceiver(self, trackOrKind: str | MediaStreamTrack, direction: str = 'sendrecv') -> RTCRtpTransceiver:
@@ -601,9 +716,11 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
         if direction not in _DIRECTIONS:
             msg = f'Invalid direction "{direction}"'
             raise InternalError(msg)
+
         init = webrtc.RTCRtpTransceiverInit(webrtc.RTCRtpTransceiverDirection(direction), [self._local_stream()])
         if track is None:
             return self._transceiver(self._native.add_transceiver(kind, init))
+
         self._check_no_sender(track)
         sent, generator = _source(track, None)
         transceiver = self._transceiver(self._native.add_transceiver(sent, init))
@@ -632,6 +749,7 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
         if self._closing is not None:
             await asyncio.shield(self._closing)
             return
+
         self._closing = asyncio.get_running_loop().create_future()
         try:
             self._native.close()
@@ -652,6 +770,7 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
         if self.signalingState not in {'have-remote-offer', 'have-local-pranswer'}:
             msg = f'Cannot create answer in signaling state "{self.signalingState}"'
             raise InvalidStateError(msg)
+
         self._attach()
         self._stop_orientation()
         return self._local_description(await self._native.create_answer())
@@ -669,6 +788,7 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
         if maxPacketLifeTime is not None and maxRetransmits is not None:
             msg = 'Cannot specify both maxPacketLifeTime and maxRetransmits'
             raise ValueError(msg)
+
         if self._sctp is None:
             self._sctp = RTCSctpTransport._of(self)
         parameters = RTCDataChannelParameters(
@@ -686,15 +806,16 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
         self._check_open()
         description = sessionDescription
         if description is None:
-            implicit = self.createAnswer if self.signalingState == 'have-remote-offer' else self.createOffer
-            description = await implicit()
+            if self.signalingState == 'have-remote-offer':
+                description = await self.createAnswer()
+            else:
+                description = await self.createOffer()
         self._check_description(description, local=True)
+
         self._attach()
         await self._native.set_local_description(_native_description(description))
         if description.type in {'answer', 'pranswer'}:
-            for transceiver in list(self._transceivers.values()):
-                if transceiver._preferred and transceiver.direction in {'sendrecv', 'sendonly'}:
-                    await transceiver._send_first_answered_codec(description.sdp)
+            await self._send_first_answered_codecs(description.sdp)
         self._description_applied()
         await self._gathering_complete()
         self._emit_ice_state()
@@ -702,11 +823,14 @@ class RTCPeerConnection(AsyncIOEventEmitter):  # ruff: ignore[too-many-public-me
     async def setRemoteDescription(self, sessionDescription: RTCSessionDescription) -> None:
         self._check_description(sessionDescription, local=False)
         self._attach()
+
         sdp, added = _with_parameters(sessionDescription.sdp, _remote_parameters)
-        await self._native.set_remote_description(_native_description(dataclasses.replace(sessionDescription, sdp=sdp)))
+        rewritten = dataclasses.replace(sessionDescription, sdp=sdp)
+        await self._native.set_remote_description(_native_description(rewritten))
         self._added_parameters = added
         self._remote_candidates_ended = _END_OF_CANDIDATES in sessionDescription.sdp
         self._description_applied()
+
         candidates = self._candidates.copy()
         self._candidates.clear()
         for candidate in candidates:

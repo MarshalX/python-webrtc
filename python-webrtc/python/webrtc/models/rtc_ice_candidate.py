@@ -38,6 +38,8 @@ _MIN_TOKENS = 8  # foundation, component, transport, priority, address, port, "t
 _RELATED_TOKENS = 4  # "raddr", the address, "rport" and the port
 _TCP_TYPE_TOKENS = 2  # "tcptype" and the type
 _PORTS = range(65536)
+_COMPONENT_IDS = range(1, 257)
+_PRIORITIES = range(1, 2**31)
 _COMPONENTS = {1: 'rtp', 2: 'rtcp'}
 _PROTOCOLS = frozenset({'udp', 'tcp'})
 _TYPES = frozenset({'host', 'srflx', 'prflx', 'relay'})
@@ -69,6 +71,7 @@ class _InvalidCandidateError(ValueError):
 def _number(token: str, max_digits: int, valid: range) -> int | None:
     if len(token) > max_digits or _DIGITS.fullmatch(token) is None:
         return None
+
     value = int(token)
     return value if value in valid else None
 
@@ -112,12 +115,17 @@ def _parse_tcp_type(fields: _CandidateFields, rest: list[str]) -> list[str]:
 
 def _base_fields(tokens: list[str]) -> _CandidateFields:
     """The fields of the tokens up to the type."""
-    foundation, component, transport, priority, address, port, _, cand_type = tokens
-    component_id = _required(_number(component, 3, range(1, 257)))
+    foundation, component, transport, priority, address, port, typ, cand_type = tokens
+    if typ != 'typ':
+        raise _InvalidCandidateError
+    component_id = _required(_number(component, 3, _COMPONENT_IDS))
+    if _FOUNDATION.fullmatch(foundation) is None:
+        raise _InvalidCandidateError
+
     return {
-        'foundation': _required(foundation if _FOUNDATION.fullmatch(foundation) is not None else None),
+        'foundation': foundation,
         'component': _COMPONENTS.get(component_id),
-        'priority': _required(_number(priority, 10, range(1, 2**31))),
+        'priority': _required(_number(priority, 10, _PRIORITIES)),
         'address': address,
         'protocol': _one_of(transport.lower(), _PROTOCOLS),
         'port': _required(_number(port, 5, _PORTS)),
@@ -136,13 +144,16 @@ def _parse_fields(value: str, *, strict: bool) -> _CandidateFields:
     if not value.startswith('candidate:'):
         raise _InvalidCandidateError
     tokens = value[len('candidate:') :].split(' ')
-    if len(tokens) < _MIN_TOKENS or tokens[6] != 'typ' or not all(tokens):
+    if len(tokens) < _MIN_TOKENS or not all(tokens):
         raise _InvalidCandidateError
 
     fields = _base_fields(tokens[:_MIN_TOKENS])
-    rest = _parse_tcp_type(fields, _parse_related(fields, tokens[_MIN_TOKENS:], strict=strict))
+    rest = _parse_related(fields, tokens[_MIN_TOKENS:], strict=strict)
+    rest = _parse_tcp_type(fields, rest)
+
     # extensions are pairs of a token and a value without spaces (like an ufrag, with "/" and "+")
-    if len(rest) % 2 != 0 or not all(_TOKEN.fullmatch(t) for t in rest[::2]):
+    extension_names = rest[::2]
+    if len(rest) % 2 != 0 or not all(_TOKEN.fullmatch(name) for name in extension_names):
         raise _InvalidCandidateError
     return fields
 
@@ -163,9 +174,11 @@ def _parse_candidate(value: str, *, strict: bool = True) -> _CandidateFields | N
 
 
 def _member_or_none(cls: type[_EnumT], value: object) -> _EnumT | None:
+    if value is None:
+        return None
     # candidates with values the enum doesn't have are valid
     try:
-        return cls(value) if value is not None else None
+        return cls(value)
     except ValueError:
         return None
 
@@ -303,8 +316,10 @@ class RTCIceCandidate:
         if self.sdp_mid is None and self.sdp_m_line_index is None:
             msg = 'sdp_mid and sdp_m_line_index are both None'
             raise TypeError(msg)
+
         object.__setattr__(self, 'candidate', str(self.candidate))
-        object.__setattr__(self, 'relay_protocol', _member_or_none(RTCIceServerTransportProtocol, self.relay_protocol))
+        relay_protocol = _member_or_none(RTCIceServerTransportProtocol, self.relay_protocol)
+        object.__setattr__(self, 'relay_protocol', relay_protocol)
         # the fields parsed from the candidate, not a field of the dataclass
         parsed = _parse_candidate(self.candidate)
         object.__setattr__(self, '_parsed', parsed if parsed is not None else _CandidateFields())
@@ -330,12 +345,15 @@ class RTCIceCandidate:
             :obj:`webrtc.RTCIceCandidate`: The candidate.
         """
         fields = _parse_candidate(kwargs['candidate'], strict=False)
+        if fields is None:
+            fields = _CandidateFields()
         init = kwargs.copy()
         init['candidate'] = ''
         candidate = cls(**init)
+
         # libwebrtc knows no related address of it, which is port 0
         parsed: _CandidateFields = {
-            **(fields if fields is not None else _CandidateFields()),
+            **fields,
             'address': None,
             'related_address': None,
             'related_port': 0,

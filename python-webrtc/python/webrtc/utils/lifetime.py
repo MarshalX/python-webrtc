@@ -60,7 +60,8 @@ def wrap(cls: type[WebRTCObject[_N]], native: _N) -> WebRTCObject[_N]:
             # under the lock so racing threads get one wrapper; nothing native runs here
             created = object.__new__(cls)
             created._init_native(native)
-            wrapper = wrappers[key] = cast('WebRTCObject[object]', created)
+            wrapper = cast('WebRTCObject[object]', created)
+            wrappers[key] = wrapper
     return cast('WebRTCObject[_N]', wrapper)
 
 
@@ -69,6 +70,7 @@ def wrapper_of(native: Native) -> WebRTCObject[object]:
     with _lock:
         wrapper = wrappers.get(native._id)
         registered = _classes.get(type(native))
+
     if wrapper is not None:
         return wrapper
     if registered is None:

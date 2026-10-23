@@ -31,6 +31,12 @@ import webrtc
 if TYPE_CHECKING:
     from pytgcalls.mtproto.data.update import UpdateGroupCallParticipantsWrapper
 
+SAMPLE_RATE = 48000
+CHANNELS = 2
+BYTES_PER_FRAME = CHANNELS * 2  # 16-bit samples
+CHUNKS_PER_SECOND = 100  # 10 ms chunks
+FRAMES_PER_CHUNK = SAMPLE_RATE // CHUNKS_PER_SECOND
+
 
 class Fingerprint(TypedDict):
     """A DTLS fingerprint of the Telegram server."""
@@ -89,14 +95,18 @@ def join_params(offer: str) -> dict[str, object]:
     }
 
 
+def candidate_line(c: Candidate) -> str:
+    """The SDP attribute of an ICE candidate."""
+    return (
+        f'a=candidate:{c["foundation"]} {c["component"]} {c["protocol"]} {c["priority"]} {c["ip"]} {c["port"]} '
+        f'typ {c["type"]} generation {c["generation"]}'
+    )
+
+
 def build_answer(params: CallParams) -> str:
     """The SDP answer of the Telegram server."""
     transport = params['transport']
-    candidates = '\n'.join(
-        f'a=candidate:{c["foundation"]} {c["component"]} {c["protocol"]} {c["priority"]} {c["ip"]} {c["port"]} '
-        f'typ {c["type"]} generation {c["generation"]}'
-        for c in transport['candidates']
-    )
+    candidates = '\n'.join(candidate_line(c) for c in transport['candidates'])
     return f"""v=0
 o=- {time.time()} 2 IN IP4 0.0.0.0
 s=-
@@ -129,22 +139,21 @@ async def send_audio_data(generator: webrtc.MediaStreamTrackGenerator, file: Bin
     start = loop.time()
     chunks = 0
 
-    while (data := file.read(480 * 4)) != b'':  # 480 frames of 2 channels of 16 bits
-        frames = len(data) // 4
-        await writer.write(
-            webrtc.AudioData(
-                webrtc.AudioDataInit(
-                    format='s16',
-                    sample_rate=48000,
-                    number_of_frames=frames,
-                    number_of_channels=2,
-                    timestamp=chunks * 10_000,
-                    data=data[: frames * 4],
-                )
-            )
+    while (data := file.read(FRAMES_PER_CHUNK * BYTES_PER_FRAME)) != b'':
+        frames = len(data) // BYTES_PER_FRAME
+        init = webrtc.AudioDataInit(
+            format='s16',
+            sample_rate=SAMPLE_RATE,
+            number_of_frames=frames,
+            number_of_channels=CHANNELS,
+            timestamp=chunks * 1_000_000 // CHUNKS_PER_SECOND,
+            data=data[: frames * BYTES_PER_FRAME],
         )
+        await writer.write(webrtc.AudioData(init))
+
         chunks += 1
-        await asyncio.sleep(max(0.0, start + chunks / 100 - loop.time()))
+        due = start + chunks / CHUNKS_PER_SECOND
+        await asyncio.sleep(max(0.0, due - loop.time()))
 
 
 async def main(input_peer: str, audio: BinaryIO) -> None:
@@ -153,13 +162,13 @@ async def main(input_peer: str, audio: BinaryIO) -> None:
         os.environ.get('SESSION_NAME'), api_hash=os.environ.get('API_HASH'), api_id=os.environ.get('API_ID')
     )
     await client.start()
-    pc = webrtc.RTCPeerConnection()
 
+    pc = webrtc.RTCPeerConnection()
     generator = webrtc.MediaStreamTrackGenerator('audio')
     pc.add_track(generator)
-
     offer = await pc.create_offer()
     await pc.set_local_description(offer)
+
     answered = asyncio.Event()
 
     async def on_update(update: UpdateGroupCallWrapper | UpdateGroupCallParticipantsWrapper) -> None:
@@ -169,10 +178,8 @@ async def main(input_peer: str, audio: BinaryIO) -> None:
         if isinstance(update.call, GroupCallWrapper):
             answered.set()
             params: CallParams = json.loads(update.call.params.data)
-            answer = build_answer(params)
-            await pc.set_remote_description(
-                webrtc.RTCSessionDescription(webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, answer))
-            )
+            answer = webrtc.RTCSessionDescriptionInit(webrtc.RTCSdpType.answer, build_answer(params))
+            await pc.set_remote_description(webrtc.RTCSessionDescription(answer))
 
     app = PyrogramBridge(client)
     app.register_group_call_native_callback(on_update, on_update)
@@ -189,7 +196,6 @@ async def main(input_peer: str, audio: BinaryIO) -> None:
     await asyncio.wait_for(answered.wait(), 30)
 
     sending = asyncio.ensure_future(send_audio_data(generator, audio))
-
     await pyrogram.idle()
     sending.cancel()
     await client.stop()

@@ -93,9 +93,10 @@ def _error_event(name: str, *args: object) -> SFrameTransformErrorEvent:
     if not isinstance(frame, (RTCEncodedVideoFrame, RTCEncodedAudioFrame, bytes)):
         msg = f'An SFrame error is of a frame or bytes, not {type(frame).__name__}'
         raise TypeError(msg)
+
     error_type = _ERROR_TYPES[cast('int', error)]
-    is_key_id = error_type == SFrameTransformErrorEventType.key_id
-    init = SFrameTransformErrorEventInit(error_type, frame, cast('int | None', key_id) if is_key_id else None)
+    reported_key_id = cast('int | None', key_id) if error_type == SFrameTransformErrorEventType.key_id else None
+    init = SFrameTransformErrorEventInit(error_type, frame, reported_key_id)
     return SFrameTransformErrorEvent(name, init)
 
 
@@ -121,7 +122,8 @@ class _SFrameEncryptorManager:
             webrtc.InvalidRangeError: If the key id doesn't fit 64 bits.
             webrtc.InvalidModificationError: If the key can't be derived.
         """
-        raw, key_id = _key(key), _key_id(key_id)
+        raw = _key(key)
+        key_id = _key_id(key_id)
         if not self._native_obj.setEncryptionKey(raw, key_id):
             msg = 'The key can not be derived'
             raise webrtc.InvalidModificationError(msg)
@@ -150,7 +152,8 @@ class _SFrameDecryptorManager:
             webrtc.InvalidRangeError: If the key id doesn't fit 64 bits.
             webrtc.InvalidModificationError: If the key can't be derived.
         """
-        raw, key_id = _key(key), _key_id(key_id)
+        raw = _key(key)
+        key_id = _key_id(key_id)
         if not self._native_obj.addDecryptionKey(raw, key_id):
             msg = 'The key can not be derived'
             raise webrtc.InvalidModificationError(msg)
@@ -203,7 +206,9 @@ class RTCRtpSFrameEncryptor(_SFrameEncryptorManager, WebRTCObject[wrtc.SFrameTra
 
     def __init__(self, options: RTCRtpSFrameEncryptorOptions) -> None:
         native = _native(options, encrypting=True)
-        if SFrameType(getattr(options, 'type', SFrameType.per_frame)) == SFrameType.per_packet:
+        # a plain SFrameTransformOptions has no type: it's per-frame
+        sframe_type = SFrameType(getattr(options, 'type', SFrameType.per_frame))
+        if sframe_type == SFrameType.per_packet:
             msg = 'per-packet SFrame needs the SFrame packetization of RTP, which is not supported'
             raise NotSupportedError(msg)
         super().__init__(native)

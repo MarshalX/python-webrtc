@@ -54,18 +54,29 @@ def _number(value: float | None) -> str:
     """At least three significant digits, without an exponent."""
     if value is None or value == 0:
         return markdown.number(value, 0)
-    return markdown.number(value, max(0, min(3, 2 - math.floor(math.log10(abs(value))))))
+    magnitude = math.floor(math.log10(abs(value)))
+    digits = max(0, min(3, 2 - magnitude))
+    return markdown.number(value, digits)
 
 
 def _change(metric: Metric, before: float | None, after: float | None) -> tuple[str, str]:
     """After over before, and whether that's better, worse or the same."""
-    if before is None or after is None:
-        return '-', 'only after' if before is None else 'only before'
+    if before is None:
+        return '-', 'only after'
+    if after is None:
+        return '-', 'only before'
     if before == 0:
         return '-', '-'
+
     change = (after - before) / before
+    return f'{change:+.1%}', _verdict(metric, change)
+
+
+def _verdict(metric: Metric, change: float) -> str:
+    if change == 0:
+        return 'same'
     better = change < 0 if metric.lower_is_better else change > 0
-    return f'{change:+.1%}', 'same' if change == 0 else 'better' if better else 'worse'
+    return 'better' if better else 'worse'
 
 
 def _row(metric: Metric, before: float | None, after: float | None, *, with_library: bool) -> list[str]:
@@ -83,7 +94,8 @@ def _row(metric: Metric, before: float | None, after: float | None, *, with_libr
 
 def _suite(suite: str, before: Run, after: Run) -> list[str]:
     """The table of a suite: a row a metric, case and library in either run, grouped by metric."""
-    old, new = _values(suite, before), _values(suite, after)
+    old = _values(suite, before)
+    new = _values(suite, after)
     metrics = list(dict.fromkeys([*old, *new]))
     titles = list(dict.fromkeys(metric.title for metric in metrics))
     metrics.sort(key=lambda metric: titles.index(metric.title))

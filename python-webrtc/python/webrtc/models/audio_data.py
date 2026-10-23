@@ -27,6 +27,9 @@ if TYPE_CHECKING:
     from typing_extensions import Buffer, TypeGuard
 
 _SAMPLE_BYTES = {'u8': 1, 's16': 2, 's32': 4, 'f32': 4}
+_PLANAR_SUFFIX = '-planar'
+# the interleaved format of the samples of a track, by bits per sample
+_TRACK_FORMATS = {8: AudioSampleFormat.u8, 16: AudioSampleFormat.s16, 32: AudioSampleFormat.s32}
 
 
 def _sample_format(value: object) -> AudioSampleFormat:
@@ -38,11 +41,12 @@ def _sample_format(value: object) -> AudioSampleFormat:
 
 
 def _sample_bytes(format: AudioSampleFormat) -> int:
-    return _SAMPLE_BYTES[format.value.split('-')[0]]
+    sample_type = format.value.removesuffix(_PLANAR_SUFFIX)
+    return _SAMPLE_BYTES[sample_type]
 
 
 def _is_planar(format: AudioSampleFormat) -> bool:
-    return format.value.endswith('-planar')
+    return format.value.endswith(_PLANAR_SUFFIX)
 
 
 @dataclass
@@ -207,9 +211,11 @@ class AudioData(Closable):
         if isinstance(init.timestamp, bool) or not isinstance(init.timestamp, int):
             msg = 'The timestamp is an integer of microseconds'
             raise TypeError(msg)
+
         transfer = Transfer(init.transfer)
         size = frames * channels * _sample_bytes(format)
-        data = _buffer(init.data, size, keep=_is_buffer(init.data) and transfer.has(init.data))
+        transferred = _is_buffer(init.data) and transfer.has(init.data)
+        data = _buffer(init.data, size, keep=transferred)
         transfer.detach()
         self._set(data, _Layout(format, sample_rate, frames, channels), init.timestamp)
 
@@ -223,7 +229,7 @@ class AudioData(Closable):
         """Samples of a track, interleaved: the data, bits per sample, sample rate, channels, frames and timestamp."""
         data, bits_per_sample, sample_rate, channels, frames, timestamp = native
         audio = cls.__new__(cls)
-        format = {8: AudioSampleFormat.u8, 16: AudioSampleFormat.s16, 32: AudioSampleFormat.s32}[bits_per_sample]
+        format = _TRACK_FORMATS[bits_per_sample]
         audio._set(data, _Layout(format, float(sample_rate), frames, channels), timestamp)
         return audio
 
@@ -295,16 +301,19 @@ class AudioData(Closable):
         if data is None:
             msg = 'The data is closed'
             raise InvalidStateError(msg)
+
         plane_index = _unsigned(options.plane_index, 'plane_index')
         frame_offset = _unsigned(options.frame_offset, 'frame_offset')
-        destination = self._format if options.format is None else _sample_format(options.format)
-        if _is_planar(destination):
+        target_format = self._format if options.format is None else _sample_format(options.format)
+        planar = _is_planar(target_format)
+        if planar:
             if plane_index >= self._channels:
                 msg = f'plane_index must be less than the {self._channels} channels'
                 raise InvalidRangeError(msg)
         elif plane_index > 0:
             msg = 'plane_index must be 0 for an interleaved format'
             raise InvalidRangeError(msg)
+
         if frame_offset >= self._frames:
             msg = f'frame_offset must be less than the {self._frames} frames'
             raise InvalidRangeError(msg)
@@ -315,10 +324,10 @@ class AudioData(Closable):
             if frame_count > remaining:
                 msg = f'frame_count must be at most the {remaining} frames from frame_offset'
                 raise InvalidRangeError(msg)
-        elements = frame_count if _is_planar(destination) else frame_count * self._channels
-        return _CopyPlan(
-            data, destination, plane_index, frame_offset, frame_count, elements * _sample_bytes(destination)
-        )
+
+        samples = frame_count if planar else frame_count * self._channels
+        size = samples * _sample_bytes(target_format)
+        return _CopyPlan(data, target_format, plane_index, frame_offset, frame_count, size)
 
     def allocation_size(self, options: AudioDataCopyToOptions) -> int:
         """Computes the minimum destination size for :meth:`copy_to` with the same options.
@@ -360,6 +369,7 @@ class AudioData(Closable):
         if memoryview(destination).nbytes < plan.size:
             msg = f'The destination must be at least {plan.size} bytes'
             raise webrtc.InvalidRangeError(msg)
+
         try:
             wrtc.copyAudioSamples(
                 plan.data,

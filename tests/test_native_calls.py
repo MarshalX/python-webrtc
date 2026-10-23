@@ -35,7 +35,9 @@ async def test_result() -> None:
     def method(mailbox: wrtc.Mailbox, token: int, *numbers: int) -> None:
         _in_thread(lambda: wrtc._testing.complete(mailbox, token, sum(numbers)))
 
-    assert await call_native(method, 1, 2) == 3
+    result = await call_native(method, 1, 2)
+
+    assert result == 3
 
 
 @pytest.mark.asyncio
@@ -75,11 +77,13 @@ async def test_late_completion_after_cancel_is_dropped() -> None:
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
     # the drain drops the completion, then runs the marker
     await loop.run_in_executor(None, wrtc._testing.complete, state.mailbox, tokens[0], 1)
     done = loop.create_future()
     state.post(lambda: done.set_result(None))
     await done
+
     assert errors == []
     assert state.pending == {}
 
@@ -90,10 +94,13 @@ async def test_call_of_a_native_object_is_started_for_its_wrapper() -> None:
     loop = asyncio.get_running_loop()
     state = LoopState.of(loop)
     pc = webrtc.RTCPeerConnection()
+
     task = loop.create_task(call_native(pc._native_obj.getStats))
     await asyncio.sleep(0)
-    # weakly: a call in flight is no root
-    assert [call.target() if call.target is not None else None for call in state.pending.values()] == [pc]
+
+    # held weakly: a call in flight doesn't keep its wrapper alive
+    targets = [None if call.target is None else call.target() for call in state.pending.values()]
+    assert targets == [pc]
     assert isinstance(await task, str)
     assert state.pending == {}
     pc.close()
@@ -117,7 +124,9 @@ def test_exit_cancels_the_calls_of_a_loop_of_another_thread_on_that_thread() -> 
     thread = threading.Thread(target=asyncio.run, args=(awaiting(),), kwargs={'debug': True}, daemon=True)
     thread.start()
     assert started.wait(seconds(5))
+
     loops._exit()
+
     assert cancelled.wait(seconds(5))
     thread.join(seconds(5))
     assert not thread.is_alive()
@@ -130,7 +139,9 @@ def test_calls_at_exit_are_cancelled_and_later_ones_fail_right_away() -> None:
     try:
         state = LoopState.of(loop)
         _, future = state.start(None)
+
         loops._exit()
+
         assert future.cancelled()
         assert state.pending == {}
         assert state.mailbox.closed

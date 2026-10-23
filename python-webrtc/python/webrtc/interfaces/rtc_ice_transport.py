@@ -111,9 +111,10 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
     def _candidate_of(self, native: wrtc.IceCandidateInit) -> webrtc.RTCIceCandidate:
         """The candidate object of a native candidate, the same one each time."""
         kwargs = native.kwargs()
-        if kwargs['candidate'] not in self._candidates:
-            self._candidates[kwargs['candidate']] = RTCIceCandidate(**kwargs)
-        return self._candidates[kwargs['candidate']]
+        key = kwargs['candidate']
+        if key not in self._candidates:
+            self._candidates[key] = RTCIceCandidate(**kwargs)
+        return self._candidates[key]
 
     def _remember(self, candidate: webrtc.RTCIceCandidate) -> None:
         """Makes a candidate the object of its native candidate, unless there's one already."""
@@ -184,6 +185,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
         if self.gathering_state != RTCIceGathererState.new:
             msg = 'The transport gathers its candidates already'
             raise webrtc.InvalidStateError(msg)
+
         options = options if options is not None else RTCIceGatherOptions()
         servers = options.ice_servers if options.ice_servers is not None else ()
         self._native_obj.gather(options.gather_policy, RTCIceServer._to_native_list(servers))
@@ -221,6 +223,7 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
         if role not in {RTCIceRole.controlling, RTCIceRole.controlled}:
             msg = 'role must be controlling or controlled'
             raise ValueError(msg)
+
         self._native_obj.start(ufrag, password, role)
 
     def add_remote_candidate(
@@ -243,12 +246,10 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
         candidate = remote_candidate if remote_candidate is not None else RTCIceCandidateInit()
         if not isinstance(candidate, RTCIceCandidate):
             candidate = RTCIceCandidate(*RTCIceCandidate._members_of(candidate))
-        self._native_obj.addRemoteCandidate(
-            candidate.candidate,
-            candidate.sdp_mid if candidate.sdp_mid is not None else '',
-            candidate.sdp_m_line_index if candidate.sdp_m_line_index is not None else 0,
-            candidate.username_fragment,
-        )
+
+        sdp_mid = candidate.sdp_mid if candidate.sdp_mid is not None else ''
+        sdp_m_line_index = candidate.sdp_m_line_index if candidate.sdp_m_line_index is not None else 0
+        self._native_obj.addRemoteCandidate(candidate.candidate, sdp_mid, sdp_m_line_index, candidate.username_fragment)
         self._remember(candidate)
 
     def stop(self) -> None:
@@ -282,7 +283,8 @@ class RTCIceTransport(WebRTCObject[wrtc.RTCIceTransport], EventTarget[_IceTransp
             remote_candidate = RTCIceCandidate._peer_reflexive(remote.kwargs())
         else:
             remote_candidate = RTCIceCandidate(**remote.kwargs())
-        return RTCIceCandidatePair(RTCIceCandidate(**local.kwargs()), remote_candidate)
+        local_candidate = RTCIceCandidate(**local.kwargs())
+        return RTCIceCandidatePair(local_candidate, remote_candidate)
 
     def get_local_candidates(self) -> list[webrtc.RTCIceCandidate]:
         """Returns the local candidates gathered for the transport so far.

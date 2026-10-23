@@ -13,7 +13,7 @@ import asyncio
 import time
 from dataclasses import dataclass
 from itertools import starmap
-from typing import ClassVar, Union
+from typing import ClassVar, NamedTuple, Union
 
 import wrtc
 from webrtc.base import WebRTCObject
@@ -136,7 +136,10 @@ class RTCDtlsFingerprint(Dictionary):
     value: str | None = None
 
 
-_KeyParams = tuple[str, int, int]
+class _KeyParams(NamedTuple):
+    key_type: str
+    modulus_length: int
+    public_exponent: int
 
 
 def _ecdsa_params(algorithm: Algorithm) -> _KeyParams:
@@ -144,18 +147,21 @@ def _ecdsa_params(algorithm: Algorithm) -> _KeyParams:
     if curve != 'P-256':
         msg = f'the {curve} curve is not supported, only P-256 is'
         raise NotSupportedError(msg)
-    return 'ecdsa', 0, 0
+    return _KeyParams('ecdsa', 0, 0)
 
 
 def _rsa_params(algorithm: Algorithm) -> _KeyParams:
     if not isinstance(algorithm, RsaHashedKeyGenParams):
         msg = 'RSASSA-PKCS1-v1_5 needs an RsaHashedKeyGenParams, with a hash, a modulus length and a public exponent'
         raise NotSupportedError(msg)
+
     hash_name = algorithm.hash.name if isinstance(algorithm.hash, Algorithm) else algorithm.hash
     if hash_name.upper() != 'SHA-256':
         msg = f'the {hash_name} hash is not supported, only SHA-256 is'
         raise NotSupportedError(msg)
-    return 'rsa', algorithm.modulus_length, int.from_bytes(bytes(algorithm.public_exponent), 'big')
+
+    public_exponent = int.from_bytes(bytes(algorithm.public_exponent), 'big')
+    return _KeyParams('rsa', algorithm.modulus_length, public_exponent)
 
 
 _KEY_PARAMS = {'ECDSA': _ecdsa_params, 'RSASSA-PKCS1-V1_5': _rsa_params}
@@ -165,6 +171,7 @@ def _key_params(algorithm: AlgorithmIdentifier) -> _KeyParams:
     """The key parameters for an algorithm."""
     if isinstance(algorithm, str):
         algorithm = Algorithm(algorithm)
+
     key_params = _KEY_PARAMS.get(algorithm.name.upper())
     if key_params is None:
         msg = f'the {algorithm.name!r} algorithm is not supported, ECDSA and RSASSA-PKCS1-v1_5 are'
@@ -195,6 +202,7 @@ class RTCCertificate(WebRTCObject[wrtc.RTCCertificate]):
         if not valid:
             msg = f'expires must be an unsigned 64-bit integer, not {expires!r}'
             raise TypeError(msg)
+
         native = await asyncio.get_running_loop().run_in_executor(
             None, wrtc.RTCCertificate.generate, key_type, modulus_length, exponent, expires
         )

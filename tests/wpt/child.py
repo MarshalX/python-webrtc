@@ -26,6 +26,7 @@ from tests.wpt.runner import (
     TEST_STATUSES,
     TIMEOUT,
     CaseResult,
+    TestResult,
     harness_result,
 )
 
@@ -66,6 +67,27 @@ def _log_unhandled_rejections(loop: asyncio.AbstractEventLoop, context: dict[str
         loop.default_exception_handler(context)
 
 
+def _set_location(case: str, variant: str) -> None:
+    pathname = '/' + case.partition('?')[0]
+    pm.eval('(search, pathname) => { globalThis.location = {search, pathname, href: pathname + search}; }')(
+        variant, pathname
+    )
+
+
+def _case_result(result: _JsResult, unsupported: set[str]) -> CaseResult:
+    """What testharness reported, with statuses as names."""
+    harness = result['harness']
+    tests: list[TestResult] = [
+        {'name': test['name'], 'status': TEST_STATUSES[int(test['status'])], 'message': _text(test['message'])}
+        for test in result['tests']
+    ]
+    return {
+        'harness': {'status': HARNESS_STATUSES[int(harness['status'])], 'message': _text(harness['message'])},
+        'tests': tests,
+        'unsupported': sorted(unsupported),
+    }
+
+
 async def run_in_process(case: str) -> CaseResult:
     path, variant = split_case(case)
     test_file = load(path)
@@ -80,15 +102,12 @@ async def run_in_process(case: str) -> CaseResult:
 
     bridge.LOOP = loop
     loop.set_exception_handler(_log_unhandled_rejections)
-
     pm.eval('(env) => { globalThis.__wpt = env; }')({
         'bridge': bridge.EXPORTS,
         'unsupported': unsupported.add,
         'complete': complete,
     })
-    pm.eval('(search, pathname) => { globalThis.location = {search, pathname, href: pathname + search}; }')(
-        variant, '/' + case.partition('?')[0]
-    )
+    _set_location(case, variant)
 
     try:
         # one after another, without giving control to the loop in between
@@ -108,17 +127,7 @@ async def run_in_process(case: str) -> CaseResult:
         except asyncio.TimeoutError:
             return harness_result('TIMEOUT', 'the harness did not complete after timing out')
 
-    return {
-        'harness': {
-            'status': HARNESS_STATUSES[int(result['harness']['status'])],
-            'message': _text(result['harness']['message']),
-        },
-        'tests': [
-            {'name': t['name'], 'status': TEST_STATUSES[int(t['status'])], 'message': _text(t['message'])}
-            for t in result['tests']
-        ],
-        'unsupported': sorted(unsupported),
-    }
+    return _case_result(result, unsupported)
 
 
 def main() -> None:

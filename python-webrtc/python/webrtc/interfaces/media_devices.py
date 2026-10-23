@@ -26,6 +26,7 @@ from webrtc.interfaces.media_stream_track import (
     CAMERA_DEVICE_ID,
     MICROPHONE_DEVICE_ID,
     _camera_mode,
+    _CameraMode,
     _converted,
     _keep_constraints,
     _unsatisfied,
@@ -189,12 +190,13 @@ def _check_satisfiable(constraints: MediaTrackConstraints, device: InputDeviceIn
         raise OverconstrainedError(failed, f"The constraint {failed} can't be satisfied")
 
 
-def _capture_mode(
-    video: MediaTrackConstraints | None, camera: webrtc.MediaTrackCapabilities
-) -> tuple[float, float, float]:
+_DEFAULT_CAMERA_MODE = _CameraMode(640, 480, 30.0)
+
+
+def _capture_mode(video: MediaTrackConstraints | None, camera: webrtc.MediaTrackCapabilities) -> _CameraMode:
     """The width, height and frame rate of the camera: its defaults, within the constraints and its capabilities."""
     constraints = video if video is not None else MediaTrackConstraints()
-    return _camera_mode(constraints, camera, MediaTrackSettings(), current=(640, 480, 30.0))
+    return _camera_mode(constraints, camera, MediaTrackSettings(), current=_DEFAULT_CAMERA_MODE)
 
 
 class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent]):
@@ -275,14 +277,19 @@ class MediaDevices(UniformEventTarget[Literal['devicechange'], DeviceChangeEvent
         if audio is None and video is None:
             msg = 'audio or video must be requested'
             raise TypeError(msg)
+
         microphone, camera = cast('list[InputDeviceInfo]', self._devices)
         audio = _converted(audio) if audio is not None else None
         video = _converted(video) if video is not None else None
         for requested, device in ((audio, microphone), (video, camera)):
             if requested is not None:
                 _check_satisfiable(requested, device)
-        width, height, frame_rate = _capture_mode(video, camera.get_capabilities())
-        stream = MediaStream._wrap(wrtc.getUserMedia(audio is not None, video is not None, width, height, frame_rate))
+
+        mode = _capture_mode(video, camera.get_capabilities())
+        native_stream = wrtc.getUserMedia(
+            audio is not None, video is not None, mode.width, mode.height, mode.frame_rate
+        )
+        stream = MediaStream._wrap(native_stream)
         for track in stream.get_audio_tracks():
             track._native_obj._setLabel(microphone.label)
             _keep_constraints(track._native_obj, audio)

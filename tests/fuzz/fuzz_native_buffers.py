@@ -34,11 +34,42 @@ EXPECTED = (TypeError, ValueError, RuntimeError, BufferError)
 
 
 def frame(inp: Input) -> wrtc.VideoFrameBuffer:
-    width, height = inp.unsigned(40), inp.unsigned(40)
+    width = inp.unsigned(40)
+    height = inp.unsigned(40)
     layout = [(inp.unsigned(1 << 12), inp.unsigned(256)) for _ in range(inp.small(4))]
-    return wrtc.VideoFrameBuffer.fromData(
-        inp.choice(PIXEL_FORMATS), width, height, inp.buffer(inp.small(1 << 15)), layout
+    format = inp.choice(PIXEL_FORMATS)
+    data = inp.buffer(inp.small(1 << 15))
+    return wrtc.VideoFrameBuffer.fromData(format, width, height, data, layout)
+
+
+def plane_copy(inp: Input) -> tuple[int, int, int, int, int, int]:
+    return (
+        inp.unsigned(256),
+        inp.unsigned(256),
+        inp.unsigned(256),
+        inp.unsigned(256),
+        inp.unsigned(256),
+        inp.unsigned(256),
     )
+
+
+def copy_planes(inp: Input, buffer: wrtc.VideoFrameBuffer) -> None:
+    copies = [plane_copy(inp) for _ in range(inp.small(4))]
+    buffer.copyPlanes(inp.destination(inp.small(1 << 15)), copies)
+
+
+def convert(inp: Input, buffer: wrtc.VideoFrameBuffer) -> None:
+    destination = inp.destination(inp.small(1 << 15))
+    format = inp.choice(PIXEL_FORMATS)
+    x = inp.unsigned(40)
+    y = inp.unsigned(40)
+    width = inp.unsigned(40)
+    height = inp.unsigned(40)
+    offset = inp.unsigned(1 << 12)
+    stride = inp.unsigned(256)
+    matrix = inp.choice(MATRICES)
+    full_range = inp.flag()
+    buffer.convertTo(destination, format, x, y, width, height, offset, stride, matrix, full_range)
 
 
 def video(inp: Input) -> None:
@@ -46,44 +77,43 @@ def video(inp: Input) -> None:
     for _ in range(inp.small(4)):
         action = inp.small(2)
         if action == 0:
-            u = inp.unsigned
-            copies = [(u(256), u(256), u(256), u(256), u(256), u(256)) for _ in range(inp.small(4))]
-            buffer.copyPlanes(inp.destination(inp.small(1 << 15)), copies)
+            copy_planes(inp, buffer)
         elif action == 1:
-            buffer.convertTo(
-                inp.destination(inp.small(1 << 15)),
-                inp.choice(PIXEL_FORMATS),
-                inp.unsigned(40),
-                inp.unsigned(40),
-                inp.unsigned(40),
-                inp.unsigned(40),
-                inp.unsigned(1 << 12),
-                inp.unsigned(256),
-                inp.choice(MATRICES),
-                inp.flag(),
-            )
+            convert(inp, buffer)
         else:
             buffer = buffer.withoutAlpha()
 
 
 def audio(inp: Input) -> None:
+    source = inp.buffer(inp.small(1 << 14))
+    source_format = inp.choice(SAMPLE_FORMATS)
+    channels = inp.unsigned(8)
+    frames = inp.unsigned(1024)
+    destination = inp.destination(inp.small(1 << 14))
+    destination_format = inp.choice(SAMPLE_FORMATS)
+    plane_index = inp.unsigned(8)
+    frame_offset = inp.unsigned(1024)
+    frame_count = inp.unsigned(1024)
     wrtc.copyAudioSamples(
-        inp.buffer(inp.small(1 << 14)),
-        inp.choice(SAMPLE_FORMATS),
-        inp.unsigned(8),
-        inp.unsigned(1024),
-        inp.destination(inp.small(1 << 14)),
-        inp.choice(SAMPLE_FORMATS),
-        inp.unsigned(8),
-        inp.unsigned(1024),
-        inp.unsigned(1024),
+        source,
+        source_format,
+        channels,
+        frames,
+        destination,
+        destination_format,
+        plane_index,
+        frame_offset,
+        frame_count,
     )
 
 
 def test_one_input(data: bytes) -> None:
     inp = Input(data)
     with contextlib.suppress(*EXPECTED):
-        video(inp) if inp.flag() else audio(inp)
+        if inp.flag():
+            video(inp)
+        else:
+            audio(inp)
 
 
 def main() -> None:

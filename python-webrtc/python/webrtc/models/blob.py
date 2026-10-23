@@ -49,12 +49,20 @@ def _done(value: _T) -> asyncio.Future[_T]:
 def _content_type(value: str) -> str:
     """The type of a blob: lowercased, or empty if it has characters outside of U+0020-U+007E."""
     value = str(value)
-    return value.lower() if all(_MIN_TYPE_CHAR <= ord(c) <= _MAX_TYPE_CHAR for c in value) else ''
+    printable = all(_MIN_TYPE_CHAR <= ord(c) <= _MAX_TYPE_CHAR for c in value)
+    return value.lower() if printable else ''
 
 
 def _native_endings(text: str) -> str:
     """Converts every CR LF, CR and LF to the line ending of the platform."""
     return text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', os.linesep)
+
+
+def _clamped_index(index: int, size: int) -> int:
+    """An index of :meth:`Blob.slice`, counted from the end if negative and clamped to the bytes."""
+    if index < 0:
+        return max(size + index, 0)
+    return min(index, size)
 
 
 def _decode(data: builtins.bytes) -> str:
@@ -91,6 +99,7 @@ class _Source:
         chunk = self._data[self._offset : self._offset + _CHUNK_SIZE]
         self._offset += len(chunk)
         final = self._offset >= len(self._data)
+
         if self._decoder is None:
             if len(chunk) > 0:
                 controller.enqueue(chunk)
@@ -118,16 +127,21 @@ class Blob:
     """
 
     def __init__(self, blob_parts: Iterable[BlobPart] | None = None, options: BlobPropertyBag | None = None) -> None:
+        if blob_parts is None:
+            blob_parts = ()
         if options is None:
             options = BlobPropertyBag()
+
         native = EndingType(options.endings) == EndingType.native
         chunks: list[builtins.bytes] = []
-        for part in blob_parts if blob_parts is not None else ():
+        for part in blob_parts:
             if isinstance(part, Blob):
                 chunks.append(part._bytes)
             elif isinstance(part, str):
                 text = usv_string(part)
-                chunks.append((_native_endings(text) if native else text).encode())
+                if native:
+                    text = _native_endings(text)
+                chunks.append(text.encode())
             else:
                 chunks.append(bytes(memoryview(part)))
         self._bytes = b''.join(chunks)
@@ -164,9 +178,10 @@ class Blob:
             :obj:`Blob`: The new blob.
         """
         size = len(self._bytes)
-        start = max(size + start, 0) if start < 0 else min(start, size)
-        end = size if end is None else (max(size + end, 0) if end < 0 else min(end, size))
-        return Blob([self._bytes[start : max(start, end)]], BlobPropertyBag(type=content_type))
+        start = _clamped_index(start, size)
+        end = size if end is None else _clamped_index(end, size)
+        part = self._bytes[start : max(start, end)]
+        return Blob([part], BlobPropertyBag(type=content_type))
 
     def array_buffer(self) -> asyncio.Future[bytes]:
         """Reads the bytes. They come as :obj:`bytes`, where the specification gives an array buffer.

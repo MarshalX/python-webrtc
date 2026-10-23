@@ -30,6 +30,10 @@ from tests.timing import seconds
 TIMEOUT = seconds(20)
 OPUS = 'opus/48000/2'
 VP8 = 'VP8/90000'
+SAMPLE_RATE = 48000
+#: 10 ms of audio
+FRAMES_PER_WRITE = 480
+TONES_HZ = (440, 660)
 
 #: A change to the SDP of a description
 Munge = Callable[[str], str]
@@ -69,6 +73,7 @@ def stereo(sdp: str) -> str:
 def remove_codec(sdp: str, codec: str) -> str:
     """Removes a codec, and the retransmission of it, from every media section."""
     lines = sdp.split('\r\n')
+
     removed = payload_types(lines, codec)
     retransmissions = {f'apt={payload_type}' for payload_type in removed}
     removed |= {
@@ -79,12 +84,15 @@ def remove_codec(sdp: str, codec: str) -> str:
     prefixes = tuple(
         f'a={attribute}:{payload_type} ' for attribute in ('rtpmap', 'fmtp', 'rtcp-fb') for payload_type in removed
     )
+
     kept: list[str] = []
     for line in lines:
         if line.startswith('m='):
             # m=<media> <port> <proto> <payload type>...
             fields = line.split()
-            kept.append(' '.join(fields[:3] + [field for field in fields[3:] if field not in removed]))
+            header, formats = fields[:3], fields[3:]
+            kept_formats = [payload_type for payload_type in formats if payload_type not in removed]
+            kept.append(' '.join(header + kept_formats))
         elif not line.startswith(prefixes):
             kept.append(line)
     return '\r\n'.join(kept)
@@ -107,6 +115,7 @@ async def negotiate(
     offer.sdp = munge_offer(offer.sdp)
     await caller.set_local_description(offer)
     await callee.set_remote_description(offer)
+
     answer = await callee.create_answer()
     answer.sdp = munge_answer(answer.sdp)
     await callee.set_local_description(answer)
@@ -146,27 +155,31 @@ async def write_stereo(generator: webrtc.MediaStreamTrackGenerator, *, stop: asy
     loop = asyncio.get_running_loop()
     start = loop.time()
     written = 0
+
     while not stop.is_set():
         samples = array.array('h')
-        for i in range(480):
-            time = (written + i) / 48000
-            samples.extend(int(12000 * math.sin(2 * math.pi * tone * time)) for tone in (440, 660))
+        for i in range(FRAMES_PER_WRITE):
+            time = (written + i) / SAMPLE_RATE
+            samples.extend(int(12000 * math.sin(2 * math.pi * tone * time)) for tone in TONES_HZ)
         init = webrtc.AudioDataInit(
             format='s16',
-            sample_rate=48000,
-            number_of_frames=480,
-            number_of_channels=2,
-            timestamp=written * 1_000_000 // 48000,
+            sample_rate=SAMPLE_RATE,
+            number_of_frames=FRAMES_PER_WRITE,
+            number_of_channels=len(TONES_HZ),
+            timestamp=written * 1_000_000 // SAMPLE_RATE,
             data=samples.tobytes(),
         )
         await writer.write(webrtc.AudioData(init))
-        written += 480
-        await asyncio.sleep(max(0.0, start + written / 48000 - loop.time()))
+
+        written += FRAMES_PER_WRITE
+        next_write_at = start + written / SAMPLE_RATE
+        await asyncio.sleep(max(0.0, next_write_at - loop.time()))
 
 
 def plane(audio: webrtc.AudioData, index: int) -> array.array[float]:
     samples = array.array('f', [0.0] * audio.number_of_frames)
-    audio.copy_to(memoryview(samples).cast('B'), webrtc.AudioDataCopyToOptions(plane_index=index, format='f32-planar'))
+    options = webrtc.AudioDataCopyToOptions(plane_index=index, format='f32-planar')
+    audio.copy_to(memoryview(samples).cast('B'), options)
     return samples
 
 
@@ -187,6 +200,7 @@ async def test_munged_offer_and_answer_are_set(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:
     caller.add_transceiver('audio')
+
     await negotiate(caller, callee, munge_offer=stereo, munge_answer=stereo)
 
     for pc in (caller, callee):
@@ -222,9 +236,11 @@ async def test_opus_stereo(
     caller.add_track(generator)
     tracks: list[webrtc.MediaStreamTrack] = []
     callee.on('track', lambda event: tracks.append(event.track))
+
     async with writing(write_stereo, generator):
         await connect(caller, callee, munge_answer=munge)
-        reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(tracks[0])).readable.get_reader()
+        processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(tracks[0]))
+        reader = processor.readable.get_reader()
         audio = await asyncio.wait_for(first_sound(reader), TIMEOUT)
         await reader.cancel()
     generator.stop()
@@ -244,6 +260,7 @@ async def test_opus_max_average_bitrate(
     bitrate = int(parameters.rpartition('maxaveragebitrate=')[2])
     generator = webrtc.MediaStreamTrackGenerator('audio')
     caller.add_track(generator)
+
     async with writing(write_stereo, generator):
         await connect(caller, callee, munge_answer=lambda sdp: add_fmtp(sdp, OPUS, parameters))
         await wait_until(lambda: target_bitrate(caller), 'the encoder', TIMEOUT)
@@ -264,6 +281,7 @@ async def test_vp8_bitrate_sets_the_initial_estimate(
 ) -> None:
     """Until media flows, the estimate is the start bitrate, clamped to the minimum and maximum."""
     caller.add_transceiver('video')
+
     await connect(caller, callee, munge_answer=lambda sdp: add_fmtp(sdp, VP8, f'{parameter}={kbps}'))
     await wait_until(lambda: available_outgoing_bitrate(caller), 'a bandwidth estimate', TIMEOUT)
 
@@ -279,7 +297,9 @@ async def test_vp8_max_bitrate_caps_the_encoder(
     width, height = 320, 240
     generator = webrtc.VideoTrackGenerator()
     caller.add_track(generator.track)
-    async with writing(write_video, generator, bytes(width * height * 3 // 2), (width, height)):
+    i420_frame = bytes(width * height * 3 // 2)
+
+    async with writing(write_video, generator, i420_frame, (width, height)):
         await connect(caller, callee, munge_answer=lambda sdp: add_fmtp(sdp, VP8, f'x-google-max-bitrate={kbps}'))
         await wait_until(lambda: target_bitrate(caller), 'the encoder', TIMEOUT)
         targets: list[float | None] = []
@@ -296,14 +316,15 @@ async def test_munged_ice_credentials(caller: webrtc.RTCPeerConnection, callee: 
     """Changed ICE credentials in the offer are used by both peers."""
     ufrag, pwd = 'mungedufrag', 'mungedpasswordmungedpassword'
     caller.add_transceiver('audio')
-    await connect(
-        caller,
-        callee,
-        munge_offer=lambda sdp: replace_attribute(replace_attribute(sdp, 'ice-ufrag', ufrag), 'ice-pwd', pwd),
-    )
+
+    def munge_credentials(sdp: str) -> str:
+        return replace_attribute(replace_attribute(sdp, 'ice-ufrag', ufrag), 'ice-pwd', pwd)
+
+    await connect(caller, callee, munge_offer=munge_credentials)
 
     assert callee.remote_description is not None
     assert f'a=ice-ufrag:{ufrag}\r\na=ice-pwd:{pwd}\r\n' in callee.remote_description.sdp
+
     local_transport = caller.get_senders()[0].transport
     remote_transport = callee.get_receivers()[0].transport
     assert local_transport is not None
@@ -324,10 +345,12 @@ async def test_removed_codec_is_not_negotiated(
     assert capabilities is not None
     assert 'video/VP8' in {codec.mime_type for codec in capabilities.codecs}
     caller.add_transceiver('video')
+
     await negotiate(caller, callee, munge_offer=lambda sdp: remove_codec(sdp, VP8))
 
     assert callee.remote_description is not None
     assert VP8 not in callee.remote_description.sdp
+
     codecs = {codec.mime_type for codec in caller.get_senders()[0].get_parameters().codecs}
     assert len(codecs) > 0
     assert 'video/VP8' not in codecs

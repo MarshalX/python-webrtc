@@ -43,7 +43,10 @@ def u64(inp: Input) -> int:
 
 
 def field_size(value: int) -> int:
-    return 0 if value < 8 else (value.bit_length() + 7) // 8
+    """The bytes a key id or counter takes after the config byte, which holds values below 8 itself."""
+    if value < 8:
+        return 0
+    return (value.bit_length() + 7) // 8
 
 
 def suite(inp: Input) -> int:
@@ -60,6 +63,7 @@ def parse(inp: Input) -> None:
     header = wrtc._sframeParseHeader(data)
     if header is None:
         return
+
     key_id, counter, size = header
     raw = bytes(data)
     assert 1 <= size <= min(len(raw), 17)
@@ -70,7 +74,8 @@ def parse(inp: Input) -> None:
 
 
 def header(inp: Input) -> None:
-    key_id, counter = u64(inp), u64(inp)
+    key_id = u64(inp)
+    counter = u64(inp)
     encoded = wrtc._sframeHeader(key_id, counter)
     size = 1 + field_size(key_id) + field_size(counter)
     assert len(encoded) == size
@@ -81,21 +86,39 @@ def decrypt(inp: Input) -> None:
     """Arbitrary ciphertexts, or tampered real ones: decrypted or None, never a crash."""
     ciphertext = inp.contiguous(inp.small(256))
     if inp.flag():
-        real = wrtc._sframeEncrypt(inp.choice(SUITES), octets(inp), u64(inp), u64(inp), b'', octets(inp, 128))
-        tampered = bytearray(real)
-        for _ in range(inp.small(4)):
-            if len(tampered) > 0:
-                tampered[inp.small(len(tampered) - 1)] ^= inp.small(254) + 1
-        ciphertext = bytes(tampered[: inp.small(len(tampered))] if inp.flag() else tampered)
-    out = wrtc._sframeDecrypt(suite(inp), inp.contiguous(inp.small(64)), inp.contiguous(inp.small(32)), ciphertext)
+        ciphertext = tampered_ciphertext(inp)
+
+    suite_id = suite(inp)
+    key = inp.contiguous(inp.small(64))
+    metadata = inp.contiguous(inp.small(32))
+    out = wrtc._sframeDecrypt(suite_id, key, metadata, ciphertext)
     assert out is None or isinstance(out, bytes)
+
+
+def tampered_ciphertext(inp: Input) -> bytes:
+    """A real ciphertext with some bytes flipped, maybe truncated."""
+    suite_id = inp.choice(SUITES)
+    key = octets(inp)
+    key_id = u64(inp)
+    counter = u64(inp)
+    plaintext = octets(inp, 128)
+    tampered = bytearray(wrtc._sframeEncrypt(suite_id, key, key_id, counter, b'', plaintext))
+    for _ in range(inp.small(4)):
+        if len(tampered) > 0:
+            tampered[inp.small(len(tampered) - 1)] ^= inp.small(254) + 1
+    if inp.flag():
+        tampered = tampered[: inp.small(len(tampered))]
+    return bytes(tampered)
 
 
 def round_trip(inp: Input) -> None:
     """Encrypted then decrypted gives the plaintext back; any byte changed, or other metadata, gives None."""
     suite_id = inp.choice(SUITES)
-    key, key_id, counter = octets(inp), u64(inp), u64(inp)
-    metadata, plaintext = octets(inp, 32), octets(inp, 512)
+    key = octets(inp)
+    key_id = u64(inp)
+    counter = u64(inp)
+    metadata = octets(inp, 32)
+    plaintext = octets(inp, 512)
     ciphertext = wrtc._sframeEncrypt(suite_id, key, key_id, counter, metadata, plaintext)
     size = 1 + field_size(key_id) + field_size(counter)
     assert len(ciphertext) == size + len(plaintext) + TAGS[suite_id]
@@ -117,9 +140,9 @@ def round_trip(inp: Input) -> None:
 
 def derive(inp: Input) -> None:
     suite_id = suite(inp)
-    key, salt = wrtc._sframeDerive(
-        suite_id, inp.contiguous(inp.small(128)), u64(inp) if inp.small(7) < 7 else mistyped(inp.integer(16))
-    )
+    base_key = inp.contiguous(inp.small(128))
+    key_id = u64(inp) if inp.small(7) < 7 else mistyped(inp.integer(16))
+    key, salt = wrtc._sframeDerive(suite_id, base_key, key_id)
     assert len(salt) == 12
     assert len(key) in {16, 32, 48, 96}
 
@@ -140,7 +163,8 @@ class Context:
         return u64(self.inp) if self.inp.small(3) < 3 else self.inp.choice([0, *self.keys])
 
     def add_key(self) -> None:
-        key, key_id = octets(self.inp), self.key_id()
+        key = octets(self.inp)
+        key_id = self.key_id()
         assert self.decryptor.addDecryptionKey(key, key_id)
         self.keys[key_id] = key
 
@@ -150,7 +174,8 @@ class Context:
         self.keys.pop(key_id, None)
 
     def set_key(self) -> None:
-        key, key_id = octets(self.inp), self.key_id()
+        key = octets(self.inp)
+        key_id = self.key_id()
         assert self.encryptor.setEncryptionKey(key, key_id)
         self.sending = (key, key_id)
         if self.inp.flag():
@@ -163,6 +188,7 @@ class Context:
         assert (ciphertext is None) == (self.sending is None)
         if ciphertext is None or self.sending is None:
             return
+
         key, key_id = self.sending
         result = self.decryptor.decrypt(ciphertext)
         if key_id not in self.keys:

@@ -25,6 +25,7 @@ from tests.helpers import (
     exchange_ice_candidates,
     exchange_offer,
     mistyped,
+    report_first_exception,
     settled_alive,
     undelivered,
     wait_progressing,
@@ -41,6 +42,7 @@ MARK = 0xAB
 KEPT = 3
 
 Frame = Union[webrtc.RTCEncodedVideoFrame, webrtc.RTCEncodedAudioFrame]
+Pair = tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]
 
 
 class Recorder:
@@ -87,9 +89,9 @@ class Recorder:
 
     def describe(self) -> str:
         """What the worker saw, for failure messages."""
-        if self.transformer is None:
-            return 'not started'
         transformer = self.transformer
+        if transformer is None:
+            return 'not started'
         return f'{len(self.frames)} frames, ended {transformer._ended}, native state {transformer._native_obj.state}'
 
 
@@ -107,15 +109,17 @@ def unmark(frame: Frame) -> None:
 
 
 @pytest.fixture
-def pair() -> Iterator[tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]]:
-    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+def pair() -> Iterator[Pair]:
+    caller = webrtc.RTCPeerConnection()
+    callee = webrtc.RTCPeerConnection()
     yield caller, callee
     caller.close()
     callee.close()
 
 
 async def local_track(kind: str) -> webrtc.MediaStreamTrack:
-    stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(**{kind: True}))
+    constraints = webrtc.MediaStreamConstraints(**{kind: True})
+    stream = await webrtc.media_devices.get_user_media(constraints)
     return stream.get_tracks()[0]
 
 
@@ -141,15 +145,26 @@ async def transformed_call(
 
     callee.on('track', on_track)
     await connect(caller, callee)
+
     assert len(receivers) == 1
     return sender, receivers[0]
 
 
+async def transformer_of_unread_sender(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> tuple[webrtc.RTCRtpSender, webrtc.RTCRtpScriptTransformer]:
+    """Connects a video sender, then sets a transform nobody reads, once its source is known."""
+    started: asyncio.Future[webrtc.RTCRtpScriptTransformer] = asyncio.get_running_loop().create_future()
+    sender, _ = await transformed_call(caller, callee, 'video')
+    sender.transform = webrtc.RTCRtpScriptTransform(lambda event: started.set_result(event.transformer))
+    transformer = await asyncio.wait_for(started, TIMEOUT)
+    await wait_until(lambda: transformer._native_obj.sourceKind is not None, 'a source', TIMEOUT)
+    return sender, transformer
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('kind', ['video', 'audio'])
-async def test_frames_pass_through_transforms(
-    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection], kind: str
-) -> None:
+async def test_frames_pass_through_transforms(pair: Pair, kind: str) -> None:
     """The receiver's transform sees what the sender's transform changed, and removes it before decoding."""
     caller, callee = pair
     sending, receiving = Recorder(mark), Recorder(unmark)
@@ -162,19 +177,21 @@ async def test_frames_pass_through_transforms(
         unmark(frame)
 
     receiving.change = check
+
     _, receiver = await transformed_call(caller, callee, kind, sender_worker=sending, receiver_worker=receiving)
     await wait_progressing(lambda: min(len(marked), 20), lambda: len(marked) >= 20, 'frames with data', stall=TIMEOUT)
-    assert sum(marked) >= 15
 
+    assert sum(marked) >= 15
     frame_class = webrtc.RTCEncodedVideoFrame if kind == 'video' else webrtc.RTCEncodedAudioFrame
     assert all(isinstance(frame, frame_class) for frame in sending.frames + receiving.frames)
     await wait_until_unmuted(receiver.track)
 
 
 @pytest.mark.asyncio
-async def test_video_metadata(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
+async def test_video_metadata(pair: Pair) -> None:
     caller, callee = pair
     sending, receiving = Recorder(), Recorder()
+
     await transformed_call(caller, callee, 'video', sender_worker=sending, receiver_worker=receiving)
     await receiving.wait_frames(5)
 
@@ -200,6 +217,7 @@ async def test_video_metadata(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPe
     assert received.synchronization_source == sent.synchronization_source
     assert received.receive_time is not None
     assert abs(received.receive_time - time.time() * 1000) < 60_000
+
     received.width = 1
     again = receiving.frames[0].get_metadata()
     assert isinstance(again, webrtc.RTCEncodedVideoFrameMetadata)
@@ -207,9 +225,10 @@ async def test_video_metadata(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPe
 
 
 @pytest.mark.asyncio
-async def test_audio_metadata(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
+async def test_audio_metadata(pair: Pair) -> None:
     caller, callee = pair
     receiving = Recorder()
+
     await transformed_call(caller, callee, 'audio', receiver_worker=receiving)
     await receiving.wait_frames(5)
 
@@ -234,9 +253,7 @@ def negotiate_abs_capture_time(transceiver: webrtc.RTCRtpTransceiver) -> None:
 
 
 @pytest.mark.asyncio
-async def test_metadata_of_the_absolute_capture_time(
-    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection],
-) -> None:
+async def test_metadata_of_the_absolute_capture_time(pair: Pair) -> None:
     """A received frame has the sender's capture time and clock offset."""
     caller, callee = pair
     sending, receiving = Recorder(), Recorder()
@@ -249,11 +266,13 @@ async def test_metadata_of_the_absolute_capture_time(
         event.receiver.transform = webrtc.RTCRtpScriptTransform(receiving)
 
     callee.on('track', on_track)
+
     await connect(caller, callee)
     await receiving.wait_frames(5)
 
     received = receiving.frames[-1].get_metadata()
-    sent = next(f.get_metadata() for f in sending.frames if f.get_metadata().rtp_timestamp == received.rtp_timestamp)
+    sent_metadata = (frame.get_metadata() for frame in sending.frames)
+    sent = next(metadata for metadata in sent_metadata if metadata.rtp_timestamp == received.rtp_timestamp)
     assert received.sender_capture_time_offset is not None
     assert received.capture_time is not None
     assert sent.capture_time is not None
@@ -262,7 +281,7 @@ async def test_metadata_of_the_absolute_capture_time(
 
 
 @pytest.mark.asyncio
-async def test_copy_construction(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
+async def test_copy_construction(pair: Pair) -> None:
     caller, callee = pair
     sending = Recorder(write=False)
     await transformed_call(caller, callee, 'video', sender_worker=sending)
@@ -271,6 +290,7 @@ async def test_copy_construction(pair: tuple[webrtc.RTCPeerConnection, webrtc.RT
     assert isinstance(frame, webrtc.RTCEncodedVideoFrame)
 
     clone = webrtc.RTCEncodedVideoFrame(frame)
+
     assert repr(clone).startswith('<webrtc.RTCEncodedVideoFrame object at 0x')
     assert clone.type == frame.type
     assert clone.data == frame.data
@@ -279,8 +299,10 @@ async def test_copy_construction(pair: tuple[webrtc.RTCPeerConnection, webrtc.RT
 
     options = webrtc.RTCEncodedVideoFrameOptions(webrtc.RTCEncodedVideoFrameMetadata(width=7, dependencies=[1, 2]))
     changed = webrtc.RTCEncodedVideoFrame(frame, options)
+
     expected = frame.get_metadata()
-    expected.width, expected.dependencies = 7, [1, 2]
+    expected.width = 7
+    expected.dependencies = [1, 2]
     assert changed.get_metadata() == expected
 
     with pytest.raises(TypeError):
@@ -288,7 +310,7 @@ async def test_copy_construction(pair: tuple[webrtc.RTCPeerConnection, webrtc.RT
 
 
 @pytest.mark.asyncio
-async def test_frame_data(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
+async def test_frame_data(pair: Pair) -> None:
     caller, callee = pair
     sending = Recorder(write=False)
     await transformed_call(caller, callee, 'audio', sender_worker=sending)
@@ -298,13 +320,17 @@ async def test_frame_data(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerCo
     data = frame.data
     assert isinstance(data, bytearray)
     assert frame.data is data
+
     frame.data = b'\x01\x02'
     assert frame.data == bytearray(b'\x01\x02')
+
     shared = bytearray(b'\x03')
     frame.data = shared
     assert frame.data is shared
+
     frame.data = memoryview(b'\x04\x05')[::1]
     assert frame.data == bytearray(b'\x04\x05')
+
     with pytest.raises(TypeError):
         frame.data = mistyped('text')
     with pytest.raises(TypeError):
@@ -312,7 +338,7 @@ async def test_frame_data(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerCo
 
 
 @pytest.mark.asyncio
-async def test_changed_data_is_received(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
+async def test_changed_data_is_received(pair: Pair) -> None:
     """Data changed in place, or replaced by bytes or a memoryview, is what the receiver's transform reads."""
     caller, callee = pair
     written = 0
@@ -329,16 +355,21 @@ async def test_changed_data_is_received(pair: tuple[webrtc.RTCPeerConnection, we
 
     payloads: set[bytes] = set()
     receiving = Recorder(lambda frame: payloads.add(bytes(frame.data)))
+
     await transformed_call(caller, callee, 'audio', sender_worker=Recorder(change), receiver_worker=receiving)
-    await wait_until(lambda: {b'in place', b'bytes', b'a memoryview'} <= payloads, 'each changed payload', TIMEOUT)
+
+    changed = {b'in place', b'bytes', b'a memoryview'}
+    await wait_until(lambda: changed <= payloads, 'each changed payload', TIMEOUT)
 
 
 @pytest.mark.asyncio
-async def test_written_frame_is_detached(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
+async def test_written_frame_is_detached(pair: Pair) -> None:
     caller, callee = pair
     sending = Recorder()
+
     await transformed_call(caller, callee, 'audio', sender_worker=sending)
     await sending.wait_frames(2)
+
     frame = sending.frames[0]
     assert frame.data == bytearray()
     assert frame.get_metadata().mime_type == 'audio/opus'
@@ -347,7 +378,7 @@ async def test_written_frame_is_detached(pair: tuple[webrtc.RTCPeerConnection, w
 
 
 @pytest.mark.asyncio
-async def test_write_rules(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
+async def test_write_rules(pair: Pair) -> None:
     """Copies, frames written twice or out of order, and frames of another transformer are dropped."""
     caller, callee = pair
     payloads: list[bytes] = []
@@ -373,6 +404,7 @@ async def test_write_rules(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerC
     third.data = bytearray(b'after')
     await writer.write(third)
     await wait_until(lambda: b'after' in payloads, 'the frame written last', TIMEOUT)
+
     assert b'accepted' in payloads
     assert {b'copy', b'twice', b'reordered'}.isdisjoint(payloads)
 
@@ -381,7 +413,7 @@ async def test_write_rules(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerC
 
 
 @pytest.mark.asyncio
-async def test_generate_key_frame(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
+async def test_generate_key_frame(pair: Pair) -> None:
     caller, callee = pair
     sending, receiving = Recorder(), Recorder()
     await transformed_call(caller, callee, 'video', sender_worker=sending, receiver_worker=receiving)
@@ -404,9 +436,7 @@ async def test_generate_key_frame(pair: tuple[webrtc.RTCPeerConnection, webrtc.R
 
 
 @pytest.mark.asyncio
-async def test_generate_key_frame_of_a_simulcast_layer(
-    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection],
-) -> None:
+async def test_generate_key_frame_of_a_simulcast_layer(pair: Pair) -> None:
     """A rid the sender doesn't send is NotFoundError."""
     caller, callee = pair
     sending = Recorder()
@@ -421,6 +451,7 @@ async def test_generate_key_frame_of_a_simulcast_layer(
     # libwebrtc doesn't announce receiving both layers by itself
     simulcast = 'a=rid:hi recv\r\na=rid:lo recv\r\na=simulcast:recv hi;lo\r\n'
     await caller.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', answer.sdp + simulcast))
+
     assert [encoding.rid for encoding in sender.get_parameters().encodings] == ['hi', 'lo']
     await sending.wait_frames(1)
     assert sending.transformer is not None
@@ -430,16 +461,13 @@ async def test_generate_key_frame_of_a_simulcast_layer(
         await sending.transformer.generate_key_frame('mid')
 
     # each request waits for a key frame of its own layer
-    await asyncio.wait_for(
-        asyncio.gather(sending.transformer.generate_key_frame('hi'), sending.transformer.generate_key_frame('lo')),
-        TIMEOUT,
-    )
+    high = sending.transformer.generate_key_frame('hi')
+    low = sending.transformer.generate_key_frame('lo')
+    await asyncio.wait_for(asyncio.gather(high, low), TIMEOUT)
 
 
 @pytest.mark.asyncio
-async def test_cancelled_generate_key_frame_leaves_the_next_one(
-    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection],
-) -> None:
+async def test_cancelled_generate_key_frame_leaves_the_next_one(pair: Pair) -> None:
     """A cancelled request is skipped when the key frame comes."""
     caller, callee = pair
     sending = Recorder()
@@ -451,22 +479,25 @@ async def test_cancelled_generate_key_frame_leaves_the_next_one(
     await asyncio.sleep(0)
     cancelled.cancel()
     await asyncio.wait_for(sending.transformer.generate_key_frame(), TIMEOUT)
+
     assert cancelled.cancelled()
 
 
 @pytest.mark.asyncio
-async def test_generate_key_frame_of_audio(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
+async def test_generate_key_frame_of_audio(pair: Pair) -> None:
     caller, callee = pair
     sending = Recorder()
+
     await transformed_call(caller, callee, 'audio', sender_worker=sending)
     await sending.wait_frames(1)
+
     assert sending.transformer is not None
     with pytest.raises(webrtc.InvalidStateError):
         await sending.transformer.generate_key_frame()
 
 
 @pytest.mark.asyncio
-async def test_send_key_frame_request(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
+async def test_send_key_frame_request(pair: Pair) -> None:
     caller, callee = pair
     sending, receiving = Recorder(), Recorder()
     await transformed_call(caller, callee, 'video', sender_worker=sending, receiver_worker=receiving)
@@ -477,14 +508,14 @@ async def test_send_key_frame_request(pair: tuple[webrtc.RTCPeerConnection, webr
     keys = key_frames(sending)
     await receiving.transformer.send_key_frame_request()
     await receiving.transformer.sendKeyFrameRequest()
-
     await wait_until(lambda: key_frames(sending) > keys, 'a key frame', TIMEOUT)
+
     with pytest.raises(webrtc.InvalidStateError):
         await sending.transformer.send_key_frame_request()
 
 
 @pytest.mark.asyncio
-async def test_removing_a_transform(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
+async def test_removing_a_transform(pair: Pair) -> None:
     """The streams of a removed transform end, and frames flow without it."""
     caller, callee = pair
     sending, receiving = Recorder(mark), Recorder(unmark)
@@ -507,23 +538,23 @@ async def test_removing_a_transform(pair: tuple[webrtc.RTCPeerConnection, webrtc
 
 
 @pytest.mark.asyncio
-async def test_a_transform_has_one_sender_or_receiver(
-    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection],
-) -> None:
+async def test_a_transform_has_one_sender_or_receiver(pair: Pair) -> None:
     caller, _ = pair
     first = caller.add_transceiver(webrtc.MediaType.video).sender
     second = caller.add_transceiver(webrtc.MediaType.video).sender
     recorder = Recorder()
     transform = webrtc.RTCRtpScriptTransform(recorder)
+
     first.transform = transform
     assert first.transform is transform
     await asyncio.wait_for(recorder.started, TIMEOUT)
-    # set again on the same sender, as browsers allow
+
     first.transform = transform
     with pytest.raises(webrtc.InvalidStateError):
         second.transform = transform
     with pytest.raises(webrtc.InvalidStateError):
         caller.get_transceivers()[1].receiver.transform = transform
+
     first.transform = None
     with pytest.raises(webrtc.InvalidStateError):
         first.transform = transform
@@ -536,9 +567,11 @@ async def test_a_transform_has_one_sender_or_receiver(
 async def test_rtctransform_event() -> None:
     events: list[webrtc.RTCTransformEvent] = []
     options = {'name': 'sender'}
+
     transform = webrtc.RTCRtpScriptTransform(events.append, options, [options])
     assert events == []
     await asyncio.sleep(0)
+
     assert len(events) == 1
     event = events[0]
     assert isinstance(event, webrtc.RTCTransformEvent)
@@ -567,7 +600,8 @@ async def test_rtctransform_event() -> None:
 
 def test_transformer_reads_in_a_second_loop() -> None:
     """Reads keep working in a later loop."""
-    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    caller = webrtc.RTCPeerConnection()
+    callee = webrtc.RTCPeerConnection()
     started: list[webrtc.RTCTransformEvent] = []
 
     async def setup() -> None:
@@ -604,13 +638,14 @@ def test_a_transform_needs_a_loop() -> None:
 
 def test_key_frame_request_event() -> None:
     event = webrtc.KeyFrameRequestEvent('keyframerequest')
+
     assert event.type == 'keyframerequest'
     assert event.rid is None
     assert webrtc.KeyFrameRequestEvent('keyframerequest', 'hi').rid == 'hi'
 
 
 @pytest.mark.asyncio
-async def test_nobody_reading(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]) -> None:
+async def test_nobody_reading(pair: Pair) -> None:
     """Frames of a transformer that isn't read are dropped, nothing blocks."""
     caller, callee = pair
     started: list[webrtc.RTCTransformEvent] = []
@@ -629,6 +664,7 @@ async def test_nobody_reading(pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPe
 
     # past the 60 frames a transformer queues, the oldest are dropped; slow cores encode slower, not never
     await wait_progressing(frames_encoded, lambda: encoded > 70, 'more frames than the queue keeps')
+
     assert len(started) == 1
     caller.close()
     callee.close()
@@ -647,7 +683,7 @@ def left_over(baseline: dict[str, int]) -> int:
 
 def alive_objects() -> dict[str, int]:
     """The native objects of transforms alive, once releases on helper threads are done."""
-    alive = settled_alive()[0]
+    alive, _ = settled_alive()
     return {name: alive[name] for name in ('RTCRtpScriptTransform', 'RTCEncodedFrame', 'FrameTransformerBridge')}
 
 
@@ -656,11 +692,14 @@ async def test_closing_releases_transforms() -> None:
     baseline = alive_objects()
 
     async def session() -> None:
-        caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        caller = webrtc.RTCPeerConnection()
+        callee = webrtc.RTCPeerConnection()
         sending, receiving = Recorder(mark), Recorder(unmark)
         await transformed_call(caller, callee, 'video', sender_worker=sending, receiver_worker=receiving)
         await receiving.wait_frames(5)
-        caller.add_track(await local_track('audio')).transform = webrtc.RTCRtpScriptTransform(lambda _event: None)
+        audio_sender = caller.add_track(await local_track('audio'))
+        audio_sender.transform = webrtc.RTCRtpScriptTransform(lambda _event: None)
+
         caller.close()
         callee.close()
         try:
@@ -685,7 +724,8 @@ async def test_closing_releases_transforms() -> None:
 @pytest.mark.parametrize('kind', ['video', 'audio'])
 async def test_frames_are_released_where_dropped(kind: str) -> None:
     """Frames kept past their connection are destroyed on the thread dropping them, while the Dispatcher is held."""
-    caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    caller = webrtc.RTCPeerConnection()
+    callee = webrtc.RTCPeerConnection()
     sending, receiving = Recorder(keep=KEPT), Recorder(keep=KEPT)
     await transformed_call(caller, callee, kind, sender_worker=sending, receiver_worker=receiving)
     await receiving.wait_frames(KEPT)
@@ -698,7 +738,8 @@ async def test_frames_are_released_where_dropped(kind: str) -> None:
     assert len(kept) == 2 * KEPT
     sending.frames.clear()
     receiving.frames.clear()
-    alive = settled_alive()[0]['RTCEncodedFrame']
+    alive, _ = settled_alive()
+    frames_alive = alive['RTCEncodedFrame']
 
     def drop() -> None:
         kept.clear()
@@ -708,24 +749,25 @@ async def test_frames_are_released_where_dropped(kind: str) -> None:
         dropping = threading.Thread(target=drop)
         dropping.start()
         dropping.join()
-        assert wrtc._testing.alive_counts()['RTCEncodedFrame'] == alive - 2 * KEPT
+        assert wrtc._testing.alive_counts()['RTCEncodedFrame'] == frames_alive - 2 * KEPT
 
 
 @pytest.mark.asyncio
 async def test_async_worker_exception_goes_to_the_loop() -> None:
     """An async worker's exception reaches the loop's exception handler."""
     loop = asyncio.get_running_loop()
-    reported = loop.create_future()
-    loop.set_exception_handler(lambda _loop, context: reported.done() or reported.set_result(context))
+    reported: asyncio.Future[dict[str, object]] = loop.create_future()
+
+    async def worker(_event: webrtc.RTCTransformEvent) -> None:
+        await asyncio.sleep(0)
+        msg = 'worker'
+        raise ValueError(msg)
+
+    report_first_exception(reported)
     try:
-
-        async def worker(_event: webrtc.RTCTransformEvent) -> None:
-            await asyncio.sleep(0)
-            msg = 'worker'
-            raise ValueError(msg)
-
         transform = webrtc.RTCRtpScriptTransform(worker)
         context = await asyncio.wait_for(reported, seconds(5))
+
         assert context['message'] == 'Exception in the worker of an RTCRtpScriptTransform'
         assert isinstance(context['exception'], ValueError)
         assert transform is not None
@@ -734,51 +776,39 @@ async def test_async_worker_exception_goes_to_the_loop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_generate_key_frame_settles_when_the_transform_is_removed(
-    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection],
-) -> None:
+async def test_generate_key_frame_settles_when_the_transform_is_removed(pair: Pair) -> None:
     """A pending key frame request rejects on removal."""
-    caller, callee = pair
-    started: asyncio.Future[webrtc.RTCRtpScriptTransformer] = asyncio.get_running_loop().create_future()
-    sender, _ = await transformed_call(caller, callee, 'video')
-    sender.transform = webrtc.RTCRtpScriptTransform(lambda event: started.set_result(event.transformer))
-    transformer = await asyncio.wait_for(started, TIMEOUT)
-    await wait_until(lambda: transformer._native_obj.sourceKind is not None, 'a source', TIMEOUT)
+    sender, transformer = await transformer_of_unread_sender(*pair)
     request = asyncio.ensure_future(transformer.generate_key_frame())
     # only a read key frame fulfills it, and nothing reads
     await delivered()
     assert not request.done()
+
     sender.transform = None
+
     with pytest.raises(webrtc.InvalidStateError):
         await asyncio.wait_for(request, TIMEOUT)
 
 
 @pytest.mark.asyncio
-async def test_cancelled_generate_key_frame_is_left_on_removal(
-    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection],
-) -> None:
+async def test_cancelled_generate_key_frame_is_left_on_removal(pair: Pair) -> None:
     """Removal rejects pending requests and leaves a cancelled one as is."""
-    caller, callee = pair
-    started: asyncio.Future[webrtc.RTCRtpScriptTransformer] = asyncio.get_running_loop().create_future()
-    sender, _ = await transformed_call(caller, callee, 'video')
-    sender.transform = webrtc.RTCRtpScriptTransform(lambda event: started.set_result(event.transformer))
-    transformer = await asyncio.wait_for(started, TIMEOUT)
-    await wait_until(lambda: transformer._native_obj.sourceKind is not None, 'a source', TIMEOUT)
+    sender, transformer = await transformer_of_unread_sender(*pair)
     cancelled = asyncio.ensure_future(transformer.generate_key_frame())
     pending = asyncio.ensure_future(transformer.generate_key_frame())
     await delivered()
     cancelled.cancel()
     await asyncio.gather(cancelled, return_exceptions=True)
+
     sender.transform = None
+
     with pytest.raises(webrtc.InvalidStateError):
         await asyncio.wait_for(pending, TIMEOUT)
     assert cancelled.cancelled()
 
 
 @pytest.mark.asyncio
-async def test_key_frames_of_a_removed_transform(
-    pair: tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection],
-) -> None:
+async def test_key_frames_of_a_removed_transform(pair: Pair) -> None:
     """Key frame calls reject instead of hanging."""
     caller, callee = pair
     sending, receiving = Recorder(), Recorder()
@@ -802,6 +832,7 @@ async def test_key_frames_of_an_unused_transform() -> None:
     started: asyncio.Future[webrtc.RTCRtpScriptTransformer] = asyncio.get_running_loop().create_future()
     transform = webrtc.RTCRtpScriptTransform(lambda event: started.set_result(event.transformer))
     transformer = await asyncio.wait_for(started, TIMEOUT)
+
     with pytest.raises(webrtc.InvalidStateError):
         await transformer.generate_key_frame()
     with pytest.raises(webrtc.InvalidStateError):

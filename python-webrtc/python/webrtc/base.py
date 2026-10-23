@@ -63,6 +63,7 @@ class WebRTCObject(Generic[_NativeT]):
                 msg = f'{type(self).__name__} has no native class'
                 raise TypeError(msg)
             native_obj = self._class()
+
         self.__obj = native_obj
         self.__connection = None
         self._handlers = None
@@ -97,8 +98,10 @@ class WebRTCObject(Generic[_NativeT]):
         else:
             obj = cls.__new__(cls)
             obj._init_native(item)
+
         if connection is not None and obj._connection is None:
             obj._connection = connection
+
         if isinstance(obj, EventTarget):
             _ = obj._attach()
         elif connection is not None:

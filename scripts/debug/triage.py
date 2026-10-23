@@ -20,7 +20,10 @@ import pathlib
 import re
 import signal
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 #: Outcomes of a failed run, the most severe first
 FAILURES = ('crash', 'hang', 'leak', 'memory', 'failure')
@@ -150,15 +153,18 @@ def _abnormal_end(evidence: Evidence) -> str | None:
 
 def signature(outcome: str, evidence: Evidence) -> str:
     """The same text for runs that hit the same bug, starting with the outcome."""
-    describe = {'crash': _crash, 'hang': _hang, 'leak': _leak, 'failure': _failure}.get(outcome)
-    return f'{outcome} {describe(evidence) if describe is not None else evidence.job}'
+    describe = _DESCRIBERS.get(outcome)
+    if describe is None:
+        return f'{outcome} {evidence.job}'
+    return f'{outcome} {describe(evidence)}'
 
 
 def slug(text: str) -> str:
     """A directory name for a signature: its outcome, some readable text, a hash."""
     outcome, _, rest = text.partition(' ')
     readable = re.sub(r'[^A-Za-z0-9_.-]+', '_', rest).strip('_')[:40]
-    return f'{outcome}-{readable}-{hashlib.sha1(text.encode(), usedforsecurity=False).hexdigest()[:8]}'
+    digest = hashlib.sha1(text.encode(), usedforsecurity=False).hexdigest()
+    return f'{outcome}-{readable}-{digest[:8]}'
 
 
 def crash_report_pid(path: pathlib.Path) -> int | None:
@@ -172,11 +178,13 @@ def normalize(frame: str) -> str:
     frame = re.sub(r'\[clone [^\]]*\]|\[abi:[^\]]*\]|\(anonymous namespace\)::|\.llvm\.\d+', '', frame)
     frame = re.sub(r'\$_\d+', '$_', frame)
     frame = frame.replace('operator()', 'operator<call>')
+
     while True:
         stripped = re.sub(r'\([^()]*\)', '', frame)
         if stripped == frame:
             break
         frame = stripped
+
     # gdb wraps long argument lists to the next line
     frame = re.sub(r'\s*\(.*$|\s+const$|\s+0x[0-9a-f]+\b', '', frame)
     return frame.replace('operator<call>', 'operator()').strip()
@@ -223,29 +231,44 @@ def _sanitizer_stacks(output: str) -> list[list[str]]:
 
 def _sanitizer_symbol(frame: str) -> str:
     symbol = _SANITIZER_LOCATION.sub('', frame).strip()
+    if re.fullmatch(r'0x[0-9a-f]+', symbol) is None:
+        return symbol
     # unsymbolized: the address changes with every run, the module doesn't
-    if re.fullmatch(r'0x[0-9a-f]+', symbol) is not None and (module := _SANITIZER_MODULE.search(frame)) is not None:
-        return pathlib.PurePath(module[1]).name
-    return symbol
+    module = _SANITIZER_MODULE.search(frame)
+    if module is None:
+        return symbol
+    return pathlib.PurePath(module[1]).name
 
 
 def _crash(evidence: Evidence) -> str:
     kind = _sanitizer(evidence.output)
     if kind is not None:
-        stacks = _sanitizer_stacks(evidence.output)
-        if kind.startswith('tsan'):
-            # which of the two racing accesses is reported first varies
-            frames = sorted(' | '.join(stack[:TSAN_FRAMES]) for stack in stacks[:2])
-            return f'{kind}: {" || ".join(frames)}'
-        return f'{kind}: {" | ".join(stacks[0][:TOP_FRAMES] if stacks != [] else [])}'
+        return _sanitizer_crash(kind, evidence.output)
+    return _signal_crash(evidence)
+
+
+def _sanitizer_crash(kind: str, output: str) -> str:
+    stacks = _sanitizer_stacks(output)
+    if kind.startswith('tsan'):
+        # which of the two racing accesses is reported first varies
+        frames = sorted(' | '.join(stack[:TSAN_FRAMES]) for stack in stacks[:2])
+        return f'{kind}: {" || ".join(frames)}'
+    top: list[str] = stacks[0][:TOP_FRAMES] if stacks != [] else []
+    return f'{kind}: {" | ".join(top)}'
+
+
+def _signal_crash(evidence: Evidence) -> str:
     name = signal.Signals(-evidence.returncode).name
     frames = _crash_report_frames(evidence.crash_report)
     if frames == []:
         frames = _core_frames(evidence)
     if frames == []:
         frames = _python_crash_frames(evidence.output)
+
     check = _CHECK_FAILED.search(evidence.output)
-    return f'{name}: {" | ".join([*([check[1]] if check is not None else []), *frames])}'
+    if check is not None:
+        frames = [check[1], *frames]
+    return f'{name}: {" | ".join(frames)}'
 
 
 def _crash_report(path: pathlib.Path) -> _CrashReport | None:
@@ -261,10 +284,11 @@ def _crash_report_frames(path: pathlib.Path | None) -> list[str]:
     report = _crash_report(path) if path is not None else None
     if report is None:
         return []
+
     images = report['usedImages']
+    faulting = report['threads'][report['faultingThread']]
     frames = [
-        (frame.get('symbol', '???'), images[frame['imageIndex']].get('name', '???'))
-        for frame in report['threads'][report['faultingThread']]['frames']
+        (frame.get('symbol', '???'), images[frame['imageIndex']].get('name', '???')) for frame in faulting['frames']
     ]
     # the frames above it are faulthandler raising the signal again
     symbols = [symbol for symbol, _image in frames]
@@ -282,12 +306,16 @@ def _core_frames(evidence: Evidence) -> list[str]:
     path = evidence.stacks / f'{evidence.pid}-core.txt' if evidence.stacks is not None else None
     if path is None or not path.exists():
         return []
+
     lines = path.read_text(encoding='utf-8', errors='replace').splitlines()
-    frames = [match[1] for line in lines if (match := _GDB_FRAME.match(line)) is not None]
+    matches = (_GDB_FRAME.match(line) for line in lines)
+    frames = [match[1] for match in matches if match is not None]
     # the frames above it are faulthandler raising the signal again
     if _GDB_SIGNAL_FRAME in frames:
-        frames = frames[len(frames) - frames[::-1].index(_GDB_SIGNAL_FRAME) :]
-    return [symbol for symbol in map(normalize, frames) if symbol != '??'][:TOP_FRAMES]
+        last_signal = len(frames) - 1 - frames[::-1].index(_GDB_SIGNAL_FRAME)
+        frames = frames[last_signal + 1 :]
+    symbols = [normalize(frame) for frame in frames]
+    return [symbol for symbol in symbols if symbol != '??'][:TOP_FRAMES]
 
 
 def _python_threads(output: str) -> list[list[tuple[str, str]]]:
@@ -353,18 +381,27 @@ def _hang(evidence: Evidence) -> str:
         blocked = _blocked_in_library(path.read_text(encoding='utf-8', errors='replace'))
         if blocked != []:
             return f'native: {" | ".join(blocked)}'
+
     # without the library's symbols, chaos names the step better than its Python frames
     stuck = _CHAOS_STUCK.findall(evidence.output)
     if stuck != []:
         return f'stuck: {stuck[-1]}'
-    python: set[str] = set()
-    for frames in _python_threads(evidence.output):
+
+    python = _python_hang_frames(evidence.output)
+    if python != []:
+        return f'python: {" | ".join(python[:HANG_FRAMES])}'
+    return evidence.job
+
+
+def _python_hang_frames(output: str) -> list[str]:
+    """The innermost frame outside the standard library of each Python thread."""
+    found: set[str] = set()
+    for frames in _python_threads(output):
         ours = next(((file, function) for file, function in frames if not _in_stdlib(file)), None)
         if ours is not None:
-            python.add(f'{ours[1]} ({pathlib.Path(ours[0]).name})')
-    if python != set():
-        return f'python: {" | ".join(sorted(python)[:HANG_FRAMES])}'
-    return evidence.job
+            file, function = ours
+            found.add(f'{function} ({pathlib.Path(file).name})')
+    return sorted(found)
 
 
 def _failure(evidence: Evidence) -> str:
@@ -379,10 +416,14 @@ def _failure(evidence: Evidence) -> str:
     return f'{evidence.job} exit {evidence.returncode}'
 
 
+_DESCRIBERS: dict[str, Callable[[Evidence], str]] = {'crash': _crash, 'hang': _hang, 'leak': _leak, 'failure': _failure}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='The signature of a hunt bundle.')
     parser.add_argument('bundle', type=pathlib.Path, help='build/hunt/<signature>/<bundle>')
     bundle: pathlib.Path = parser.parse_args().bundle
+
     info: BundleInfo = json.loads((bundle / 'info.json').read_text(encoding='utf-8'))
     report = bundle / 'crash.ips'
     evidence = Evidence(

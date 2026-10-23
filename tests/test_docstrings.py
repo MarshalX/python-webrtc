@@ -16,6 +16,12 @@ from pathlib import Path
 import pytest
 
 PACKAGE = Path(__file__).parents[1] / 'python-webrtc' / 'python' / 'webrtc'
+
+
+def _modules_in(directory: str) -> list[str]:
+    return [f'{directory}/{path.stem}' for path in (PACKAGE / directory).glob('*.py') if path.stem != '__init__']
+
+
 MODULES = [
     '__init__',
     'base',
@@ -26,9 +32,7 @@ MODULES = [
     'utils/events',
     'utils/lifetime',
     'utils/loops',
-    *sorted(
-        f'{d}/{p.stem}' for d in ('interfaces', 'models') for p in (PACKAGE / d).glob('*.py') if p.stem != '__init__'
-    ),
+    *sorted([*_modules_in('interfaces'), *_modules_in('models')]),
 ]
 
 
@@ -40,17 +44,26 @@ def _attribute_name(node: ast.stmt) -> str | None:
     return None
 
 
+def _is_docstring(node: ast.stmt | None) -> bool:
+    return isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+
+
 def _documented(cls: ast.ClassDef, i: int, lines: list[str]) -> bool:
     node = cls.body[i]
     # an attribute docstring after it
     after = cls.body[i + 1] if i + 1 < len(cls.body) else None
-    if isinstance(after, ast.Expr) and isinstance(after.value, ast.Constant) and isinstance(after.value.value, str):
+    if _is_docstring(after):
         return True
+
     # a doc comment above it or on its line
-    if lines[node.lineno - 2].strip().startswith('#:') or '#:' in lines[node.lineno - 1]:
+    line_above = lines[node.lineno - 2]
+    own_line = lines[node.lineno - 1]
+    if line_above.strip().startswith('#:') or '#:' in own_line:
         return True
+
     # an entry in the Args or Attributes section of the class
-    docstring, name = ast.get_docstring(cls), _attribute_name(node)
+    docstring = ast.get_docstring(cls)
+    name = _attribute_name(node)
     if docstring is None or name is None:
         return False
     return re.search(rf'^\s+{re.escape(name)}\b.*:', docstring, re.MULTILINE) is not None

@@ -17,14 +17,17 @@ import webrtc
 from tests.helpers import capture_mode, connect, wait_for_event
 
 
+def camera(constraints: webrtc.MediaTrackConstraints) -> webrtc.MediaStream:
+    """A stream of the camera, from get_user_media run in a loop of its own."""
+    return asyncio.run(webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=constraints)))
+
+
 def test_get_user_media_video() -> None:
     """A stream of video only has one video track."""
-    stream = asyncio.run(
-        webrtc.media_devices.get_user_media(
-            webrtc.MediaStreamConstraints(video=webrtc.MediaTrackConstraints(width=320, height=240))
-        )
-    )
+    stream = camera(webrtc.MediaTrackConstraints(width=320, height=240))
+
     (track,) = stream.get_tracks()
+
     assert track.kind == webrtc.MediaType.video
     assert stream.get_video_tracks() == [track]
     track.stop()
@@ -56,35 +59,29 @@ def test_get_user_media_constraint_beyond_the_camera(
 ) -> None:
     """A required value the camera can't have is overconstrained; a negative size clamps to 0."""
     with pytest.raises(error):
-        asyncio.run(webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=constraints)))
+        camera(constraints)
 
 
 def test_get_user_media_ideal_beyond_the_camera() -> None:
     """An ideal value selects the nearest one the camera can have."""
-    (track,) = asyncio.run(
-        webrtc.media_devices.get_user_media(
-            webrtc.MediaStreamConstraints(
-                video=webrtc.MediaTrackConstraints(height=webrtc.ConstrainULongRange(ideal=0))
-            )
-        )
-    ).get_tracks()
+    stream = camera(webrtc.MediaTrackConstraints(height=webrtc.ConstrainULongRange(ideal=0)))
+
+    (track,) = stream.get_tracks()
+
     assert capture_mode(track) == (640, 1, 30)
     track.stop()
 
 
 def test_get_user_media_constraints() -> None:
     """Constraints that select a positive value are accepted."""
-    stream = asyncio.run(
-        webrtc.media_devices.get_user_media(
-            webrtc.MediaStreamConstraints(
-                video=webrtc.MediaTrackConstraints(
-                    width=webrtc.ConstrainULongRange(ideal=320),
-                    height=webrtc.ConstrainULongRange(min=100, max=240),
-                    frame_rate=webrtc.ConstrainDoubleRange(exact=15),
-                )
-            )
-        )
+    constraints = webrtc.MediaTrackConstraints(
+        width=webrtc.ConstrainULongRange(ideal=320),
+        height=webrtc.ConstrainULongRange(min=100, max=240),
+        frame_rate=webrtc.ConstrainDoubleRange(exact=15),
     )
+
+    stream = camera(constraints)
+
     for track in stream.get_tracks():
         track.stop()
 
@@ -92,11 +89,14 @@ def test_get_user_media_constraints() -> None:
 def test_media_stream_constructor(audio_stream: webrtc.MediaStream, video_stream: webrtc.MediaStream) -> None:
     """A stream is created from tracks or from another stream, which it copies, or empty."""
     tracks = [*audio_stream.get_tracks(), *video_stream.get_tracks()]
+
     stream = webrtc.MediaStream(tracks)
     assert len(stream.get_tracks()) == 2
+
     copy = webrtc.MediaStream(stream)
     assert copy.id != stream.id
     assert len(copy.get_tracks()) == 2
+
     assert webrtc.MediaStream().get_tracks() == []
 
 
@@ -107,10 +107,11 @@ async def test_remote_video_track(
     """The remote end of a video track has its kind and stream."""
     caller.add_track(video_stream.get_tracks()[0], video_stream)
     track_event = wait_for_event(callee, 'track')
+
     await connect(caller, callee)
     event = await track_event
-    assert isinstance(event, webrtc.RTCTrackEvent)
 
+    assert isinstance(event, webrtc.RTCTrackEvent)
     assert event.track.kind == webrtc.MediaType.video
-    assert [s.id for s in event.streams] == [video_stream.id]
+    assert [stream.id for stream in event.streams] == [video_stream.id]
     assert event.transceiver.receiver == event.receiver

@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import asyncio
-import pathlib
 import sys
 import time
 from typing import TYPE_CHECKING
@@ -18,17 +17,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 import webrtc
-from tests.helpers import connect, wait_for_event, wait_for_ice_gathering_complete, wait_until
+from tests.helpers import connect, open_descriptors, wait_for_event, wait_for_ice_gathering_complete, wait_until
 from tests.timing import seconds
 
 if TYPE_CHECKING:
     from tests.helpers import CreatePC
 
 posix_only = pytest.mark.skipif(sys.platform == 'win32', reason='counts the descriptors in /dev/fd')
-
-
-def _descriptors() -> int:
-    return sum(1 for _ in pathlib.Path('/dev/fd').iterdir())
 
 
 async def _connected_pair(create_pc: CreatePC) -> tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]:
@@ -42,13 +37,13 @@ async def _connected_pair(create_pc: CreatePC) -> tuple[webrtc.RTCPeerConnection
 @pytest.mark.asyncio
 async def test_connections_set_up_at_once_open_as_many_sockets_as_one_at_a_time(create_pc: CreatePC) -> None:
     """A connection gathering doesn't allocate its ports again when another one starts."""
-    before = _descriptors()
+    before = open_descriptors()
     await _connected_pair(create_pc)
-    one = _descriptors() - before
+    one = open_descriptors() - before
 
-    before = _descriptors()
+    before = open_descriptors()
     await asyncio.gather(*(_connected_pair(create_pc) for _ in range(10)))
-    at_once = _descriptors() - before
+    at_once = open_descriptors() - before
 
     assert at_once <= 10 * one
 
@@ -62,10 +57,11 @@ async def test_tcp_candidates_are_active_and_listen_nowhere(create_pc: CreatePC)
     """TCP candidates connect out to a remote passive one, so connections hold no TCP pair per network."""
     pc = create_pc()
     pc.create_data_channel('tcp')
+
     await pc.set_local_description()
     await wait_for_ice_gathering_complete(pc)
-    assert pc.local_description is not None
 
+    assert pc.local_description is not None
     candidates = _tcp_candidates(pc.local_description.sdp)
     assert len(candidates) > 0
     assert all('tcptype active' in candidate for candidate in candidates)
@@ -87,6 +83,7 @@ async def test_closing_during_a_flood(create_pc: CreatePC) -> None:
     for _ in range(16):
         channel.send(message)
         remote.send(message)
+
     caller.close()
     callee.close()
 
@@ -125,6 +122,7 @@ async def test_gathering_runs_its_phases_without_waiting_between_them(
         pytest.skip('a wall-clock limit, and --gc-on-emit collects garbage on every event')
     pc = create_pc()
     pc.create_data_channel('gather')
+
     started = time.perf_counter()
     await pc.set_local_description()
     await wait_for_ice_gathering_complete(pc)
@@ -142,6 +140,7 @@ async def test_a_candidate_pool_runs_its_phases_without_waiting_between_them(
         pytest.skip('a wall-clock limit, and --gc-on-emit collects garbage on every event')
     pc = create_pc(webrtc.RTCConfiguration(ice_candidate_pool_size=1))
     pc.create_data_channel('gather')
+
     started = time.perf_counter()
     # not polled: a poll's interval would hide the wait
     complete = wait_for_event(

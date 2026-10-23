@@ -49,6 +49,8 @@ SLOW_SETUP_MS = 5000.0
 
 State = Literal['created', 'datachannel', 'audio']
 STATES: tuple[State, ...] = ('created', 'datachannel', 'audio')
+#: the column titles of the states
+STATE_TITLES = ('Created', 'Data channel', 'Audio')
 
 
 @dataclass(frozen=True)
@@ -100,6 +102,10 @@ class Results(TypedDict):
     growth: list[Growth]
 
 
+def _total_rss(drivers: tuple[Driver, Driver]) -> int:
+    return sum(driver.rss() for driver in drivers)
+
+
 async def _reading(drivers: tuple[Driver, Driver], connections: int) -> Reading:
     await asyncio.gather(*(driver.collect() for driver in drivers))
     offerer, answerer = drivers
@@ -141,10 +147,11 @@ async def _through_levels(
 
     readings: list[Reading] = []
     for level in levels:
-        connections += (await _grow(drivers, state, level - len(connections)))[0]
+        added, _ = await _grow(drivers, state, level - len(connections))
+        connections += added
         await asyncio.sleep(SETTLE)
         readings.append(await _reading(drivers, level))
-        if _limit(sum(driver.rss() for driver in drivers)) is not None:
+        if _limit(_total_rss(drivers)) is not None:
             print(f'  memory limit at {level} connections, no more levels', file=sys.stderr)
             break
 
@@ -187,7 +194,7 @@ async def _step(drivers: tuple[Driver, Driver], connections: list[Connection], s
         added, batch_times = await _grow(drivers, 'datachannel', min(BATCH, target - len(connections)))
         connections += added
         times += batch_times
-        reason = _limit(sum(driver.rss() for driver in drivers))
+        reason = _limit(_total_rss(drivers))
 
     p95 = percentile(times, 0.95)
     if reason is None and p95 > SLOW_SETUP_MS:
@@ -195,7 +202,7 @@ async def _step(drivers: tuple[Driver, Driver], connections: list[Connection], s
 
     step: Step = {
         'connections': len(connections),
-        'total_mb': sum(driver.rss() for driver in drivers) / 1e6,
+        'total_mb': _total_rss(drivers) / 1e6,
         'available_mb': psutil.virtual_memory().available / 1e6,
         'setup_p95_ms': p95,
     }
@@ -276,9 +283,8 @@ async def run(options: Options) -> dict[str, Results]:
         if state is None:
             results[library]['growth'].append(await growth_run(library, sizes, options.log))
         else:
-            results[library]['states'][state].append(
-                await state_run(library, state, levels=sizes.levels, log=options.log)
-            )
+            state_result = await state_run(library, state, levels=sizes.levels, log=options.log)
+            results[library]['states'][state].append(state_result)
 
     return results
 
@@ -309,7 +315,10 @@ def _baseline_mb(result: Results) -> float:
 def _per_connection_row(name: str, data: dict[str, Results], libraries: dict[str, Hello]) -> list[str]:
     result = data[name]
     values = [_per_connection_kb(result, state) for state in STATES]
-    baselines = [_per_connection_kb(data[BASELINE], state) if BASELINE in data else float('nan') for state in STATES]
+    if BASELINE in data:
+        baselines = [_per_connection_kb(data[BASELINE], state) for state in STATES]
+    else:
+        baselines = [float('nan')] * len(STATES)
     return [
         markdown.library(name, libraries),
         markdown.number(_baseline_mb(result), 0),
@@ -324,7 +333,8 @@ def _levels_rows(name: str, result: Results, libraries: dict[str, Hello]) -> lis
         runs = _runs(result, state)
         if len(runs) == 0:
             continue
-        totals = [median([_total(run['levels'][i]) for run in runs]) for i in range(len(runs[0]['levels']))]
+        levels = len(runs[0]['levels'])
+        totals = [median([_total(run['levels'][level]) for run in runs]) for level in range(levels)]
         rows.append([markdown.library(name, libraries), state, *(markdown.number(total, 0) for total in totals)])
     return rows
 
@@ -349,24 +359,15 @@ def _levels(data: dict[str, Results]) -> list[int]:
     return [] if len(runs) == 0 else [reading['connections'] for reading in runs[0]['levels']]
 
 
-def render(data: dict[str, Results], libraries: dict[str, Hello]) -> list[str]:
-    """The tables of the results: per connection, after closing, at each count, and the growth."""
-    names = list(data)
-    per_state = ['Created', 'Data channel', 'Audio']
-    lines = [
-        '- RSS of both processes after a garbage collection.',
-        '- Created: not negotiated. Data channel: open. Audio: plus a 48 kHz tone.',
-        '',
-    ]
-
+def _per_connection_table(data: dict[str, Results], libraries: dict[str, Hello]) -> list[str]:
     header = [
         'Library',
         'Baseline (MB)',
-        *(f'{s} (KB)' for s in per_state),
-        *(f'{s}, % of {BASELINE}' for s in per_state),
+        *(f'{title} (KB)' for title in STATE_TITLES),
+        *(f'{title}, % of {BASELINE}' for title in STATE_TITLES),
     ]
-    rows = [_per_connection_row(name, data, libraries) for name in names]
-    lines += [
+    rows = [_per_connection_row(name, data, libraries) for name in data]
+    return [
         '### Per connection',
         '',
         '- Baseline: the library started. KB: the slope over the connection counts.',
@@ -374,29 +375,46 @@ def render(data: dict[str, Results], libraries: dict[str, Hello]) -> list[str]:
         *markdown.table(header, rows),
     ]
 
+
+def _retained_table(data: dict[str, Results], libraries: dict[str, Hello]) -> list[str]:
     rows = [
-        [markdown.library(name, libraries), *(markdown.number(_retained_mb(data[name], s)) for s in STATES)]
-        for name in names
+        [markdown.library(name, libraries), *(markdown.number(_retained_mb(result, state)) for state in STATES)]
+        for name, result in data.items()
     ]
-    lines += [
+    return [
         '### Kept after closing every connection (MB over the baseline)',
         '',
-        *markdown.table(['Library', *per_state], rows),
+        *markdown.table(['Library', *STATE_TITLES], rows),
     ]
 
-    header = ['Library', 'State', *(str(level) for level in _levels(data))]
-    rows = [row for name in names for row in _levels_rows(name, data[name], libraries)]
-    lines += ['### RSS of both processes by connections (MB)', '', *markdown.table(header, rows)]
 
+def _levels_table(data: dict[str, Results], libraries: dict[str, Hello]) -> list[str]:
+    header = ['Library', 'State', *(str(level) for level in _levels(data))]
+    rows = [row for name, result in data.items() for row in _levels_rows(name, result, libraries)]
+    return ['### RSS of both processes by connections (MB)', '', *markdown.table(header, rows)]
+
+
+def _growth_table(data: dict[str, Results], libraries: dict[str, Hello]) -> list[str]:
     limits = (
         f'- Steps of {BATCH} until setup fails, its p95 > {SLOW_SETUP_MS / 1000:.0f} s, '
         f'RSS > {RSS_CAP / 1024**3:.0f} GB or free memory < {AVAILABLE_FLOOR / 1024**3:.1f} GB.'
     )
     header = ['Library', 'Last good', 'Stopped by', 'RSS at the last step (MB)', 'Setup p95 at the last step (ms)']
-    rows = [_growth_row(name, data[name], libraries) for name in names]
-    lines += ['### Most connections', '', limits, '', *markdown.table(header, rows)]
+    rows = [_growth_row(name, result, libraries) for name, result in data.items()]
+    return ['### Most connections', '', limits, '', *markdown.table(header, rows)]
 
-    return lines
+
+def render(data: dict[str, Results], libraries: dict[str, Hello]) -> list[str]:
+    """The tables of the results: per connection, after closing, at each count, and the growth."""
+    return [
+        '- RSS of both processes after a garbage collection.',
+        '- Created: not negotiated. Data channel: open. Audio: plus a 48 kHz tone.',
+        '',
+        *_per_connection_table(data, libraries),
+        *_retained_table(data, libraries),
+        *_levels_table(data, libraries),
+        *_growth_table(data, libraries),
+    ]
 
 
 def figures(data: dict[str, Results]) -> list[Figure]:

@@ -29,6 +29,7 @@ from tests.helpers import (
     connect_track,
     exchange_ice_candidates,
     exchange_offer,
+    reader_of,
     stats_of_type,
     wait_for_event,
     wait_until,
@@ -42,12 +43,31 @@ from tests.timing import seconds
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from typing_extensions import TypeAlias
+
+    Reader: TypeAlias = webrtc.ReadableStreamDefaultReader[webrtc.VideoFrame | webrtc.AudioData]
+
 TIMEOUT = seconds(20)
 #: no frame for this long means frames stopped; exact, as it defines the assertion
 QUIET = 0.5
 #: a send pause, seconds
 PAUSE = 1.5
 WIDTH, HEIGHT = 320, 240
+SAMPLE_RATE = 48000
+#: samples in 10 ms at the sample rate
+FRAME_SAMPLES = 480
+#: pure red in BT.601 limited range
+RED_YUV = (81, 90, 240)
+GRAY_YUV = (128, 128, 128)
+
+
+async def close_next_frame(reader: Reader, timeout: float) -> None:
+    cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), timeout)).value).close()
+
+
+async def sleep_until(when: float) -> None:
+    """Sleeps until a time of the running loop, if it's still ahead."""
+    await asyncio.sleep(max(0.0, when - asyncio.get_running_loop().time()))
 
 
 def solid_i420(y: int, u: int, v: int) -> bytes:
@@ -60,29 +80,32 @@ def solid_nv12(y: int, u: int, v: int) -> bytes:
     return bytes([y] * (WIDTH * HEIGHT) + [u, v] * chroma)
 
 
+def sine(frequency: float, first: int, count: int) -> array.array[int]:
+    """16-bit samples of a sine, from the sample at the index."""
+    return array.array(
+        'h', (int(12000 * math.sin(2 * math.pi * frequency * (first + i) / SAMPLE_RATE)) for i in range(count))
+    )
+
+
 async def write_sine(generator: webrtc.MediaStreamTrackGenerator, frequency: float, *, stop: asyncio.Event) -> None:
     """Writes a sine of 48 kHz mono in 10 ms frames, at the pace of real time."""
     writer = generator.writable.get_writer()
-    loop = asyncio.get_running_loop()
-    start = loop.time()
+    start = asyncio.get_running_loop().time()
     written = 0
     while not stop.is_set():
-        samples = array.array(
-            'h', (int(12000 * math.sin(2 * math.pi * frequency * (written + i) / 48000)) for i in range(480))
-        )
         audio = webrtc.AudioData(
             webrtc.AudioDataInit(
                 format='s16',
-                sample_rate=48000,
-                number_of_frames=480,
+                sample_rate=SAMPLE_RATE,
+                number_of_frames=FRAME_SAMPLES,
                 number_of_channels=1,
-                timestamp=written * 1_000_000 // 48000,
-                data=samples.tobytes(),
+                timestamp=written * 1_000_000 // SAMPLE_RATE,
+                data=sine(frequency, written, FRAME_SAMPLES).tobytes(),
             )
         )
         await writer.write(audio)
-        written += 480
-        await asyncio.sleep(max(0.0, start + written / 48000 - loop.time()))
+        written += FRAME_SAMPLES
+        await sleep_until(start + written / SAMPLE_RATE)
 
 
 def dominant_frequency(samples: list[float], rate: int) -> float:
@@ -91,9 +114,13 @@ def dominant_frequency(samples: list[float], rate: int) -> float:
     return (len(crossings) - 1) * rate / (crossings[-1] - crossings[0])
 
 
-async def read_frames(
-    reader: webrtc.ReadableStreamDefaultReader[webrtc.VideoFrame | webrtc.AudioData], count: int
-) -> tuple[list[int], bytearray]:
+def center_pixel(rgba: bytearray) -> bytearray:
+    """The RGBA of the pixel at the center of a frame."""
+    center = (HEIGHT // 2 * WIDTH + WIDTH // 2) * 4
+    return rgba[center : center + 4]
+
+
+async def read_frames(reader: Reader, count: int) -> tuple[list[int], bytearray]:
     """Reads frames of the size, returns their timestamps and the last one in RGBA."""
     timestamps: list[int] = []
     for _ in range(count):
@@ -121,23 +148,16 @@ async def test_video_through_a_connection(
 ) -> None:
     """Frames of one color arrive in that color, at their size, with increasing timestamps."""
     generator = webrtc.VideoTrackGenerator()
-    # pure red in BT.601 limited range
-    async with writing(
-        write_frames,
-        generator,
-        solid(81, 90, 240),
-        webrtc.VideoFrameBufferInit(format=format, coded_width=WIDTH, coded_height=HEIGHT, timestamp=0),
-    ):
+    init = webrtc.VideoFrameBufferInit(format=format, coded_width=WIDTH, coded_height=HEIGHT, timestamp=0)
+
+    async with writing(write_frames, generator, solid(*RED_YUV), init):
         remote = await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
-        reader = webrtc.MediaStreamTrackProcessor(
-            webrtc.MediaStreamTrackProcessorInit(remote, max_buffer_size=5)
-        ).readable.get_reader()
+        reader = reader_of(remote, max_buffer_size=5)
         timestamps, rgba = await read_frames(reader, 10)
         await reader.cancel()
     generator.track.stop()
 
-    center = (HEIGHT // 2 * WIDTH + WIDTH // 2) * 4
-    r, g, b, a = rgba[center : center + 4]
+    r, g, b, a = center_pixel(rgba)
     # encoding adds some noise
     assert r > 230
     assert g < 25
@@ -162,21 +182,21 @@ async def test_relayed_video_outlasts_the_sender_reports(
     """A remote video track sent on another connection keeps sending once its RTCP sender reports arrive."""
     relay, sink = create_pc(), create_pc()
     generator = webrtc.VideoTrackGenerator()
-    async with writing(write_video, generator, solid_i420(128, 128, 128), (WIDTH, HEIGHT)):
+    async with writing(write_video, generator, solid_i420(*GRAY_YUV), (WIDTH, HEIGHT)):
         remote = await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
         relayed = await connect_track(relay, sink, remote, timeout=TIMEOUT)
-        reader = webrtc.MediaStreamTrackProcessor(
-            webrtc.MediaStreamTrackProcessorInit(relayed, max_buffer_size=5)
-        ).readable.get_reader()
+        reader = reader_of(relayed, max_buffer_size=5)
+
         deadline = asyncio.get_running_loop().time() + TIMEOUT
         # the second report gives the receiver an NTP estimate of the frames
         while await sender_reports(callee) < 2:
             assert asyncio.get_running_loop().time() < deadline, 'no RTCP sender reports arrived'
             for _ in range(10):
-                cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), TIMEOUT)).value).close()
+                await close_next_frame(reader, TIMEOUT)
+
         # a second of frames past it
         for _ in range(30):
-            cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), seconds(1))).value).close()
+            await close_next_frame(reader, seconds(1))
         await reader.cancel()
     generator.track.stop()
 
@@ -191,6 +211,7 @@ async def test_a_remote_video_track_has_one_sender_a_connection(
     relay = create_pc()
     clone = remote.clone()
     sender = relay.add_track(clone)
+
     with pytest.raises(webrtc.InvalidAccessError):
         relay.add_track(clone)
 
@@ -198,6 +219,7 @@ async def test_a_remote_video_track_has_one_sender_a_connection(
     del clone
     _ = gc.collect()
     assert wrapper() is None
+
     again = sender.track
     assert again is not None
     with pytest.raises(webrtc.InvalidAccessError):
@@ -227,6 +249,7 @@ async def send_at_low_bitrate(
     parameters = sender.get_parameters()
     parameters.degradation_preference = preference
     await sender.set_parameters(parameters)
+
     received = wait_for_event(callee, 'track', TIMEOUT)
     await connect(caller, callee, TIMEOUT)
     # libwebrtc drops frames too large for the bitrate only if it knows the bitrate before the first frame
@@ -236,9 +259,7 @@ async def send_at_low_bitrate(
 
 async def read_widths(track: webrtc.MediaStreamTrack, count: int) -> list[int]:
     """The widths of the next frames of the track."""
-    reader = webrtc.MediaStreamTrackProcessor(
-        webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=1)
-    ).readable.get_reader()
+    reader = reader_of(track, max_buffer_size=1)
     widths: list[int] = []
     while len(widths) < count:
         frame = (await asyncio.wait_for(reader.read(), TIMEOUT)).value
@@ -303,7 +324,8 @@ async def test_a_sent_track_keeps_its_size_for_its_own_sinks(
         caller, callee, generator.track, preference=webrtc.RTCDegradationPreference.maintain_framerate
     )
     async with writing(write_video, generator, LARGE_I420, LARGE):
-        assert all(width < 640 for width in await read_widths(await received_track(received), FRAMES))
+        remote_widths = await read_widths(await received_track(received), FRAMES)
+        assert all(width < 640 for width in remote_widths)
         local = await read_widths(generator.track, FRAMES)
         settings = generator.track.get_settings()
     generator.track.stop()
@@ -351,7 +373,7 @@ async def source_frames(pc: webrtc.RTCPeerConnection) -> int:
 def frame_writer(generator: webrtc.VideoTrackGenerator) -> Callable[[], Awaitable[None]]:
     """Writes the next frame of a producer to the generator, its timestamp a frame interval after the previous one."""
     writer = generator.writable.get_writer()
-    data = solid_i420(128, 128, 128)
+    data = solid_i420(*GRAY_YUV)
     timestamps = itertools.count(0, FRAME_US)
 
     async def write() -> None:
@@ -382,8 +404,10 @@ async def test_generator_frames_written_at_once_reach_the_encoder(
     generator = webrtc.VideoTrackGenerator()
     write = frame_writer(generator)
     await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
+
     await write()
     await write()
+
     taken = await frames_taken(caller, 0, 2)
     generator.track.stop()
 
@@ -399,6 +423,7 @@ async def test_late_generator_frames_written_at_once_reach_the_encoder(
     write = frame_writer(generator)
     loop = asyncio.get_running_loop()
     await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
+
     start = loop.time()
     written = 0
     deadline = start + TIMEOUT
@@ -406,9 +431,10 @@ async def test_late_generator_frames_written_at_once_reach_the_encoder(
         assert loop.time() < deadline, 'no frame reached the encoder'
         await write()
         written += 1
-        await asyncio.sleep(max(0.0, start + written * FRAME_US / 1e6 - loop.time()))
+        await sleep_until(start + written * FRAME_US / 1e6)
+
     # it falls behind by the burst, then catches up
-    await asyncio.sleep(max(0.0, start + (written + BURST) * FRAME_US / 1e6 - loop.time()))
+    await sleep_until(start + (written + BURST) * FRAME_US / 1e6)
     before = await source_frames(caller)
     for _ in range(BURST):
         await write()
@@ -442,6 +468,12 @@ async def sent_layers(caller: webrtc.RTCPeerConnection) -> dict[str, _Layer]:
     return layers
 
 
+def simulcast_lines() -> str:
+    """The SDP lines that receive the layers."""
+    rids = ''.join(f'a=rid:{rid} recv\r\n' for rid in LAYERS)
+    return rids + f'a=simulcast:recv {";".join(LAYERS)}\r\n'
+
+
 async def send_simulcast(
     caller: webrtc.RTCPeerConnection,
     callee: webrtc.RTCPeerConnection,
@@ -455,6 +487,7 @@ async def send_simulcast(
     codecs = [c for c in capabilities.codecs if c.mime_type == mime_type]
     if len(codecs) == 0:
         pytest.skip(f'no {mime_type} encoder')
+
     # without a scalability mode, libwebrtc sends VP9 and AV1 layers as one stream
     mode = 'L1T1' if mime_type in {'video/VP9', 'video/AV1'} else None
     encodings = [
@@ -464,13 +497,14 @@ async def send_simulcast(
     init = webrtc.RTCRtpTransceiverInit(direction='sendonly', send_encodings=encodings)
     transceiver = caller.add_transceiver(track, init)
     transceiver.set_codec_preferences(codecs)
+
     exchange_ice_candidates(caller, callee)
     await exchange_offer(caller, callee)
     answer = await callee.create_answer()
     await callee.set_local_description(answer)
     # libwebrtc doesn't announce receiving the layers by itself
-    simulcast = ''.join(f'a=rid:{rid} recv\r\n' for rid in LAYERS) + f'a=simulcast:recv {";".join(LAYERS)}\r\n'
-    await caller.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', answer.sdp + simulcast))
+    await caller.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', answer.sdp + simulcast_lines()))
+
     parameters = transceiver.sender.get_parameters()
     # the start bitrate would make libwebrtc scale the frames down
     parameters.degradation_preference = 'maintain-resolution'
@@ -504,18 +538,16 @@ async def test_audio_through_a_connection(caller: webrtc.RTCPeerConnection, call
     generator = webrtc.MediaStreamTrackGenerator('audio')
     async with writing(write_sine, generator, 440):
         remote = await connect_track(caller, callee, generator, timeout=TIMEOUT)
-        reader = webrtc.MediaStreamTrackProcessor(
-            webrtc.MediaStreamTrackProcessorInit(remote, max_buffer_size=100)
-        ).readable.get_reader()
+        reader = reader_of(remote, max_buffer_size=100)
         samples: list[float] = []
         for chunk in range(150):
             audio = (await asyncio.wait_for(reader.read(), TIMEOUT)).value
             assert isinstance(audio, webrtc.AudioData)
-            assert audio.sample_rate == 48000
+            assert audio.sample_rate == SAMPLE_RATE
+
             plane = array.array('f', [0.0] * audio.number_of_frames)
-            audio.copy_to(
-                memoryview(plane).cast('B'), webrtc.AudioDataCopyToOptions(plane_index=0, format='f32-planar')
-            )
+            options = webrtc.AudioDataCopyToOptions(plane_index=0, format='f32-planar')
+            audio.copy_to(memoryview(plane).cast('B'), options)
             audio.close()
             # the first half second is the jitter buffer filling up
             if chunk >= 50:
@@ -524,7 +556,7 @@ async def test_audio_through_a_connection(caller: webrtc.RTCPeerConnection, call
     generator.stop()
 
     assert max(samples) > 0.1, 'the sine arrived, not silence'
-    assert abs(dominant_frequency(samples, 48000) - 440) < 5
+    assert abs(dominant_frequency(samples, SAMPLE_RATE) - 440) < 5
 
 
 async def inbound_rtp(receiver: webrtc.RTCRtpReceiver) -> webrtc.RTCInboundRtpStreamStats | None:
@@ -537,7 +569,9 @@ async def inbound_rtp(receiver: webrtc.RTCRtpReceiver) -> webrtc.RTCInboundRtpSt
 
 async def packets_received(receiver: webrtc.RTCRtpReceiver) -> int:
     stats = await inbound_rtp(receiver)
-    return 0 if stats is None or stats.packets_received is None else stats.packets_received
+    if stats is None or stats.packets_received is None:
+        return 0
+    return stats.packets_received
 
 
 async def set_active(sender: webrtc.RTCRtpSender, *, active: bool) -> None:
@@ -590,12 +624,13 @@ async def test_remote_track_end_closes_the_processor(
 ) -> None:
     """The processor of a remote track closes when the remote peer stops sending it."""
     generator = webrtc.VideoTrackGenerator()
-    async with writing(write_video, generator, solid_i420(128, 128, 128), (WIDTH, HEIGHT)):
+    async with writing(write_video, generator, solid_i420(*GRAY_YUV), (WIDTH, HEIGHT)):
         remote = await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
-        reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(remote)).readable.get_reader()
+        reader = reader_of(remote)
         frame = (await asyncio.wait_for(reader.read(), TIMEOUT)).value
         assert isinstance(frame, webrtc.VideoFrame)
         frame.close()
+
         callee.close()
         await asyncio.wait_for(reader.closed, TIMEOUT)
     generator.track.stop()
@@ -609,15 +644,17 @@ async def test_stopped_camera_track_stops_sending(
     stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=True))
     track = stream.get_video_tracks()[0]
     remote = await connect_track(caller, callee, track, timeout=TIMEOUT)
-    reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(remote)).readable.get_reader()
+    reader = reader_of(remote)
     for _ in range(5):
-        cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), TIMEOUT)).value).close()
+        await close_next_frame(reader, TIMEOUT)
+
     track.stop()
     await asyncio.sleep(1)
+
     drained = 0
     while drained < 100:
         try:
-            cast('webrtc.VideoFrame', (await asyncio.wait_for(reader.read(), QUIET)).value).close()
+            await close_next_frame(reader, QUIET)
         except asyncio.TimeoutError:
             break
         drained += 1

@@ -17,7 +17,11 @@ from dataclasses import dataclass, field
 # the frame number, as bits in blocks of luma at the top left of a frame
 BITS = 16
 BLOCK = 16
-LUMA_ONE, LUMA_ZERO, LUMA_THRESHOLD = 235, 16, 125
+#: the rows and the columns of a block that are read
+BLOCK_CENTER = range(5, 11)
+LUMA_ONE = 235
+LUMA_ZERO = 16
+LUMA_THRESHOLD = 125
 TONE = 440.0
 
 
@@ -32,7 +36,8 @@ def numbered(frame: bytes, width: int, number: int) -> bytes:
     """A copy of an I420 frame with the number drawn in its luma."""
     copy = bytearray(frame)
     for bit in range(BITS):
-        block = bytes([LUMA_ONE if number >> bit & 1 != 0 else LUMA_ZERO]) * BLOCK
+        is_one = (number >> bit) & 1 != 0
+        block = bytes([LUMA_ONE if is_one else LUMA_ZERO]) * BLOCK
         for y in range(BLOCK):
             start = y * width + bit * BLOCK
             copy[start : start + BLOCK] = block
@@ -43,7 +48,7 @@ def read_number(luma: bytes | bytearray, stride: int) -> int:
     """The number drawn in a luma plane, read at the centers of the blocks, away from compression blur."""
     number = 0
     for bit in range(BITS):
-        samples = [luma[y * stride + bit * BLOCK + x] for y in range(5, 11) for x in range(5, 11)]
+        samples = [luma[y * stride + bit * BLOCK + x] for y in BLOCK_CENTER for x in BLOCK_CENTER]
         if sum(samples) / len(samples) > LUMA_THRESHOLD:
             number |= 1 << bit
     return number

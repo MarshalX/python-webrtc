@@ -85,7 +85,8 @@ def _platform() -> tuple[str, str]:
         machine = 'x64'
     elif machine == 'aarch64':
         machine = 'arm64'
-    return 'linux' if sys.platform.startswith('linux') else sys.platform, machine
+    system = 'linux' if sys.platform.startswith('linux') else sys.platform
+    return system, machine
 
 
 def _glibc() -> tuple[int, int] | None:
@@ -95,16 +96,23 @@ def _glibc() -> tuple[int, int] | None:
         return None
     if version is None or not version.startswith('glibc '):
         return None
-    major, minor = version.split()[1].split('.')[:2]
+    number = version.split()[1]
+    major, minor = number.split('.')[:2]
     return int(major), int(minor)
+
+
+def _dotted(version: tuple[int, int]) -> str:
+    major, minor = version
+    return f'{major}.{minor}'
 
 
 def _check_glibc() -> None:
     glibc = _glibc()
-    if glibc is None or glibc < _GLIBC:
-        found = f'glibc {glibc[0]}.{glibc[1]}' if glibc is not None else 'no glibc'
-        msg = f"Cisco's OpenH264 binary needs glibc {_GLIBC[0]}.{_GLIBC[1]} or newer, this system has {found}"
-        raise RuntimeError(msg)
+    if glibc is not None and glibc >= _GLIBC:
+        return
+    found = f'glibc {_dotted(glibc)}' if glibc is not None else 'no glibc'
+    msg = f"Cisco's OpenH264 binary needs glibc {_dotted(_GLIBC)} or newer, this system has {found}"
+    raise RuntimeError(msg)
 
 
 def _cache_dir() -> Path:
@@ -155,35 +163,43 @@ async def install(cache_dir: str | os.PathLike[str] | None = None, *, print_noti
         RuntimeError: If Cisco has no binary for this platform (on Linux, it needs glibc 2.34 or newer), or it can't
             be downloaded, doesn't match its SHA-256, or can't be loaded.
     """
-    version = await asyncio.to_thread(_load, Path(cache_dir) if cache_dir is not None else None)
+    directory = Path(cache_dir) if cache_dir is not None else None
+    version = await asyncio.to_thread(_load, directory)
     if print_notice:
         print(NOTICE)  # ruff: ignore[print]
     return version
 
 
 def _load(cache_dir: Path | None) -> str:
-    binary = _BINARIES.get(_platform())
+    system, machine = _platform()
+    binary = _BINARIES.get((system, machine))
     if binary is None:
-        msg = f'Cisco provides no OpenH264 binary for {"-".join(_platform())}'
+        msg = f'Cisco provides no OpenH264 binary for {system}-{machine}'
         raise RuntimeError(msg)
-    name, sha256 = binary
-    if _platform()[0] == 'linux':
+    if system == 'linux':
         _check_glibc()
 
+    name, sha256 = binary
     directory = cache_dir if cache_dir is not None else _cache_dir() / f'openh264-{VERSION}'
     library = directory / name
     with _lock:
         if not library.exists():
-            data = _archive(directory / f'{name}.bz2')
-            actual = hashlib.sha256(data).hexdigest()
-            if actual != sha256:
-                msg = f'{name}.bz2 has SHA-256 {actual}, expected {sha256}'
-                raise RuntimeError(msg)
-            _atomic_write(library, bz2.decompress(data))
+            _unpack(directory / f'{name}.bz2', library, sha256)
         return wrtc.loadOpenH264(str(library))
 
 
-def _archive(path: Path) -> bytes:
+def _unpack(archive: Path, library: Path, sha256: str) -> None:
+    """Writes the library out of its archive, once the archive matches its SHA-256."""
+    data = _read_archive(archive)
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != sha256:
+        msg = f'{archive.name} has SHA-256 {actual}, expected {sha256}'
+        raise RuntimeError(msg)
+    _atomic_write(library, bz2.decompress(data))
+
+
+def _read_archive(path: Path) -> bytes:
+    """The cached archive, or the one downloaded from Cisco."""
     if path.exists():
         return path.read_bytes()
     url = f'{_URL}{path.name}'

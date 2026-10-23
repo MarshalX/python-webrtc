@@ -79,7 +79,8 @@ def _generate(path_name: str, arguments: list[str]) -> str:
 def encoded(video: Video, codec: str) -> str:
     """An IVF VP8 or Annex B H.264 file of the video, as Pion sends it unchanged."""
     extension = 'ivf' if codec == 'VP8' else 'h264'
-    return _generate(f'{codec.lower()}-{video.stem}.{extension}', [*_testsrc(video, SECONDS), *_encoder(video, codec)])
+    arguments = [*_testsrc(video, SECONDS), *_encoder(video, codec)]
+    return _generate(f'{codec.lower()}-{video.stem}.{extension}', arguments)
 
 
 def raw(video: Video) -> str:

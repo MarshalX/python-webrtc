@@ -27,6 +27,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from typing import NamedTuple
 
 MAX_PROCESSES = 8
 PYTHON_STACKS_WAIT = 2
@@ -45,6 +46,12 @@ class Process:
     comm: str
 
 
+class _Command(NamedTuple):
+    argv: list[str]
+    output: pathlib.Path
+    timeout: int
+
+
 def _processes() -> list[Process]:
     ps = ['ps', '-A', '-o', 'pid=,ppid=,pgid=,rss=,stat=,comm=']
     output = subprocess.run(ps, capture_output=True, text=True, errors='replace', check=True).stdout
@@ -55,7 +62,8 @@ def _processes() -> list[Process]:
         except ValueError:
             continue
         # macOS shows the path of the executable
-        rows.append(Process(int(pid), int(ppid), int(pgid), int(rss), stat, pathlib.PurePath(comm).name))
+        name = pathlib.PurePath(comm).name
+        rows.append(Process(int(pid), int(ppid), int(pgid), int(rss), stat, name))
     return rows
 
 
@@ -64,6 +72,7 @@ def tree(root: int) -> list[Process]:
     alive = [process for process in _processes() if not process.stat.startswith('Z')]
     # a descendant may have left the group with setsid, an orphan is reparented to init but stays in the group
     members = {root} | {process.pid for process in alive if process.pgid == root}
+
     parents = list(members)
     while parents != []:
         parent = parents.pop()
@@ -71,10 +80,12 @@ def tree(root: int) -> list[Process]:
             if process.ppid == parent and process.pid not in members:
                 members.add(process.pid)
                 parents.append(process.pid)
-    return sorted((process for process in alive if process.pid in members), key=lambda p: (p.pid != root, p.pid))
+
+    found = [process for process in alive if process.pid in members]
+    return sorted(found, key=lambda process: (process.pid != root, process.pid))
 
 
-def _commands(pid: int, out_dir: pathlib.Path) -> list[tuple[list[str], pathlib.Path, int]]:
+def _commands(pid: int, out_dir: pathlib.Path) -> list[_Command]:
     def path(tool: str) -> pathlib.Path:
         return out_dir / f'{pid}-{tool}.txt'
 
@@ -82,16 +93,20 @@ def _commands(pid: int, out_dir: pathlib.Path) -> list[tuple[list[str], pathlib.
         batch = ['-o', 'thread backtrace all', '-o', 'process detach']
         lldb = ['lldb', '--no-lldbinit', '--batch', '-p', str(pid), *batch]
         sample = ['sample', str(pid), '2', '-mayDie', '-file', str(path('sample'))]
-        return [(lldb, path('lldb'), 90), (sample, path('sample'), 60)]
-    commands = [([*GDB, '-p', str(pid), '-ex', 'thread apply all bt'], path('gdb'), 120)]
+        return [_Command(lldb, path('lldb'), 90), _Command(sample, path('sample'), 60)]
+
+    gdb = [*GDB, '-p', str(pid), '-ex', 'thread apply all bt']
+    commands = [_Command(gdb, path('gdb'), 120)]
     if shutil.which('py-spy') is not None:
-        commands.append((['py-spy', 'dump', '--native', '--pid', str(pid)], path('py-spy'), 60))
+        py_spy = ['py-spy', 'dump', '--native', '--pid', str(pid)]
+        commands.append(_Command(py_spy, path('py-spy'), 60))
     return commands
 
 
 def _run(command: list[str], path: pathlib.Path, timeout: int) -> bool:
     # the sanitizer runtimes break debuggers they are preloaded into
     env = {name: value for name, value in os.environ.items() if name not in {'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES'}}
+
     timed_out = False
     if shutil.which(command[0]) is None:
         output = f'{command[0]} is not installed\n'
@@ -111,6 +126,7 @@ def _run(command: list[str], path: pathlib.Path, timeout: int) -> bool:
         except subprocess.TimeoutExpired:
             output = f'{command[0]} timed out after {timeout} s\n'
             timed_out = True
+
     # sample writes its report itself
     if not path.exists():
         path.write_text(output, encoding='utf-8')
@@ -135,7 +151,9 @@ def collect(root: int, out_dir: pathlib.Path, *, signal_root: bool) -> list[Proc
     processes = tree(root)[:MAX_PROCESSES]
     for process in processes:
         _snapshot(process.pid, out_dir)
-    is_python = processes != [] and processes[0].pid == root and processes[0].comm.lower().startswith('python')
+
+    root_found = processes != [] and processes[0].pid == root
+    is_python = root_found and processes[0].comm.lower().startswith('python')
     # SIGUSR1 kills a process that hasn't registered it with faulthandler; a Python one dumps to its stderr
     if signal_root and is_python and sys.platform != 'win32':
         send(root, signal.SIGUSR1)
@@ -151,11 +169,13 @@ def core_backtrace(executable: str, core: pathlib.Path, path: pathlib.Path) -> N
 def main() -> None:
     if sys.platform == 'win32':
         sys.exit('stacks: not supported on Windows')
+
     parser = argparse.ArgumentParser(description='Native stacks of a process and its descendants.')
     parser.add_argument('pid', type=int)
     parser.add_argument('--out', type=pathlib.Path, help='write a file per process and tool to this directory')
     parser.add_argument('--signal', action='store_true', help='then SIGUSR1: Python stacks, if the process registered')
     args = parser.parse_args()
+
     if args.out is not None:
         collect(args.pid, args.out, signal_root=args.signal)
         return

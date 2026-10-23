@@ -82,12 +82,14 @@ def pytest_configure(config: pytest.Config) -> None:
         # an extension not marked GIL-free silently re-enables the GIL on import
         gil_enabled = getattr(sys, '_is_gil_enabled', lambda: True)
         assert not gil_enabled(), 'the GIL was enabled by an import on a free-threaded build'
+
     # before pytest-timeout reads it: its per-test limit stretches like every wait, unless set otherwise
     if config.getvalue('timeout') is None and 'PYTEST_TIMEOUT' not in os.environ:
         config.option.timeout = seconds(float(config.getini('timeout')))
     config.addinivalue_line('markers', 'stress: a long stress test, run with --stress')
     config.addinivalue_line('markers', 'leaks(reason): the test leaks, the reason names the leak class')
     config.addinivalue_line('markers', 'roots(reason): the test fails a roots check, the reason names the class')
+
     # macOS may block the LAN without Local Network permission
     os.environ['WRTC_ALLOW_LOOPBACK'] = '1'
     webrtc.allow_loopback()
@@ -95,8 +97,12 @@ def pytest_configure(config: pytest.Config) -> None:
     _record_wrappers()
     if config.getoption('--dispatcher-wake'):
         loops.LoopState.watches_pipe = False
-    if not config.getoption('--gc-on-emit'):
-        return
+    if config.getoption('--gc-on-emit'):
+        _collect_on_emit()
+
+
+def _collect_on_emit() -> None:
+    """Collects before every record a loop drains, and on every Dispatcher wake."""
     # gc can run on any thread with the GIL, Dispatcher wakes included: releases must block neither
     run = loops.LoopState._run
     collect = gc.collect
@@ -159,10 +165,12 @@ def pytest_runtest_teardown(item: pytest.Item) -> Generator[None, object, object
     result = yield
     # a candidate arriving as the loop closed leaves a task holding its connections
     release_stranded_candidates()
-    if item.stash.get(_PASSED, False) and item.get_closest_marker('leaks') is None:
+
+    passed = item.stash.get(_PASSED, False)
+    if passed and item.get_closest_marker('leaks') is None:
         _check_released(item)
     # raised in a drain, a failed roots check only reaches the loop's exception handler
-    if item.stash.get(_PASSED, False) and item.get_closest_marker('roots') is None and len(loops.mismatches) > 0:
+    if passed and item.get_closest_marker('roots') is None and len(loops.mismatches) > 0:
         pytest.fail('the roots checks failed:\n' + '\n'.join(loops.mismatches), pytrace=False)
     return result
 
@@ -180,15 +188,15 @@ def _check_released(item: pytest.Item) -> None:
 
     alive, factories = settled_alive(released)
     if not released(alive, factories):
-        pytest.fail(_leak_report((alive, factories), item.stash[_BASELINE]), pytrace=False)
+        report = _leak_report(alive, factories, baseline=baseline, baseline_factories=baseline_factories)
+        pytest.fail(report, pytrace=False)
 
 
 def _within(alive: dict[str, int], baseline: dict[str, int]) -> bool:
     return all(count <= baseline.get(name, 0) for name, count in alive.items())
 
 
-def _leak_report(current: tuple[dict[str, int], int], base: tuple[dict[str, int], int]) -> str:
-    (alive, factories), (baseline, baseline_factories) = current, base
+def _leak_report(alive: dict[str, int], factories: int, *, baseline: dict[str, int], baseline_factories: int) -> str:
     over = [
         f'{name} {count} > {baseline.get(name, 0)}' for name, count in alive.items() if count > baseline.get(name, 0)
     ]
@@ -197,10 +205,16 @@ def _leak_report(current: tuple[dict[str, int], int], base: tuple[dict[str, int]
         lines.append(f'  native objects above the baseline: {", ".join(over)}')
     if factories > baseline_factories:
         lines.append(f'  factories: {factories} > {baseline_factories}')
-    survivors = [obj for ref in _created.refs if (obj := ref()) is not None]
+
+    survivors: list[object] = []
+    for ref in _created.refs:
+        obj = ref()
+        if obj is not None:
+            survivors.append(obj)
     if len(survivors) > 0:
         by_type = Counter(type(obj).__name__ for obj in survivors)
-        lines.append(f'  wrappers of the test: {", ".join(f"{name} x{n}" for name, n in by_type.items())}')
+        counts = ', '.join(f'{name} x{n}' for name, n in by_type.items())
+        lines.append(f'  wrappers of the test: {counts}')
         lines.extend(
             f'    {type(obj).__name__} referred to by {_referrers(obj, survivors)}'
             for obj in survivors[:DESCRIBED_SURVIVORS]

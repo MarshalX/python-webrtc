@@ -75,13 +75,13 @@ def _camel_case(name: str) -> str:
 
 
 def _event_to_js(event: webrtc.Event) -> dict[str, object]:
-    init = {_camel_case(k): to_js(v) for k, v in vars(event).items() if k not in {'type', 'target'}}
+    init = {_camel_case(name): to_js(value) for name, value in vars(event).items() if name not in {'type', 'target'}}
     return {'__event': type(event).__name__, 'type': event.type, 'init': init}
 
 
 def _dictionary_to_js(value: DataclassInstance) -> dict[str, object]:
     # a dictionary in WebIDL, where missing members are left out
-    members = ((f.name, getattr(value, f.name)) for f in dataclasses.fields(value))
+    members = ((field.name, getattr(value, field.name)) for field in dataclasses.fields(value))
     return {_camel_case(name): to_js(member) for name, member in members if member is not None}
 
 
@@ -134,11 +134,11 @@ def _bytes_to_js(value: bytes) -> object:
 
 
 def _dict_to_js(value: dict[object, object]) -> object:
-    return {k: to_js(v) for k, v in value.items()}
+    return {key: to_js(item) for key, item in value.items()}
 
 
 def _sequence_to_js(value: list[object] | tuple[object, ...]) -> object:
-    return [to_js(v) for v in value]
+    return [to_js(item) for item in value]
 
 
 # in order: the first type that matches converts the value
@@ -183,7 +183,7 @@ def _to_enum(value: dict[str, object]) -> object:
 
 def _object_from_js(value: list[object] | memoryview | dict[str, object]) -> object:
     if isinstance(value, list):
-        return [from_js(v) for v in value]
+        return [from_js(item) for item in value]
     if isinstance(value, memoryview):
         # an ArrayBuffer or a view of one
         return bytes(value)
@@ -199,7 +199,7 @@ def _dict_from_js(value: dict[str, object]) -> object:
     if '__json' in value:
         # a WebIDL dictionary as JS has it, which the library converts with its from_json
         return getattr(webrtc, str(value['__json'])).from_json(from_js(value['value']))
-    return {k: from_js(v) for k, v in value.items()}
+    return {key: from_js(item) for key, item in value.items()}
 
 
 def from_js(value: object) -> object:
@@ -213,13 +213,14 @@ def from_js(value: object) -> object:
     return value
 
 
+def _error_kind(exc: BaseException) -> str:
+    """The most specific class of an exception that the shim knows."""
+    known = (cls.__name__ for cls in type(exc).__mro__ if cls.__module__ in {'webrtc.exceptions', 'wrtc', 'builtins'})
+    return next(known, 'Error')
+
+
 def _error(exc: BaseException) -> Result:
-    # the most specific class known to the shim
-    kind = next(
-        (cls.__name__ for cls in type(exc).__mro__ if cls.__module__ in {'webrtc.exceptions', 'wrtc', 'builtins'}),
-        'Error',
-    )
-    error: dict[str, object] = {'kind': kind, 'message': str(exc)}
+    error: dict[str, object] = {'kind': _error_kind(exc), 'message': str(exc)}
     if isinstance(exc, webrtc.OverconstrainedError):
         error['constraint'] = exc.constraint
     if isinstance(exc, webrtc.RTCError):
@@ -283,13 +284,15 @@ def _from_js_as(kind: type[_T], value: object) -> _T:
 
 def _call(obj: object, name: str, arguments: dict[str, object]) -> object:
     """Calls a method with {'args': [...], 'kwargs': {...}} from JS."""
-    args, kwargs = arguments['args'], arguments.get('kwargs')
+    args = arguments['args']
+    kwargs = arguments.get('kwargs')
     if not isinstance(args, list):
         msg = f'args from JS is not an array: {args!r}'
         raise TypeError(msg)
     if kwargs is not None and not isinstance(kwargs, dict):
         msg = f'kwargs from JS is not an object: {kwargs!r}'
         raise TypeError(msg)
+
     keywords: dict[object, object] = dict(kwargs) if kwargs is not None else {}
     return getattr(obj, name)(*from_js(list(args)), **from_js(keywords))
 
@@ -341,9 +344,11 @@ def audio_data_copy_to(audio: webrtc.AudioData, destination: Buffer, options: ob
 
 
 def construct(name: str, kwargs: dict[str, object], args: list[object] | None = None) -> Result:
-    return _guard(
-        lambda: getattr(webrtc, name)(*from_js(list(args) if args is not None else []), **from_js(dict(kwargs)))
-    )
+    def create() -> object:
+        positional: list[object] = list(args) if args is not None else []
+        return getattr(webrtc, name)(*from_js(positional), **from_js(dict(kwargs)))
+
+    return _guard(create)
 
 
 def media_devices() -> Result:
@@ -351,7 +356,11 @@ def media_devices() -> Result:
 
 
 def call_static(class_name: str, name: str, args: list[object]) -> Result:
-    return _guard(lambda: getattr(getattr(webrtc, class_name), name)(*from_js(list(args))))
+    def call() -> object:
+        method = getattr(getattr(webrtc, class_name), name)
+        return method(*from_js(list(args)))
+
+    return _guard(call)
 
 
 def call_async_static(class_name: str, name: str, args: list[object]) -> asyncio.Future[Result]:
@@ -407,8 +416,8 @@ def read_text(path: str) -> Result:
 
 
 EXPORTS = {
-    f.__name__: f
-    for f in (
+    function.__name__: function
+    for function in (
         get_attr,
         set_attr,
         call_method,

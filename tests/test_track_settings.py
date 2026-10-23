@@ -58,7 +58,9 @@ async def test_camera_settings_and_capabilities() -> None:
 async def test_microphone_settings(audio_stream: webrtc.MediaStream) -> None:
     """A microphone track has the format of its samples, and no constraints."""
     track = audio_stream.get_tracks()[0]
+
     await wait_until(lambda: track.get_settings().sample_rate is not None, 'the audio format')
+
     settings = track.get_settings()
     assert (settings.sample_rate, settings.channel_count, settings.sample_size) == (48000, 1, 16)
     assert settings.echo_cancellation is False
@@ -71,12 +73,15 @@ async def test_microphone_settings(audio_stream: webrtc.MediaStream) -> None:
 async def test_microphone_settings_are_the_format_of_its_samples(audio_stream: webrtc.MediaStream) -> None:
     track = audio_stream.get_tracks()[0]
     before = track.get_settings()
-    reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
+    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
+    reader = processor.readable.get_reader()
+
     # the second chunk comes after every sink of the track saw the first
     for _ in range(2):
         audio = (await asyncio.wait_for(reader.read(), seconds(5))).value
         assert isinstance(audio, webrtc.AudioData)
-        sample_rate, channels = audio.sample_rate, audio.number_of_channels
+        sample_rate = audio.sample_rate
+        channels = audio.number_of_channels
         audio.close()
     await reader.cancel()
 
@@ -89,16 +94,17 @@ async def test_microphone_settings_are_the_format_of_its_samples(audio_stream: w
 async def test_apply_constraints_to_the_camera(video_stream: webrtc.MediaStream) -> None:
     """Constraints change the size and frame rate of the camera, and are kept by the track."""
     track = video_stream.get_tracks()[0]
-    await track.apply_constraints(
-        C(width=160, height=webrtc.ConstrainULongRange(exact=120), frame_rate=webrtc.ConstrainDoubleRange(max=10))
-    )
-    await wait_until(lambda: track.get_settings().width == 160, 'the new size')
+    exact_height = webrtc.ConstrainULongRange(exact=120)
+    max_frame_rate = webrtc.ConstrainDoubleRange(max=10)
 
     def slowed() -> bool:
         frame_rate = track.get_settings().frame_rate
         return frame_rate is None or frame_rate < 12
 
+    await track.apply_constraints(C(width=160, height=exact_height, frame_rate=max_frame_rate))
+    await wait_until(lambda: track.get_settings().width == 160, 'the new size')
     await wait_until(slowed, 'the new frame rate')
+
     assert track.get_settings().height == 120
     assert track.getConstraints().height == webrtc.ConstrainULongRange(exact=120)
 
@@ -114,7 +120,9 @@ async def test_constraints_of_the_current_camera_mode(video_stream: webrtc.Media
     settings = track.get_settings()
     assert settings.frame_rate is not None
     constraints = C(width=settings.width, height=settings.height, frame_rate=settings.frame_rate)
+
     await track.apply_constraints(constraints)
+
     assert track.get_settings() == settings
     assert track.get_constraints() == constraints
 
@@ -124,6 +132,7 @@ async def test_overconstrained(video_stream: webrtc.MediaStream, audio_stream: w
     """A required constraint the source can't satisfy fails, leaving the track as it was."""
     video = video_stream.get_tracks()[0]
     await video.apply_constraints(C(width=320))
+
     with pytest.raises(webrtc.OverconstrainedError) as error:
         await video.apply_constraints(C(width=webrtc.ConstrainULongRange(min=100000)))
     assert error.value.constraint == 'width'
@@ -144,10 +153,12 @@ async def test_remote_track_settings(
     """A remote track has the settings of what arrives, and no capabilities."""
     remote = await connect_track(caller, callee, video_stream.get_tracks()[0])
     await wait_until(lambda: remote.get_settings().width is not None, 'frames')
+
     settings = remote.get_settings()
     assert (settings.width, settings.height) == (640, 480)
     assert settings.device_id is None
     assert remote.get_capabilities() == webrtc.MediaTrackCapabilities()
+
     with pytest.raises(webrtc.OverconstrainedError):
         await remote.apply_constraints(C(width=webrtc.ConstrainULongRange(exact=100)))
     # without capabilities, ranges are checked against the settings
@@ -162,9 +173,11 @@ async def test_generated_track_settings_measure_its_frames() -> None:
     generator = webrtc.VideoTrackGenerator()
     width, height = 64, 48
     data = bytes(width * height * 3 // 2)
+
     async with writing(write_video, generator, data, (width, height)):
         await wait_until(lambda: generator.track.get_settings().frame_rate is not None, 'the frame rate')
         settings = generator.track.get_settings()
+
     assert (settings.width, settings.height) == (width, height)
     assert settings.frame_rate is not None
     assert settings.frame_rate > 0
@@ -178,7 +191,9 @@ async def test_remote_audio_track_settings(
 ) -> None:
     """A remote audio track has the format of the audio that arrives."""
     remote = await connect_track(caller, callee, audio_stream.get_tracks()[0])
+
     await wait_until(lambda: remote.get_settings().sample_rate is not None, 'audio')
+
     settings = remote.get_settings()
     assert settings.sample_rate is not None
     assert settings.sample_rate > 0
@@ -190,18 +205,22 @@ async def test_remote_audio_track_settings(
 
 def test_content_hint(audio_stream: webrtc.MediaStream, video_stream: webrtc.MediaStream) -> None:
     """Hints of the kind of the track are kept, others are ignored."""
-    video, audio = video_stream.get_tracks()[0], audio_stream.get_tracks()[0]
+    video = video_stream.get_tracks()[0]
+    audio = audio_stream.get_tracks()[0]
     assert video.content_hint == ''
     assert audio.contentHint == ''
+
     video.content_hint = 'text'
     audio.content_hint = 'music'
     video.content_hint = 'speech'
     audio.content_hint = 'detail'
     assert (video.content_hint, audio.content_hint) == ('text', 'music')
+
     video.content_hint = 'motion'
     assert video.content_hint == 'motion'
     video.content_hint = ''
     assert video.content_hint == ''
+
     audio.content_hint = 'speaking'
     assert audio.content_hint == 'speaking'
     audio.content_hint = ''
@@ -212,7 +231,9 @@ def test_content_hint(audio_stream: webrtc.MediaStream, video_stream: webrtc.Med
 async def test_constraints_of_an_ended_track(video_stream: webrtc.MediaStream) -> None:
     """Constraints of an ended track are accepted, even ones it couldn't satisfy."""
     track = video_stream.get_tracks()[0]
+
     track.stop()
+
     await track.apply_constraints(C(width=webrtc.ConstrainULongRange(exact=100000)))
 
 
@@ -253,60 +274,57 @@ async def test_camera_stays_within_its_capabilities(
     await track.apply_constraints(C(**constraints))
     assert capture_mode(track) == expected
 
-    track = (
-        await webrtc.media_devices.get_user_media(
-            webrtc.MediaStreamConstraints(video=webrtc.MediaTrackConstraints(**constraints))
-        )
-    ).get_tracks()[0]
-    assert capture_mode(track) == expected
+    stream = await webrtc.media_devices.get_user_media(
+        webrtc.MediaStreamConstraints(video=webrtc.MediaTrackConstraints(**constraints))
+    )
+    assert capture_mode(stream.get_tracks()[0]) == expected
 
 
 @pytest.mark.asyncio
 async def test_camera_settings_are_its_mode_while_old_frames_are_recent(video_stream: webrtc.MediaStream) -> None:
     """A camera reconfigured reports its new mode at once, not the rate its last frames were captured at."""
     track = video_stream.get_tracks()[0]
-    reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
+    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track))
+    reader = processor.readable.get_reader()
     for _ in range(3):
         frame = (await asyncio.wait_for(reader.read(), seconds(10))).value
         assert isinstance(frame, webrtc.VideoFrame)
         frame.close()
+
     await track.apply_constraints(C(frame_rate=1))
+
     assert capture_mode(track) == (640, 480, 1)
     reader.release_lock()
     track.stop()
 
 
 def test_get_user_media_rejects_what_the_camera_cannot_do() -> None:
+    too_wide = webrtc.MediaStreamConstraints(video=C(width=webrtc.ConstrainULongRange(exact=5000)))
+    too_fast = webrtc.MediaStreamConstraints(video=C(frame_rate=webrtc.ConstrainDoubleRange(min=500)))
+
     with pytest.raises(webrtc.OverconstrainedError):
-        asyncio.run(
-            webrtc.media_devices.get_user_media(
-                webrtc.MediaStreamConstraints(
-                    video=webrtc.MediaTrackConstraints(width=webrtc.ConstrainULongRange(exact=5000))
-                )
-            )
-        )
+        asyncio.run(webrtc.media_devices.get_user_media(too_wide))
     with pytest.raises(webrtc.OverconstrainedError):
-        asyncio.run(
-            webrtc.media_devices.get_user_media(
-                webrtc.MediaStreamConstraints(
-                    video=webrtc.MediaTrackConstraints(frame_rate=webrtc.ConstrainDoubleRange(min=500))
-                )
-            )
-        )
+        asyncio.run(webrtc.media_devices.get_user_media(too_fast))
 
 
 async def _cameras_of_impossible_sizes() -> list[tuple[int, int, float] | None]:
+    """The camera modes selected for impossible sizes, applied to a track, then asked of get_user_media."""
     cameras: list[tuple[int, int, float] | None] = []
-    track = (await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=True))).get_tracks()[0]
-    for impossible in (
+    impossible_sizes = (
         C(width=-1),
         C(height=webrtc.ConstrainULongRange(ideal=-5)),
         C(width=10**6, height=webrtc.ConstrainULongRange(ideal=10**6)),
         C(width=0, height=0),
-    ):
+    )
+
+    stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=True))
+    track = stream.get_tracks()[0]
+    for impossible in impossible_sizes:
         await track.apply_constraints(impossible)
         cameras.append(track._native_obj._camera())
     track.stop()
+
     constraints = webrtc.MediaStreamConstraints(video=C(width=0, height=0))
     (track,) = (await webrtc.media_devices.get_user_media(constraints)).get_tracks()
     cameras.append(track._native_obj._camera())
@@ -336,6 +354,7 @@ def test_constraints_from_json() -> None:
         'advanced': [{'width': {'min': 100}}, {'aspectRatio': 1.5}],
         'unknown': 1,
     })
+
     assert constraints == C(
         width=webrtc.ConstrainULongRange(exact=320),
         frame_rate=webrtc.ConstrainDoubleRange(max=30, ideal=15),
@@ -360,6 +379,7 @@ async def test_exact_list_of_resize_modes() -> None:
         )
     )
     track = stream.get_video_tracks()[0]
+
     assert track.get_settings().resize_mode == 'none'
     track.stop()
 
@@ -369,6 +389,8 @@ async def test_clone_keeps_constraints(video_stream: webrtc.MediaStream) -> None
     """A clone keeps the constraints."""
     video = video_stream.get_tracks()[0]
     await video.apply_constraints(C(width=320))
+
     clone = video.clone()
+
     assert clone.get_constraints() == video.get_constraints()
     clone.stop()

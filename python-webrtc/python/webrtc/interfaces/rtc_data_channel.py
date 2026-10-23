@@ -95,6 +95,7 @@ class RTCDataChannelInit(Dictionary):
         if self.max_packet_life_time is not None and self.max_retransmits is not None:
             msg = 'max_packet_life_time and max_retransmits can not both be set'
             raise TypeError(msg)
+
         if not self.negotiated:
             return
         if self.id is None:
@@ -402,12 +403,15 @@ class RTCDataChannel(WebRTCObject[wrtc.RTCDataChannel], EventTarget[_DataChannel
             webrtc.OperationError: If the send queue is full.
         """
         if isinstance(data, str):
-            message, binary = usv_utf8(data), False
+            message = usv_utf8(data)
+            binary = False
         elif isinstance(data, (bytes, bytearray, memoryview, Blob)):
-            message, binary = bytes(data), True
+            message = bytes(data)
+            binary = True
         else:
             msg = f'data must be str, bytes-like or Blob, not {type(data).__name__}'
             raise TypeError(msg)
+
         native = self._native_obj
         # only the first queued message changes activity ('data queued')
         if native.bufferedAmount == 0:

@@ -15,7 +15,7 @@ import json
 import warnings
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import MISSING, dataclass, fields
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 from webrtc.enums import (
     RTCDataChannelState,
@@ -72,12 +72,14 @@ class RTCStats(Dictionary):
 
     def __init__(self, **members: object) -> None:
         cls = self.__class__
-        names, defaults, enums = _layout(cls)
-        unknown = sorted(members.keys() - names)
+        layout = _layout(cls)
+        unknown = sorted(members.keys() - layout.names)
         if len(unknown) > 0:
             msg = f'{cls.__name__} has no member {unknown[0]!r}'
             raise TypeError(msg)
-        for name, default in defaults:
+
+        enums = layout.enums
+        for name, default in layout.defaults:
             if name in members:
                 value = members[name]
             elif default is not MISSING:
@@ -90,17 +92,23 @@ class RTCStats(Dictionary):
             setattr(self, name, value)
 
 
+class _Layout(NamedTuple):
+    names: frozenset[str]
+    defaults: tuple[tuple[str, object], ...]
+    enums: Mapping[str, type[enum.Enum]]
+
+
 @functools.cache
-def _layout(
-    cls: type[RTCStats],
-) -> tuple[frozenset[str], tuple[tuple[str, object], ...], Mapping[str, type[enum.Enum]]]:
-    """The member names of a stats dictionary, each with its default (or MISSING), and the enums of its members."""
+def _layout(cls: type[RTCStats]) -> _Layout:
+    """The members of a stats dictionary and the enums of their values."""
     enums: dict[str, type[enum.Enum]] = {}
     for klass in cls.__mro__:
         own: Mapping[str, type[enum.Enum]] = vars(klass).get('_enums', {})
         enums.update(own)
+
     defaults = tuple((field.name, field.default) for field in fields(cls))
-    return frozenset(name for name, _ in defaults), defaults, enums
+    names = frozenset(name for name, _ in defaults)
+    return _Layout(names, defaults, enums)
 
 
 @dataclass(init=False)
@@ -1267,10 +1275,12 @@ _SOURCES: Mapping[object, type[RTCStats]] = {'audio': RTCAudioSourceStats, 'vide
 
 
 def _dictionary(entry: Mapping[str, object]) -> type[RTCStats]:
-    if entry.get('type') == 'media-source':
-        return _SOURCES.get(entry.get('kind'), RTCMediaSourceStats)
     stats_type = entry.get('type')
-    return _DICTIONARIES.get(stats_type, RTCStats) if isinstance(stats_type, str) else RTCStats
+    if stats_type == 'media-source':
+        return _SOURCES.get(entry.get('kind'), RTCMediaSourceStats)
+    if not isinstance(stats_type, str):
+        return RTCStats
+    return _DICTIONARIES.get(stats_type, RTCStats)
 
 
 _DOWNGRADED: set[object] = set()
@@ -1284,8 +1294,26 @@ def _stats(entry: Mapping[str, object]) -> RTCStats:
         stats_type = entry.get('type')
         if stats_type not in _DOWNGRADED:
             _DOWNGRADED.add(stats_type)
-            warnings.warn(f'{stats_type!r} stats lack a required member, left as RTCStats: {error}', RuntimeWarning, 2)
+            msg = f'{stats_type!r} stats lack a required member, left as RTCStats: {error}'
+            warnings.warn(msg, RuntimeWarning, stacklevel=2)
         return RTCStats.from_json(entry)
+
+
+def _normalize_entry(entry: dict[str, object], track_ids: Mapping[str, str]) -> None:
+    """Rewrites a native stats entry in place to the values the dictionaries expect."""
+    # libwebrtc serializes microseconds
+    timestamp = entry.get('timestamp')
+    if isinstance(timestamp, (int, float)):
+        entry['timestamp'] = timestamp / 1000
+
+    stats_type = entry.get('type')
+    track_id = entry.get('trackIdentifier')
+    if stats_type == 'inbound-rtp' and isinstance(track_id, str) and track_id in track_ids:
+        entry['trackIdentifier'] = track_ids[track_id]
+
+    # libwebrtc leaves the addresses of candidates it doesn't expose (like peer-reflexive ones) empty
+    if stats_type in {'local-candidate', 'remote-candidate'} and entry.get('address') == '':
+        entry['address'] = None
 
 
 class RTCStatsReport(Mapping[str, RTCStats]):
@@ -1311,16 +1339,8 @@ class RTCStatsReport(Mapping[str, RTCStats]):
         track_ids = {receiver.track._native_obj._nativeId: receiver.track.id for receiver in receivers}
         entries: list[dict[str, object]] = json.loads(report if report != '' else '[]')
         for entry in entries:
-            # libwebrtc serializes microseconds
-            timestamp = entry.get('timestamp')
-            if isinstance(timestamp, (int, float)):
-                entry['timestamp'] = timestamp / 1000
-            track_id = entry.get('trackIdentifier')
-            if entry.get('type') == 'inbound-rtp' and isinstance(track_id, str) and track_id in track_ids:
-                entry['trackIdentifier'] = track_ids[track_id]
-            # libwebrtc leaves the addresses of candidates it doesn't expose (like peer-reflexive ones) empty
-            if entry.get('type') in {'local-candidate', 'remote-candidate'} and entry.get('address') == '':
-                entry['address'] = None
+            _normalize_entry(entry, track_ids)
+
         stats = [_stats(entry) for entry in entries]
         return cls({entry.id: entry for entry in stats})
 
@@ -1332,9 +1352,7 @@ class RTCStatsReport(Mapping[str, RTCStats]):
             for name, value in vars(duplicate).items():
                 if isinstance(value, dict):
                     setattr(duplicate, name, dict(value))
-
             copied[stats_id] = duplicate
-
         return RTCStatsReport(copied)
 
     def __getitem__(self, stats_id: str) -> RTCStats:

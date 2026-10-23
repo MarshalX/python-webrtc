@@ -161,6 +161,19 @@ class RTCEncodedAudioFrameOptions(Dictionary):
 _MetadataT = TypeVar('_MetadataT', bound=RTCEncodedFrameMetadata)
 
 
+def _merged_metadata(original: _MetadataT, overrides: _MetadataT | None) -> _MetadataT:
+    """A deep copy of the metadata, with each member the overrides set replacing the original one."""
+    merged = copy.deepcopy(original)
+    if overrides is None:
+        return merged
+
+    for field in dataclasses.fields(overrides):
+        value: object = getattr(overrides, field.name)
+        if value is not None:
+            setattr(merged, field.name, copy.deepcopy(value))
+    return merged
+
+
 class _RTCEncodedFrame(Generic[_MetadataT]):
     _metadata_class: type[_MetadataT]
 
@@ -180,12 +193,8 @@ class _RTCEncodedFrame(Generic[_MetadataT]):
         if original_frame._detached:
             msg = 'The data of the original frame was written to its sender or receiver'
             raise DataCloneError(msg)
-        merged = copy.deepcopy(original_frame._metadata)
-        if metadata is not None:
-            for field in dataclasses.fields(metadata):
-                value: object = getattr(metadata, field.name)
-                if value is not None:
-                    setattr(merged, field.name, copy.deepcopy(value))
+
+        merged = _merged_metadata(original_frame._metadata, metadata)
         self._native = None
         self._payload = bytearray(original_frame.data)
         self._metadata = merged
@@ -245,7 +254,9 @@ class _RTCEncodedFrame(Generic[_MetadataT]):
         if not view.contiguous:
             msg = 'data must be a contiguous buffer'
             raise TypeError(msg)
-        self._payload = bytearray(view.cast('B') if view.ndim == 1 else view.tobytes())
+
+        contents = view.cast('B') if view.ndim == 1 else view.tobytes()
+        self._payload = bytearray(contents)
 
     def _copied_metadata(self) -> _MetadataT:
         return copy.deepcopy(self._metadata)
@@ -272,6 +283,8 @@ class RTCEncodedVideoFrame(_RTCEncodedFrame[RTCEncodedVideoFrameMetadata]):
     """
 
     _metadata_class = RTCEncodedVideoFrameMetadata
+    _type: EncodedVideoChunkType
+    _rid: str | None = None
 
     def __init__(
         self, original_frame: RTCEncodedVideoFrame, options: RTCEncodedVideoFrameOptions | None = None
@@ -284,9 +297,6 @@ class RTCEncodedVideoFrame(_RTCEncodedFrame[RTCEncodedVideoFrameMetadata]):
         self._type = EncodedVideoChunkType.key if values.get('keyFrame') is True else EncodedVideoChunkType.delta
         rid = values.get('rid')
         self._rid = rid if isinstance(rid, str) else None
-
-    _type: EncodedVideoChunkType
-    _rid: str | None = None
 
     @property
     def type(self) -> EncodedVideoChunkType:

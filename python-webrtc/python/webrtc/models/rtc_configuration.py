@@ -57,9 +57,23 @@ def _check_url(url: str) -> str:
         msg = f'{url!r} is not a valid STUN or TURN URL'
         raise webrtc.InvalidSyntaxError(msg)
 
+    scheme: str = match['scheme']
     host: str = match['host']
     port: str | None = match['port']
     transport: str | None = match['transport']
+    _check_host(url, host)
+
+    if port is not None and (port == '' or int(port) > _MAX_PORT):
+        msg = f'{url!r} has an invalid port'
+        raise webrtc.InvalidSyntaxError(msg)
+    if transport is not None and (scheme.startswith('stun') or transport not in {'udp', 'tcp'}):
+        msg = f'{url!r} has an invalid transport'
+        raise webrtc.InvalidSyntaxError(msg)
+    return scheme
+
+
+def _check_host(url: str, host: str) -> None:
+    """Checks the host of a STUN or TURN URL: a bracketed IPv6 address or a registered name."""
     if host.startswith('['):
         try:
             _ = ipaddress.IPv6Address(host[1:-1])
@@ -69,14 +83,6 @@ def _check_url(url: str) -> str:
     elif _REG_NAME.fullmatch(host) is None:
         msg = f'{url!r} has an invalid host'
         raise webrtc.InvalidSyntaxError(msg)
-
-    if port is not None and (port == '' or int(port) > _MAX_PORT):
-        msg = f'{url!r} has an invalid port'
-        raise webrtc.InvalidSyntaxError(msg)
-    if transport is not None and (match['scheme'].startswith('stun') or transport not in {'udp', 'tcp'}):
-        msg = f'{url!r} has an invalid transport'
-        raise webrtc.InvalidSyntaxError(msg)
-    return match['scheme']
 
 
 @dataclass
@@ -237,21 +243,22 @@ class RTCConfiguration(Dictionary):
 
     @classmethod
     def _from_native(cls, native: wrtc.ConfigurationInit) -> RTCConfiguration:
+        ice_servers = [
+            RTCIceServer(urls=list(server.urls), username=server.username, credential=server.credential)
+            for server in native.iceServers
+        ]
+        port_range = tuple(native.portRange) if native.portRange is not None else None
+        certificates: list[RTCCertificate] = []
+        if native.certificates is not None:
+            certificates = RTCCertificate._wrap_many(native.certificates)
         return cls(
-            ice_servers=[
-                RTCIceServer(
-                    urls=list(server.urls),
-                    username=server.username,
-                    credential=server.credential,
-                )
-                for server in native.iceServers
-            ],
+            ice_servers=ice_servers,
             ice_transport_policy=native.iceTransportPolicy,
             bundle_policy=native.bundlePolicy,
             rtcp_mux_policy=native.rtcpMuxPolicy,
             ice_candidate_pool_size=native.iceCandidatePoolSize,
-            port_range=tuple(native.portRange) if native.portRange is not None else None,
-            certificates=RTCCertificate._wrap_many(native.certificates) if native.certificates is not None else [],
+            port_range=port_range,
+            certificates=certificates,
             always_negotiate_data_channels=native.alwaysNegotiateDataChannels,
             rtp_header_encryption_policy=native.rtpHeaderEncryptionPolicy,
         )

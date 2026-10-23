@@ -18,6 +18,7 @@ import pathlib
 import sys
 
 import atheris
+from typing_extensions import TypeGuard
 
 with atheris.instrument_imports():
     from inputs import Input
@@ -32,6 +33,8 @@ PIXEL_FORMATS = list(webrtc.VideoPixelFormat)
 SAMPLE_FORMATS = list(webrtc.AudioSampleFormat)
 SAMPLE_BYTES = {'u8': 1, 's16': 2, 's32': 4, 'f32': 4}
 RATES = [1, 100, 1499, 1500, 3000, 7999, 8000, 11025, 16000, 22050, 44100, 48000, 96000, 192000, 384000, 384001]
+WIDTHS = [1, 2, 3, 15, 16, 17, 639, 640, 1920, 4096]
+HEIGHTS = [1, 2, 3, 15, 16, 17, 479, 480, 1080, 4096]
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
@@ -47,14 +50,11 @@ class Session:
     writers: dict[webrtc.MediaTypeValue, webrtc.WritableStreamDefaultWriter[object]]
 
     async def start(self) -> None:
-        self.caller, self.callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+        self.caller = webrtc.RTCPeerConnection()
+        self.callee = webrtc.RTCPeerConnection()
         self.processors = []
-        self.callee.on(
-            'track',
-            lambda event: self.processors.append(
-                webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(event.track))
-            ),
-        )
+        self.callee.on('track', self.on_track)
+
         self.senders = {}
         self.writers = {}
         for kind in ('audio', 'video'):
@@ -62,6 +62,10 @@ class Session:
             self.senders[kind] = self.caller.add_track(generator)
             self.writers[kind] = generator.writable.get_writer()
         await connect(self.caller, self.callee)
+
+    def on_track(self, event: webrtc.RTCTrackEvent) -> None:
+        processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(event.track))
+        self.processors.append(processor)
 
     async def write(self, kind: webrtc.MediaTypeValue, chunk: webrtc.AudioData | webrtc.VideoFrame) -> None:
         try:
@@ -75,21 +79,25 @@ class Session:
         await asyncio.sleep(0)
 
 
+def is_positive_int(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def sample_bytes(format: webrtc.AudioSampleFormat) -> int:
+    """The size of one sample, interleaved or planar."""
+    interleaved, _, _planar = format.value.partition('-')
+    return SAMPLE_BYTES[interleaved]
+
+
 def audio_data(inp: Input) -> webrtc.AudioData:
     format = inp.choice(SAMPLE_FORMATS)
     channels = inp.small(20) if inp.flag() else inp.integer(20)
     rate = inp.choice(RATES) if inp.flag() else inp.number(400000)
     frames = inp.small(8000) if inp.flag() else inp.integer(8000)
-    if not (
-        isinstance(channels, int)
-        and not isinstance(channels, bool)
-        and channels > 0
-        and isinstance(frames, int)
-        and not isinstance(frames, bool)
-        and frames > 0
-    ):
-        channels, frames = 1, 480
-    size = min(frames * channels * SAMPLE_BYTES[format.value.split('-')[0]], 1 << 20)
+    if not (is_positive_int(channels) and is_positive_int(frames)):
+        channels = 1
+        frames = 480
+    size = min(frames * channels * sample_bytes(format), 1 << 20)
     return webrtc.AudioData(
         webrtc.AudioDataInit(
             format=format,
@@ -104,8 +112,8 @@ def audio_data(inp: Input) -> webrtc.AudioData:
 
 def video_frame(inp: Input) -> webrtc.VideoFrame:
     format = inp.choice(PIXEL_FORMATS)
-    width = inp.small(64) + 1 if inp.flag() else inp.choice([1, 2, 3, 15, 16, 17, 639, 640, 1920, 4096])
-    height = inp.small(64) + 1 if inp.flag() else inp.choice([1, 2, 3, 15, 16, 17, 479, 480, 1080, 4096])
+    width = inp.small(64) + 1 if inp.flag() else inp.choice(WIDTHS)
+    height = inp.small(64) + 1 if inp.flag() else inp.choice(HEIGHTS)
     init = webrtc.VideoFrameBufferInit(
         format=format, coded_width=width, coded_height=height, timestamp=mistyped(inp.integer())
     )

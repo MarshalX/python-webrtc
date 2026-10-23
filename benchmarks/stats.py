@@ -103,7 +103,8 @@ def _cpu() -> str:
     brand = _output('sysctl', '-n', 'machdep.cpu.brand_string') if sys.platform == 'darwin' else None
     if brand is not None:
         return brand
-    return platform.processor() if platform.processor() != '' else platform.machine()
+    processor = platform.processor()
+    return processor if processor != '' else platform.machine()
 
 
 def machine() -> str:

@@ -95,16 +95,18 @@ _HELD = 24
 
 
 async def _last_of_held(track: webrtc.MediaStreamTrack) -> tuple[tuple[int, int], bytes]:
-    reader = webrtc.MediaStreamTrackProcessor(
-        webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=5)
-    ).readable.get_reader()
+    processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=5))
+    reader = processor.readable.get_reader()
+
     # every frame converts, the last one is checked
     held: list[webrtc.VideoFrame] = []
     for _ in range(_HELD):
         frame = (await asyncio.wait_for(reader.read(), seconds(20))).value
         assert isinstance(frame, webrtc.VideoFrame)
-        size, center = (frame.coded_width, frame.coded_height), await _center_pixel(frame)
+        size = (frame.coded_width, frame.coded_height)
+        center = await _center_pixel(frame)
         held.append(frame)
+
     for frame in held:
         frame.close()
     await reader.cancel()
@@ -119,6 +121,7 @@ async def _received(
     track: webrtc.MediaStreamTrack,
 ) -> _Received:
     size, center = await _last_of_held(track)
+
     outbound = stats_of_type(await caller.get_stats(), 'outbound-rtp')[0]
     stats = await callee.get_stats()
     inbound = stats_of_type(stats, 'inbound-rtp')[0]
@@ -127,6 +130,7 @@ async def _received(
     assert inbound.codec_id is not None
     codec = stats[inbound.codec_id]
     assert isinstance(codec, webrtc.RTCCodecStats)
+
     return _Received(
         version=version,
         size=size,
@@ -148,12 +152,14 @@ async def _send_red() -> _Received:
     generator = webrtc.VideoTrackGenerator()
     sender = caller.add_track(generator.track)
     transceiver = next(t for t in caller.get_transceivers() if t.sender == sender)
-    transceiver.set_codec_preferences([c for c in _h264() if c.sdp_fmtp_line not in builtin])
+    openh264_codecs = [codec for codec in _h264() if codec.sdp_fmtp_line not in builtin]
+    transceiver.set_codec_preferences(openh264_codecs)
 
     async with writing(write_video, generator, RED, (WIDTH, HEIGHT)):
         track_event = wait_for_event(callee, 'track', 20)
         await connect(caller, callee, 20)
         received = await _received(caller, callee, version=version, track=_track(await track_event))
+
     generator.track.stop()
     caller.close()
     callee.close()
@@ -225,15 +231,20 @@ def _toggled() -> _Toggled:
         return webrtc.openh264.is_enabled(), len(_h264_fmtps() - builtin) > 0
 
     states = [state()]
-    printed, printed_quietly = io.StringIO(), io.StringIO()
+    printed = io.StringIO()
+    printed_quietly = io.StringIO()
+
     with contextlib.redirect_stdout(printed):
         versions = asyncio.run(_install_twice())
     states.append(state())
+
     webrtc.openh264.disable()
     states.append(state())
+
     with contextlib.redirect_stdout(printed_quietly):
         asyncio.run(webrtc.openh264.install(print_notice=False))
     states.append(state())
+
     return _Toggled(states, versions, printed.getvalue(), printed_quietly.getvalue())
 
 
@@ -256,8 +267,11 @@ def test_notice() -> None:
 def test_license_is_the_one_in_third_party_licenses() -> None:
     """The constant and THIRD_PARTY_LICENSES.md carry the same text, and the notice in it."""
     text = (ROOT / 'THIRD_PARTY_LICENSES.md').read_text(encoding='utf-8')
-    start = text.index('```\n' + '\n'.join(webrtc.openh264.LICENSE.splitlines()[:2])) + len('```\n')
+    fence = '```\n'
+    first_lines = '\n'.join(webrtc.openh264.LICENSE.splitlines()[:2])
+    start = text.index(fence + first_lines) + len(fence)
     section = text[start : text.index('\n```', start)]
+
     assert section == webrtc.openh264.LICENSE.rstrip()
     assert webrtc.openh264.NOTICE in webrtc.openh264.LICENSE
 
@@ -280,6 +294,7 @@ def test_glibc_floor(monkeypatch: pytest.MonkeyPatch, version: str | None, error
 
     # os.confstr exists only on POSIX
     monkeypatch.setattr(webrtc.openh264.os, 'confstr', confstr, raising=False)
+
     if error is None:
         webrtc.openh264._check_glibc()
     else:
@@ -295,6 +310,7 @@ def test_glibc_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
         raise ValueError(msg)
 
     monkeypatch.setattr(webrtc.openh264.os, 'confstr', confstr, raising=False)
+
     with pytest.raises(RuntimeError, match='this system has no glibc'):
         webrtc.openh264._check_glibc()
 
@@ -327,12 +343,16 @@ def mirror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_machines_named_as_cisco_does(monkeypatch: pytest.MonkeyPatch, machine: str, name: str) -> None:
     """Windows, Linux and macOS name the same machines differently."""
     monkeypatch.setattr(webrtc.openh264.platform, 'machine', lambda: machine)
-    assert webrtc.openh264._platform()[1] == name
+
+    _system, cisco_name = webrtc.openh264._platform()
+
+    assert cisco_name == name
 
 
 @pytest.mark.asyncio
 async def test_install_on_a_machine_cisco_has_no_binary_for(monkeypatch: pytest.MonkeyPatch, mirror: Path) -> None:
     monkeypatch.setattr(webrtc.openh264.platform, 'machine', lambda: 'riscv64')
+
     with pytest.raises(RuntimeError, match=r'Cisco provides no OpenH264 binary for \w+-riscv64'):
         await webrtc.openh264.install(mirror.parent / 'cache')
     assert not webrtc.openh264.is_enabled()
@@ -350,6 +370,7 @@ async def test_install_rejects_an_archive_of_another_sha256(tmp_path: Path) -> N
     name, sha256 = _binary()
     cache = tmp_path / 'cache'
     _junk_archive(cache / f'{name}.bz2')
+
     with pytest.raises(RuntimeError, match=rf'{re.escape(name)}\.bz2 has SHA-256 [0-9a-f]{{64}}, expected {sha256}'):
         await webrtc.openh264.install(cache, print_notice=False)
     assert [p.name for p in cache.iterdir()] == [f'{name}.bz2']
@@ -361,6 +382,7 @@ async def test_install_downloads_a_missing_archive(tmp_path: Path, mirror: Path)
     """An error to get the archive says from where."""
     name, _ = _binary()
     url = re.escape(f'{mirror.as_uri()}/{name}.bz2')
+
     with pytest.raises(RuntimeError, match=f"Can't download {url}: "):
         await webrtc.openh264.install(tmp_path / 'cache', print_notice=False)
 
@@ -385,6 +407,7 @@ async def test_install_caches_in_the_cache_directory(
         monkeypatch.delenv(other, raising=False)
     monkeypatch.setenv(variable, str(tmp_path))
     _junk_archive(tmp_path / suffix / f'openh264-{webrtc.openh264.VERSION}' / f'{name}.bz2')
+
     # read from there, not downloaded from the empty mirror
     with pytest.raises(RuntimeError, match='has SHA-256'):
         await webrtc.openh264.install(print_notice=False)
@@ -396,6 +419,7 @@ async def test_install_rejects_a_file_that_isnt_a_library(tmp_path: Path) -> Non
     name, _ = _binary()
     library = tmp_path / name
     _ = library.write_bytes(b'not a library')
+
     with pytest.raises(RuntimeError, match=f"Can't load {re.escape(str(library))}: "):
         await webrtc.openh264.install(tmp_path, print_notice=False)
     assert not webrtc.openh264.is_enabled()
@@ -407,6 +431,7 @@ def test_load_rejects_a_library_without_openh264() -> None:
     library = 'kernel32.dll' if sys.platform == 'win32' else ctypes.util.find_library('c')
     if library is None:
         pytest.skip('no C library found')
+
     with pytest.raises(RuntimeError, match='Not an OpenH264 library, no WelsCreateSVCEncoder'):
         wrtc.loadOpenH264(library)
     assert not webrtc.openh264.is_enabled()
@@ -426,9 +451,11 @@ def _downloaded(directory: Path) -> _Downloaded:
         version = asyncio.run(webrtc.openh264.install(directory, print_notice=False))
     except RuntimeError as e:
         _skip_if_unavailable(e)
+
     name, _ = _binary()
     files = sorted(p.name for p in directory.iterdir())
     mode = (directory / name).stat().st_mode & 0o777
+
     copy = directory / 'copy'
     copy.mkdir()
     _ = shutil.copy(directory / name, copy / name)

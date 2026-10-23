@@ -65,7 +65,10 @@ def call_handler(loop: asyncio.AbstractEventLoop, handler: Callable[[_E], object
 
         def done(task: asyncio.Future[object]) -> None:
             tasks.discard(task)
-            if not task.cancelled() and (exception := task.exception()) is not None:
+            if task.cancelled():
+                return
+            exception = task.exception()
+            if exception is not None:
                 _report(loop, exception, message=message, event=event)
 
         task = asyncio.ensure_future(result, loop=loop)
@@ -127,7 +130,8 @@ class _Handlers:
     def remove(self, name: str | None, handler: AnyHandler | None) -> None:
         """Removes a handler of an event, every handler of it, or every handler of every event."""
         with self._lock:
-            for each in list(self._registrations) if name is None else [name]:
+            names = list(self._registrations) if name is None else [name]
+            for each in names:
                 self._keep(each, lambda r: handler is not None and r.handler != handler)
 
     def remove_loop(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -171,7 +175,8 @@ class _Handlers:
     def all_loops(self) -> list[asyncio.AbstractEventLoop]:
         """The loops with a handler of any event, in the order of registration."""
         with self._lock:
-            return list(dict.fromkeys(r.loop for registrations in self._registrations.values() for r in registrations))
+            loops = (r.loop for registrations in self._registrations.values() for r in registrations)
+            return list(dict.fromkeys(loops))
 
     def loops(self, name: str) -> list[asyncio.AbstractEventLoop]:
         """The loops with a handler of an event."""
@@ -287,7 +292,9 @@ class EventTarget(Generic[_N_contra]):
         super().__init_subclass__(**kwargs)
         cls._rootable = cls._activity is not EventTarget._activity
         for base in cast('tuple[object, ...]', cls.__dict__.get('__orig_bases__', ())):
-            names = _literal_names(get_args(base)[0]) if _is_target_base(base) else ()
+            if not _is_target_base(base):
+                continue
+            names = _literal_names(get_args(base)[0])
             if len(names) > 0:
                 cls._events = names
 
@@ -323,6 +330,7 @@ class EventTarget(Generic[_N_contra]):
         connection = self._connection
         if connection is not None:
             _ = connection._attach()
+
         mailbox = LoopState.of(loop).mailbox
         bound = self._native_obj._bind(mailbox)
         if not bound and self._state() is None:
@@ -350,7 +358,8 @@ class EventTarget(Generic[_N_contra]):
 
     def _update(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
         """Re-evaluates the root on the bound loop, and on ``loop``, the one it was bound to before a change."""
-        previous, state = _roots_of(loop), self._state()
+        previous = _roots_of(loop)
+        state = self._state()
         if previous is not None and previous is not state:
             previous.update(self)
         if state is not None:
@@ -449,7 +458,10 @@ class EventTarget(Generic[_N_contra]):
         plan = handlers.plan(name, state.loop)
         # read before _open(), so the check can detect a racing change
         generation = state.generation
-        event = self._create_event(name, *args) if len(plan.registrations) > 0 and self._open() else None
+        event = None
+        if len(plan.registrations) > 0 and self._open():
+            event = self._create_event(name, *args)
+
         if event is not None:
             if primary and checking_roots():
                 _check_handled(self, name, plan.registrations, roots=state, generation=generation)
@@ -478,10 +490,13 @@ class EventTarget(Generic[_N_contra]):
     ) -> None:
         event.target = self
         handlers = self._handlers
-        removals = handlers.removals if handlers is not None else -1
+        if handlers is None:
+            return
+
+        removals = handlers.removals
         for registration in registrations:
             # one removed by an earlier handler isn't called
-            if handlers is None or (handlers.removals != removals and not handlers.has(name, registration)):
+            if handlers.removals != removals and not handlers.has(name, registration):
                 continue
             if registration.once:
                 with self._changing():
@@ -580,7 +595,10 @@ def _literal_names(literal: object) -> tuple[str, ...]:
         return ()
     names: list[str] = []
     for arg in cast('tuple[object, ...]', get_args(literal)):
-        names.extend(_literal_names(arg) if get_origin(arg) in _LITERALS else [arg] if isinstance(arg, str) else [])
+        if get_origin(arg) in _LITERALS:
+            names.extend(_literal_names(arg))
+        elif isinstance(arg, str):
+            names.append(arg)
     return tuple(dict.fromkeys(names))
 
 

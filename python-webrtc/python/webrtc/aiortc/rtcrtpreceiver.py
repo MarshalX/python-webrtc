@@ -62,8 +62,6 @@ _AV_PIXEL_FORMATS = {
     'BGRA': 'bgra',
     'BGRX': 'bgr0',
 }
-
-
 _S16 = webrtc.AudioDataCopyToOptions(plane_index=0, format='s16')
 _S16_BYTES = 2
 _NOT_DECODED = {'red', 'cn', 'telephone-event'}
@@ -95,7 +93,10 @@ class _VideoFrames:
             converted = _av_video_frame(frame)
             rtp_timestamp = frame.metadata().rtp_timestamp
             capture_time = frame.timestamp * VIDEO_CLOCK_RATE // 1_000_000
-        converted.pts = self.map(capture_time, rtp=False) if rtp_timestamp is None else self.map(rtp_timestamp)
+        if rtp_timestamp is None:
+            converted.pts = self.map(capture_time, rtp=False)
+        else:
+            converted.pts = self.map(rtp_timestamp)
         converted.time_base = VIDEO_TIME_BASE
         return [converted]
 
@@ -115,7 +116,9 @@ class _VideoFrames:
 
 def _av_video_frame(frame: webrtc.VideoFrame) -> av.VideoFrame:
     plan = frame._plan_copy(None)
-    converted = av.VideoFrame(int(plan.rect.width), int(plan.rect.height), _AV_PIXEL_FORMATS[plan.format.value])
+    width = int(plan.rect.width)
+    height = int(plan.rect.height)
+    converted = av.VideoFrame(width, height, _AV_PIXEL_FORMATS[plan.format.value])
     for index, (copy, plane) in enumerate(zip(plan.planes, converted.planes)):
         # a copy of no rows is skipped, so each call fills one plane of the frame
         copies: list[tuple[int, int, int, int, int, int]] = [_NO_COPY] * len(plan.planes)
@@ -152,24 +155,28 @@ class _AudioFrames:
     def _fill(self, data: webrtc.AudioData) -> list[Frame]:
         # the core cuts the chunks into frames of the decoders' size, with no resampling
         frames: list[Frame] = []
-        offset, available = 0, data.number_of_frames
+        offset = 0
+        available = data.number_of_frames
         upmix = data.number_of_channels != self._channels
         while offset < available:
             if self._pending is None:
                 self._pending = av.AudioFrame(format='s16', layout=self._layout, samples=self._frame_size)
                 self._filled = 0
+
             count = min(available - offset, self._frame_size - self._filled)
             plane = memoryview(self._pending.planes[0])
             options = webrtc.AudioDataCopyToOptions(plane_index=0, frame_offset=offset, frame_count=count, format='s16')
             if upmix:
                 # mono plays on every channel, as a stereo Opus decoder outputs it
                 data.copy_to(self._mono, options)
-                start, end = self._filled * self._channels, (self._filled + count) * self._channels
+                start = self._filled * self._channels
+                end = (self._filled + count) * self._channels
                 interleaved = plane.cast('h')
                 for channel in range(self._channels):
                     interleaved[start + channel : end : self._channels] = self._mono[:count]
             else:
                 data.copy_to(plane[self._filled * self._channels * _S16_BYTES :], options)
+
             offset += count
             self._filled += count
             if self._filled == self._frame_size:
@@ -227,7 +234,13 @@ class RemoteStreamTrack(MediaStreamTrack):
 
     def _open(self) -> webrtc.ReadableStreamDefaultReader[webrtc.VideoFrame | webrtc.AudioData]:
         video = self.kind == 'video'
-        buffer = (_VIDEO_BUFFER if video else _AUDIO_BUFFER) if self._buffered else _LATEST
+        if not self._buffered:
+            buffer = _LATEST
+        elif video:
+            buffer = _VIDEO_BUFFER
+        else:
+            buffer = _AUDIO_BUFFER
+
         init = webrtc.MediaStreamTrackProcessorInit(self._native, buffer)
         self._reader = webrtc.MediaStreamTrackProcessor(init).readable.get_reader()
         if video:
@@ -291,13 +304,13 @@ class _RtpEndpoint(Generic[_N]):
         native = cls._native_class.get_capabilities(webrtc.MediaType(kind))
         if native is None:
             return RTCRtpCapabilities()
-        return RTCRtpCapabilities(
-            codecs=[
-                RTCRtpCodecCapability(c.mime_type, c.clock_rate, c.channels, _parameters(c.sdp_fmtp_line))
-                for c in native.codecs
-            ],
-            headerExtensions=[RTCRtpHeaderExtensionCapability(e.uri) for e in native.header_extensions],
-        )
+
+        codecs = [
+            RTCRtpCodecCapability(c.mime_type, c.clock_rate, c.channels, _parameters(c.sdp_fmtp_line))
+            for c in native.codecs
+        ]
+        extensions = [RTCRtpHeaderExtensionCapability(e.uri) for e in native.header_extensions]
+        return RTCRtpCapabilities(codecs=codecs, headerExtensions=extensions)
 
     async def getStats(self) -> RTCStatsReport:
         return self._transceiver._pc._stats(await self._native.get_stats())

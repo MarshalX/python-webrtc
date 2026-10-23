@@ -24,7 +24,7 @@ import shlex
 import shutil
 import subprocess
 import sys
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
 if sys.platform != 'win32':
     import fcntl
@@ -55,9 +55,17 @@ NATIVE_HERE = sys.platform == 'darwin'
 
 _NO_PROFILE = 'no profile can be merged'
 _STATIC_PREFIX = re.compile(r'^[^\[\]:]+\.(?:cpp|mm|h):')
+_REGION_LINE_START = 0
+_REGION_FILE_ID = 5
 
-#: (file, first line) -> (name, whether it ran); template instantiations share one key
-Functions = dict[tuple[str, int], tuple[str, bool]]
+
+class _Function(NamedTuple):
+    name: str
+    ran: bool
+
+
+#: (file, first line) -> function; template instantiations share one key
+Functions = dict[tuple[str, int], _Function]
 
 
 class _Count(TypedDict):
@@ -135,7 +143,9 @@ def _extension() -> pathlib.Path | None:
 def _stamp() -> str:
     digest = hashlib.sha1(usedforsecurity=False)
     extension = _extension()
-    for path in [*([extension] if extension is not None else []), *sorted(PACKAGE.rglob('*.py'))]:
+    paths: list[pathlib.Path] = [extension] if extension is not None else []
+    paths += sorted(PACKAGE.rglob('*.py'))
+    for path in paths:
         digest.update(path.read_bytes())
     return digest.hexdigest()
 
@@ -174,6 +184,7 @@ def _merge_native(group: str) -> None:
     raws = sorted(NATIVE.glob(f'{group}-*.profraw'))
     if raws == []:
         return
+
     merged = NATIVE / f'{group}.profdata'
     fresh = NATIVE / f'{group}.new'
     result = _llvm('llvm-profdata', 'merge', '-sparse', '--failure-mode=all', *raws, '-o', fresh)
@@ -181,6 +192,7 @@ def _merge_native(group: str) -> None:
         if _NO_PROFILE in result.stderr:
             _unlink(raws)
         return
+
     if merged.exists():
         temporary = NATIVE / f'{group}.tmp'
         if not _ok(_llvm('llvm-profdata', 'merge', '-sparse', merged, fresh, '-o', temporary)):
@@ -254,7 +266,8 @@ def _cpp_summary(profile: pathlib.Path | None) -> str:
     exported = _export(profile, '-summary-only') if profile is not None else None
     if exported is None:
         return 'C++ none collected'
-    lines, functions = exported['totals']['lines'], exported['totals']['functions']
+    lines = exported['totals']['lines']
+    functions = exported['totals']['functions']
     return f'C++ {lines["percent"]:.1f}% of lines, {functions["covered"]}/{functions["count"]} functions'
 
 
@@ -267,7 +280,8 @@ def _python_summary(data: pathlib.Path | None) -> str:
 
 def summary_line() -> str | None:
     with _locked():
-        profile, data = _native_data(GROUPS), _python_data(GROUPS)
+        profile = _native_data(GROUPS)
+        data = _python_data(GROUPS)
         if profile is None and data is None:
             return None
         return f'Coverage: {_cpp_summary(profile)}; {_python_summary(data)}'
@@ -285,41 +299,50 @@ def _cpp_functions(profile: pathlib.Path | None) -> Functions:
     exported = _export(profile, '-skip-expansions') if profile is not None else None
     if exported is None:
         return {}
+
     found: Functions = {}
     for function in exported['functions']:
         region = function['regions'][0]
-        path = pathlib.Path(function['filenames'][region[5]])
+        path = pathlib.Path(function['filenames'][region[_REGION_FILE_ID]])
         if not path.is_relative_to(SOURCES):
             continue
-        key = (path.relative_to(SOURCES).as_posix(), region[0])
-        name, ran = found.get(key, (function['name'], False))
-        found[key] = (name, ran or function['count'] > 0)
-    names = _demangle([name for name, _ran in found.values()])
-    return {key: (name, ran) for (key, (_mangled, ran)), name in zip(found.items(), names)}
+        key = (path.relative_to(SOURCES).as_posix(), region[_REGION_LINE_START])
+        name, ran = found.get(key, _Function(function['name'], ran=False))
+        found[key] = _Function(name, ran or function['count'] > 0)
+
+    names = _demangle([function.name for function in found.values()])
+    return {key: function._replace(name=name) for (key, function), name in zip(found.items(), names)}
 
 
 def _python_functions(data: pathlib.Path | None) -> Functions:
     report = _python_report(data) if data is not None else None
     if report is None:
         return {}
+
     found: Functions = {}
     for file, entry in report['files'].items():
         relative = pathlib.Path(os.path.relpath(ROOT / file, PACKAGE.parent)).as_posix()
         for name, function in entry['functions'].items():
             summary = function['summary']
-            if summary['num_statements'] > 0:
+            if summary['num_statements'] == 0:
+                continue
+            ran = summary['covered_lines'] > 0
+            if name == '':
                 # the module's own code at line 0, since a function may start at line 1
-                line, label = (function['start_line'], name) if name != '' else (0, '<module>')
-                found[relative, line] = (label, summary['covered_lines'] > 0)
+                found[relative, 0] = _Function('<module>', ran)
+            else:
+                found[relative, function['start_line']] = _Function(name, ran)
     return found
 
 
 def _never(functions: Functions) -> Functions:
-    return {key: value for key, value in functions.items() if not value[1]}
+    return {key: function for key, function in functions.items() if not function.ran}
 
 
 def _missed_by(reached: Functions, missed: Functions) -> Functions:
-    return {key: value for key, value in reached.items() if value[1] and key in missed and not missed[key][1]}
+    return {
+        key: function for key, function in reached.items() if function.ran and key in missed and not missed[key].ran
+    }
 
 
 def _by_file(functions: Iterable[tuple[str, int]]) -> dict[str, list[int]]:
@@ -332,6 +355,7 @@ def _by_file(functions: Iterable[tuple[str, int]]) -> dict[str, list[int]]:
 def _section(title: str, listed: Functions, every: Functions) -> list[str]:
     if every == {}:
         return [f'## {title}: no data', '']
+
     totals = _by_file(every)
     lines = [f'## {title}: {len(listed)} of {len(every)} functions', '']
     for file, starts in _by_file(listed).items():
@@ -339,17 +363,20 @@ def _section(title: str, listed: Functions, every: Functions) -> list[str]:
             lines.append(f'- `{file}`: all {len(starts)}')
             continue
         lines.append(f'- `{file}`: {len(starts)} of {len(totals[file])}')
-        lines += [f'  - {line} `{listed[file, line][0]}`' for line in starts]
+        lines += [f'  - {line} `{listed[file, line].name}`' for line in starts]
     return [*lines, '']
 
 
 def _suite_only(title: str, suite: Functions, chaos: Functions, *, every: Functions) -> list[str]:
-    return _section(title, _missed_by(suite, chaos), every if suite != {} and chaos != {} else {})
+    both_ran = suite != {} and chaos != {}
+    return _section(title, _missed_by(suite, chaos), every if both_ran else {})
 
 
 def _split(cpp: Functions, python: Functions) -> list[str]:
-    suite_cpp, chaos_cpp = _cpp_functions(_native_data([SUITE])), _cpp_functions(_native_data([CHAOS]))
-    suite_python, chaos_python = _python_functions(_python_data([SUITE])), _python_functions(_python_data([CHAOS]))
+    suite_cpp = _cpp_functions(_native_data([SUITE]))
+    chaos_cpp = _cpp_functions(_native_data([CHAOS]))
+    suite_python = _python_functions(_python_data([SUITE]))
+    chaos_python = _python_functions(_python_data([CHAOS]))
     return [
         '# The suite reaches, chaos never does',
         '',
@@ -359,9 +386,12 @@ def _split(cpp: Functions, python: Functions) -> list[str]:
 
 
 def _write_never(profile: pathlib.Path | None, data: pathlib.Path | None) -> None:
-    cpp, python = _cpp_functions(profile), _python_functions(data)
+    cpp = _cpp_functions(profile)
+    python = _python_functions(data)
     lines = ['# Never executed', '', 'Functions by file and first line, of the suite and the hunt together.', '']
-    lines += _section('C++', _never(cpp), cpp) + _section('Python', _never(python), python) + _split(cpp, python)
+    lines += _section('C++', _never(cpp), cpp)
+    lines += _section('Python', _never(python), python)
+    lines += _split(cpp, python)
     NEVER.write_text('\n'.join(lines), encoding='utf-8')
 
 
@@ -369,6 +399,7 @@ def _render_cpp(profile: pathlib.Path | None) -> str:
     summary = _cpp_summary(profile)
     if profile is None:
         return summary
+
     shutil.rmtree(HTML / 'cpp', ignore_errors=True)
     show = ['llvm-cov', 'show', _extension(), f'-instr-profile={profile}', '-format=html', '-show-branches=count']
     _ok(_llvm(*show, f'-output-dir={HTML / "cpp"}', SOURCES))
@@ -379,6 +410,7 @@ def _render_python(data: pathlib.Path | None) -> str:
     summary = _python_summary(data)
     if data is None:
         return summary
+
     _coverage('html', '--quiet', f'--data-file={data}', '-d', HTML / 'python')
     return f'{summary}: {HTML / "python" / "index.html"}'
 
@@ -386,7 +418,8 @@ def _render_python(data: pathlib.Path | None) -> str:
 def report() -> None:
     with _locked():
         _collect()
-        profile, data = _native_data(GROUPS), _python_data(GROUPS)
+        profile = _native_data(GROUPS)
+        data = _python_data(GROUPS)
         print(_render_cpp(profile))
         print(_render_python(data))
         _write_never(profile, data)
@@ -400,6 +433,7 @@ def run(pytest_args: list[str]) -> int:
             return built.returncode
     else:
         print('coverage: C++ coverage is macOS only, measuring Python')
+
     collect()
     tests = [SANITIZERS] if NATIVE_HERE else [sys.executable, '-m', 'pytest', '--ignore=tests/wpt']
     variables = {**os.environ, **env(SUITE, python=True)}
@@ -411,6 +445,7 @@ def run(pytest_args: list[str]) -> int:
 def main() -> None:
     if sys.platform == 'win32':
         sys.exit('coverage: not supported on Windows')
+
     parser = argparse.ArgumentParser(description='Coverage of the C++ and the Python package, in build/coverage.')
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('run', help='the suite once, then the report; other arguments go to pytest')
@@ -420,6 +455,7 @@ def main() -> None:
     args, pytest_args = parser.parse_known_args()
     if args.command != 'run' and pytest_args != []:
         parser.error(f'unrecognized arguments: {" ".join(pytest_args)}')
+
     if args.command == 'run':
         sys.exit(run(pytest_args))
     if args.command == 'collect':

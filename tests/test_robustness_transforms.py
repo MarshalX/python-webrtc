@@ -22,7 +22,7 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import connect, wait_until
+from tests.helpers import connect, start_threads, wait_until
 from tests.isolation import isolated
 from tests.timing import seconds
 
@@ -37,8 +37,13 @@ _held: list[Frame | bytes] = []
 _kept: list[object] = []
 
 
+def _retrieve_exception(future: asyncio.Future[None]) -> None:
+    if not future.cancelled():
+        _ = future.exception()
+
+
 def _retrieve(future: asyncio.Future[None]) -> None:
-    future.add_done_callback(lambda f: f.cancelled() or f.exception())
+    future.add_done_callback(_retrieve_exception)
 
 
 async def _worker(event: webrtc.RTCTransformEvent) -> None:
@@ -89,13 +94,6 @@ async def _call() -> tuple[webrtc.RTCPeerConnection, webrtc.RTCPeerConnection]:
     return caller, callee
 
 
-def _start(*targets: Callable[[], None]) -> list[threading.Thread]:
-    threads = [threading.Thread(target=target, daemon=True) for target in targets]
-    for thread in threads:
-        thread.start()
-    return threads
-
-
 async def _join(threads: list[threading.Thread]) -> None:
     loop = asyncio.get_running_loop()
     for thread in threads:
@@ -104,7 +102,7 @@ async def _join(threads: list[threading.Thread]) -> None:
 
 
 def _held_natives() -> list[wrtc.RTCEncodedFrame]:
-    return [f._native for f in _held.copy() if not isinstance(f, bytes) and f._native is not None]
+    return [frame._native for frame in _held.copy() if not isinstance(frame, bytes) and frame._native is not None]
 
 
 def _use_held_frames() -> None:
@@ -116,7 +114,7 @@ def _use_held_frames() -> None:
 
 async def _transform_while_frames_are_used() -> None:
     _kept.extend(await _call())
-    _start(_use_held_frames)
+    start_threads(_use_held_frames)
     await asyncio.sleep(0.2)
 
 
@@ -156,7 +154,7 @@ class _Race:
             while not self.stop.is_set():
                 step(rng)
 
-        return _start(repeat)[0]
+        return start_threads(repeat)[0]
 
     def set_transforms(self, rng: random.Random) -> None:
         with contextlib.suppress(webrtc.InvalidStateError):
@@ -167,13 +165,13 @@ class _Race:
         choice = rng.randrange(3)
         if choice == 0:
             part.transform = None
-        elif choice == 2:
-            if isinstance(part, webrtc.RTCRtpSender):
-                part.transform = _encryptor()
-            else:
-                part.transform = _decryptor(rng.randrange(3))
-        elif len(self.spare) > 0:
-            part.transform = self.spare.pop()
+        elif choice == 1:
+            if len(self.spare) > 0:
+                part.transform = self.spare.pop()
+        elif isinstance(part, webrtc.RTCRtpSender):
+            part.transform = _encryptor()
+        else:
+            part.transform = _decryptor(rng.randrange(3))
 
     def rotate_keys(self, rng: random.Random) -> None:
         for part in self.parts:
@@ -201,6 +199,7 @@ class _Race:
                 if len(self.natives) > 0:
                     data = rng.choice([None, b'', bytes(rng.randrange(3000))])
                     native.write(rng.choice(self.natives), data)
+
         for frame in [*self.natives[-10:], *_held_natives()[-10:]]:
             frame.getData()
             frame.getMetadata()
@@ -228,6 +227,7 @@ async def _race() -> None:
     await asyncio.sleep(0.5)
     race.stop.set()
     await _join(threads)
+
     assert errors == [], errors
     assert len(race.natives) > 0, 'no frame was read'
 
@@ -270,11 +270,13 @@ async def _share_frames() -> None:
                 if native.write(frame, None):
                     written.append(frame)
 
-    threads = _start(read, use, use, use)
+    threads = start_threads(read, use, use, use)
     await asyncio.sleep(3)
     stop.set()
     await _join(threads)
-    assert len(written) == len({id(frame) for frame in written}) > 0
+
+    assert len(written) > 0
+    assert len(written) == len({id(frame) for frame in written})
     caller.close()
     callee.close()
 

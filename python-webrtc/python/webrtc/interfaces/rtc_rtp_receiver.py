@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from typing import TypeVar, cast
+from typing import TYPE_CHECKING, NamedTuple, TypeVar, cast
 
 from typing_extensions import override
 
@@ -25,10 +25,18 @@ from webrtc.models.rtp_parameters import RTCRtpCapabilities, RTCRtpReceiveParame
 from webrtc.models.rtp_source import RTCRtpContributingSource, RTCRtpSynchronizationSource
 from webrtc.utils.loops import call_native_batched
 
+if TYPE_CHECKING:
+    _NativeSource = tuple[bool, int, float, int, int | None]
+
 _SourceT = TypeVar('_SourceT', bound=RTCRtpContributingSource)
 
 #: The maximum jitter_buffer_target, in milliseconds
 _MAX_JITTER_BUFFER_TARGET = 4000
+
+
+class _CachedSources(NamedTuple):
+    loop: asyncio.AbstractEventLoop
+    sources: list[_NativeSource]
 
 
 class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
@@ -42,14 +50,14 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
     __slots__ = ('_cached_sources',)
 
     _class = wrtc.RTCRtpReceiver
-    _cached_sources: tuple[asyncio.AbstractEventLoop, list[tuple[bool, int, float, int, int | None]]] | None
+    _cached_sources: _CachedSources | None
 
     @override
     def _init_native(self, native_obj: wrtc.RTCRtpReceiver | None) -> None:
         super()._init_native(native_obj)
         self._cached_sources = None
 
-    def _native_sources(self) -> list[tuple[bool, int, float, int, int | None]]:
+    def _native_sources(self) -> list[_NativeSource]:
         # kept for the loop iteration (the spec's task): both getters in it cost one hop to the worker thread
         try:
             loop = asyncio.get_running_loop()
@@ -57,11 +65,11 @@ class RTCRtpReceiver(WebRTCObject[wrtc.RTCRtpReceiver]):
             return self._native_obj._getSources()
 
         cached = self._cached_sources
-        if cached is not None and cached[0] is loop:
-            return cached[1]
+        if cached is not None and cached.loop is loop:
+            return cached.sources
 
         sources = self._native_obj._getSources()
-        self._cached_sources = (loop, sources)
+        self._cached_sources = _CachedSources(loop, sources)
         _ = loop.call_soon(self._clear_sources)
 
         return sources

@@ -42,7 +42,7 @@ class Event:
         self.target: webrtc.EventTarget[Never] | None = None
 
     def __repr__(self) -> str:
-        fields = ', '.join(f'{k}={v!r}' for k, v in vars(self).items() if k != 'target')
+        fields = ', '.join(f'{name}={value!r}' for name, value in vars(self).items() if name != 'target')
         return f'{type(self).__name__}({fields})'
 
 

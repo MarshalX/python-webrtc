@@ -37,19 +37,27 @@ import subprocess
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TypedDict
+from typing import NamedTuple, TypedDict
+
+
+class LlvmDir(NamedTuple):
+    """How WebRTC pins a directory of llvm-project."""
+
+    deps_path: str
+    cmake_variable: str
+
 
 REPO = 'repos/llvm/llvm-project'
 CHROMIUM_CONFIG = ('__config_site', '__assertion_handler')
-# llvm-project dir -> (its DEPS path in WebRTC, CMake variable of its commit)
 LLVM_DIRS = {
-    'libcxx': ('src/third_party/libc++/src', 'LIBCXX_LLVM_COMMIT'),
-    'libcxxabi': ('src/third_party/libc++abi/src', 'LIBCXXABI_LLVM_COMMIT'),
-    'libc': ('src/third_party/llvm-libc/src', 'LLVM_LIBC_COMMIT'),
+    'libcxx': LlvmDir('src/third_party/libc++/src', 'LIBCXX_LLVM_COMMIT'),
+    'libcxxabi': LlvmDir('src/third_party/libc++abi/src', 'LIBCXXABI_LLVM_COMMIT'),
+    'libc': LlvmDir('src/third_party/llvm-libc/src', 'LLVM_LIBC_COMMIT'),
 }
 # llvm-project dirs the runtime sources include from: their own trees, and llvm-libc (-I libc)
 RUNTIME_TREES = ('libcxx/src', 'libcxxabi/src', 'libc')
 INCLUDE = re.compile(rb'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE)
+GITHUB_TIME = '%Y-%m-%dT%H:%M:%SZ'
 
 
 class TreeEntry(TypedDict):
@@ -90,7 +98,8 @@ def gh(path: str) -> bytes:
 
 def git_tree(sha: str, *, recursive: bool = False) -> Tree:
     """A git tree of llvm-project."""
-    tree: Tree = json.loads(gh(f'{REPO}/git/trees/{sha}' + ('?recursive=1' if recursive else '')))
+    query = '?recursive=1' if recursive else ''
+    tree: Tree = json.loads(gh(f'{REPO}/git/trees/{sha}{query}'))
     return tree
 
 
@@ -141,22 +150,32 @@ def git_fetch(url: str, ref: str, repo: str) -> str:
     return subprocess.check_output([git, '-C', repo, 'rev-parse', 'FETCH_HEAD'], text=True).strip()
 
 
+def commits_near(name: str, committed: str) -> list[Commit]:
+    """The llvm-project commits that changed a directory within a day of an ISO 8601 commit time."""
+    date = dt.datetime.fromisoformat(committed).astimezone(dt.timezone.utc)
+    since = (date - dt.timedelta(days=1)).strftime(GITHUB_TIME)
+    until = (date + dt.timedelta(days=1)).strftime(GITHUB_TIME)
+    commits: list[Commit] = json.loads(gh(f'{REPO}/commits?path={name}&since={since}&until={until}&per_page=100'))
+    return commits
+
+
 def resolve_llvm(deps: str, name: str) -> str:
     """Chromium mirrors each llvm-project dir as its own repo: finds the llvm-project commit with the same tree."""
-    match = re.search(rf"'{re.escape(LLVM_DIRS[name][0])}':\s*'([^'@]+)@([0-9a-f]+)'", deps)
+    deps_path = LLVM_DIRS[name].deps_path
+    match = re.search(rf"'{re.escape(deps_path)}':\s*'([^'@]+)@([0-9a-f]+)'", deps)
     if match is None:
-        msg = f'{LLVM_DIRS[name][0]} is not in the WebRTC DEPS'
+        msg = f'{deps_path} is not in the WebRTC DEPS'
         raise SystemExit(msg)
+
     url, revision = match.groups()
     with tempfile.TemporaryDirectory() as repo:
         git_fetch(url, revision, repo)
-        tree, committed = subprocess.check_output(
+        log = subprocess.check_output(
             [tool('git'), '-C', repo, 'log', '-1', '--format=%T %cI', 'FETCH_HEAD'], text=True
-        ).split()
-    date = dt.datetime.fromisoformat(committed).astimezone(dt.timezone.utc)
-    since, until = ((date + dt.timedelta(days=d)).strftime('%Y-%m-%dT%H:%M:%SZ') for d in (-1, 1))
-    commits: list[Commit] = json.loads(gh(f'{REPO}/commits?path={name}&since={since}&until={until}&per_page=100'))
-    for commit in commits:
+        )
+    tree, committed = log.split()
+
+    for commit in commits_near(name, committed):
         if tree_sha(commit['sha'], name) == tree:
             return commit['sha']
     msg = f'no llvm-project commit has the {name} tree of {url}@{revision}'
@@ -167,10 +186,14 @@ def runtime_sources(tag: str) -> list[str]:
     """The libc++ and libc++abi sources of Chromium's Linux build, as llvm-project paths."""
     sources: list[str] = []
     for gn, llvm in (('libc%2B%2B', 'libcxx'), ('libc%2B%2Babi', 'libcxxabi')):
-        for line in chromium(f'buildtools/third_party/{gn}/BUILD.gn', tag).decode().splitlines():
+        build_gn = chromium(f'buildtools/third_party/{gn}/BUILD.gn', tag).decode()
+        for line in build_gn.splitlines():
             match = re.search(r'"//third_party/libc\+\+(?:abi)?/src/src/([^"]+\.cpp)"', line)
-            if match is not None and not line.lstrip().startswith('#') and 'win32' not in match[1]:
-                sources.append(f'{llvm}/src/{match[1]}')
+            if match is None or line.lstrip().startswith('#'):
+                continue
+            source = match[1]
+            if 'win32' not in source:
+                sources.append(f'{llvm}/src/{source}')
     return sorted(set(sources))
 
 
@@ -189,20 +212,27 @@ def pin_runtime(commits: dict[str, str], tag: str) -> None:
     """Pins the runtime sources and, transitively, every file they include from RUNTIME_TREES."""
     tree: dict[str, str] = {}
     for root in RUNTIME_TREES:
-        tree.update({f'{root}/{e["path"]}': e['sha'] for e in subtree(commits[root.split('/')[0]], root)})
+        llvm_dir = root.split('/')[0]
+        tree.update({f'{root}/{e["path"]}': e['sha'] for e in subtree(commits[llvm_dir], root)})
+
     sources = runtime_sources(tag)
     pinned: dict[str, bytes] = {}
     queue = list(sources)
     with ThreadPoolExecutor(8) as pool:
         while len(queue) > 0:
-            pinned.update(zip(queue, pool.map(blob, [tree[p] for p in queue])))
-            found = set[str]().union(*(includes(path, pinned[path]) for path in queue))
+            contents = pool.map(blob, [tree[path] for path in queue])
+            pinned.update(zip(queue, contents))
+            found: set[str] = set()
+            for path in queue:
+                found |= includes(path, pinned[path])
             queue = sorted(c for c in found if c in tree and c not in pinned)
+
     # CMake compiles every pinned libcxx/libcxxabi .cpp, so only the sources may be among them
     stray = [p for p in pinned if p.endswith('.cpp') and p not in sources and not p.startswith('libc/')]
     if len(stray) > 0:
         msg = f'sources include other .cpp files: {stray}'
         raise SystemExit(msg)
+
     lines = [f'{hashlib.sha256(data).hexdigest()}  {path}\n' for path, data in sorted(pinned.items())]
     (Path(__file__).parent / 'runtime.sha256').write_text(''.join(lines))
     print(f'{len(sources)} runtime sources, {len(lines)} files pinned')
@@ -227,7 +257,7 @@ def pin_headers(commit: str, headers: Path) -> None:
         msg = f'the prebuilt headers differ from llvm-project@{commit}: {mismatches[:10]}'
         raise SystemExit(msg)
 
-    missing = [e for e in tree if e['path'] not in local and '.' not in e['path'].rsplit('/', 1)[-1]]
+    missing = [e for e in tree if e['path'] not in local and '.' not in posixpath.basename(e['path'])]
 
     def sha256(entry: TreeEntry) -> str:
         data = blob(entry['sha'])
@@ -262,8 +292,8 @@ def main() -> None:
     pin_config(args.chromium_tag)
     pin_runtime(commits, args.chromium_tag)
 
-    for name, (_, variable) in LLVM_DIRS.items():
-        print(f'set({variable} {commits[name]})')
+    for name, llvm_dir in LLVM_DIRS.items():
+        print(f'set({llvm_dir.cmake_variable} {commits[name]})')
     print(f'set(LIBCXX_CHROMIUM_TAG {args.chromium_tag})')
 
 

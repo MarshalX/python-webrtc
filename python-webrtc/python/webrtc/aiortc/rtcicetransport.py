@@ -49,7 +49,9 @@ def _candidate(native: webrtc.RTCIceCandidate) -> RTCIceCandidate:
     # the vendored module imports this one
     from webrtc.aiortc.sdp import candidate_from_sdp  # ruff: ignore[import-outside-top-level]
 
-    candidate = candidate_from_sdp(native.candidate.split(':', 1)[1])
+    # the parser takes the attribute's value, without its 'candidate:' prefix
+    value = native.candidate.split(':', 1)[1]
+    candidate = candidate_from_sdp(value)
     candidate.sdpMid = native.sdp_mid
     candidate.sdpMLineIndex = native.sdp_m_line_index
     return candidate

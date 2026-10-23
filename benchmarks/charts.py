@@ -64,9 +64,10 @@ def _label(library: str, versions: dict[str, Hello]) -> str:
 
 def _footer(found: Newest) -> str:
     """The machine and the conditions of the runs, for the foot of their charts."""
-    manifest = found.sources[-1][0]
+    manifest, _ = found.sources[-1]
     go = f', {manifest["go"]}' if manifest['go'] is not None else ''
     dates = sorted({source['date'][:10] for source, _ in found.sources})
+
     if any(source['quick'] for source, _ in found.sources):
         runs = 'a quick run, not results'
     elif len(found.sources) > 1:
@@ -82,16 +83,20 @@ def _times(value: float, _: int | None) -> str:
 
 def _detail(ax: Axes, detail: Detail, *, categories: list[str], legend: dict[str, str]) -> None:
     """Draws a panel of absolute values under a chart, its bars in the chart's categories and colors."""
-    rows = [
-        (category, legend[library], value)
-        for category in categories
-        for library, value in detail.values.get(category, {}).items()
-        if library in legend and math.isfinite(value)
-    ]
+    bar_categories: list[str] = []
+    bar_labels: list[str] = []
+    bar_values: list[float] = []
+    for category in categories:
+        for library, value in detail.values.get(category, {}).items():
+            if library in legend and math.isfinite(value):
+                bar_categories.append(category)
+                bar_labels.append(legend[library])
+                bar_values.append(value)
+
     sns.barplot(
-        x=[row[0] for row in rows],
-        y=[row[2] for row in rows],
-        hue=[row[1] for row in rows],
+        x=bar_categories,
+        y=bar_values,
+        hue=bar_labels,
         hue_order=list(legend.values()),
         order=categories,
         ax=ax,

@@ -30,9 +30,8 @@ async def record(track: webrtc.MediaStreamTrack, file: BinaryIO) -> None:
     """Writes the frames of a track to a file until the track ends."""
     frames = 0
     with file:
-        async for media in webrtc.MediaStreamTrackProcessor(
-            webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=30)
-        ).readable:
+        processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=30))
+        async for media in processor.readable:
             # audio data for an audio track, video frames for a video one
             if isinstance(media, webrtc.AudioData):
                 options = webrtc.AudioDataCopyToOptions(plane_index=0)
@@ -44,6 +43,7 @@ async def record(track: webrtc.MediaStreamTrack, file: BinaryIO) -> None:
             else:
                 msg = f'unexpected media: {media!r}'
                 raise TypeError(msg)
+
             media.close()
             file.write(data)
             frames += 1
@@ -75,8 +75,10 @@ async def negotiate(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConn
 
 async def main() -> None:
     """Records the camera and the microphone for a few seconds."""
-    sender, receiver = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    sender = webrtc.RTCPeerConnection()
+    receiver = webrtc.RTCPeerConnection()
     trickle(sender, receiver)
+
     stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(audio=True, video=True))
     for track in stream.get_tracks():
         sender.add_track(track, stream)
@@ -90,6 +92,7 @@ async def main() -> None:
 
     await negotiate(sender, receiver)
     await asyncio.sleep(SECONDS)
+
     # closing the connection ends its remote tracks, which ends the recordings
     receiver.close()
     sender.close()

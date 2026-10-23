@@ -103,7 +103,8 @@ class Driver(base.Driver):
     ) -> Message:
         """Sends the raw frames of a file, encoded in the connection's codec, at most at the bitrate."""
         raw = frames.load_raw(path, width, height)
-        sender = self._senders[pc] = media.VideoSource(raw, size=(width, height), fps=fps, numbered=numbered)
+        sender = media.VideoSource(raw, size=(width, height), fps=fps, numbered=numbered)
+        self._senders[pc] = sender
         self.tallies[pc] = sender.tally
 
         encoding = webrtc.RTCRtpEncodingParameters(max_bitrate=bitrate)

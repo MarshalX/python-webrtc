@@ -50,10 +50,14 @@ class _Sent:
     uncapped: float
 
 
+def _key_frame_count(recorder: Recorder) -> int:
+    return sum(encoded.key for encoded in recorder.encoded)
+
+
 async def _key_frames(sender: webrtc.RTCRtpSender, recorder: Recorder) -> _KeyFrames:
-    before = sum(e.key for e in recorder.encoded)
+    before = _key_frame_count(recorder)
     first = await recorder.key_frame_on_request(sender)
-    return _KeyFrames(before, sum(e.key for e in recorder.encoded), first)
+    return _KeyFrames(before, _key_frame_count(recorder), first)
 
 
 async def _bitrate_capped_at(sender: webrtc.RTCRtpSender, recorder: Recorder, max_bitrate: int) -> float:
@@ -70,21 +74,34 @@ class _Decoded:
     frames: bytes
 
 
+def _probe(ffprobe: str, path: pathlib.Path) -> dict[str, object]:
+    shown = ['-show_entries', 'stream=profile,width,height', '-of', 'json']
+    probed = subprocess.run([ffprobe, '-v', 'error', *shown, path], capture_output=True, text=True, check=True)
+    stream: dict[str, object] = json.loads(probed.stdout)['streams'][0]
+    return stream
+
+
 def _decode(ffmpeg: str, ffprobe: str, stream: list[Encoded]) -> _Decoded:
     with tempfile.TemporaryDirectory() as directory:
         path = pathlib.Path(directory) / 'sent.h264'
-        path.write_bytes(b''.join(e.data for e in stream))
-        shown = ['-show_entries', 'stream=profile,width,height', '-of', 'json']
-        probed = subprocess.run([ffprobe, '-v', 'error', *shown, path], capture_output=True, text=True, check=True)
-        probe: dict[str, object] = json.loads(probed.stdout)['streams'][0]
+        path.write_bytes(b''.join(encoded.data for encoded in stream))
+        probe = _probe(ffprobe, path)
         decoding = [ffmpeg, '-v', 'error', '-i', path, '-f', 'rawvideo', '-pix_fmt', 'yuv420p', '-']
         frames = subprocess.run(decoding, capture_output=True, check=True).stdout
-    return _Decoded(probe.get('profile'), (probe.get('width'), probe.get('height')), frames)
+
+    size = (probe.get('width'), probe.get('height'))
+    return _Decoded(probe.get('profile'), size, frames)
+
+
+def _luma(frames: bytes, index: int) -> bytes:
+    """The Y plane of a frame of raw I420 frames."""
+    start = index * SIZE
+    return frames[start : start + LUMA]
 
 
 def _psnrs(recorder: Recorder, stream: list[Encoded], decoded: bytes) -> list[float]:
-    values = [recorder.best_psnr(decoded[i * SIZE : i * SIZE + LUMA], stream[i].written) for i in SAMPLES]
-    return [min(v, 99.0) for v in values]
+    values = [recorder.best_psnr(_luma(decoded, i), stream[i].written) for i in SAMPLES]
+    return [min(value, 99.0) for value in values]
 
 
 async def _install() -> set[str | None]:
@@ -102,7 +119,8 @@ def _openh264_sender(
 ) -> webrtc.RTCRtpSender:
     sender = caller.add_track(recorder.generator.track)
     transceiver = next(t for t in caller.get_transceivers() if t.sender == sender)
-    transceiver.set_codec_preferences([c for c in h264_codecs() if c.sdp_fmtp_line not in builtin])
+    openh264_codecs = [codec for codec in h264_codecs() if codec.sdp_fmtp_line not in builtin]
+    transceiver.set_codec_preferences(openh264_codecs)
     sender.transform = webrtc.RTCRtpScriptTransform(recorder.tap)
     return sender
 
@@ -112,10 +130,12 @@ async def _send(ffmpeg: str, ffprobe: str) -> _Sent:
     recorder = Recorder(ffmpeg)
     caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
     sender = _openh264_sender(caller, recorder, builtin)
+
     async with writing(recorder.write):
         await connect(caller, callee, 20)
         await asyncio.wait_for(recorder.frames(DECODED), seconds(20))
         stream = recorder.encoded[:DECODED]
+
         key_frames = await _key_frames(sender, recorder)
         capped = await _bitrate_capped_at(sender, recorder, 100_000)
         uncapped = await _bitrate_capped_at(sender, recorder, 2_000_000)

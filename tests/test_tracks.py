@@ -28,6 +28,14 @@ from tests.helpers import (
 )
 
 
+async def remote_tracks(
+    pc: webrtc.RTCPeerConnection, offer: webrtc.RTCSessionDescription
+) -> list[webrtc.MediaStreamTrack]:
+    """The tracks of the transceivers a remote offer adds."""
+    await pc.set_remote_description(offer)
+    return [transceiver.receiver.track for transceiver in pc.get_transceivers()]
+
+
 @pytest.mark.asyncio
 async def test_remote_tracks_have_their_own_id_and_label(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, callee2: webrtc.RTCPeerConnection
@@ -36,16 +44,15 @@ async def test_remote_tracks_have_their_own_id_and_label(
     caller.add_transceiver(webrtc.MediaType.audio)
     caller.add_transceiver(webrtc.MediaType.video)
     await caller.set_local_description()
+    offer = caller.local_description
+    assert offer is not None
 
-    tracks: list[list[webrtc.MediaStreamTrack]] = []
-    assert caller.local_description is not None
-    for pc in (callee, callee2):
-        await pc.set_remote_description(caller.local_description)
-        tracks.append([t.receiver.track for t in pc.get_transceivers()])
+    tracks = await remote_tracks(callee, offer)
+    other_tracks = await remote_tracks(callee2, offer)
 
-    assert [t.label for t in tracks[0]] == ['remote audio', 'remote video']
-    assert {t.id for t in tracks[0]}.isdisjoint(t.id for t in tracks[1])
-    assert tracks[0][0].clone().label == 'remote audio'
+    assert [track.label for track in tracks] == ['remote audio', 'remote video']
+    assert {track.id for track in tracks}.isdisjoint(track.id for track in other_tracks)
+    assert tracks[0].clone().label == 'remote audio'
 
 
 @pytest.mark.asyncio
@@ -57,6 +64,7 @@ async def test_stopped_transceiver_ends_the_track_with_its_event(pc: webrtc.RTCP
 
     transceiver.stop()
     assert track.ready_state == webrtc.MediaStreamTrackState.live
+
     await ended
     assert track.ready_state == webrtc.MediaStreamTrackState.ended
 
@@ -73,6 +81,7 @@ async def test_stop_drops_a_queued_ended_event(pc: webrtc.RTCPeerConnection) -> 
     track.stop()
     # its completion is drained after the queued event
     _ = await pc.get_stats()
+
     assert calls == []
     assert track.ready_state == webrtc.MediaStreamTrackState.ended
 
@@ -87,8 +96,10 @@ async def test_ended_track_is_not_kept_by_its_handlers(
     remote_track = remote.receiver.track
     remote_track.on('mute', lambda event: calls.append(event.type))
     ended = wait_for_event(remote_track, 'ended')
+
     remote.stop()
     await ended
+
     assert remote_track.listeners('mute') != []
     ref = weakref.ref(remote_track)
     del remote_track
@@ -99,8 +110,10 @@ async def test_ended_track_is_not_kept_by_its_handlers(
 
     local_track = audio_stream.get_tracks()[0]
     local_track.on('mute', lambda event: calls.append(event.type))
+
     local_track.stop()
     local_track.on('ended', lambda event: calls.append(event.type))
+
     assert local_track.listeners('ended') != []
     await delivered()
     assert calls == []
@@ -116,6 +129,7 @@ async def test_rollback_ends_the_track_of_a_removed_transceiver(
     [transceiver] = callee.get_transceivers()
 
     await callee.set_remote_description(webrtc.RTCSessionDescriptionInit('rollback'))
+
     track = transceiver.receiver.track
     assert track.ready_state == webrtc.MediaStreamTrackState.live
     await wait_for_event(track, 'ended')
@@ -130,9 +144,11 @@ async def test_track_ended_before_its_wrapper_ends_with_its_event(
     # nothing receives, so no track event wraps the callee's transceiver
     stopped = caller.add_transceiver(webrtc.MediaType.audio, webrtc.RTCRtpTransceiverInit(direction='recvonly'))
     await exchange_offer_answer(caller, callee)
+
     stopped.stop()
     # rejects the section, which stops the callee's transceiver and ends its track
     await exchange_offer(caller, callee)
+
     [transceiver] = callee.get_transceivers()
     track = transceiver.receiver.track
     await wait_for_event(track, 'ended')
@@ -142,6 +158,7 @@ async def test_track_ended_before_its_wrapper_ends_with_its_event(
 def test_remove_track_of_another_connection(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
     """A connection can't remove a sender of another one."""
     sender = callee.add_transceiver(webrtc.MediaType.audio).sender
+
     with pytest.raises(webrtc.InvalidAccessError):
         caller.remove_track(sender)
 
@@ -156,6 +173,7 @@ async def test_remove_track_of_a_negotiated_stopped_transceiver(
     transceiver.stop()
     await exchange_offer_answer(caller, callee)
     assert transceiver.current_direction == webrtc.RTCRtpTransceiverDirection.stopped
+
     caller.remove_track(transceiver.sender)
 
 
@@ -166,7 +184,9 @@ def test_remove_track_of_a_stopping_transceiver(pc: webrtc.RTCPeerConnection, au
     [transceiver] = pc.get_transceivers()
     transceiver.stop()
     assert transceiver.direction == webrtc.RTCRtpTransceiverDirection.stopped
+
     pc.remove_track(sender)
+
     assert sender.track is track
     assert pc.get_senders() == [sender]
 
@@ -180,6 +200,7 @@ async def test_remove_track_of_a_rolled_back_transceiver(
     await exchange_offer(caller, callee)
     [transceiver] = callee.get_transceivers()
     await callee.set_remote_description(webrtc.RTCSessionDescriptionInit('rollback'))
+
     callee.remove_track(transceiver.sender)
 
 
@@ -191,15 +212,18 @@ async def test_track_event_when_remote_streams_change(
     events: list[webrtc.RTCTrackEvent] = []
     callee.on('track', events.append)
     transceiver = caller.add_transceiver(webrtc.MediaType.audio)
+
     await exchange_offer_answer(caller, callee)
+
     assert len(events) == 1
     assert events[0].streams == []
 
     stream = webrtc.MediaStream()
     transceiver.sender.set_streams(stream, stream)
     await exchange_offer_answer(caller, callee)
+
     assert len(events) == 2
-    assert [s.id for s in events[1].streams] == [stream.id]
+    assert [remote.id for remote in events[1].streams] == [stream.id]
     assert events[1].track == events[0].track
 
 
@@ -217,7 +241,7 @@ async def test_rejected_media_section_fires_no_track_event(
     rejected = re.sub(r'^m=video \d+', 'm=video 0', offer.sdp, flags=re.MULTILINE)
     await callee.set_remote_description(webrtc.RTCSessionDescriptionInit('offer', rejected))
 
-    assert [e.track.kind for e in events] == [webrtc.MediaType.audio]
+    assert [event.track.kind for event in events] == [webrtc.MediaType.audio]
 
 
 @pytest.mark.asyncio
@@ -225,12 +249,15 @@ async def test_replace_track_is_chained_after_remove_track(
     pc: webrtc.RTCPeerConnection, audio_stream: webrtc.MediaStream, audio_stream2: webrtc.MediaStream
 ) -> None:
     """replace_track is an operation of the connection: called before remove_track, it replaces the track after it."""
-    (first,), (second,) = audio_stream.get_tracks(), audio_stream2.get_tracks()
+    (first,) = audio_stream.get_tracks()
+    (second,) = audio_stream2.get_tracks()
     sender = pc.add_track(first)
+
     replaced = asyncio.ensure_future(sender.replace_track(second))
     await asyncio.sleep(0)  # let the task start
     pc.remove_track(sender)
     await replaced
+
     assert sender.track == second
 
 
@@ -243,7 +270,8 @@ async def test_remote_track_mute_and_stream_events(
     video_stream: webrtc.MediaStream,
 ) -> None:
     """A remote track that no longer receives media is removed from its stream and muted."""
-    (audio,), (video,) = audio_stream.get_tracks(), video_stream.get_tracks()
+    (audio,) = audio_stream.get_tracks()
+    (video,) = video_stream.get_tracks()
     stream = webrtc.MediaStream([audio, video])
     caller.add_track(audio, stream)
     transceiver = caller.add_transceiver(video, webrtc.RTCRtpTransceiverInit(streams=[stream]))
@@ -254,7 +282,7 @@ async def test_remote_track_mute_and_stream_events(
     remote_stream = events[0].streams[0]
     assert len(remote_stream.get_tracks()) == 2
     removed = wait_for_event(remote_stream, 'removetrack')
-    remote_video = next(e.track for e in events if e.track.kind == webrtc.MediaType.video)
+    remote_video = next(event.track for event in events if event.track.kind == webrtc.MediaType.video)
     # a track that is muted already doesn't fire mute
     await wait_until_unmuted(remote_video)
     muted = wait_for_event(remote_video, 'mute')
@@ -273,9 +301,11 @@ def test_remote_track_keeps_its_id_after_close(pc: webrtc.RTCPeerConnection) -> 
     """A kept remote track keeps its id."""
     track = pc.add_transceiver(webrtc.MediaType.audio).receiver.track
     before = track.id
+
     pc.close()
     gc.collect()
     _ = pc.get_transceivers()
+
     assert (track.id, track.label) == (before, 'remote audio')
 
 
@@ -285,7 +315,9 @@ def test_clone_copies_enabled_and_content_hint(pc: webrtc.RTCPeerConnection, kin
     track = pc.add_transceiver(kind).receiver.track
     track.enabled = False
     track.content_hint = hint
+
     clones = [track.clone(), webrtc.MediaStream([track]).clone().get_tracks()[0]]
+
     assert [(clone.enabled, clone.content_hint) for clone in clones] == [(False, hint)] * 2
 
 
@@ -293,8 +325,10 @@ def test_stream_is_active_until_all_its_tracks_end(
     audio_stream: webrtc.MediaStream, video_stream: webrtc.MediaStream
 ) -> None:
     """A stream is active while a track hasn't ended."""
-    (audio,), (video,) = audio_stream.get_tracks(), video_stream.get_tracks()
+    (audio,) = audio_stream.get_tracks()
+    (video,) = video_stream.get_tracks()
     assert webrtc.MediaStream().active is False
+
     stream = webrtc.MediaStream([audio, video])
     assert stream.get_track_by_id(video.id) == video
     assert stream.get_track_by_id('missing') is None

@@ -56,12 +56,16 @@ def test_the_gil_is_released_through_gil_release() -> None:
     assert offending == [], 'the GIL is released outside gil_release:\n' + '\n'.join(offending)
 
 
+def _is_dispatcher_wake(line: str) -> bool:
+    return line.startswith('utils/dispatcher.h:') and line.endswith(' _wake;')
+
+
 def test_no_python_object_is_held_natively() -> None:
     """No pybind11 members besides the Dispatcher's wake."""
-    # a member: the type anywhere in a line ending `_name;`, optionally initialized
     typed = _lines_matching(r'pybind11::(object|function|handle|buffer)\b')
+    # a member: the type anywhere in a line ending `_name;`, optionally initialized
     members = [line for line in typed if re.search(r'\b_\w+\s*(\{[^;]*\})?\s*(=[^;]*)?;\s*$', line) is not None]
-    offending = [line for line in members if not line.startswith('utils/dispatcher.h:') or not line.endswith(' _wake;')]
+    offending = [line for line in members if not _is_dispatcher_wake(line)]
     assert offending == [], 'a Python object is a member of a native class:\n' + '\n'.join(offending)
 
 
@@ -82,6 +86,7 @@ def test_wrappers_are_created_by_create_only() -> None:
     derived = re.compile(r'public NativeObject<(\w+)>')
     classes: list[str] = sorted({name for _, text in _sources() for name in derived.findall(text)})
     assert len(classes) >= 20, classes
+
     names = '|'.join(classes)
     offending = _lines_matching(
         rf'std::make_shared<\s*({names})\s*>|std::shared_ptr<\s*({names})\s*>\s*\(\s*new\b',
@@ -115,9 +120,13 @@ class Leaf(NamedTuple):
 
 def _class_body(text: str, start: int) -> str:
     """The text between a class's braces, from just past its opening brace."""
-    depth, end = 1, start
+    depth = 1
+    end = start
     while depth > 0:
-        depth += {'{': 1, '}': -1}.get(text[end], 0)
+        if text[end] == '{':
+            depth += 1
+        elif text[end] == '}':
+            depth -= 1
         end += 1
 
     return text[start : end - 1]
@@ -131,8 +140,11 @@ def _leaves() -> dict[str, Leaf]:
             continue
 
         for marker in re.finditer(re.escape(LEAF_MARKER), text):
+            # the marker's class is the last one opened before it
             head = list(re.finditer(r'\bclass (\w+)\b([^;{]*)\{', text[: marker.start()]))[-1]
-            leaves[head.group(1)] = Leaf(relative, ' '.join(head.group(2).split()), _class_body(text, head.end()))
+            name = head.group(1)
+            bases = ' '.join(head.group(2).split())
+            leaves[name] = Leaf(relative, bases, _class_body(text, head.end()))
 
     return leaves
 
@@ -182,6 +194,7 @@ def test_leaves_hold_only_values() -> None:
     for name, leaf in _leaves().items():
         assert leaf.bases == f': public NativeObject<{name}>', f'{leaf.path}: the leaf {name} derives from {leaf.bases}'
         assert re.search(rf'~{name}\s*\(', leaf.body) is None, f'{leaf.path}: the leaf {name} declares a destructor'
+
         members = _member_types(leaf.body)
         unknown = [member for member in members if member not in LEAF_MEMBERS]
         assert unknown == [], f'{leaf.path}: the leaf {name} holds members not known to only free memory: {unknown}'
@@ -191,13 +204,17 @@ def test_leaves_hold_only_values() -> None:
     assert used == set(LEAF_MEMBERS)
 
 
+def _without_suffix(path: str) -> str:
+    return path.rsplit('.', 1)[0]
+
+
 def test_leaves_dont_wait_or_post() -> None:
     """A leaf's sources don't wait, post, emit or register."""
     sources = _sources()
     for name, leaf in _leaves().items():
-        stem = leaf.path.rsplit('.', 1)[0]
+        stem = _without_suffix(leaf.path)
         for path, text in sources:
-            if path.rsplit('.', 1)[0] == stem:
+            if _without_suffix(path) == stem:
                 matching = re.findall(LEAF_FORBIDDEN, text)
                 assert matching == [], f'{path}: the leaf {name} waits, posts or registers: {matching}'
 

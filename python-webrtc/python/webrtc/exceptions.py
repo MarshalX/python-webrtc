@@ -30,8 +30,6 @@ if TYPE_CHECKING:
 PythonWebRTCExceptionBase = wrtc.PythonWebRTCExceptionBase
 #: The native exception that :obj:`RTCException` subclasses, and so every WebRTC error of this library does too
 PythonWebRTCException = wrtc.PythonWebRTCException
-#: The native exception for an SDP that doesn't parse. Descriptions that don't parse raise :obj:`RTCError` instead,
-#: with the ``sdp-syntax-error`` detail
 
 
 class RTCException(PythonWebRTCException):
@@ -211,8 +209,8 @@ class RTCError(OperationError):
     httpRequestStatusCode: ClassVar[Alias[int | None]] = alias('http_request_status_code')
 
 
+# the W3C error names for libwebrtc's RTCErrorType values
 _BY_RTC_ERROR_TYPE = {
-    # the W3C error names for libwebrtc's RTCErrorType values
     'UNSUPPORTED_OPERATION': OperationError,
     'UNSUPPORTED_PARAMETER': InvalidAccessError,
     'INVALID_PARAMETER': InvalidAccessError,
@@ -236,13 +234,13 @@ def _from_native(
 ) -> RTCException:
     """Creates the exception for a webrtc::RTCError, called from cpp/src/exceptions.cpp."""
     if error_type == 'OPERATION_ERROR_WITH_DATA' or detail is not None:
-        init = RTCErrorInit(
-            detail if detail is not None else RTCErrorDetailType.data_channel_failure,
-            sctp_cause_code=sctp_cause_code,
-            sdp_line_number=sdp_line_number,
-        )
+        if detail is None:
+            detail = RTCErrorDetailType.data_channel_failure
+        init = RTCErrorInit(detail, sctp_cause_code=sctp_cause_code, sdp_line_number=sdp_line_number)
         return RTCError(init, message)
-    return _BY_RTC_ERROR_TYPE.get(error_type, OperationError)(message)
+
+    error_class = _BY_RTC_ERROR_TYPE.get(error_type, OperationError)
+    return error_class(message)
 
 
 def _event_error(native: wrtc.RTCCallbackException) -> RTCError:

@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import asyncio
-import pathlib
 import socket
 import sys
 import time
@@ -21,25 +20,43 @@ import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import connect, exchange_offer_answer, wait_for_event, wait_for_ice_gathering_complete, wait_until
+from tests.helpers import (
+    connect,
+    exchange_offer_answer,
+    open_descriptors,
+    wait_for_event,
+    wait_for_ice_gathering_complete,
+    wait_until,
+)
 from tests.timing import seconds
 
 if TYPE_CHECKING:
     from tests.helpers import CreatePC
 
 
-def _descriptors() -> int:
-    return sum(1 for _ in pathlib.Path('/dev/fd').iterdir())
-
-
 async def _round(count: int) -> None:
     pairs = [(webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()) for _ in range(count)]
     for caller, _ in pairs:
         caller.create_data_channel('round')
+
     await asyncio.gather(*starmap(connect, pairs))
+
     for caller, callee in pairs:
         caller.close()
         callee.close()
+
+
+async def _open_channel(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, label: str
+) -> tuple[webrtc.RTCDataChannel, webrtc.RTCDataChannel]:
+    """The caller's open channel and the callee's end of it."""
+    channel = caller.create_data_channel(label)
+    announced = wait_for_event(callee, 'datachannel')
+    await connect(caller, callee)
+    event = await announced
+    assert isinstance(event, webrtc.RTCDataChannelEvent)
+    await wait_until(lambda: channel.ready_state == webrtc.RTCDataChannelState.open, 'the channel to open')
+    return channel, event.channel
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='counts the descriptors in /dev/fd')
@@ -47,11 +64,11 @@ async def _round(count: int) -> None:
 async def test_rounds_of_connections_give_their_sockets_back() -> None:
     """After rounds of connections set up at once and closed, the process has the sockets it had after the first."""
     await _round(5)
-    after_first = _descriptors()
+    after_first = open_descriptors()
     for _ in range(4):
         await _round(5)
 
-    await wait_until(lambda: _descriptors() <= after_first, 'the sockets of closed connections to close')
+    await wait_until(lambda: open_descriptors() <= after_first, 'the sockets of closed connections to close')
 
 
 @pytest.mark.asyncio
@@ -59,13 +76,7 @@ async def test_messages_flow_across_ice_restarts(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:
     """Each restart gathers again on the connection's own networks and keeps the channel working."""
-    channel = caller.create_data_channel('restarts')
-    announced = wait_for_event(callee, 'datachannel')
-    await connect(caller, callee)
-    event = await announced
-    assert isinstance(event, webrtc.RTCDataChannelEvent)
-    remote = event.channel
-    await wait_until(lambda: channel.ready_state == webrtc.RTCDataChannelState.open, 'the channel to open')
+    channel, remote = await _open_channel(caller, callee, 'restarts')
 
     for restart in range(3):
         caller.restart_ice()
@@ -73,9 +84,11 @@ async def test_messages_flow_across_ice_restarts(
         await wait_until(
             lambda: caller.ice_gathering_state == webrtc.RTCIceGatheringState.complete, 'gathering after the restart'
         )
+
         received = wait_for_event(remote, 'message')
         channel.send(f'after restart {restart}')
         message = await received
+
         assert isinstance(message, webrtc.MessageEvent)
         assert message.data == f'after restart {restart}'
 
@@ -91,15 +104,19 @@ def _to_closed_tcp_port(sdp: str, port: int) -> str:
     """Keeps the TCP candidates on 127.0.0.1, made passive on a port nothing listens on."""
     lines: list[str] = []
     for line in sdp.split('\r\n'):
-        if line.startswith('a=candidate:'):
-            parts = line.split()
-            if parts[2].lower() != 'tcp' or parts[4] != '127.0.0.1':
-                continue
-            parts[5] = str(port)
-            parts[parts.index('tcptype') + 1] = 'passive'
-            lines.append(' '.join(parts))
-        else:
+        if not line.startswith('a=candidate:'):
             lines.append(line)
+            continue
+
+        fields = line.split()
+        transport, address = fields[2], fields[4]
+        if transport.lower() != 'tcp' or address != '127.0.0.1':
+            continue
+
+        fields[5] = str(port)
+        fields[fields.index('tcptype') + 1] = 'passive'
+        lines.append(' '.join(fields))
+
     return '\r\n'.join(lines)
 
 
@@ -112,28 +129,27 @@ async def test_refused_tcp_connects_neither_spin_nor_leak(create_pc: CreatePC) -
     await caller.set_local_description()
     await wait_for_ice_gathering_complete(caller)
     assert caller.local_description is not None
-    offer = webrtc.RTCSessionDescriptionInit(
-        type='offer', sdp=_to_closed_tcp_port(caller.local_description.sdp, _closed_port())
-    )
-    await callee.set_remote_description(offer)
+
+    sdp = _to_closed_tcp_port(caller.local_description.sdp, _closed_port())
+    await callee.set_remote_description(webrtc.RTCSessionDescriptionInit(type='offer', sdp=sdp))
     await callee.set_local_description()
     await wait_for_ice_gathering_complete(callee)
     await asyncio.sleep(1)
-    descriptors = _descriptors()
+    descriptors = open_descriptors()
 
     started = time.process_time()
     await asyncio.sleep(1)
 
     assert time.process_time() - started < seconds(0.5)
-    assert _descriptors() <= descriptors
+    assert open_descriptors() <= descriptors
 
 
 async def _selected_pair(pc: webrtc.RTCPeerConnection) -> webrtc.RTCIceCandidatePairStats:
     report = await pc.get_stats()
     selected = next(
-        s.selected_candidate_pair_id
-        for s in report.values()
-        if isinstance(s, webrtc.RTCTransportStats) and s.selected_candidate_pair_id is not None
+        stats.selected_candidate_pair_id
+        for stats in report.values()
+        if isinstance(stats, webrtc.RTCTransportStats) and stats.selected_candidate_pair_id is not None
     )
     pair = report[selected]
     assert isinstance(pair, webrtc.RTCIceCandidatePairStats)
@@ -154,13 +170,7 @@ async def test_a_flood_between_connections_of_one_thread_loses_no_datagram(
 ) -> None:
     """The network thread reads what it sends to its own sockets before their kernel buffers overflow."""
     _skip_unless_a_flood_fits(pytestconfig)
-    channel = caller.create_data_channel('flood')
-    announced = wait_for_event(callee, 'datachannel')
-    await connect(caller, callee)
-    event = await announced
-    assert isinstance(event, webrtc.RTCDataChannelEvent)
-    remote = event.channel
-    await wait_until(lambda: channel.ready_state == webrtc.RTCDataChannelState.open, 'the channel to open')
+    channel, remote = await _open_channel(caller, callee, 'flood')
 
     count = 20000
     received = 0
@@ -182,9 +192,9 @@ async def test_a_flood_between_connections_of_one_thread_loses_no_datagram(
         channel.send(payload)
     await all_received.wait()
 
+    # SCTP retransmits what the kernel dropped, so only these counts show the loss
     sent = (await _selected_pair(caller)).packets_sent
     delivered = (await _selected_pair(callee)).packets_received
-    # SCTP retransmits what the kernel dropped, so only these counts show the loss
     assert sent is not None
     assert delivered is not None
     assert sent - delivered <= 16, f'{sent - delivered} of {sent} datagrams dropped'

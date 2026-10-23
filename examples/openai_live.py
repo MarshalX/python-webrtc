@@ -184,7 +184,9 @@ class Console:
 def peak(samples: bytes | bytearray) -> float:
     """The peak level of 16-bit samples, from 0 to 1."""
     values = array('h', samples)
-    return max(*values, -min(values)) / 32768 if len(values) > 0 else 0
+    if len(values) == 0:
+        return 0
+    return max(abs(value) for value in values) / 32768
 
 
 class Microphone:
@@ -272,17 +274,12 @@ class LiveCall:
 
     async def run(self, hang_up: asyncio.Event) -> None:
         """Connects, then talks until hung up."""
-        console, args = self.console, self.args
-        loop = asyncio.get_running_loop()
+        console = self.console
+        args = self.args
+        microphone = self._open_audio_devices()
 
-        self.microphone = Microphone(args.input_device, loop)
-        self.speakers = Speakers(args.output_device)
-        console.info(f'Microphone: {self.microphone.name}')
-        console.info(f'Speakers:   {self.speakers.name}')
-        if not args.barge_in:
-            console.info('Echo guard on: the mic is muted while the assistant speaks (--barge-in turns it off)')
-
-        self.pc = pc = webrtc.RTCPeerConnection()
+        pc = webrtc.RTCPeerConnection()
+        self.pc = pc
         pc.on('connectionstatechange', self._on_connection_state)
         pc.on('track', self._on_track)
 
@@ -303,11 +300,22 @@ class LiveCall:
         answer = await self._create_session(sdp)
         await pc.set_remote_description(webrtc.RTCSessionDescriptionInit('answer', answer))
 
-        self.microphone.start()
+        microphone.start()
         writer = generator.writable.get_writer()
-        self.tasks.append(asyncio.ensure_future(self._send_microphone(writer, self.microphone)))
+        self.tasks.append(asyncio.ensure_future(self._send_microphone(writer, microphone)))
         await hang_up.wait()
         await self.close()
+
+    def _open_audio_devices(self) -> Microphone:
+        """Opens the microphone and the speakers, returns the microphone."""
+        console = self.console
+        self.microphone = Microphone(self.args.input_device, asyncio.get_running_loop())
+        self.speakers = Speakers(self.args.output_device)
+        console.info(f'Microphone: {self.microphone.name}')
+        console.info(f'Speakers:   {self.speakers.name}')
+        if not self.args.barge_in:
+            console.info('Echo guard on: the mic is muted while the assistant speaks (--barge-in turns it off)')
+        return self.microphone
 
     async def _gathered(self, pc: webrtc.RTCPeerConnection) -> str:
         """Waits for the local ICE candidates, which go in the offer since there is no trickling, returns the offer."""
@@ -329,14 +337,17 @@ class LiveCall:
         return pc.local_description.sdp
 
     async def _create_session(self, sdp: str) -> str:
+        """Posts the offer to the API, returns the answer."""
         session: dict[str, object] = {'model': self.args.model}
         if self.args.instructions:
             session['instructions'] = self.args.instructions
         if self.args.voice:
             session['audio'] = {'output': {'voice': self.args.voice}}
+
         transport: dict[str, object] = {'type': 'webrtc', 'sdp': sdp}
         if not self.args.no_warp:
             transport['dcid'] = WARP_CHANNEL_ID
+
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
@@ -349,6 +360,7 @@ class LiveCall:
             raise CallError(msg) from None
         if response.is_error:
             raise CallError(_describe_http_error(response))
+
         reply: SessionReply = response.json()
         self.console.ok(f'Session created: {reply.get("session", {}).get("id", "?")}')
         return reply['transport']['sdp']
@@ -386,49 +398,59 @@ class LiveCall:
 
     async def _send_microphone(self, writer: webrtc.WritableStreamDefaultWriter, microphone: Microphone) -> None:
         """Sends the microphone to the model, silence instead while the echo guard holds it."""
-        console, loop = self.console, asyncio.get_running_loop()
+        loop = asyncio.get_running_loop()
         silence = bytes(FRAME * 2)
-        timestamp, heard, started = 0, False, loop.time()
+        timestamp = 0
+        checked = False
+        started = loop.time()
         while True:
             chunk = await microphone.queue.get()
-            if not heard:
-                if peak(chunk) > VOICE_LEVEL:
-                    heard = True
-                    console.ok('Microphone is picking up sound')
-                elif loop.time() - started > SILENT_MIC_WARNING:
-                    heard = True
-                    console.warn(
-                        f'The microphone has been silent for {SILENT_MIC_WARNING} s: '
-                        'check its permission and input level'
-                    )
-            guarded = not self.args.barge_in and time.monotonic() - self.assistant_spoke_at < ECHO_TAIL
-            data = webrtc.AudioData(
-                webrtc.AudioDataInit(
-                    format='s16',
-                    sample_rate=SAMPLE_RATE,
-                    number_of_frames=FRAME,
-                    number_of_channels=1,
-                    timestamp=timestamp,
-                    data=silence if guarded else chunk,
-                )
+            if not checked:
+                checked = self._check_microphone(chunk, silent_for=loop.time() - started)
+
+            init = webrtc.AudioDataInit(
+                format='s16',
+                sample_rate=SAMPLE_RATE,
+                number_of_frames=FRAME,
+                number_of_channels=1,
+                timestamp=timestamp,
+                data=silence if self._echo_guarded() else chunk,
             )
-            await writer.write(data)
+            await writer.write(webrtc.AudioData(init))
             timestamp += 10_000
+
+    def _check_microphone(self, chunk: bytes, *, silent_for: float) -> bool:
+        """Reports whether the microphone hears sound, returns whether there's a verdict."""
+        if peak(chunk) > VOICE_LEVEL:
+            self.console.ok('Microphone is picking up sound')
+            return True
+        if silent_for > SILENT_MIC_WARNING:
+            self.console.warn(
+                f'The microphone has been silent for {SILENT_MIC_WARNING} s: check its permission and input level'
+            )
+            return True
+        return False
+
+    def _echo_guarded(self) -> bool:
+        """Whether the microphone is muted, so the model doesn't hear its own voice from the speakers."""
+        return not self.args.barge_in and time.monotonic() - self.assistant_spoke_at < ECHO_TAIL
 
     async def _play(self, track: webrtc.MediaStreamTrack, speakers: Speakers) -> None:
         """Plays the assistant's audio."""
+        processor = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=50))
+        options = webrtc.AudioDataCopyToOptions(plane_index=0, format='s16')
         heard = False
-        async for data in webrtc.MediaStreamTrackProcessor(
-            webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=50)
-        ).readable:
+        async for data in processor.readable:
             if not isinstance(data, webrtc.AudioData):
                 msg = f'expected audio data, not {data!r}'
                 raise TypeError(msg)
+
             with data:
-                options = webrtc.AudioDataCopyToOptions(plane_index=0, format='s16')
                 samples = bytearray(data.allocation_size(options))
                 data.copy_to(samples, options)
-                rate, channels = int(data.sample_rate), data.number_of_channels
+                rate = int(data.sample_rate)
+                channels = data.number_of_channels
+
             if peak(samples) > VOICE_LEVEL:
                 self.assistant_spoke_at = time.monotonic()
                 if not heard:
@@ -442,6 +464,7 @@ class LiveCall:
         if message is None:
             console.debug(f'Not JSON: {event.data!r}')
             return
+
         kind = message.get('type')
         if kind == 'session.input_transcript.delta':
             console.transcript('user', message.get('delta', ''))
@@ -452,23 +475,33 @@ class LiveCall:
             console.ok('Session started, say something! (Ctrl+C to hang up)')
             console.debug(f'Session started {self._elapsed()}')
         elif kind == 'session.closed':
-            usage = message.get('usage', {})
-            reason = message.get('reason', '')
-            console.info(
-                f'Session closed{f" ({reason})" if reason != "" else ""}, {usage.get("seconds", "?")} s billed'
-            )
-            self.session_closed.set()
+            self._on_session_closed(message)
         elif kind == 'error':
-            error = message.get('error', {})
-            text = error.get('message')
-            console.error(f'API error: {text if text is not None and text != "" else error}')
+            self._on_api_error(message)
         elif kind == 'session.usage.updated':
-            usage = message.get('usage', {})
-            ratio = message.get('context_window', {}).get('usage_ratio')
-            context = f', context {ratio:.0%} full' if isinstance(ratio, (int, float)) else ''
-            console.debug(f'Usage: {usage.get("seconds", "?")} s{context}')
+            self._on_usage(message)
         else:
             console.debug(f'Event {kind}')
+
+    def _on_session_closed(self, message: Message) -> None:
+        usage = message.get('usage', {})
+        reason = message.get('reason', '')
+        because = f' ({reason})' if reason != '' else ''
+        self.console.info(f'Session closed{because}, {usage.get("seconds", "?")} s billed')
+        self.session_closed.set()
+
+    def _on_api_error(self, message: Message) -> None:
+        error = message.get('error', {})
+        text = error.get('message')
+        if text is None or text == '':
+            text = str(error)
+        self.console.error(f'API error: {text}')
+
+    def _on_usage(self, message: Message) -> None:
+        usage = message.get('usage', {})
+        ratio = message.get('context_window', {}).get('usage_ratio')
+        context = f', context {ratio:.0%} full' if isinstance(ratio, (int, float)) else ''
+        self.console.debug(f'Usage: {usage.get("seconds", "?")} s{context}')
 
     async def close(self) -> None:
         """Ends the session gracefully, then releases the audio devices."""
@@ -480,9 +513,11 @@ class LiveCall:
                 await asyncio.wait_for(self.session_closed.wait(), 5)
             except asyncio.TimeoutError:
                 console.warn("The session didn't confirm closing")
+
         for task in self.tasks:
             task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
+
         if self.pc is not None:
             self.pc.close()
         if self.microphone is not None:
@@ -521,7 +556,10 @@ def _describe_http_error(response: httpx.Response) -> str:
         429: 'rate limit or quota exceeded',
     }
     summary = hints.get(response.status_code, response.reason_phrase)
-    return f'OpenAI API returned {response.status_code}, {summary}' + (f': {message}' if message != '' else '')
+    description = f'OpenAI API returned {response.status_code}, {summary}'
+    if message != '':
+        description += f': {message}'
+    return description
 
 
 def parse_args() -> argparse.Namespace:
@@ -541,6 +579,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--list-devices', action='store_true', help='list audio devices and exit')
     parser.add_argument('-v', '--verbose', action='store_true', help='log every event from the API')
     args = parser.parse_args()
+
     for name in ('input_device', 'output_device'):
         value: str | None = getattr(args, name)
         if value is not None and value.isdigit():
@@ -554,6 +593,7 @@ async def main() -> None:
     if args.list_devices:
         print(sounddevice.query_devices())
         return
+
     console = Console(verbose=args.verbose)
     if not args.api_key:
         console.error('No API key: set OPENAI_API_KEY or pass --api-key')

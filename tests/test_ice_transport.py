@@ -33,6 +33,13 @@ from tests.helpers import (
 )
 from tests.timing import seconds
 
+#: the shortest valid ICE password
+PASSWORD = 'p' * 22
+CANDIDATE = 'candidate:1 1 udp 2122260223 192.0.2.1 50000 typ host'
+#: the fields of a candidate before its address
+CANDIDATE_ADDRESS = re.compile(r'^((?:\S+ ){4})\S+')
+MDNS_NAME = '4f1e9d2c-8a7b-4c5d-9e3f-0f3c1d7e6b5a.local'
+
 
 def local_parameters(transport: webrtc.RTCIceTransport) -> webrtc.RTCIceParameters:
     parameters = transport.get_local_parameters()
@@ -40,23 +47,53 @@ def local_parameters(transport: webrtc.RTCIceTransport) -> webrtc.RTCIceParamete
     return parameters
 
 
+async def data_channel_ice_transport(pc: webrtc.RTCPeerConnection, label: str) -> webrtc.RTCIceTransport:
+    """The ICE transport of a new data channel, once the offer is set locally."""
+    pc.create_data_channel(label)
+    await pc.set_local_description()
+    assert pc.sctp is not None
+    return pc.sctp.transport.ice_transport
+
+
+def forward_candidates(source: webrtc.RTCIceTransport, destination: webrtc.RTCIceTransport) -> None:
+    """Signals the candidates the source gathers to the destination."""
+
+    def on_candidate(event: webrtc.RTCPeerConnectionIceEvent) -> None:
+        if event.candidate is not None:
+            destination.add_remote_candidate(event.candidate)
+
+    source.on('icecandidate', on_candidate)
+
+
+async def connect_transports(local: webrtc.RTCIceTransport, remote: webrtc.RTCIceTransport) -> None:
+    """Gathers, starts the local transport controlling and the remote one controlled, and waits for both."""
+    local.gather()
+    remote.gather()
+    local.start(local_parameters(remote), 'controlling')
+    remote.start(local_parameters(local), 'controlled')
+
+    def connected() -> bool:
+        return local.state == remote.state == webrtc.RTCIceTransportState.connected
+
+    await wait_until(connected, 'both transports to connect')
+
+
 @pytest.mark.asyncio
 async def test_candidates_parameters_and_role(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:
     """A connection's transport learns its role from the answer, and has the signaled parameters and candidates."""
-    caller.create_data_channel('ice')
-    await caller.set_local_description()
-    assert caller.sctp is not None
-    ice = caller.sctp.transport.ice_transport
+    ice = await data_channel_ice_transport(caller, 'ice')
     assert ice.role == webrtc.RTCIceRole.unknown
     assert ice.get_remote_parameters() is None
 
     await connect(caller, callee)
     await wait_until(lambda: ice.role == webrtc.RTCIceRole.controlling, 'the controlling role')
+
     assert callee.sctp is not None
     remote_ice = callee.sctp.transport.ice_transport
-    local, remote = ice.get_local_parameters(), ice.get_remote_parameters()
+    local = ice.get_local_parameters()
+    remote = ice.get_remote_parameters()
     assert isinstance(local, webrtc.RTCIceParameters)
     assert local.username_fragment != ''
     assert local.password != ''
@@ -73,10 +110,7 @@ async def test_candidates_parameters_and_role(
 async def test_once_handles_the_first_state_change_only(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:
-    caller.create_data_channel('once')
-    await caller.set_local_description()
-    assert caller.sctp is not None
-    ice = caller.sctp.transport.ice_transport
+    ice = await data_channel_ice_transport(caller, 'once')
     first: list[webrtc.RTCIceTransportState] = []
     every: list[webrtc.RTCIceTransportState] = []
     ice.once('statechange', lambda _event: first.append(ice.state))
@@ -84,6 +118,7 @@ async def test_once_handles_the_first_state_change_only(
 
     await connect(caller, callee)
     await wait_until(lambda: webrtc.RTCIceTransportState.connected in every, 'the connected ICE transport')
+
     assert len(every) > 1
     assert first == every[:1]
 
@@ -92,7 +127,9 @@ async def test_once_handles_the_first_state_change_only(
 async def test_component(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
     """RTP and RTCP are multiplexed on the transport of the RTP component."""
     transceiver = caller.add_transceiver(webrtc.MediaType.audio)
+
     await connect(caller, callee)
+
     assert transceiver.sender.transport is not None
     assert transceiver.sender.transport.ice_transport.component == webrtc.RTCIceComponent.rtp
 
@@ -105,7 +142,9 @@ async def test_close_keeps_gathering_state(pc: webrtc.RTCPeerConnection) -> None
     assert transceiver.sender.transport is not None
     ice = transceiver.sender.transport.ice_transport
     state = ice.gathering_state
+
     pc.close()
+
     assert ice.state == webrtc.RTCIceTransportState.closed
     assert ice.gathering_state == state
 
@@ -120,14 +159,10 @@ async def test_two_transports_connect() -> None:
     assert local.get_remote_parameters() is None
     assert local.get_selected_candidate_pair() is None
 
-    for transport, other in ((local, remote), (remote, local)):
-
-        def on_candidate(event: webrtc.RTCPeerConnectionIceEvent, other: webrtc.RTCIceTransport = other) -> None:
-            if event.candidate is not None:
-                other.add_remote_candidate(event.candidate)
-
-        transport.on('icecandidate', on_candidate)
+    forward_candidates(local, remote)
+    forward_candidates(remote, local)
     connected = [wait_for_event(t, 'statechange') for t in (local, remote)]
+
     local.gather()
     remote.gather()
     # read live: host candidates may all be gathered already
@@ -156,13 +191,14 @@ def test_start_validation() -> None:
     """Start checks the remote parameters and the role, and other remote parameters restart the checks."""
     transport = webrtc.RTCIceTransport()
     with pytest.raises(webrtc.InvalidSyntaxError):
-        transport.start(webrtc.RTCIceParameters('ab', 'p' * 22))
+        transport.start(webrtc.RTCIceParameters('ab', PASSWORD))
     with pytest.raises(webrtc.InvalidSyntaxError):
         transport.start(webrtc.RTCIceParameters('abcd', 'short'))
-    transport.start(webrtc.RTCIceParameters('abcd', 'p' * 22))
+
+    transport.start(webrtc.RTCIceParameters('abcd', PASSWORD))
     assert transport.role == webrtc.RTCIceRole.controlled
     with pytest.raises(webrtc.InvalidStateError):
-        transport.start(webrtc.RTCIceParameters('abcd', 'p' * 22), 'controlling')
+        transport.start(webrtc.RTCIceParameters('abcd', PASSWORD), 'controlling')
     with pytest.raises(webrtc.OperationError):
         transport.add_remote_candidate(webrtc.RTCIceCandidate('invalid', sdp_mid=''))
 
@@ -170,10 +206,12 @@ def test_start_validation() -> None:
     transport.add_remote_candidate(candidate)
     assert transport.state == webrtc.RTCIceTransportState.checking
     assert transport.get_remote_candidates() == [candidate]
+
     # other remote parameters are another remote agent
     transport.start(webrtc.RTCIceParameters('efgh', 'q' * 22))
     assert transport.state == webrtc.RTCIceTransportState.new
     assert transport.get_remote_candidates() == []
+
     transport.stop()
 
 
@@ -189,16 +227,21 @@ async def test_selected_pair_changes_with_its_event(
     await callee.set_remote_description(cast('webrtc.RTCSessionDescription', caller.local_description))
     await callee.set_local_description()
     await wait_for_ice_gathering_complete(callee)
+
     assert caller.sctp is not None
     assert callee.sctp is not None
     transports = (caller.sctp.transport.ice_transport, callee.sctp.transport.ice_transport)
     # the pair each transport showed last along with its event
     shown = [transport.get_selected_candidate_pair() for transport in transports]
+
+    def show_on_change(index: int, transport: webrtc.RTCIceTransport) -> None:
+        def on_change(_event: webrtc.Event) -> None:
+            shown[index] = transport.get_selected_candidate_pair()
+
+        transport.on('selectedcandidatepairchange', on_change)
+
     for index, transport in enumerate(transports):
-        transport.on(
-            'selectedcandidatepairchange',
-            lambda _event, i=index, t=transport: shown.__setitem__(i, t.get_selected_candidate_pair()),
-        )
+        show_on_change(index, transport)
 
     wrtc._testing.park('ice.pairchanged')
     try:
@@ -212,14 +255,11 @@ async def test_selected_pair_changes_with_its_event(
         wrtc._testing.release('ice.pairchanged')
     await answering
     await wait_until(lambda: shown[0] is not None, 'the selected pair')
-
     ice = transports[0]
 
     caller.close()
+
     assert ice.get_selected_candidate_pair() is None
-
-
-CANDIDATE = 'candidate:1 1 udp 2122260223 192.0.2.1 50000 typ host'
 
 
 async def offered_audio(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> webrtc.RTCIceTransport:
@@ -227,6 +267,7 @@ async def offered_audio(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeer
     caller.add_transceiver(webrtc.MediaType.audio)
     await callee.set_remote_description(await caller.create_offer())
     await callee.set_local_description()
+
     transport = callee.get_transceivers()[0].receiver.transport
     assert transport is not None
     return transport.ice_transport
@@ -285,10 +326,12 @@ async def test_end_of_candidates_is_for_one_remote_description(
     await exchange_offer(caller, callee)
     await callee.add_ice_candidate()
     await exchange_answer(caller, callee)
+
     # the answer makes the offer current, which keeps it
     current = callee.current_remote_description
     assert current is not None
     assert 'a=end-of-candidates' in current.sdp
+
     # later descriptions may take the address of a freed one
     for _ in range(20):
         caller.restart_ice()
@@ -296,6 +339,7 @@ async def test_end_of_candidates_is_for_one_remote_description(
         pending = callee.pending_remote_description
         assert pending is not None
         assert 'a=end-of-candidates' not in pending.sdp
+
         await exchange_answer(caller, callee)
         current = callee.current_remote_description
         assert current is not None
@@ -309,16 +353,24 @@ async def test_candidate_without_media_section_is_a_type_error(pc: webrtc.RTCPee
         await pc.add_ice_candidate(webrtc.RTCIceCandidateInit(CANDIDATE))
 
 
+async def offer_with_candidates(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, *candidates: str
+) -> None:
+    """Signals an audio offer with the candidates in its media section."""
+    caller.add_transceiver(webrtc.MediaType.audio)
+    offer = await caller.create_offer()
+    lines = ''.join(f'a={candidate}\r\n' for candidate in candidates)
+    offer.sdp = offer.sdp.replace('a=mid:0\r\n', f'a=mid:0\r\n{lines}')
+    await callee.set_remote_description(offer)
+
+
 @pytest.mark.asyncio
 async def test_candidates_of_blocked_ports_are_ignored(
     caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
 ) -> None:
-    """TCP candidates for blocked ports are dropped, as browsers do."""
+    """TCP candidates for blocked ports are dropped."""
     blocked = 'candidate:2 1 tcp 1518280447 192.0.2.2 22 typ host tcptype passive'
-    caller.add_transceiver(webrtc.MediaType.audio)
-    offer = await caller.create_offer()
-    offer.sdp = offer.sdp.replace('a=mid:0\r\n', f'a=mid:0\r\na={blocked}\r\na={CANDIDATE}\r\n')
-    await callee.set_remote_description(offer)
+    await offer_with_candidates(caller, callee, blocked, CANDIDATE)
 
     await callee.add_ice_candidate(webrtc.RTCIceCandidateInit(blocked.replace('192.0.2.2', '192.0.2.3'), sdp_mid='0'))
 
@@ -334,10 +386,7 @@ async def test_active_tcp_candidates_on_the_discard_port_are_kept(
 ) -> None:
     """An active candidate is never connected to, so its port 9 (RFC 6544) isn't blocked."""
     active = 'candidate:2 1 tcp 1518280447 192.0.2.2 9 typ host tcptype active'
-    caller.add_transceiver(webrtc.MediaType.audio)
-    offer = await caller.create_offer()
-    offer.sdp = offer.sdp.replace('a=mid:0\r\n', f'a=mid:0\r\na={active}\r\n')
-    await callee.set_remote_description(offer)
+    await offer_with_candidates(caller, callee, active)
 
     await callee.add_ice_candidate(webrtc.RTCIceCandidateInit(active.replace('192.0.2.2', '192.0.2.3'), sdp_mid='0'))
 
@@ -350,16 +399,14 @@ async def test_active_tcp_candidates_on_the_discard_port_are_kept(
 @pytest.mark.asyncio
 async def test_standalone_methods_reject_a_transport_of_a_connection(pc: webrtc.RTCPeerConnection) -> None:
     """Gather, start, stop and remote candidates are standalone-only."""
-    pc.create_data_channel('ice')
-    await pc.set_local_description()
-    assert pc.sctp is not None
-    ice = pc.sctp.transport.ice_transport
+    ice = await data_channel_ice_transport(pc, 'ice')
     calls = [
         ice.gather,
-        lambda: ice.start(webrtc.RTCIceParameters('abcd', 'p' * 22)),
+        lambda: ice.start(webrtc.RTCIceParameters('abcd', PASSWORD)),
         lambda: ice.add_remote_candidate(webrtc.RTCIceCandidateInit(CANDIDATE, sdp_mid='')),
         ice.stop,
     ]
+
     for call in calls:
         with pytest.raises(webrtc.InvalidStateError, match='belongs to an RTCPeerConnection'):
             call()
@@ -368,10 +415,12 @@ async def test_standalone_methods_reject_a_transport_of_a_connection(pc: webrtc.
 def test_gather_once_and_with_a_known_role() -> None:
     transport = webrtc.RTCIceTransport()
     transport.gather()
+
     with pytest.raises(webrtc.InvalidStateError, match='gathers its candidates already'):
         transport.gather()
     with pytest.raises(ValueError, match='controlling or controlled'):
-        transport.start(webrtc.RTCIceParameters('abcd', 'p' * 22), webrtc.RTCIceRole.unknown)
+        transport.start(webrtc.RTCIceParameters('abcd', PASSWORD), webrtc.RTCIceRole.unknown)
+
     transport.stop()
 
 
@@ -399,6 +448,7 @@ async def test_gathers_like_a_connection() -> None:
         return transport.gathering_state == webrtc.RTCIceGathererState.complete
 
     gathered = wait_for_event(transport, 'gatheringstatechange', predicate=complete)
+
     start = time.monotonic()
     transport.gather()
     await gathered
@@ -415,7 +465,9 @@ async def test_gathers_like_a_connection() -> None:
 
 def test_remote_candidate_from_a_dictionary() -> None:
     transport = webrtc.RTCIceTransport()
+
     transport.add_remote_candidate(webrtc.RTCIceCandidateInit(CANDIDATE, sdp_mid='', username_fragment='abcd'))
+
     (candidate,) = transport.get_remote_candidates()
     assert isinstance(candidate, webrtc.RTCIceCandidate)
     assert (candidate.candidate, candidate.address, candidate.username_fragment) == (CANDIDATE, '192.0.2.1', 'abcd')
@@ -426,22 +478,11 @@ def test_remote_candidate_from_a_dictionary() -> None:
 async def test_unsignaled_remote_is_peer_reflexive() -> None:
     """It connects to the address the checks come from."""
     local, remote = webrtc.RTCIceTransport(), webrtc.RTCIceTransport()
-
-    def on_candidate(event: webrtc.RTCPeerConnectionIceEvent) -> None:
-        if event.candidate is not None:
-            local.add_remote_candidate(event.candidate)
-
     # only the remote's candidates are signaled
-    remote.on('icecandidate', on_candidate)
-    local.gather()
-    remote.gather()
-    local.start(local_parameters(remote), 'controlling')
-    remote.start(local_parameters(local), 'controlled')
+    forward_candidates(remote, local)
 
-    def connected() -> bool:
-        return local.state == remote.state == webrtc.RTCIceTransportState.connected
+    await connect_transports(local, remote)
 
-    await wait_until(connected, 'both transports to connect')
     pair = remote.get_selected_candidate_pair()
     assert pair is not None
     assert pair.remote.candidate == ''
@@ -451,6 +492,7 @@ async def test_unsignaled_remote_is_peer_reflexive() -> None:
     # signaled later, the remote candidate is the signaled one
     for candidate in local.get_local_candidates():
         remote.add_remote_candidate(candidate)
+
     pair = remote.get_selected_candidate_pair()
     assert pair is not None
     assert pair.remote.type == webrtc.RTCIceCandidateType.host
@@ -467,27 +509,16 @@ async def test_remote_signaled_by_hostname_pairs_as_the_signaled_candidate() -> 
 
     def on_local_candidate(event: webrtc.RTCPeerConnectionIceEvent) -> None:
         if event.candidate is not None and event.candidate.protocol == webrtc.RTCIceProtocol.udp:
-            # an mDNS name the remote can't resolve, as browsers do
-            name = '4f1e9d2c-8a7b-4c5d-9e3f-0f3c1d7e6b5a.local'
-            hidden = re.sub(r'^((?:\S+ ){4})\S+', rf'\g<1>{name}', event.candidate.candidate)
+            # an mDNS name the remote can't resolve
+            hidden = CANDIDATE_ADDRESS.sub(rf'\g<1>{MDNS_NAME}', event.candidate.candidate)
             signaled.append(hidden)
             remote.add_remote_candidate(webrtc.RTCIceCandidateInit(hidden, sdp_mid=''))
 
-    def on_remote_candidate(event: webrtc.RTCPeerConnectionIceEvent) -> None:
-        if event.candidate is not None:
-            local.add_remote_candidate(event.candidate)
-
     local.on('icecandidate', on_local_candidate)
-    remote.on('icecandidate', on_remote_candidate)
-    local.gather()
-    remote.gather()
-    local.start(local_parameters(remote), 'controlling')
-    remote.start(local_parameters(local), 'controlled')
+    forward_candidates(remote, local)
 
-    def connected() -> bool:
-        return local.state == remote.state == webrtc.RTCIceTransportState.connected
+    await connect_transports(local, remote)
 
-    await wait_until(connected, 'both transports to connect')
     pair = remote.get_selected_candidate_pair()
     assert pair is not None
     assert pair.remote.candidate in signaled
@@ -504,6 +535,7 @@ async def test_transport_bundled_away_keeps_its_parameters(
     audio = caller.add_transceiver('audio')
     video = caller.add_transceiver('video')
     await caller.set_local_description()
+
     transport = video.sender.transport
     assert transport is not None
     assert transport is not audio.sender.transport

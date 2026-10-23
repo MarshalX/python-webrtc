@@ -27,16 +27,14 @@ async def grayscale(frame: webrtc.VideoFrame, controller: webrtc.TransformStream
     i420 = webrtc.VideoFrameCopyToOptions(format='I420')
     data = bytearray(frame.allocation_size(i420))
     await frame.copy_to(data, i420)
+
     luma = frame.coded_width * frame.coded_height
     data[luma:] = b'\x80' * (len(data) - luma)
-    controller.enqueue(
-        webrtc.VideoFrame(
-            data,
-            webrtc.VideoFrameBufferInit(
-                format='I420', coded_width=frame.coded_width, coded_height=frame.coded_height, timestamp=frame.timestamp
-            ),
-        )
+
+    init = webrtc.VideoFrameBufferInit(
+        format='I420', coded_width=frame.coded_width, coded_height=frame.coded_height, timestamp=frame.timestamp
     )
+    controller.enqueue(webrtc.VideoFrame(data, init))
     frame.close()
 
 
@@ -51,16 +49,19 @@ def video_frame(media: object) -> webrtc.VideoFrame:
 async def watch(track: webrtc.MediaStreamTrack) -> None:
     """Reads the echoed frames for a while, then prints whether the last one is gray."""
     reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
+    options = webrtc.VideoFrameCopyToOptions(format='RGBA')
+
     loop = asyncio.get_running_loop()
     end = loop.time() + SECONDS
-    frames, rgba = 0, bytearray()
+    frames = 0
+    rgba = bytearray()
     while loop.time() < end:
         frame = video_frame((await reader.read()).value)
-        options = webrtc.VideoFrameCopyToOptions(format='RGBA')
         rgba = bytearray(frame.allocation_size(options))
         await frame.copy_to(rgba, options)
         frame.close()
         frames += 1
+
     red, green, blue = rgba[0:3]
     print(f'{frames} frames echoed, the last one is gray: {red == green == blue} ({red}, {green}, {blue})')
 
@@ -90,21 +91,23 @@ async def negotiate(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConn
 
 async def main() -> None:
     """Echoes the camera of the caller back to it."""
-    caller, echo = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
+    caller = webrtc.RTCPeerConnection()
+    echo = webrtc.RTCPeerConnection()
     trickle(caller, echo)
-    camera = (await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=True))).get_video_tracks()[
-        0
-    ]
+
+    stream = await webrtc.media_devices.get_user_media(webrtc.MediaStreamConstraints(video=True))
+    camera = stream.get_video_tracks()[0]
     caller.add_track(camera)
+
     generator = webrtc.VideoTrackGenerator()
     echoed = asyncio.get_running_loop().create_future()
     pipes: list[asyncio.Future[None]] = []
 
     @echo.on('track')
     def on_echo_track(event: webrtc.RTCTrackEvent) -> None:
-        readable = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(event.track)).readable
-        pipe = readable.pipe_through(webrtc.TransformStream({'transform': grayscale})).pipe_to(generator.writable)
-        pipes.append(asyncio.ensure_future(pipe))
+        received = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(event.track)).readable
+        grayscaled = received.pipe_through(webrtc.TransformStream({'transform': grayscale}))
+        pipes.append(asyncio.ensure_future(grayscaled.pipe_to(generator.writable)))
 
     @caller.on('track')
     def on_caller_track(event: webrtc.RTCTrackEvent) -> None:

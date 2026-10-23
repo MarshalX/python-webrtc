@@ -15,13 +15,20 @@ import gc
 import sys
 import threading
 import time
-from typing import Callable
 
 import pytest
 
 import webrtc
 import wrtc
-from tests.helpers import connect, delivered, exchange_offer_answer, settled_alive, wait_for_event, wait_until
+from tests.helpers import (
+    connect,
+    delivered,
+    exchange_offer_answer,
+    settled_alive,
+    start_threads,
+    wait_for_event,
+    wait_until,
+)
 from tests.isolation import isolated
 from tests.timing import seconds
 from webrtc.utils.loops import LoopState
@@ -31,13 +38,6 @@ def _join(threads: list[threading.Thread]) -> None:
     for thread in threads:
         thread.join(seconds(20))
         assert not thread.is_alive(), 'stuck'
-
-
-def _start(*targets: Callable[[], None]) -> list[threading.Thread]:
-    threads = [threading.Thread(target=target, daemon=True) for target in targets]
-    for thread in threads:
-        thread.start()
-    return threads
 
 
 async def _open_channel(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> webrtc.RTCDataChannel:
@@ -84,6 +84,7 @@ async def _release_while_the_signaling_thread_waits(kind: str) -> None:
             webrtc.MediaStreamTrackProcessorInit(webrtc.VideoTrackGenerator().track)
         )
     gc.collect()
+
     # the signaling thread delivers the messages, waiting for the GIL this thread keeps
     sys.setswitchinterval(1000)
     for _ in range(200):
@@ -94,6 +95,7 @@ async def _release_while_the_signaling_thread_waits(kind: str) -> None:
     del released
     gc.collect()
     sys.setswitchinterval(0.005)
+
     caller.close()
     callee.close()
 
@@ -122,7 +124,7 @@ async def _create_and_release_tracks_while_messages_arrive() -> None:
             tracks = [asyncio.run(webrtc.media_devices.get_user_media(constraints)).get_tracks()[0] for _ in range(5)]
             del tracks
 
-    threads = _start(create, create, release, release)
+    threads = start_threads(create, create, release, release)
     end = time.monotonic() + 4
     while time.monotonic() < end:
         for _ in range(100):
@@ -130,6 +132,7 @@ async def _create_and_release_tracks_while_messages_arrive() -> None:
         await asyncio.sleep(0.001)
     stop.set()
     _join(threads)
+
     caller.close()
     callee.close()
 
@@ -153,7 +156,7 @@ async def _negotiate_while_transceivers_are_wrapped() -> None:
             pc.get_transceivers()
             pc.close()
 
-    threads = _start(create, create, create)
+    threads = start_threads(create, create, create)
     end = time.monotonic() + 4
     while time.monotonic() < end:
         # new transceivers of the callee, wrapped on the signaling thread by its track events
@@ -186,7 +189,7 @@ async def _read_connections_while_they_connect() -> None:
                     _ = receiver.transport, receiver.track.ready_state
             stream.get_tracks()
 
-    threads = _start(read, read, read)
+    threads = start_threads(read, read, read)
     end = time.monotonic() + 4
     while time.monotonic() < end:
         caller, callee = webrtc.RTCPeerConnection(), webrtc.RTCPeerConnection()
@@ -225,7 +228,7 @@ def _watched() -> tuple[webrtc.RTCPeerConnection, webrtc.RTCIceTransport]:
 def _watched_on_a_loop() -> tuple[asyncio.AbstractEventLoop, webrtc.RTCPeerConnection, webrtc.RTCIceTransport]:
     """Objects with handlers, plus garbage, on a thread's loop."""
     loop = asyncio.new_event_loop()
-    _start(loop.run_forever)
+    start_threads(loop.run_forever)
     watched: concurrent.futures.Future[tuple[webrtc.RTCPeerConnection, webrtc.RTCIceTransport]] = (
         concurrent.futures.Future()
     )
@@ -253,16 +256,17 @@ def test_wrappers_made_and_collected_while_a_libwebrtc_thread_posts() -> None:
 
     wrtc._testing.park('mailbox.post')
     try:
-        _start(create_channel)
+        start_threads(create_channel)
         assert wrtc._testing.parked('mailbox.post', seconds(5))
-        _start(create)
-        _start(gatherer.gather)
+        start_threads(create)
+        start_threads(gatherer.gather)
         time.sleep(0.3)
         assert not created.is_set()
         gc.collect()
     finally:
         wrtc._testing.release('mailbox.post')
     assert created.wait(seconds(10)), 'stuck'
+
     gatherer.stop()
     pc.close()
     loop.call_soon_threadsafe(loop.stop)
@@ -291,6 +295,7 @@ def test_dispatcher_parked_while_objects_go_and_their_loop_closes() -> None:
         gc.collect()
     finally:
         wrtc._testing.release('dispatcher.wake')
+
     assert settled_alive() == baseline
 
 
@@ -303,6 +308,7 @@ async def _read_while_the_signaling_thread_is_parked() -> None:
     sctp = caller.sctp
     assert sctp is not None
     await wait_until(lambda: sctp.transport.ice_transport.get_selected_candidate_pair() is not None, 'the pair')
+
     # bound, and never negotiated
     fresh = webrtc.RTCPeerConnection()
     remote = callee.get_transceivers()[0].receiver.track
@@ -321,6 +327,7 @@ async def _read_while_the_signaling_thread_is_parked() -> None:
         )
 
     expected = read()
+
     wrtc._testing.park('connection.datachannel')
     try:
         # off the loop: creating it waits for the parked signaling thread too
@@ -330,6 +337,7 @@ async def _read_while_the_signaling_thread_is_parked() -> None:
     finally:
         wrtc._testing.release('connection.datachannel')
     await creating
+
     track.stop()
     fresh.close()
     caller.close()
@@ -367,6 +375,7 @@ async def _start_while_the_previous_operation_releases() -> list[str]:
     await answering
     order.append('answered')
     await wait_until(lambda: 'gathering' in order, 'gathering')
+
     caller.close()
     callee.close()
     return order
@@ -376,4 +385,5 @@ async def _start_while_the_previous_operation_releases() -> list[str]:
 def test_operation_holds_its_events_after_the_previous_one_releases() -> None:
     """The next operation starts as the one before releases its hold on events, and still holds its own."""
     order = asyncio.run(_start_while_the_previous_operation_releases())
+
     assert order.index('answered') < order.index('gathering'), order

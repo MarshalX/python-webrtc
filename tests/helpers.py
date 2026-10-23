@@ -20,6 +20,7 @@ import pathlib
 import signal
 import subprocess
 import sys
+import threading
 import time
 from typing import TYPE_CHECKING, Callable, Protocol, TypeVar, cast
 
@@ -143,11 +144,14 @@ async def wait_progressing(
         TimeoutError: Nothing progressed for ``stall`` seconds; the message names what it waited for.
     """
     loop = asyncio.get_running_loop()
-    deadline, last = loop.time() + stall, await called(progress)
+    deadline = loop.time() + stall
+    last = await called(progress)
     while not bool(done()):
         # read before the deadline: one poll may outlast it on a busy loop
-        if (current := await called(progress)) > last:
-            deadline, last = loop.time() + stall, current
+        current = await called(progress)
+        if current > last:
+            deadline = loop.time() + stall
+            last = current
         if loop.time() > deadline:
             msg = f'Timed out waiting for {what}: no progress for {stall} s, at {last}'
             raise TimeoutError(msg)
@@ -166,6 +170,16 @@ async def delivered() -> None:
     await done
     # handlers scheduled by those events run in the iteration after
     await next_task()
+
+
+def report_first_exception(reported: asyncio.Future[dict[str, object]]) -> None:
+    """Sets the running loop's exception handler to set the future to the first context it gets."""
+
+    def handle(_loop: asyncio.AbstractEventLoop, context: dict[str, object]) -> None:
+        if not reported.done():
+            reported.set_result(context)
+
+    asyncio.get_running_loop().set_exception_handler(handle)
 
 
 async def wait_for_ice_gathering_complete(pc: webrtc.RTCPeerConnection, timeout: float = WAIT) -> None:
@@ -246,9 +260,9 @@ def undelivered() -> Generator[None, None, None]:
         wrtc._testing.release('dispatcher.wake')
 
 
-def exit_code_within(pid: int, seconds: float) -> int | None:
+def exit_code_within(pid: int, timeout: float) -> int | None:
     """A forked child's exit code, or None if killed on timeout."""
-    deadline = time.monotonic() + seconds
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         done, status = os.waitpid(pid, os.WNOHANG)
         if done != 0:
@@ -256,6 +270,14 @@ def exit_code_within(pid: int, seconds: float) -> int | None:
         time.sleep(0.05)
     os.kill(pid, 9)
     return None
+
+
+def start_threads(*targets: Callable[[], object]) -> list[threading.Thread]:
+    """Daemon threads running the targets, started."""
+    threads = [threading.Thread(target=target, daemon=True) for target in targets]
+    for thread in threads:
+        thread.start()
+    return threads
 
 
 def register_stack_dump() -> None:
@@ -349,6 +371,14 @@ def capture_mode(track: webrtc.MediaStreamTrack) -> tuple[int | None, int | None
     return settings.width, settings.height, settings.frame_rate
 
 
+def reader_of(
+    track: webrtc.MediaStreamTrack, max_buffer_size: int | None = None
+) -> webrtc.ReadableStreamDefaultReader[webrtc.VideoFrame | webrtc.AudioData]:
+    """A reader of a new processor of the track."""
+    init = webrtc.MediaStreamTrackProcessorInit(track, max_buffer_size=max_buffer_size)
+    return webrtc.MediaStreamTrackProcessor(init).readable.get_reader()
+
+
 async def connect_track(
     caller: webrtc.RTCPeerConnection,
     callee: webrtc.RTCPeerConnection,
@@ -431,7 +461,8 @@ def settled_alive(released: Callable[[dict[str, int], int], bool] | None = None)
     """Native object and factory counts, polled until ``released`` (or two equal readings) or a stall in releases."""
     collect()
     alive, factories = _alive_once_dispatched()
-    deadline, fewest = time.monotonic() + SETTLE_TIMEOUT, sum(alive.values()) + factories
+    deadline = time.monotonic() + SETTLE_TIMEOUT
+    fewest = sum(alive.values()) + factories
     while not (released is not None and released(alive, factories)) and time.monotonic() < deadline:
         time.sleep(SETTLE_INTERVAL)
         gc.collect()
@@ -439,16 +470,24 @@ def settled_alive(released: Callable[[dict[str, int], int], bool] | None = None)
         # equal readings don't mean released: an in-flight destructor keeps its count flat
         if released is None and current == (alive, factories):
             break
+
         alive, factories = current
+        total = sum(alive.values()) + factories
         # a slow release goes on; a leak stays flat
-        if (total := sum(alive.values()) + factories) < fewest:
-            deadline, fewest = time.monotonic() + SETTLE_TIMEOUT, total
+        if total < fewest:
+            deadline = time.monotonic() + SETTLE_TIMEOUT
+            fewest = total
     return alive, factories
 
 
 # the memory of sanitizers (ASan quarantine, TSan shadow) hides leaks from resident memory
 SANITIZED: bool = wrtc._sanitized
 skip_if_sanitized = pytest.mark.skipif(SANITIZED, reason='resident memory says nothing under sanitizers')
+
+
+def open_descriptors() -> int:
+    """The number of file descriptors the process has open (POSIX only)."""
+    return sum(1 for _ in pathlib.Path('/dev/fd').iterdir())
 
 
 def rss_bytes() -> int:
@@ -459,18 +498,19 @@ def rss_bytes() -> int:
     if sys.platform == 'win32':
 
         class Counters(ctypes.Structure):
-            _fields_ = [('cb', ctypes.c_ulong), ('PageFaultCount', ctypes.c_ulong)] + [
-                (name, ctypes.c_size_t)
-                for name in (
-                    'PeakWorkingSetSize',
-                    'WorkingSetSize',
-                    'QuotaPeakPagedPoolUsage',
-                    'QuotaPagedPoolUsage',
-                    'QuotaPeakNonPagedPoolUsage',
-                    'QuotaNonPagedPoolUsage',
-                    'PagefileUsage',
-                    'PeakPagefileUsage',
-                )
+            """PROCESS_MEMORY_COUNTERS."""
+
+            _fields_ = [
+                ('cb', ctypes.c_ulong),
+                ('PageFaultCount', ctypes.c_ulong),
+                ('PeakWorkingSetSize', ctypes.c_size_t),
+                ('WorkingSetSize', ctypes.c_size_t),
+                ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
+                ('QuotaPagedPoolUsage', ctypes.c_size_t),
+                ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
+                ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
+                ('PagefileUsage', ctypes.c_size_t),
+                ('PeakPagefileUsage', ctypes.c_size_t),
             ]
 
         counters = Counters()
@@ -483,7 +523,7 @@ def rss_bytes() -> int:
 
 
 #: The root of the project, which has the tests package (pytest may run from elsewhere, like cibuildwheel)
-ROOT = pathlib.Path(pathlib.Path(pathlib.Path(__file__).resolve()).parent).parent
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 class _RelaySocket(asyncio.DatagramProtocol):
@@ -501,8 +541,10 @@ class _RelaySocket(asyncio.DatagramProtocol):
     def datagram_received(self, data: bytes, addr: object) -> None:
         if self.peer is None or self.other is None or self.other.transport is None:
             return
+
         self.relay.inspect(data)
-        asyncio.get_running_loop().call_later(self.relay.delay, self.other.transport.sendto, data, self.peer)
+        forward = self.other.transport.sendto
+        asyncio.get_running_loop().call_later(self.relay.delay, forward, data, self.peer)
 
 
 class UdpRelay:
@@ -523,17 +565,24 @@ class UdpRelay:
         for pc in (caller, callee):
             await wait_until(lambda pc=pc: pc.ice_gathering_state == 'complete', 'ICE gathering')
 
+        caller_candidate = _relayable(caller_candidates)
+        callee_candidate = _relayable(callee_candidates)
+        for_caller = await self._open_socket(caller_candidate)
+        for_callee = await self._open_socket(callee_candidate)
+        for_caller.other = for_callee
+        for_callee.other = for_caller
+
+        await _add_ice_candidate(callee, _moved(caller_candidate, for_caller))
+        await _add_ice_candidate(caller, _moved(callee_candidate, for_callee))
+
+    async def _open_socket(self, candidate: webrtc.RTCIceCandidate) -> _RelaySocket:
+        """A local socket relaying to the candidate."""
+        address = cast('str', candidate.address)
         loop = asyncio.get_running_loop()
-        relayed = [_relayable(caller_candidates), _relayable(callee_candidates)]
-        for candidate in relayed:
-            address = cast('str', candidate.address)
-            _, socket = await loop.create_datagram_endpoint(lambda: _RelaySocket(self), local_addr=(address, 0))
-            socket.peer = (address, cast('int', candidate.port))
-            self._sockets.append(socket)
-        for_caller, for_callee = self._sockets
-        for_caller.other, for_callee.other = for_callee, for_caller
-        await _add_ice_candidate(callee, _moved(relayed[0], for_caller))
-        await _add_ice_candidate(caller, _moved(relayed[1], for_callee))
+        _, socket = await loop.create_datagram_endpoint(lambda: _RelaySocket(self), local_addr=(address, 0))
+        socket.peer = (address, cast('int', candidate.port))
+        self._sockets.append(socket)
+        return socket
 
     def close(self) -> None:
         for socket in self._sockets:
@@ -551,13 +600,15 @@ def _collect(candidates: list[webrtc.RTCIceCandidate], event: webrtc.RTCPeerConn
         candidates.append(event.candidate)
 
 
+def _is_ipv4_udp_host(candidate: webrtc.RTCIceCandidate) -> bool:
+    is_udp_host = (candidate.protocol, candidate.type) == ('udp', 'host')
+    return is_udp_host and candidate.address is not None and ':' not in candidate.address
+
+
 def _relayable(candidates: list[webrtc.RTCIceCandidate]) -> webrtc.RTCIceCandidate:
-    ipv4 = [
-        c
-        for c in candidates
-        if (c.protocol, c.type) == ('udp', 'host') and c.address is not None and ':' not in c.address
-    ]
-    return next((c for c in ipv4 if c.address == '127.0.0.1'), ipv4[0])
+    """The loopback IPv4 host candidate, or else the first IPv4 one."""
+    ipv4 = [candidate for candidate in candidates if _is_ipv4_udp_host(candidate)]
+    return next((candidate for candidate in ipv4 if candidate.address == '127.0.0.1'), ipv4[0])
 
 
 def _moved(candidate: webrtc.RTCIceCandidate, socket: _RelaySocket) -> webrtc.RTCIceCandidate:

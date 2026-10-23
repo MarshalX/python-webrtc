@@ -33,7 +33,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TEST_STATUSES = ('PASS', 'FAIL', 'TIMEOUT', 'NOTRUN', 'PRECONDITION_FAILED')
 HARNESS_STATUSES = ('OK', 'ERROR', 'TIMEOUT', 'PRECONDITION_FAILED')
 
-# Same as WPT in browsers
 TIMEOUT = 10
 LONG_TIMEOUT = 60
 
@@ -64,7 +63,8 @@ def harness_result(status: str, message: str) -> CaseResult:
 def run(case: str) -> CaseResult:
     """Runs a case in a child process. A crash or a hang of the child becomes the harness status."""
     path, _ = split_case(case)
-    limit = (LONG_TIMEOUT if load(path).long_timeout else TIMEOUT) + 30
+    harness_timeout = LONG_TIMEOUT if load(path).long_timeout else TIMEOUT
+    limit = harness_timeout + 30
     try:
         proc = subprocess.run(
             [sys.executable, '-m', 'tests.wpt.child', case],

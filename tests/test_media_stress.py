@@ -20,6 +20,7 @@ import webrtc
 from tests.helpers import (
     SANITIZED,
     connect_track,
+    reader_of,
     rss_bytes,
     skip_if_sanitized,
     wait_progressing,
@@ -56,11 +57,14 @@ async def test_cancel_during_pending_reads(video_stream: webrtc.MediaStream) -> 
     """Canceling while reads wait for frames settles them, over and over."""
     track = video_stream.get_tracks()[0]
     for _ in range(50):
-        reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
+        reader = reader_of(track)
         reads = [reader.read() for _ in range(3)]
         await asyncio.sleep(0)
+
         await reader.cancel()
-        for result in await asyncio.wait_for(asyncio.gather(*reads), TIMEOUT):
+
+        results = await asyncio.wait_for(asyncio.gather(*reads), TIMEOUT)
+        for result in results:
             if not result.done:
                 close(result.value)
 
@@ -69,7 +73,6 @@ async def test_cancel_during_pending_reads(video_stream: webrtc.MediaStream) -> 
 async def test_stop_track_while_reading(video_stream: webrtc.MediaStream, audio_stream: webrtc.MediaStream) -> None:
     """Tracks stopped while tasks read them close their streams."""
     tracks = [*video_stream.get_tracks(), *audio_stream.get_tracks()]
-
     read: list[webrtc.MediaStreamTrack] = []
 
     async def read_all(track: webrtc.MediaStreamTrack) -> int:
@@ -84,21 +87,24 @@ async def test_stop_track_while_reading(video_stream: webrtc.MediaStream, audio_
     tasks = [asyncio.ensure_future(read_all(track)) for track in tracks for _ in range(3)]
     # every task reads some media first (a fixed wait was too short on slow machines)
     await wait_until(lambda: len(read) == len(tasks), 'every task to read media', TIMEOUT)
+
     for track in tracks:
         track.stop()
-    assert all(count > 0 for count in await asyncio.wait_for(asyncio.gather(*tasks), TIMEOUT))
+
+    counts = await asyncio.wait_for(asyncio.gather(*tasks), TIMEOUT)
+    assert all(count > 0 for count in counts)
 
 
 @pytest.mark.asyncio
 async def test_many_processors_of_one_track(video_stream: webrtc.MediaStream) -> None:
     """Every processor of a track gets its frames."""
     track = video_stream.get_tracks()[0]
-    readers = [
-        webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
-        for _ in range(20)
-    ]
-    for result in await asyncio.wait_for(asyncio.gather(*(r.read() for r in readers)), TIMEOUT):
+    readers = [reader_of(track) for _ in range(20)]
+
+    results = await asyncio.wait_for(asyncio.gather(*(r.read() for r in readers)), TIMEOUT)
+    for result in results:
         close(result.value)
+
     track.stop()
     await asyncio.wait_for(asyncio.gather(*(r.closed for r in readers)), TIMEOUT)
 
@@ -113,8 +119,10 @@ async def test_garbage_collected_with_pending_reads(video_stream: webrtc.MediaSt
         processor.readable.get_reader().read()
         refs.append(weakref.ref(processor))
         del processor
+
     await wait_until(lambda: collected(refs), 'the processors to be collected')
-    reader = webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(track)).readable.get_reader()
+
+    reader = reader_of(track)
     close((await asyncio.wait_for(reader.read(), TIMEOUT)).value)
 
 
@@ -126,14 +134,13 @@ async def test_close_connection_while_reading(
     generator = webrtc.VideoTrackGenerator()
     async with writing(write_video, generator, bytes(64 * 64 * 3 // 2), (64, 64), interval=0.01):
         remote = await connect_track(caller, callee, generator.track, timeout=TIMEOUT)
-        readers = [
-            webrtc.MediaStreamTrackProcessor(webrtc.MediaStreamTrackProcessorInit(remote)).readable.get_reader()
-            for _ in range(5)
-        ]
+        readers = [reader_of(remote) for _ in range(5)]
         close((await asyncio.wait_for(readers[0].read(), TIMEOUT)).value)
         pending = [r.read() for r in readers]
+
         callee.close()
         caller.close()
+
         await asyncio.wait_for(asyncio.gather(*(r.closed for r in readers)), TIMEOUT)
         for result in await asyncio.gather(*pending):
             if not result.done:
@@ -157,10 +164,12 @@ def test_loop_closed_while_frames_arrive() -> None:
     loop = asyncio.new_event_loop()
     processors = loop.run_until_complete(start())
     loop.close()
+
     # frames keep arriving for the closed loop
     time.sleep(0.3)
     del processors
     gc.collect()
+
     for track in stream.get_tracks():
         track.stop()
 
@@ -185,9 +194,13 @@ async def test_create_and_destroy_cycles_do_not_leak() -> None:
         await cycle()
     gc.collect()
     before = rss_bytes()
-    refs = [ref for _ in range(1000) for ref in await cycle()]
+
+    refs: list[weakref.ref[object]] = []
+    for _ in range(1000):
+        refs.extend(await cycle())
     # callbacks still queued on the loop hold the last objects
     await wait_until(lambda: collected(refs), 'every cycle to be collected')
+
     growth = rss_bytes() - before
     assert SANITIZED or growth < 20 * 1024 * 1024, f'{growth / 1e6:.1f} MB more after 1000 cycles'
 
@@ -202,10 +215,13 @@ async def test_unread_frames_do_not_grow_memory(video_stream: webrtc.MediaStream
     reader = processor.readable.get_reader()
     # warm up, then measure over 60 frames (2 s of the camera)
     await wait_until(lambda: processor.total_frames >= 15, 'frames to arrive')
-    before, discarded = rss_bytes(), processor.discarded_frames
+    before = rss_bytes()
+    discarded = processor.discarded_frames
+
     await wait_progressing(
         lambda: processor.discarded_frames, lambda: processor.discarded_frames >= discarded + 60, '60 frames dropped'
     )
+
     assert rss_bytes() - before < 10 * 1024 * 1024
     await reader.cancel()
 
@@ -214,15 +230,15 @@ async def test_unread_frames_do_not_grow_memory(video_stream: webrtc.MediaStream
 async def test_reader_that_never_yields_queues_nothing() -> None:
     """Frames read as fast as they're written, without the loop running, leave no callbacks piling up for it."""
     generator = webrtc.VideoTrackGenerator()
-    reader = webrtc.MediaStreamTrackProcessor(
-        webrtc.MediaStreamTrackProcessorInit(generator.track, max_buffer_size=2)
-    ).readable.get_reader()
+    reader = reader_of(generator.track, max_buffer_size=2)
     writer = generator.writable.get_writer()
     loop = asyncio.get_running_loop()
+
     for timestamp in range(2000):
         # both are done right away, so the loop never runs in between
         await writer.write(frame(timestamp))
         close((await reader.read()).value)
+
     state = LoopState.of(loop)
     assert len(state.mailbox) + len(state._markers) <= 2
     # the callbacks ready to run, private to the loop

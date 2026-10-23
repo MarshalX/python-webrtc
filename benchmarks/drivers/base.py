@@ -80,7 +80,8 @@ class Channel(abc.ABC):
     async def flood(self, *, size: int, seconds: float, low: int, high: int) -> None:
         """Sends messages for a while, keeping the buffered amount between the watermarks."""
         self.set_low_threshold(low)
-        payload, end = bytes(size), now() + seconds
+        payload = bytes(size)
+        end = now() + seconds
         slice_end = now() + FLOOD_SLICE
 
         while (remaining := end - now()) > 0:

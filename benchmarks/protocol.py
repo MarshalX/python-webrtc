@@ -190,13 +190,18 @@ class Server:
         task.add_done_callback(self._tasks.discard)
 
     async def _run(self, driver: object, message: Message) -> None:
-        command_id, name = message.pop('id'), str(message.pop('cmd'))
+        command_id = message.pop('id')
+        name = str(message.pop('cmd'))
         if name == 'exit':
             self._send({'id': command_id, 'result': {}})
             self._lines.put_nowait(None)
             return
+
         try:
-            result = await (self._probe() if name == 'probe' else getattr(driver, name)(**message))
+            if name == 'probe':
+                result: object = await self._probe()
+            else:
+                result = await getattr(driver, name)(**message)
         except Exception as error:  # ruff: ignore[blind-except] - the runner reports what failed
             self._send({'id': command_id, 'error': f'{type(error).__name__}: {error}'})
         else:

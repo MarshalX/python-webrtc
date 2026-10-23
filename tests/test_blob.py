@@ -21,6 +21,7 @@ from tests.helpers import mistyped
 async def test_blob() -> None:
     """A Blob is immutable bytes with a type, sliced like a sequence."""
     blob = webrtc.Blob(['héllo', b' ', bytearray(b'world')], webrtc.BlobPropertyBag(type='Text/Plain'))
+
     assert blob.size == len(bytes(blob)) == 12
     assert blob.type == 'text/plain'
     assert await blob.text() == 'héllo world'
@@ -34,8 +35,11 @@ async def test_blob() -> None:
 def test_endings() -> None:
     """Native endings convert the line breaks of string parts only, transparent ones keep them."""
     parts: list[str | bytes] = ['a\r\nb\rc\nd', b'\r\n']
-    assert bytes(webrtc.Blob(parts)) == b'a\r\nb\rc\nd\r\n'
+
+    transparent = webrtc.Blob(parts)
     native = webrtc.Blob(parts, webrtc.BlobPropertyBag(endings=webrtc.EndingType.native))
+
+    assert bytes(transparent) == b'a\r\nb\rc\nd\r\n'
     assert bytes(native) == f'a{os.linesep}b{os.linesep}c{os.linesep}d'.encode() + b'\r\n'
     with pytest.raises(ValueError, match='not a valid EndingType'):
         webrtc.Blob(['a'], webrtc.BlobPropertyBag(endings=mistyped('crlf')))
@@ -51,9 +55,11 @@ async def test_text_drops_bom() -> None:
 async def test_stream() -> None:
     """stream() reads the bytes in chunks, and an empty blob closes at once."""
     data = bytes(range(256)) * 1000
+
     stream = webrtc.Blob([data]).stream()
     assert isinstance(stream, webrtc.ReadableStream)
     chunks = [chunk async for chunk in stream]
+
     assert len(chunks) > 1
     assert all(isinstance(chunk, bytes) for chunk in chunks)
     assert b''.join(chunks) == data
@@ -64,8 +70,10 @@ async def test_stream() -> None:
 async def test_text_stream() -> None:
     """textStream() decodes across chunk boundaries."""
     text = 'é' * 100_000
+
     stream = webrtc.Blob([text]).textStream()
     chunks = [chunk async for chunk in stream]
+
     assert len(chunks) > 1
     assert all(isinstance(chunk, str) for chunk in chunks)
     assert ''.join(chunks) == text
@@ -76,6 +84,7 @@ def test_equality_by_content() -> None:
     """Blobs are equal, and hash alike, when their bytes and type are."""
     blob = webrtc.Blob(['ab', b'c'], webrtc.BlobPropertyBag(type='text/plain'))
     same = webrtc.Blob([b'abc'], webrtc.BlobPropertyBag(type='TEXT/PLAIN'))
+
     assert len(blob) == blob.size == 3
     assert blob == same
     assert hash(blob) == hash(same)
