@@ -87,6 +87,7 @@ docs = [
     "sphinx-docsearch==0.3.1; python_version >= '3.12'",
     "sphinx-favicon==1.1.0; python_version >= '3.12'",
     "sphinxext-opengraph==0.13.0; python_version >= '3.12'",
+    "sphinx-llm==1.1.0; python_version >= '3.12'",
 ]
 
 [tool.scikit-build]
@@ -94,7 +95,7 @@ minimum-version = "build-system.requires"
 cmake.version = ">=3.26"
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["python-webrtc/python/webrtc"]
-sdist.exclude = [".github", ".idea", "benchmarks", "docs", "examples", "wpt"]
+sdist.exclude = [".github", ".idea", "benchmarks", "docs", "examples", "wpt", ".devin", "context7.json"]
 
 [tool.cibuildwheel]
 # free-threaded from 3.14, where it's no longer experimental
