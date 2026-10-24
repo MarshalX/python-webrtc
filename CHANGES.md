@@ -1,5 +1,66 @@
 # Change Log
 
+## Version 0.1.0
+
+**24.10.2026**
+
+**🧪 The first beta: the API follows the specifications and is ready to build on, while compatibility between versions isn't guaranteed until 1.0.0**
+
+**⚡ Data channels move 1.2–2.1 Gbps, 7.7–14.6x aiortc's throughput at 10–15% of its CPU per MB. See the [benchmarks](https://wrtc.marshal.dev/benchmarks/)**
+
+**🚀 A data channel opens 3.5 ms after `createOffer`, 7–8x faster than aiortc, and `getStats` takes 1.7 instead of 4.2 ms**
+
+**🎥 Simulcast for every encoder, and H.264 on macOS that recovers from encoder faults and falls back to OpenH264**
+
+**🧭 Transceiver, ICE, SCTP and track state change with the events that report them, as in browsers**
+
+**🧩 [Examples](https://wrtc.marshal.dev/examples/) of a server for a browser page, a Gemini Live voice agent, and WHIP/WHEP streams**
+
+* Add simulcast for every encoder, on Windows too: each layer is sent in the negotiated codec at its scaled size, whether or not the encoder does simulcast itself. VP9 and AV1 need a `scalabilityMode` such as `L1T1` for each layer by [@MarshalX](https://github.com/MarshalX) in [#254](https://github.com/MarshalX/python-webrtc/pull/254)
+* Fall back to OpenH264, once `await webrtc.openh264.install()` has run, when VideoToolbox can't encode or decode by [@MarshalX](https://github.com/MarshalX) in [#254](https://github.com/MarshalX/python-webrtc/pull/254)
+* Show transceiver, ICE, SCTP and track state with the events that change them: `mid`, `currentDirection` and the selected candidate pair change when their event fires, not before by [@MarshalX](https://github.com/MarshalX) in [#259](https://github.com/MarshalX/python-webrtc/pull/259)
+* Add a Python server for a browser page example: your camera comes back in grayscale, and Python answers a chat over a data channel by [@MarshalX](https://github.com/MarshalX) in [#268](https://github.com/MarshalX/python-webrtc/pull/268)
+* Add a Gemini Live voice agent example, with the API key kept on the server by [@MarshalX](https://github.com/MarshalX) in [#268](https://github.com/MarshalX/python-webrtc/pull/268)
+* Add a WHIP/WHEP example that plays a live stream in the terminal or publishes one by [@MarshalX](https://github.com/MarshalX) in [#268](https://github.com/MarshalX/python-webrtc/pull/268)
+* Add llms.txt, Markdown versions of the docs pages and Context7 and DeepWiki configs by [@MarshalX](https://github.com/MarshalX) in [#265](https://github.com/MarshalX/python-webrtc/pull/265)
+* Credit node-webrtc in the third-party licences by [@MarshalX](https://github.com/MarshalX) in [#262](https://github.com/MarshalX/python-webrtc/pull/262)
+* Speed up connection setup: keep libsrtp initialized and the network list updated, start the network manager and create port allocators without waiting on the network thread by [@MarshalX](https://github.com/MarshalX) in [#261](https://github.com/MarshalX/python-webrtc/pull/261)
+* Speed up the first connection by running libsrtp's self-tests on their own thread by [@MarshalX](https://github.com/MarshalX) in [#261](https://github.com/MarshalX/python-webrtc/pull/261)
+* Gather a candidate pool without waits between phases, and add ICE candidates in one signaling task by [@MarshalX](https://github.com/MarshalX) in [#261](https://github.com/MarshalX/python-webrtc/pull/261)
+* Cut thread hops from negotiation and `getStats`, and share concurrent `getStats` calls: 20 of them take 5.7 instead of 80.9 ms, renegotiation 22% less time and warm setup with trickle 18% less by [@MarshalX](https://github.com/MarshalX) in [#255](https://github.com/MarshalX/python-webrtc/pull/255)
+* Cut signaling-thread waits from getters: `transceiver.mid` takes 1.0 instead of 9.8 µs, `sender.track` 38% less time, `getSelectedCandidatePair()` 46% less and renegotiation 15% less by [@MarshalX](https://github.com/MarshalX) in [#259](https://github.com/MarshalX/python-webrtc/pull/259)
+* Speed up data channels on macOS and Linux with a second, connected socket for a busy peer. Set the `PythonWebRTC-ConnectedSockets` field trial to `Disabled` to turn it off by [@MarshalX](https://github.com/MarshalX) in [#261](https://github.com/MarshalX/python-webrtc/pull/261)
+* Speed up data channel sends with one network-thread task per send, and skip the local address lookup on every UDP packet by [@MarshalX](https://github.com/MarshalX) in [#261](https://github.com/MarshalX/python-webrtc/pull/261)
+* Convert received data channel messages once and deliver them with less Python per message by [@MarshalX](https://github.com/MarshalX) in [#261](https://github.com/MarshalX/python-webrtc/pull/261)
+* Copy data channel messages once: 10–11% more throughput and 7–11% less CPU per MB for 1 KB messages by [@MarshalX](https://github.com/MarshalX) in [#252](https://github.com/MarshalX/python-webrtc/pull/252)
+* Speed up event delivery, skip wake-ups while the event loop drains, and cache session descriptions between the events that change them by [@MarshalX](https://github.com/MarshalX) in [#261](https://github.com/MarshalX/python-webrtc/pull/261)
+* Drop the unused audio processing and video render smoothing, which cost CPU on every received stream by [@MarshalX](https://github.com/MarshalX) in [#249](https://github.com/MarshalX/python-webrtc/pull/249)
+* Send VP8 and H.264 at 720p with 6–9% less CPU per frame by [@MarshalX](https://github.com/MarshalX) in [#256](https://github.com/MarshalX/python-webrtc/pull/256)
+* Wrap NV12 frames without copies, pass NV12 to VideoToolbox as it is, and pool frame buffers by [@MarshalX](https://github.com/MarshalX) in [#257](https://github.com/MarshalX/python-webrtc/pull/257)
+* Copy video frame data once into pooled buffers, and convert VideoToolbox output to I420 in one pass by [@MarshalX](https://github.com/MarshalX) in [#261](https://github.com/MarshalX/python-webrtc/pull/261)
+* Copy encoded frames less and cache RTP sources: 14% less CPU per transformed frame, `getSynchronizationSources()` in 1.3 instead of 14.8 µs. A transform now queues up to 60 unread frames instead of 120 by [@MarshalX](https://github.com/MarshalX) in [#258](https://github.com/MarshalX/python-webrtc/pull/258)
+* Fix sockets raising SIGPIPE on macOS, which kills the process where its default handler is restored by [@MarshalX](https://github.com/MarshalX) in [#267](https://github.com/MarshalX/python-webrtc/pull/267)
+* Fix data channel stalls under load: UDP sockets get a receive buffer of at least 8 MB, which `WebRTC-SetSocketReceiveBuffer` overrides. On Linux, raise `net.core.rmem_max` to allow it. See [Field trials](https://wrtc.marshal.dev/guides/field-trials/) by [@MarshalX](https://github.com/MarshalX) in [#261](https://github.com/MarshalX/python-webrtc/pull/261)
+* Fix a VideoToolbox frame that fails after the encoder took it: the session restarts with a key frame by [@MarshalX](https://github.com/MarshalX) in [#254](https://github.com/MarshalX/python-webrtc/pull/254)
+* Fix a connection kept alive after `close()` by the event loop it was bound to while closing by [@MarshalX](https://github.com/MarshalX) in [#261](https://github.com/MarshalX/python-webrtc/pull/261)
+* Fix the operations of a closed event loop keeping their connections alive by [@MarshalX](https://github.com/MarshalX) in [#261](https://github.com/MarshalX/python-webrtc/pull/261)
+* Fix the next operation starting before the code awaiting the previous one resumes, as in browsers by [@MarshalX](https://github.com/MarshalX) in [#259](https://github.com/MarshalX/python-webrtc/pull/259)
+* Fix `addIceCandidate` without a remote description rejecting late; it now rejects at once by [@MarshalX](https://github.com/MarshalX) in [#261](https://github.com/MarshalX/python-webrtc/pull/261)
+* Fix sends that fail as the remote end closes: they fire `error` with `data-channel-failure`, and their bytes stay in `bufferedAmount` by [@MarshalX](https://github.com/MarshalX) in [#252](https://github.com/MarshalX/python-webrtc/pull/252)
+* Fix remote data channels collected before their `open` event by [@MarshalX](https://github.com/MarshalX) in [#259](https://github.com/MarshalX/python-webrtc/pull/259)
+* Fix DTMF tones and gaps raised to longer minimums than the specification's by [@MarshalX](https://github.com/MarshalX) in [#253](https://github.com/MarshalX/python-webrtc/pull/253)
+* Fix standalone ICE gathering waiting 1 s between phases and gathering passive TCP candidates, and gather IPv6 where the host has it by [@MarshalX](https://github.com/MarshalX) in [#253](https://github.com/MarshalX/python-webrtc/pull/253)
+* Fix the end of candidates of an earlier remote description shown after an ICE restart by [@MarshalX](https://github.com/MarshalX) in [#253](https://github.com/MarshalX/python-webrtc/pull/253)
+* Fix the audio capture time, so the jitter doesn't jump after a send pause by [@MarshalX](https://github.com/MarshalX) in [#253](https://github.com/MarshalX/python-webrtc/pull/253)
+* Fix `VideoTrackGenerator` frames written back to back dropped as duplicates by [@MarshalX](https://github.com/MarshalX) in [#256](https://github.com/MarshalX/python-webrtc/pull/256)
+* Fix relayed remote video not scaled down for its encoder at low bitrates, and a sent track's own sinks getting the encoder's smaller frames by [@MarshalX](https://github.com/MarshalX) in [#256](https://github.com/MarshalX/python-webrtc/pull/256)
+* Fix encoded frames a transform drops staying in memory while the event loop is busy or closed by [@MarshalX](https://github.com/MarshalX) in [#260](https://github.com/MarshalX/python-webrtc/pull/260)
+* Fix writes to a writable stream slowing down as its queue grows by [@MarshalX](https://github.com/MarshalX) in [#264](https://github.com/MarshalX/python-webrtc/pull/264)
+* Fix the empty reason in the OpenAI example's connection error by [@MarshalX](https://github.com/MarshalX) in [#264](https://github.com/MarshalX/python-webrtc/pull/264)
+* Fix the OpenAI example printing the API key in `--help` by [@MarshalX](https://github.com/MarshalX) in [#268](https://github.com/MarshalX/python-webrtc/pull/268)
+* Fix the memory benchmark table when a run stops early at the memory limit, and benchmark charts crashing on a zero value or baseline by [@MarshalX](https://github.com/MarshalX) in [#264](https://github.com/MarshalX/python-webrtc/pull/264)
+* Fix the connections guide's advice to wait for complete ICE gathering, which can take about 40 seconds with a STUN server by [@MarshalX](https://github.com/MarshalX) in [#268](https://github.com/MarshalX/python-webrtc/pull/268)
+
 ## Version 0.0.2
 
 **15.10.2026**

@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "wrtc"  # "webrtc" isn't allowed on PyPI
-version = "0.0.3"
+version = "0.1.0"
 description = "Chrome's WebRTC engine (libwebrtc M152), with the browser API, in Python"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -14,7 +14,7 @@ requires-python = ">=3.9"
 keywords = ["webrtc", "libwebrtc", "rtc", "peer-to-peer", "data-channel", "video", "audio", "voip", "asyncio", "w3c"]
 dependencies = ["typing_extensions>=4.10"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Natural Language :: English",
     "Intended Audience :: Developers",
     "Framework :: AsyncIO",

@@ -75,7 +75,7 @@ Behaves differently:
 
 ## Performance
 
-Python WebRTC opens connections 7–8x faster than aiortc, moves 4.4–9x more data through a data channel and spends
+Python WebRTC opens connections 7–8x faster than aiortc, moves 7.7–14.6x more data through a data channel and spends
 less CPU on audio. See the [benchmarks](../benchmarks.md).
 
 The layer gives up some of that for compatibility: it costs up to 8% more than the same code on the native API. Each
