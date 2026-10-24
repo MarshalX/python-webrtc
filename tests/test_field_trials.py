@@ -14,6 +14,7 @@ import contextlib
 import multiprocessing
 import multiprocessing.context
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -397,3 +398,20 @@ def test_a_flooded_connection_gets_connected_sibling_sockets() -> None:
 
 def test_connected_sockets_trial_turns_siblings_off() -> None:
     assert _siblings_after_a_flood({'PythonWebRTC-ConnectedSockets': 'Disabled'}) == 0
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='Windows keeps one socket per address')
+@isolated
+def test_a_flood_survives_its_sibling_sockets_being_shut_down() -> None:
+    """Stands in for macOS's firewall by shutting every sibling down for sending.
+
+    The flood still arrives, over the original socket, and the failed sends raise no SIGPIPE, which the default
+    handler, restored here as some applications do, would die of.
+    """
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    wrtc._testing.park('sibling.shutdown')
+    asyncio.run(_flood(1000))
+
+    made = wrtc._testing.sibling_sockets()
+    assert made > 0
+    assert wrtc._testing.abandoned_sibling_sockets() == made
