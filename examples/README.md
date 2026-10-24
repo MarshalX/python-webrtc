@@ -12,6 +12,14 @@ without worrying about copyrights.
 
 **Transforming video with a processor, a TransformStream and a VideoTrackGenerator.** Sends the received video back in grayscale.
 
+### [browser_server.py](browser_server.py)
+
+**A Python WebRTC server for a browser page.** Your camera comes back from Python in grayscale, and Python answers a chat over a data channel. Open the printed address and allow the camera:
+
+```bash
+uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/browser_server.py
+```
+
 ### [openai_live.py](openai_live.py)
 
 **Voice chat with OpenAI GPT-Live.** Talks to the model through your microphone and speakers, with live transcripts in the terminal. No server: just an API key. Dependencies are declared inline, so [uv](https://docs.astral.sh/uv/) runs it with nothing to install:
@@ -20,10 +28,26 @@ without worrying about copyrights.
 OPENAI_API_KEY=sk-... uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/openai_live.py
 ```
 
+### [gemini_live.py](gemini_live.py)
+
+**Voice agent with Gemini Live.** A browser page talks to Gemini through a Python server that keeps the API key, over WebRTC to the page and a WebSocket to the Live API:
+
+```bash
+GEMINI_API_KEY=... uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/gemini_live.py
+```
+
 ### [janus_streaming.py](janus_streaming.py)
 
 **Watching a live stream in the terminal.** Plays a stream of the public [Janus](https://janus.conf.meetecho.com/) demo server: the video drawn with colored characters, the audio on your speakers, if there are any, so it runs on a server too. No account or key:
 
 ```bash
 uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/janus_streaming.py
+```
+
+### [whip_whep.py](whip_whep.py)
+
+**Playing and publishing streams over WHIP and WHEP.** Plays the public demo stream of [Dolby OptiView](https://optiview.dolby.com/) in the terminal, or any WHEP endpoint, and `--whip` publishes instead. Where the OS has no H.264 codec, it downloads Cisco's OpenH264 once (OpenH264 Video Codec provided by Cisco Systems, Inc.). No account or key:
+
+```bash
+uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/whip_whep.py
 ```

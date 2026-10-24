@@ -23,11 +23,11 @@ Sends the received video back in grayscale.
 Writes received video and audio to raw files.
 :::
 
-:::{grid-item-card} {octicon}`broadcast;1em;sd-mr-1` Live stream in the terminal
-:link: janus_streaming
+:::{grid-item-card} {octicon}`browser;1em;sd-mr-1` Browser and Python server
+:link: browser_server
 :link-type: doc
 
-Watches a public stream, with the video as colored characters and the audio on your speakers.
+Sends your camera back from Python in grayscale, with a chat over a data channel.
 :::
 
 :::{grid-item-card} {octicon}`unmute;1em;sd-mr-1` Voice chat with OpenAI GPT-Live
@@ -37,6 +37,27 @@ Watches a public stream, with the video as colored characters and the audio on y
 Talks to the model through your microphone and speakers.
 :::
 
+:::{grid-item-card} {octicon}`comment-discussion;1em;sd-mr-1` Voice agent with Gemini Live
+:link: gemini_live
+:link-type: doc
+
+Talks to Gemini from a browser page, through a Python server that keeps the API key.
+:::
+
+:::{grid-item-card} {octicon}`broadcast;1em;sd-mr-1` Live stream in the terminal
+:link: janus_streaming
+:link-type: doc
+
+Watches a public stream, with the video as colored characters and the audio on your speakers.
+:::
+
+:::{grid-item-card} {octicon}`broadcast;1em;sd-mr-1` WHIP and WHEP
+:link: whip_whep
+:link-type: doc
+
+Plays a WHEP stream in the terminal, or publishes one over WHIP.
+:::
+
 ::::
 
 ```{toctree}
@@ -44,6 +65,9 @@ Talks to the model through your microphone and speakers.
 
 echo
 recorder
-janus_streaming
+browser_server
 openai_live
+gemini_live
+janus_streaming
+whip_whep
 ```

@@ -54,9 +54,15 @@ of date.
 
 - {doc}`Echo peer <examples/echo>`: sends back the video it receives, in grayscale.
 - {doc}`Recorder <examples/recorder>`: writes the video and audio a peer receives to files.
-- {doc}`Live stream in the terminal <examples/janus_streaming>`: plays a stream of the public Janus demo server.
+- {doc}`Browser and Python server <examples/browser_server>`: serves a page whose camera comes back from Python in
+  grayscale, with a chat over a data channel.
 - {doc}`Voice chat with OpenAI GPT-Live <examples/openai_live>`: talks to the model through the microphone and
   speakers.
+- {doc}`Voice agent with Gemini Live <examples/gemini_live>`: a browser talks to Gemini over WebRTC through a Python
+  server, which streams the audio to the Live API over a WebSocket.
+- {doc}`Live stream in the terminal <examples/janus_streaming>`: plays a stream of the public Janus demo server.
+- {doc}`WHIP and WHEP <examples/whip_whep>`: plays a WHEP stream, a public demo by default, or publishes the synthetic
+  camera and microphone over WHIP.
 
 ## Optional
 

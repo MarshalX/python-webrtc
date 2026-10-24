@@ -54,8 +54,9 @@ async def on_candidate(event):
         await signaling.send(event.candidate.to_json())
 ```
 
-To skip trickling, wait for `ice_gathering_state` to be `'complete'` and send `pc.local_description`, which then has
-every candidate in it.
+To skip trickling, send `pc.local_description` once the candidates you need have arrived: it includes them. Don't wait
+for `ice_gathering_state` to be `'complete'`: with a STUN server, an address that can't reach it, like a VPN's, holds
+gathering open for about 40 seconds. Stop at the first `srflx` candidate, or after a short pause with no new ones.
 
 ## Peers on one machine
 
