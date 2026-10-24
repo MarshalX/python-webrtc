@@ -21,7 +21,7 @@ processes, and the charts show the medians of each library's newest run.
 Against aiortc, Python WebRTC:
 
 - opens a connection **7–8x faster**;
-- moves **4.4–9x more data** through a data channel, with **4–6x less CPU** per megabyte;
+- moves **7.7–14.6x more data** through a data channel, with **7–10x less CPU** per megabyte;
 - spends **less CPU on audio** at every stream count, up to 4x less when sending;
 - encodes H.264 in hardware on macOS, at **a tenth of the CPU** per frame;
 - delivers call video with **about half the latency**;

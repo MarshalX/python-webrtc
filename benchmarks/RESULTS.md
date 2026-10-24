@@ -19,7 +19,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | Create | Offer created | Gathered | ICE connected | Connected | Data channel open | Open, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| wrtc 0.0.3 | 0.5 / 0.5 | 0.2 / 0.3 | 1.2 / 1.3 | 3.0 / 3.2 | 3.4 / 3.6 | 3.5 / 3.7 | 12% |
+| wrtc 0.1.0 | 0.5 / 0.5 | 0.2 / 0.3 | 1.2 / 1.3 | 3.0 / 3.2 | 3.4 / 3.6 | 3.5 / 3.7 | 12% |
 | aiortc 1.15.0 | 0.3 / 0.3 | 0.1 / 0.1 | 2.1 / 2.6 | 26.7 / 27.5 | 28.1 / 28.9 | 29.0 / 29.9 | 100% |
 | pion v4.2.23 | 0.8 / 1.4 | 1.9 / 2.7 | 3.5 / 4.4 | 36.5 / 89.0 | 39.1 / 94.5 | 39.6 / 95.4 | 136% |
 | libdatachannel 0.24.6 | 0.0 / 0.0 | 0.1 / 0.3 | 0.2 / 0.4 | 1.0 / 1.8 | 2.1 / 4.0 | 2.3 / 4.3 | 8% |
@@ -29,7 +29,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | Create | Offer created | Gathered | ICE connected | Connected | Data channel open | Open, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| wrtc 0.0.3 | 2.3 / 4.0 | 0.3 / 0.3 | 1.3 / 1.5 | 3.7 / 4.0 | 4.3 / 4.8 | 4.3 / 4.8 | 13% |
+| wrtc 0.1.0 | 2.3 / 4.0 | 0.3 / 0.3 | 1.3 / 1.5 | 3.7 / 4.0 | 4.3 / 4.8 | 4.3 / 4.8 | 13% |
 | aiortc 1.15.0 | 3.6 / 15.8 | 0.1 / 0.1 | 2.2 / 2.6 | 27.4 / 27.5 | 32.8 / 37.8 | 33.9 / 38.7 | 100% |
 | pion v4.2.23 | 0.4 / 0.8 | 0.8 / 1.6 | 1.5 / 2.8 | 18.6 / 78.7 | 20.1 / 82.7 | 20.6 / 84.2 | 60% |
 | libdatachannel 0.24.6 | 1.5 / 11.5 | 4.8 / 6.2 | 4.9 / 6.2 | 7.7 / 9.2 | 10.5 / 11.7 | 10.9 / 11.9 | 32% |
@@ -39,7 +39,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | Create | Offer created | Gathered | ICE connected | Connected | Data channel open | Open, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| wrtc 0.0.3 | 0.5 / 0.7 | 0.2 / 0.2 | 0.8 / 1.1 | 3.0 / 3.9 | 3.5 / 4.3 | 3.6 / 4.4 | 12% |
+| wrtc 0.1.0 | 0.5 / 0.7 | 0.2 / 0.2 | 0.8 / 1.1 | 3.0 / 3.9 | 3.5 / 4.3 | 3.6 / 4.4 | 12% |
 | aiortc 1.15.0 | 0.3 / 0.3 | 0.1 / 0.1 | 2.1 / 2.5 | 26.7 / 27.6 | 28.1 / 29.0 | 29.0 / 30.0 | 100% |
 | pion v4.2.23 | 0.8 / 1.4 | 1.9 / 2.8 | 3.6 / 4.4 | 46.7 / 47.9 | 48.5 / 49.9 | 49.4 / 50.7 | 170% |
 | libdatachannel 0.24.6 | 0.0 / 0.0 | 0.2 / 0.3 | 0.2 / 0.2 | 1.0 / 2.0 | 2.2 / 3.5 | 2.3 / 3.7 | 8% |
@@ -49,7 +49,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | Create | Offer created | Gathered | ICE connected | Connected | Data channel open | Open, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| wrtc 0.0.3 | 2.3 / 2.4 | 0.3 / 0.3 | 1.1 / 1.1 | 4.0 / 4.4 | 4.4 / 4.9 | 4.6 / 5.0 | 13% |
+| wrtc 0.1.0 | 2.3 / 2.4 | 0.3 / 0.3 | 1.1 / 1.1 | 4.0 / 4.4 | 4.4 / 4.9 | 4.6 / 5.0 | 13% |
 | aiortc 1.15.0 | 3.5 / 3.7 | 0.1 / 0.1 | 2.2 / 2.3 | 27.4 / 27.5 | 32.7 / 33.0 | 33.7 / 34.0 | 100% |
 | pion v4.2.23 | 0.4 / 3.9 | 0.7 / 4.6 | 1.2 / 8.2 | 20.9 / 36.6 | 22.3 / 37.9 | 22.7 / 38.6 | 67% |
 | libdatachannel 0.24.6 | 0.8 / 1.5 | 2.7 / 5.4 | 2.6 / 5.3 | 4.3 / 8.0 | 5.8 / 10.6 | 6.1 / 11.0 | 18% |
@@ -59,7 +59,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | CPU, both (ms) | Peak RSS, offerer (MB) | Loop lag p95 (ms) | Failed trials |
 | --- | --- | --- | --- | --- |
-| wrtc 0.0.3 | 10.8 | 55 | 0.3 | 0 |
+| wrtc 0.1.0 | 10.8 | 55 | 0.3 | 0 |
 | aiortc 1.15.0 | 11.7 | 71 | 0.8 | 0 |
 | pion v4.2.23 | 98.3 | 23 | - | 0 |
 | libdatachannel 0.24.6 | 4.7 | 10 | - | 0 |
@@ -71,7 +71,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 ### Throughput (Mbps)
 
-| Flood | wrtc 0.0.3 | aiortc 1.15.0 | pion v4.2.23 | libdatachannel 0.24.6 | webrtc-rs 0.21.1 | wrtc, % of aiortc | pion, % of aiortc | libdatachannel, % of aiortc | webrtc-rs, % of aiortc |
+| Flood | wrtc 0.1.0 | aiortc 1.15.0 | pion v4.2.23 | libdatachannel 0.24.6 | webrtc-rs 0.21.1 | wrtc, % of aiortc | pion, % of aiortc | libdatachannel, % of aiortc | webrtc-rs, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ordered 1 KB x1 | 1215 | 90 | 517 | 478 | 684 | 1353% | 575% | 532% | 762% |
 | ordered 1 KB x10 | 1282 | 95 | 1058 | 1039 | 1260 | 1353% | 1117% | 1097% | 1330% |
@@ -84,7 +84,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 ### Message rate (messages/s)
 
-| Flood | wrtc 0.0.3 | aiortc 1.15.0 | pion v4.2.23 | libdatachannel 0.24.6 | webrtc-rs 0.21.1 | wrtc, % of aiortc | pion, % of aiortc | libdatachannel, % of aiortc | webrtc-rs, % of aiortc |
+| Flood | wrtc 0.1.0 | aiortc 1.15.0 | pion v4.2.23 | libdatachannel 0.24.6 | webrtc-rs 0.21.1 | wrtc, % of aiortc | pion, % of aiortc | libdatachannel, % of aiortc | webrtc-rs, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ordered 1 KB x1 | 148350 | 10964 | 63078 | 58348 | 83512 | 1353% | 575% | 532% | 762% |
 | ordered 1 KB x10 | 156464 | 11562 | 129161 | 126857 | 153778 | 1353% | 1117% | 1097% | 1330% |
@@ -99,7 +99,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 - % below 100 is cheaper.
 
-| Flood | wrtc 0.0.3 | aiortc 1.15.0 | pion v4.2.23 | libdatachannel 0.24.6 | webrtc-rs 0.21.1 | wrtc, % of aiortc | pion, % of aiortc | libdatachannel, % of aiortc | webrtc-rs, % of aiortc |
+| Flood | wrtc 0.1.0 | aiortc 1.15.0 | pion v4.2.23 | libdatachannel 0.24.6 | webrtc-rs 0.21.1 | wrtc, % of aiortc | pion, % of aiortc | libdatachannel, % of aiortc | webrtc-rs, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ordered 1 KB x1 | 20 | 132 | 82 | 62 | 13 | 15% | 62% | 47% | 10% |
 | ordered 1 KB x10 | 19 | 127 | 54 | 52 | 34 | 15% | 43% | 41% | 27% |
@@ -114,7 +114,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | RTT p50 / p95 (ms) | Lost | p50, % of aiortc |
 | --- | --- | --- | --- |
-| wrtc 0.0.3 | 0.6 / 0.8 | 0 | 48% |
+| wrtc 0.1.0 | 0.6 / 0.8 | 0 | 48% |
 | aiortc 1.15.0 | 1.2 / 1.7 | 0 | 100% |
 | pion v4.2.23 | 0.5 / 0.9 | 0 | 46% |
 | libdatachannel 0.24.6 | 0.5 / 0.7 | 0 | 39% |
@@ -131,7 +131,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | Baseline (MB) | Created (KB) | Data channel (KB) | Audio (KB) | Created, % of aiortc | Data channel, % of aiortc | Audio, % of aiortc |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| wrtc 0.0.3 | 92 | 146 | 814 | 1701 | 335% | 166% | 129% |
+| wrtc 0.1.0 | 92 | 146 | 814 | 1701 | 335% | 166% | 129% |
 | aiortc 1.15.0 | 128 | 44 | 491 | 1322 | 100% | 100% | 100% |
 | pion v4.2.23 | 28 | 94 | 3323 | 2795 | 216% | 677% | 212% |
 | libdatachannel 0.24.6 | 5 | 22 | 771 | - | 51% | 157% | - |
@@ -141,7 +141,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | Created | Data channel | Audio |
 | --- | --- | --- | --- |
-| wrtc 0.0.3 | 36.7 | 195.1 | 376.1 |
+| wrtc 0.1.0 | 36.7 | 195.1 | 376.1 |
 | aiortc 1.15.0 | 14.2 | 108.3 | 227.9 |
 | pion v4.2.23 | 22.6 | 680.3 | 594.2 |
 | libdatachannel 0.24.6 | 13.8 | 168.9 | - |
@@ -151,9 +151,9 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | State | 1 | 10 | 50 | 100 | 200 |
 | --- | --- | --- | --- | --- | --- | --- |
-| wrtc 0.0.3 | created | 99 | 100 | 106 | 113 | 128 |
-| wrtc 0.0.3 | datachannel | 103 | 111 | 145 | 185 | 266 |
-| wrtc 0.0.3 | audio | 105 | 123 | 192 | 276 | 445 |
+| wrtc 0.1.0 | created | 99 | 100 | 106 | 113 | 128 |
+| wrtc 0.1.0 | datachannel | 103 | 111 | 145 | 185 | 266 |
+| wrtc 0.1.0 | audio | 105 | 123 | 192 | 276 | 445 |
 | aiortc 1.15.0 | created | 134 | 135 | 136 | 138 | 143 |
 | aiortc 1.15.0 | datachannel | 137 | 142 | 162 | 186 | 235 |
 | aiortc 1.15.0 | audio | 141 | 154 | 208 | 277 | 403 |
@@ -171,7 +171,7 @@ Medians; % columns are of aiortc's. How: [README](README.md#method).
 
 | Library | Last good | Stopped by | RSS at the last step (MB) | Setup p95 at the last step (ms) |
 | --- | --- | --- | --- | --- |
-| wrtc 0.0.3 | 1450 | setup failed: wrtc: no dc_open in 15.0 s | 1156 | 417.0 |
+| wrtc 0.1.0 | 1450 | setup failed: wrtc: no dc_open in 15.0 s | 1156 | 417.0 |
 | aiortc 1.15.0 | 1100 | setup failed: aiortc: no dc_open in 15.0 s | 676 | 77.8 |
 | pion v4.2.23 | 300 | setup failed: pion: no dc_open in 15.0 s | 896 | 4251.7 |
 | libdatachannel 0.24.6 | 2000 | reached 2000 connections | 1546 | 221.0 |
