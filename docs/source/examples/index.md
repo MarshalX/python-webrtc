@@ -1,3 +1,7 @@
+---
+description: "Complete Python WebRTC programs: a server for a browser page, voice agents, WHIP and WHEP, live streams in the terminal and more."
+---
+
 # Examples
 
 Complete programs from the [examples](https://github.com/MarshalX/python-webrtc/tree/main/examples) directory of the

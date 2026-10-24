@@ -1,3 +1,7 @@
+---
+description: "Guides to Python WebRTC: connections, data channels, media, events, H.264, field trials and migrating from aiortc."
+---
+
 # Guides
 
 The API is the one of the browsers, so the guides of MDN apply as they are, in snake_case. These pages cover what

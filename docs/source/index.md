@@ -1,7 +1,5 @@
 ---
-myst:
-  html_meta:
-    "description": "Python WebRTC: Chrome's WebRTC engine, with the browser API, in Python"
+description: "Chrome's WebRTC engine with the browser API, in Python: peer connections, data channels, audio and video. Prebuilt wheels for Linux, macOS and Windows."
 ---
 
 # Python WebRTC

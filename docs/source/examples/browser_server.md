@@ -1,3 +1,7 @@
+---
+description: "A Python WebRTC server for a browser page: your camera comes back in grayscale, and Python answers a chat over a data channel."
+---
+
 # Browser and Python server
 
 A browser page sends your camera to Python, which sends it back in grayscale, and Python answers a chat over a data

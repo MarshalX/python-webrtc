@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import ast
 import enum
+import html
 import inspect
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from docutils import nodes
 from pygments.formatters import HtmlFormatter
@@ -384,6 +385,21 @@ def scope_pygments_to_theme(app: Sphinx, exception: Exception | None) -> None:
     (Path(app.outdir) / '_static' / 'pygments.css').write_text('\n'.join(blocks), encoding='UTF-8')
 
 
+def use_page_description(
+    _app: Sphinx, _pagename: str, _templatename: str, context: dict[str, Any], _doctree: nodes.document | None
+) -> None:
+    """Give search results and link previews the ``description`` of the page's front matter.
+
+    Without it, OpenGraph cuts both from the first paragraph of the page.
+    """
+    description = (context.get('meta') or {}).get('description')
+    if not description:
+        return
+
+    context['meta']['og:description'] = description
+    context['metatags'] += f'<meta name="description" content="{html.escape(description)}" />\n'
+
+
 def _design_components(root: nodes.Element, component: str) -> list[nodes.container]:
     return [node for node in root.findall(nodes.container) if node.get('design_component') == component]
 
@@ -433,3 +449,5 @@ def setup(app: Sphinx) -> None:
     app.connect('autodoc-process-signature', hide_enum_signatures)
     app.connect('env-check-consistency', register_short_aliases)
     app.connect('build-finished', scope_pygments_to_theme)
+    # before OpenGraph, which connects at the default priority
+    app.connect('html-page-context', use_page_description, priority=400)

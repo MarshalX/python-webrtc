@@ -1,7 +1,5 @@
 ---
-myst:
-  html_meta:
-    "description": "Python WebRTC against aiortc, Pion, libdatachannel and webrtc-rs: connection setup, data channels, memory and media"
+description: "Python WebRTC against aiortc, Pion, libdatachannel and webrtc-rs: connection setup, data channels, memory and media"
 ---
 
 # Benchmarks

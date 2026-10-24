@@ -1,3 +1,7 @@
+---
+description: "Talk to OpenAI GPT-Live from Python over WebRTC, with your microphone, speakers and live transcripts in the terminal."
+---
+
 # Voice chat with OpenAI GPT-Live
 
 Talks to the model through your microphone and speakers, with live transcripts in the terminal. It needs no server, only an
