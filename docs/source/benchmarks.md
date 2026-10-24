@@ -64,7 +64,7 @@ This chart favors aiortc, for two reasons that come from the engine rather than 
   controller and its transport. The Python objects on top take under 1 KB.
 - **A connected data channel** is mostly ICE: the engine keeps every candidate pair it checked, about 8 KB each, to
   switch networks without reconnecting. The benchmark Mac has 10 addresses (Wi-Fi, VPN, virtual machine bridges and
-  loopback), each over UDP and TCP, so 50 pairs a connection. aiortc gathers UDP only and skips loopback. In the same
+  loopback), each over UDP and TCP, so 50 pairs a connection. aiortc gathers UDP only. In the same
   test on Linux with one interface, a connected pair takes a third of the memory it takes on that Mac.
 
 Memory stays reserved after connections close, because the allocator keeps it for reuse: opening and closing 100
@@ -87,8 +87,8 @@ close. H.264 is cheaper at every resolution, decoded by VideoToolbox on macOS.
 
 Both libraries send under the same bitrate cap. Read the two panels under the bars before the bars:
 
-- **Bitrate over the cap.** Python WebRTC stays under the cap. aiortc's VP8 ignores it as the picture grows: twice the
-  cap at 1080p60 and five times at 2160p. Sent to a real network, that is packet loss.
+- **Bitrate over the cap.** Python WebRTC stays under the cap. aiortc's VP8 ignores it as the picture grows: 2.4 times
+  the cap at 1080p60 and five times at 2160p. Sent to a real network, that is packet loss.
 - **Frame rate over the source.** To fit 1080p and 4K into 1.5 Mbps, the engine keeps the resolution and drops
   frames, as browsers do with that setting. It encodes fewer, much larger frames, so the CPU per frame goes up.
 
@@ -101,8 +101,9 @@ encoder on macOS and costs a tenth of the CPU per frame.
 
 Two peers of the same library call each other, and each library's congestion control picks the bitrate. Python WebRTC
 reaches the bitrate the video asks for, 2.5 or 5 Mbps, while aiortc stays near 1.5–2.4 Mbps. The panel under the bars
-shows it: Python WebRTC receives up to three times the bits for every frame, so a better picture, and decoding more
-bits costs more CPU per frame.
+shows it: Python WebRTC receives up to 2.8 times the bits for every frame, and decoding more bits costs more CPU per
+frame. That isn't the whole cost: at H.264 720p the bits per frame are within 6%, and Python WebRTC's receiver still
+takes more CPU per frame.
 
 ![Video call latency](https://raw.githubusercontent.com/MarshalX/python-webrtc/main/benchmarks/charts/media-video-latency.png)
 

@@ -18,6 +18,15 @@
     <a href="https://pypi.org/project/wrtc/">PyPI</a>
 </p>
 
+<p align="center">
+    <picture>
+        <source media="(prefers-color-scheme: dark)" type="image/avif" srcset="https://github.com/MarshalX/python-webrtc/raw/main/docs/source/_static/img/demo-dark.avif">
+        <source type="image/avif" srcset="https://github.com/MarshalX/python-webrtc/raw/main/docs/source/_static/img/demo-light.avif">
+        <source media="(prefers-color-scheme: dark)" srcset="https://github.com/MarshalX/python-webrtc/raw/main/docs/source/_static/img/demo-dark.gif">
+        <img src="https://github.com/MarshalX/python-webrtc/raw/main/docs/source/_static/img/demo-light.gif" alt="A browser page sends its camera to a Python server, which sends it back in grayscale and answers a chat message over a data channel">
+    </picture>
+</p>
+
 ---
 
 Python WebRTC binds **libwebrtc M152**, the engine inside Chrome, and exposes it through the **W3C APIs you
@@ -98,11 +107,13 @@ equal to the strings of the specification, dictionaries are typed dataclasses, a
 | Browser API (`RTCPeerConnection`, `createOffer`, …)     | ✅                    | similar           | ❌ rooms                    | ❌ GObject signals     |
 | Media path                                              | native               | Python            | native                     | native                |
 | VP9 and AV1                                             | ✅                    | ❌                 | ✅                          | ✅                     |
-| `pip install` on Linux, macOS and Windows               | ✅                    | ✅                 | ✅                          | ❌ system packages     |
+| `pip install` on Linux, macOS and Windows               | ✅                    | ✅                 | ✅                          | ❌ no Linux wheels     |
 
-Against aiortc, it opens connections 7–8x faster, moves 7.7–14.6x more data through a data channel and spends less
-CPU on audio. See the [benchmarks](https://wrtc.marshal.dev/benchmarks/), which also measure Pion, libdatachannel and
-webrtc-rs.
+Against aiortc, it opens connections 7.3–8.3x faster, moves 7.7–14.6x more data through a data channel and spends
+less CPU on audio. See the [benchmarks](https://wrtc.marshal.dev/benchmarks/), which also measure Pion, libdatachannel
+and webrtc-rs.
+
+The full comparison, and when another library is the better choice: [Choosing a Python WebRTC library](https://wrtc.marshal.dev/guides/comparison/).
 
 ## Codecs
 

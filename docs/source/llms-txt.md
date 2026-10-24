@@ -22,6 +22,8 @@ of date.
 ## Start
 
 - {doc}`Quickstart <quickstart>`: installation, and two peers connected with a data channel.
+- {doc}`Choosing a Python WebRTC library <guides/comparison>`: Python WebRTC, aiortc, the LiveKit SDK and GStreamer
+  webrtcbin compared, and when each is the better choice.
 - {doc}`Migrating from aiortc <guides/aiortc>`: run aiortc code by changing its imports, and what changes on the way.
 
 ## Guides
