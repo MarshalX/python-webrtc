@@ -6,6 +6,7 @@
 //
 
 #include "network_socket_server.h"
+#include "parking.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -42,7 +43,15 @@ namespace python_webrtc {
     }
 #endif
 
-    // Forwards to a socket, repeating its read event while the reads its handler makes succeed; see MakeSibling
+#ifdef __APPLE__
+    // libwebrtc sets it on iOS only, and a send to a closed peer raises SIGPIPE, fatal where its default is restored
+    void NoSigpipe(int descriptor) {
+      const int value = 1;
+      (void)setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &value, sizeof value);
+    }
+#endif
+
+    // Forwards to a socket, repeating its read event while the reads its handler makes succeed; see SendOnNewSibling
     class DrainingSocket : public webrtc::Socket {
     public:
       DrainingSocket(NetworkSocketServer &server, webrtc::Socket *socket, webrtc::Buffer &scratch, int receiveBuffer)
@@ -87,30 +96,13 @@ namespace python_webrtc {
       int Send(const void *data, size_t size) override { return _socket->Send(data, size); }
       int SendTo(const void *data, size_t size, const webrtc::SocketAddress &address) override {
         if (_sibling && address == _siblingRemote) {
-          const int sent = _sibling->Send(data, size);
-          if (sent >= 0) {
-            return sent;
-          }
-          const int error = _sibling->GetError();
-#ifndef _WIN32
-          // an unconnected socket never learns of the destination's ICMP port unreachable: neither does this one
-          if (error == ECONNREFUSED) {
-            return static_cast<int>(size);
-          }
-#endif
-          _socket->SetError(error);
-          return sent;
+          return SendOnSibling(data, size, address);
         }
-        if (address == _lastDestination) {
-          _sends = std::min(_sends + 1, kSiblingSends);
-          // both ways, or one connection's datagrams arrive on two queues out of order, which SCTP takes for loss
-          if (_sends == kSiblingSends && _receives == kSiblingSends && _lastSource == address && !_sibling &&
-              _server.SiblingsAllowed()) {
-            MakeSibling(address);
+        CountSend(address);
+        if (SiblingDue(address)) {
+          if (const auto sent = SendOnNewSibling(data, size, address)) {
+            return *sent;
           }
-        } else {
-          _lastDestination = address;
-          _sends = 1;
         }
         return _socket->SendTo(data, size, address);
       }
@@ -177,24 +169,32 @@ namespace python_webrtc {
 
       [[nodiscard]] webrtc::Socket *Reading() const { return _reading != nullptr ? _reading : _socket.get(); }
 
-      void MakeSibling(const webrtc::SocketAddress &remote) {
+      void CountSend(const webrtc::SocketAddress &address) {
+        if (address == _lastDestination) {
+          _sends = std::min(_sends + 1, kSiblingSends);
+        } else {
+          _lastDestination = address;
+          _sends = 1;
+        }
+      }
+
+      [[nodiscard]] bool SiblingDue(const webrtc::SocketAddress &address) const {
+        // both ways, or one connection's datagrams arrive on two queues out of order, which SCTP takes for loss
+        return _sends == kSiblingSends && _receives == kSiblingSends && _lastDestination == address &&
+               _lastSource == address && !_sibling && !_noSiblings && _server.SiblingsAllowed();
+      }
+
+      // a connected socket spares the kernel the route and socket lookups of every send and receive
+      std::optional<int> SendOnNewSibling(const void *data, size_t size, const webrtc::SocketAddress &remote) {
 #ifndef _WIN32
         if (!_local) {
-          return;
+          _noSiblings = true;
+          return std::nullopt;
         }
         std::unique_ptr<webrtc::Socket> sibling(_server.CreateUnwrappedSocket(_local->family(), SOCK_DGRAM));
         if (!sibling) {
-          return;
-        }
-        const int descriptor = Descriptor(*_socket);
-        const int siblingDescriptor = Descriptor(*sibling);
-        ShareAddress(descriptor, true);
-        ShareAddress(siblingDescriptor, true);
-        const bool connected = sibling->Bind(*_local) == 0 && sibling->Connect(remote) == 0;
-        ShareAddress(siblingDescriptor, false);
-        ShareAddress(descriptor, false);
-        if (!connected) {
-          return;
+          _noSiblings = true;
+          return std::nullopt;
         }
         if (_receiveBuffer > 0) {
           (void)sibling->SetOption(OPT_RCVBUF, _receiveBuffer);
@@ -202,32 +202,91 @@ namespace python_webrtc {
         for (const auto &[option, value] : _options) {
           (void)SetOptionOn(*sibling, option, value);
         }
-#ifndef __clang_analyzer__
-        sibling->SubscribeReadEvent(this, [this](webrtc::Socket *) { DrainSibling(); });
-        sibling->SubscribeWriteEvent(this, [this](webrtc::Socket *) { NotifyWriteEvent(this); });
-#endif
+        const int descriptor = Descriptor(*_socket);
+        const int siblingDescriptor = Descriptor(*sibling);
+        // shared only while the sibling binds, so no other socket can join the address
+        ShareAddress(descriptor, true);
+        ShareAddress(siblingDescriptor, true);
+        if (sibling->Bind(*_local) != 0 || sibling->Connect(remote) != 0) {
+          ShareAddress(descriptor, false);
+          _noSiblings = true;
+          return std::nullopt;
+        }
+        // tests: stands in for macOS's firewall
+        if (Parking::Holds("sibling.shutdown")) {
+          (void)shutdown(siblingDescriptor, SHUT_WR);
+        }
         _sibling = std::move(sibling);
         _siblingRemote = remote;
         NetworkSocketServer::CountSibling();
+        // first thing once connected: macOS's firewall shuts down a connected socket that receives before it sends
+        const int sent = SendOnSibling(data, size, remote);
+        ShareAddress(descriptor, false);
+        if (!_sibling) {
+          return sent;
+        }
+        ShareAddress(siblingDescriptor, false);
+#ifndef __clang_analyzer__
+        _sibling->SubscribeReadEvent(this, [this](webrtc::Socket *) { DrainSibling(); });
+        _sibling->SubscribeWriteEvent(this, [this](webrtc::Socket *) { NotifyWriteEvent(this); });
+#endif
+        // what the original already queued is read before the sibling, or SCTP takes the reordering for loss
         int queued = 0;
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): FIONREAD is only an ioctl
         _backlog = ioctl(descriptor, FIONREAD, &queued) == 0 ? queued : 0;
+        return sent;
 #else
+        (void)data;
+        (void)size;
         (void)remote;
+        return std::nullopt;
 #endif
       }
 
-      void DropSibling() {
-        if (!_sibling) {
-          return;
+      int SendOnSibling(const void *data, size_t size, const webrtc::SocketAddress &address) {
+        const int sent = _sibling->Send(data, size);
+        if (sent >= 0) {
+          return sent;
         }
+        const int error = _sibling->GetError();
+#ifndef _WIN32
+        // an unconnected socket never learns of the destination's ICMP port unreachable: neither does this one
+        if (error == ECONNREFUSED) {
+          return static_cast<int>(size);
+        }
+        if (error == EPIPE) {
+          AbandonSibling();
+          return _socket->SendTo(data, size, address);
+        }
+#endif
+        _socket->SetError(error);
+        return sent;
+      }
+
+      std::unique_ptr<webrtc::Socket> DetachSibling() {
         if (_reading == _sibling.get()) {
           _reading = nullptr;
         }
         _sibling->UnsubscribeReadEvent(this);
         _sibling->UnsubscribeWriteEvent(this);
-        _sibling.reset();
         _siblingRemote.Clear();
+        return std::move(_sibling);
+      }
+
+      // a datagram can still arrive between connect and the first send, and the firewall then shuts the sibling down
+      void AbandonSibling() {
+        // closed, not destroyed: this may run in its own read event
+        _abandonedSibling = DetachSibling();
+        (void)_abandonedSibling->Close();
+        _backlog = 0;
+        _noSiblings = true;
+        NetworkSocketServer::CountAbandonedSibling();
+      }
+
+      void DropSibling() {
+        if (_sibling) {
+          (void)DetachSibling();
+        }
       }
 
       void DrainSibling() {
@@ -288,6 +347,9 @@ namespace python_webrtc {
       // what libwebrtc set, for a sibling made later
       std::vector<std::pair<Option, int>> _options;
       std::unique_ptr<webrtc::Socket> _sibling;
+      std::unique_ptr<webrtc::Socket> _abandonedSibling;
+      // a failed sibling would cost a socket and a bind per datagram, an abandoned one would meet the firewall again
+      bool _noSiblings = false;
       webrtc::SocketAddress _siblingRemote;
       webrtc::SocketAddress _lastDestination;
       int _sends = 0;
@@ -394,6 +456,7 @@ namespace python_webrtc {
       delete dispatcher;
       return nullptr;
     }
+    NoSigpipe(dispatcher->GetDescriptor());
     return Created(dispatcher, type);
   }
 
@@ -403,6 +466,7 @@ namespace python_webrtc {
       delete dispatcher;
       return nullptr;
     }
+    NoSigpipe(dispatcher->GetDescriptor());
     return dispatcher;
   }
 
@@ -412,6 +476,7 @@ namespace python_webrtc {
       delete dispatcher;
       return nullptr;
     }
+    NoSigpipe(descriptor);
     // its events were set in libwebrtc's constructor, before this class's methods
     Watch(dispatcher);
     return dispatcher;

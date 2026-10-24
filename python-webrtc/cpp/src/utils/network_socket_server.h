@@ -42,6 +42,8 @@ namespace python_webrtc {
     [[nodiscard]] bool SiblingsAllowed() const { return _siblings; }
     static int64_t SiblingsMade() { return _siblingsMade.load(); }
     static void CountSibling() { ++_siblingsMade; }
+    static int64_t SiblingsAbandoned() { return _siblingsAbandoned.load(); }
+    static void CountAbandonedSibling() { ++_siblingsAbandoned; }
 
 #ifdef __APPLE__
     webrtc::Socket *WrapSocket(SOCKET descriptor) override;
@@ -60,6 +62,7 @@ namespace python_webrtc {
     const int _receiveBuffer;
     const bool _siblings;
     static inline std::atomic<int64_t> _siblingsMade{0};
+    static inline std::atomic<int64_t> _siblingsAbandoned{0};
 
 #ifdef __APPLE__
     struct Watched {

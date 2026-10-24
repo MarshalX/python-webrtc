@@ -359,6 +359,8 @@ namespace python_webrtc {
         nogil(), "Returns once the signaling, worker and signaling threads ran what they queued.");
     testing.def("sibling_sockets", &NetworkSocketServer::SiblingsMade,
                 "How many connected sibling sockets the network threads of the process made.");
+    testing.def("abandoned_sibling_sockets", &NetworkSocketServer::SiblingsAbandoned,
+                "How many sibling sockets were found shut down and closed, their destinations given back.");
     testing.def(
         "udp_receive_buffer",
         []() {
