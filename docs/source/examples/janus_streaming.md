@@ -1,3 +1,7 @@
+---
+description: "Play a live WebRTC stream in the terminal with Python: the video as colored characters, the audio on your speakers."
+---
+
 # Live stream in the terminal
 
 Plays a stream of the public [Janus](https://janus.conf.meetecho.com/) demo server. The video is drawn with colored

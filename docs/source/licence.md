@@ -1,3 +1,7 @@
+---
+description: "Python WebRTC is under the BSD 3-Clause License. The licences of the bundled third-party code are listed too."
+---
+
 # Licence
 
 BSD 3-Clause License. File in repository: [LICENSE.md](https://github.com/MarshalX/python-webrtc/blob/main/LICENSE.md)

@@ -1,3 +1,7 @@
+---
+description: "Listen to the events of WebRTC connections, channels and tracks in Python: handlers, one-shot handlers, removal and errors."
+---
+
 # Events
 
 Connections, channels, tracks and transports fire the events of the specification. Every one of them is an

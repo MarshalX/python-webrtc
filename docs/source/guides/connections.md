@@ -1,3 +1,7 @@
+---
+description: "Create an RTCPeerConnection in Python, exchange SDP and ICE candidates over your signalling, and follow its states and stats."
+---
+
 # Connections
 
 {obj}`~webrtc.RTCPeerConnection` is one end of a connection. Each end describes itself in an SDP description, and

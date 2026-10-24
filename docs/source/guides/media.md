@@ -1,3 +1,7 @@
+---
+description: "Receive, send and transform audio and video in Python with MediaStreamTrackProcessor and MediaStreamTrackGenerator, as in a browser."
+---
+
 # Media
 
 Media is read from tracks and written to them with the APIs of the browsers:

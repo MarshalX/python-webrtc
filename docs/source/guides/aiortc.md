@@ -1,3 +1,7 @@
+---
+description: "Run aiortc code on Chrome's WebRTC engine: install wrtc[aiortc], change the imports to webrtc.aiortc, and the rest stays as it is."
+---
+
 # Migrating from aiortc
 
 `webrtc.aiortc` runs code written for aiortc 1.15 on Python WebRTC's engine. Install the extra, change the imports,

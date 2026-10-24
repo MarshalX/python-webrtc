@@ -1,3 +1,7 @@
+---
+description: "The Python WebRTC API reference: RTCPeerConnection, data channels, tracks, streams, events, enums and exceptions, as in the W3C specifications."
+---
+
 # API reference
 
 Everything is importable from the package itself: `webrtc.RTCPeerConnection`, `webrtc.RTCConfiguration`,

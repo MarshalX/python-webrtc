@@ -1,3 +1,7 @@
+---
+description: "A Gemini Live voice agent in the browser with live transcripts, through a Python WebRTC server that keeps the API key."
+---
+
 # Voice agent with Gemini Live
 
 Talks to Gemini from a browser page, with live transcripts, through a Python server in the middle:

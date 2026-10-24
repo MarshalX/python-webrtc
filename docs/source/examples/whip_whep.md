@@ -1,3 +1,7 @@
+---
+description: "Play a live stream over WHEP in the terminal, or publish one over WHIP, with Python WebRTC."
+---
+
 # WHIP and WHEP
 
 Plays a live stream over [WHEP](https://www.rfc-editor.org/rfc/rfc9725) in the terminal, or publishes one over WHIP.

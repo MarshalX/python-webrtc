@@ -1,3 +1,7 @@
+---
+description: "Install wrtc from PyPI and connect two Python peers over a WebRTC data channel in a few lines."
+---
+
 # Quickstart
 
 ## Installation

@@ -1,3 +1,7 @@
+---
+description: "Send text and binary messages between peers with RTCDataChannel in Python: opening, options, back pressure and closing."
+---
+
 # Data channels
 
 An {obj}`~webrtc.RTCDataChannel` sends messages between the peers, over SCTP inside the encrypted connection. See {mdn}`RTCDataChannel`.
