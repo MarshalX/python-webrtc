@@ -132,6 +132,10 @@ html_permalinks_icon = Icons.permalinks_icon
 html_css_files = [
     'css/custom.css',
 ]
+html_js_files = [
+    ('js/copy-page.js', {'defer': 'defer'}),
+]
+templates_path = ['_templates']
 
 html_theme_options = {
     'show_prev_next': True,
@@ -206,6 +210,7 @@ sitemap_excludes = ['llms-txt/']
 # -- llms.txt ---------------------------------------------------
 # a Markdown copy of every page, e.g. /quickstart.md, for agents
 llms_txt_override_source = 'llms-txt'
+llms_txt_suffix_mode = 'url-suffix'
 llms_txt_nested_enabled = False
 llms_txt_full_build = True
 LLMS_MARKDOWN_BUILDER = 'llms-markdown'

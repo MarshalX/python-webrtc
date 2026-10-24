@@ -105,10 +105,12 @@ Prebuilt wheels for Linux, macOS and Windows, including free-threaded Python. No
 | Browser API (`RTCPeerConnection`, `createOffer`, …) | ✅                   | similar        | ❌ rooms                  | ❌ GObject signals  |
 | Media path                                          | native               | Python         | native                    | native              |
 | VP9 and AV1                                         | ✅                   | ❌             | ✅                        | ✅                  |
-| `pip install` on Linux, macOS and Windows           | ✅                   | ✅             | ✅                        | ❌ system packages  |
+| `pip install` on Linux, macOS and Windows           | ✅                   | ✅             | ✅                        | ❌ no Linux wheels  |
 
-Against aiortc, it opens connections 7–8x faster, moves 7.7–14.6x more data through a data channel and spends less
-CPU on audio. See the [benchmarks](benchmarks.md), which also measure Pion, libdatachannel and webrtc-rs.
+Against aiortc, it opens connections 7.3–8.3x faster, moves 7.7–14.6x more data through a data channel and spends
+less CPU on audio. See the [benchmarks](benchmarks.md), which also measure Pion, libdatachannel and webrtc-rs.
+
+The full comparison, and when another library is the better choice: [Choosing a Python WebRTC library](guides/comparison.md).
 
 ## Where to start
 
@@ -199,6 +201,7 @@ guides/events
 guides/media
 guides/h264
 guides/field-trials
+guides/comparison
 guides/aiortc
 ```
 

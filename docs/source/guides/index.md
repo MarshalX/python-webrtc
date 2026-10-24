@@ -1,5 +1,5 @@
 ---
-description: "Guides to Python WebRTC: connections, data channels, media, events, H.264, field trials and migrating from aiortc."
+description: "Guides to Python WebRTC: connections, data channels, media, events, H.264, field trials, choosing a library and migrating from aiortc."
 ---
 
 # Guides
@@ -50,6 +50,13 @@ Enabling H.264 with Cisco's OpenH264 binary, and its licensing.
 :link-type: doc
 
 Experimental features of the engine, and WARP for faster connections.
+:::
+
+:::{grid-item-card} {octicon}`git-compare;1em;sd-mr-1` Choosing a library
+:link: comparison
+:link-type: doc
+
+Python WebRTC, aiortc, the LiveKit SDK and GStreamer webrtcbin compared, and when to use each.
 :::
 
 :::{grid-item-card} {octicon}`arrow-switch;1em;sd-mr-1` Migrating from aiortc
