@@ -565,12 +565,9 @@ def _describe_http_error(response: httpx.Response) -> str:
 
 def parse_args() -> argparse.Namespace:
     """The options of the command line."""
-    parser = argparse.ArgumentParser(
-        description='Voice chat with OpenAI GPT-Live over WebRTC.',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
+    parser = argparse.ArgumentParser(description='Voice chat with OpenAI GPT-Live over WebRTC.')
     parser.add_argument('--api-key', default=os.environ.get('OPENAI_API_KEY'), help='default: $OPENAI_API_KEY')
-    parser.add_argument('--model', default='gpt-live-1', help='the GPT-Live model')
+    parser.add_argument('--model', default='gpt-live-1', help='the GPT-Live model, default: gpt-live-1')
     parser.add_argument('--instructions', help='the system prompt')
     parser.add_argument('--voice', help='quartz, ripple, vesper, willow, stone, gleam, meridian, bossa, tempo, ...')
     parser.add_argument('--input-device', help='microphone name or index (see --list-devices), default: the system one')
