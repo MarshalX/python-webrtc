@@ -136,7 +136,7 @@ class MediaTrackSupportedConstraints(Dictionary):
     """The constraints the library recognizes, as :meth:`webrtc.MediaDevices.get_supported_constraints` returns.
 
     Every member is :obj:`True`. A recognized constraint that the source has no capability or setting for (like
-    :attr:`facing_mode` on the synthetic camera) is ignored when ideal and fails when required.
+    ``facing_mode`` on the synthetic camera) is ignored when ideal and fails when required.
 
     See :mdn:`MediaDevices/getSupportedConstraints`.
 
@@ -213,7 +213,7 @@ class MediaTrackSettings(Dictionary):
     """What a track carries now, as :meth:`webrtc.MediaStreamTrack.get_settings` returns.
 
     Members are :obj:`None` when they don't apply to the track or aren't known yet. The library never fills
-    :attr:`facing_mode` or :attr:`background_blur`.
+    ``facing_mode`` or ``background_blur``.
 
     See :mdn:`MediaTrackSettings`.
 
@@ -471,7 +471,7 @@ class MediaTrackConstraints(MediaTrackConstraintSet):
     """The constraints of a track, as given to :meth:`webrtc.MediaStreamTrack.apply_constraints`.
 
     They're also given per track to :meth:`webrtc.MediaDevices.get_user_media`. The members are the ones of
-    :obj:`MediaTrackConstraintSet`, plus :attr:`advanced`.
+    :obj:`MediaTrackConstraintSet`, plus ``advanced``.
 
     See :mdn:`MediaTrackConstraints`.
 

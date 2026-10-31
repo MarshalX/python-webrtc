@@ -404,7 +404,7 @@ class ReadableStreamReadResult(Dictionary, Generic[_T]):
     See :mdn:`ReadableStreamDefaultReader/read`.
 
     Args:
-        value (optional): The chunk read. It's :obj:`None` when :attr:`done` is set.
+        value (optional): The chunk read. It's :obj:`None` when ``done`` is set.
         done (:obj:`bool`, optional): :obj:`True` once the stream is closed and every chunk was read.
     """
 
@@ -696,7 +696,7 @@ class ReadableStream(Generic[_T]):
         """Reads every chunk and writes it to a writable stream, respecting its backpressure.
 
         Both streams are locked while the pipe runs. There's no abort signal, so cancel the returned future to stop
-        the pipe. The destination is then aborted unless :attr:`StreamPipeOptions.prevent_abort` is set.
+        the pipe. The destination is then aborted unless ``StreamPipeOptions.prevent_abort`` is set.
 
         See :mdn:`ReadableStream/pipeTo`.
 

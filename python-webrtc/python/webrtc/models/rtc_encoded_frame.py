@@ -79,9 +79,9 @@ class RTCEncodedVideoFrameMetadata(RTCEncodedFrameMetadata):
     See :mdn:`RTCEncodedVideoFrame/getMetadata`.
 
     Args:
-        frame_id (:obj:`int`, optional): The identifier of the frame, which :attr:`dependencies` of later frames
+        frame_id (:obj:`int`, optional): The identifier of the frame, which ``dependencies`` of later frames
             refer to.
-        dependencies (:obj:`list` of :obj:`int`, optional): The :attr:`frame_id` values of the frames this one
+        dependencies (:obj:`list` of :obj:`int`, optional): The ``frame_id`` values of the frames this one
             depends on.
         width (:obj:`int`, optional): The width of the frame, in pixels.
         height (:obj:`int`, optional): The height of the frame, in pixels.

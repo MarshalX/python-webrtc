@@ -24,7 +24,7 @@ webrtcbin. This page compares them as of 24 October 2026, with a source for ever
 
 ## Features
 
-|                           | **Python WebRTC**          | aiortc                   | LiveKit SDK                  | GStreamer webrtcbin   |
+| Feature                   | **Python WebRTC**          | aiortc                   | LiveKit SDK                  | GStreamer webrtcbin   |
 |---------------------------|----------------------------|--------------------------|------------------------------|-----------------------|
 | Engine                    | libwebrtc M152             | own, in Python           | libwebrtc M150, through Rust | own, in C             |
 | Connects to               | any WebRTC endpoint        | any WebRTC endpoint      | a LiveKit server             | any WebRTC endpoint   |

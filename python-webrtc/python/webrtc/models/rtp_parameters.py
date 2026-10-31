@@ -418,7 +418,7 @@ class RTCRtpReceiveParameters(RTCRtpParameters):
 class RTCRtpSendParameters(RTCRtpParameters):
     """The parameters a sender sends with, from :meth:`webrtc.RTCRtpSender.get_parameters`.
 
-    Only :attr:`encodings` (all but their ``rid``) and :attr:`degradation_preference` can be changed with
+    Only ``encodings`` (all but their ``rid``) and ``degradation_preference`` can be changed with
     :meth:`webrtc.RTCRtpSender.set_parameters`.
 
     See :mdn:`RTCRtpSender/getParameters`.

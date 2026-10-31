@@ -115,6 +115,7 @@ class FieldTrials(MutableMapping[str, str]):
 
     @override
     def clear(self) -> None:
+        """Removes all trials at once."""
         _apply({})
 
     @override

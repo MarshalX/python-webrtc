@@ -98,7 +98,7 @@ Prebuilt wheels for Linux, macOS and Windows, including free-threaded Python. No
 
 ## How it compares
 
-|                                                     | **Python WebRTC**    | aiortc         | LiveKit SDK               | GStreamer webrtcbin |
+| Feature                                             | **Python WebRTC**    | aiortc         | LiveKit SDK               | GStreamer webrtcbin |
 |-----------------------------------------------------|----------------------|----------------|---------------------------|---------------------|
 | Engine                                              | libwebrtc (Chrome's) | own, in Python | libwebrtc                 | own, in C           |
 | Connects peer-to-peer to any WebRTC endpoint        | ✅                   | ✅             | ❌ needs a LiveKit server | ✅                  |

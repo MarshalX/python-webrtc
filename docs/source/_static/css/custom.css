@@ -11,6 +11,36 @@ dl.py > dt .sig-prename {
     overflow-wrap: anywhere;
 }
 
+/* Long names in prose would scroll the page sideways on phones. */
+#content {
+    overflow-wrap: anywhere;
+}
+
+#content code.literal .pre {
+    white-space: pre-wrap;
+}
+
+/* Tables scroll instead. */
+#content table {
+    overflow-wrap: normal;
+}
+
+/* The previous and next links: long titles wrap instead of widening the page. */
+main .border-t.justify-between > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+/* The muted link color is too faint on the code background. */
+#right-sidebar a code {
+    background: transparent;
+}
+
+/* Inactive tab labels are too faint by default. */
+.sd-tab-set {
+    --sd-color-tabs-label-inactive: hsl(var(--muted-foreground));
+}
+
 /* API signatures. */
 :root {
     --sig-accent: #b3123c;
@@ -54,7 +84,7 @@ dl.py a.reference .pre {
 dl.py > dt .sig-prename {
     font-size: 0.85em;
     font-weight: 400;
-    opacity: 0.6;
+    color: hsl(var(--muted-foreground));
 }
 
 dl.py.class > dd {
