@@ -183,7 +183,7 @@ class RTCCertificate(WebRTCObject[wrtc.RTCCertificate]):
     """A certificate and its private key, which a connection authenticates with in DTLS.
 
     Only :meth:`webrtc.RTCPeerConnection.generate_certificate` creates it, and a connection uses it through
-    :attr:`webrtc.RTCConfiguration.certificates`. A connection without one generates its own.
+    ``webrtc.RTCConfiguration.certificates``. A connection without one generates its own.
     See :mdn:`RTCCertificate`.
     """
 

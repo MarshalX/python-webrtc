@@ -800,7 +800,7 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
 
     @staticmethod
     async def generate_certificate(keygen_algorithm: AlgorithmIdentifier) -> webrtc.RTCCertificate:
-        """Generates a key and a self-signed certificate on a worker thread, for :attr:`RTCConfiguration.certificates`.
+        """Generates a key and a self-signed certificate on a worker thread, for ``RTCConfiguration.certificates``.
 
         See :mdn:`RTCPeerConnection/generateCertificate_static`.
 
@@ -843,8 +843,8 @@ class RTCPeerConnection(WebRTCObject[wrtc.RTCPeerConnection], EventTarget[_PeerC
         Raises:
             webrtc.InvalidStateError: If the connection is closed.
             webrtc.InvalidModificationError: If a member that can't be changed differs, like
-                :attr:`webrtc.RTCConfiguration.bundle_policy` or
-                :attr:`webrtc.RTCConfiguration.always_negotiate_data_channels`.
+                ``webrtc.RTCConfiguration.bundle_policy`` or
+                ``webrtc.RTCConfiguration.always_negotiate_data_channels``.
             webrtc.InvalidSyntaxError: If an ICE server URL is invalid.
             webrtc.InvalidAccessError: If a TURN server has no credentials, or a certificate has expired.
             ValueError: If a member of the configuration is out of range.

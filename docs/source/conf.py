@@ -84,7 +84,7 @@ else:
 suppress_warnings = ['myst.header', 'ref.python']
 
 # -- Pygments ---------------------------------------------------
-pygments_style = 'friendly'
+pygments_style = 'xcode'
 pygments_style_dark = 'monokai'
 
 # -- MyST-Parser ---------------------------------------------------
@@ -205,7 +205,7 @@ html_theme_options = {
 # -- Sitemap ---------------------------------------------------
 sitemap_locales = [None]
 sitemap_url_scheme = '{link}'
-sitemap_excludes = ['llms-txt/']
+sitemap_excludes = ['llms-txt/', 'search/', 'genindex/']
 
 # -- llms.txt ---------------------------------------------------
 # a Markdown copy of every page, e.g. /quickstart.md, for agents
@@ -339,8 +339,35 @@ def hide_enum_signatures(
     return None
 
 
+def _add_alias(py_objects: dict[str, Any], name: str, target: str) -> None:
+    """Make ``name`` resolve to the documented ``target``, unless it's documented itself."""
+    if name not in py_objects:
+        entry = py_objects[target]
+        py_objects[name] = entry.__class__(entry.docname, entry.node_id, entry.objtype, aliased=True)
+
+
+def _alias_class(py_objects: dict[str, Any], short: str, cls: type) -> None:
+    """Alias a class and its members to ``short``, and the documented members of its bases to both names."""
+    canonical = f'{cls.__module__}.{cls.__qualname__}'
+    if canonical not in py_objects:
+        return
+
+    _add_alias(py_objects, short, canonical)
+
+    # the nearest definition wins, as in the class
+    for owner in inspect.getmro(cls):
+        owner_canonical = f'{owner.__module__}.{owner.__qualname__}'
+        members = [key[len(owner_canonical) :] for key in py_objects if key.startswith(f'{owner_canonical}.')]
+        for member in members:
+            _add_alias(py_objects, f'{canonical}{member}', f'{owner_canonical}{member}')
+            _add_alias(py_objects, f'{short}{member}', f'{owner_canonical}{member}')
+
+
 def register_short_aliases(app: Sphinx, env: BuildEnvironment) -> None:
-    """Resolve ``webrtc.X`` references to the module the object is documented in."""
+    """Resolve ``webrtc.X`` references to the module the object is documented in.
+
+    A class also gets the documented members of its bases, like ``from_json`` of every dictionary.
+    """
     # parallel builds import the package in the workers only
     with mock(app.config.autodoc_mock_imports):
         import webrtc  # ruff: ignore[import-outside-top-level]
@@ -349,17 +376,17 @@ def register_short_aliases(app: Sphinx, env: BuildEnvironment) -> None:
     for name in webrtc.__all__:
         obj = getattr(webrtc, name, None)
         module = getattr(obj, '__module__', None)
-        if not module or module == 'webrtc' or not (inspect.isclass(obj) or inspect.isfunction(obj)):
+        if not module or module == 'webrtc':
             continue
 
-        canonical = f'{module}.{obj.__qualname__}'
-        # the object and its members
-        targets = [key for key in py_objects if key == canonical or key.startswith(f'{canonical}.')]
-        for target in targets:
-            short = f'webrtc.{name}{target[len(canonical) :]}'
-            if short not in py_objects:
-                entry = py_objects[target]
-                py_objects[short] = entry.__class__(entry.docname, entry.node_id, entry.objtype, aliased=True)
+        if inspect.isclass(obj):
+            _alias_class(py_objects, f'webrtc.{name}', obj)
+            continue
+
+        # a function, or a module-level instance like field_trials
+        canonical = f'{module}.{obj.__qualname__}' if inspect.isfunction(obj) else f'{module}.{name}'
+        if canonical in py_objects:
+            _add_alias(py_objects, f'webrtc.{name}', canonical)
 
 
 def disable_search_index(app: Sphinx) -> None:

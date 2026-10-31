@@ -56,7 +56,7 @@ _SIXTEEN_BIT_SUFFIXES = ('P10', 'P12')
 class DOMRectReadOnly:
     """An immutable rectangle, like the coded or visible part of a frame.
 
-    The width and height may be negative. The edges are then measured from :attr:`x` and :attr:`y` backwards.
+    The width and height may be negative. The edges are then measured from ``x`` and ``y`` backwards.
 
     See :mdn:`DOMRectReadOnly`.
 
@@ -74,7 +74,7 @@ class DOMRectReadOnly:
 
     @property
     def top(self) -> float:
-        """:obj:`float`: The smaller of :attr:`y` and :attr:`y` plus :attr:`height`.
+        """:obj:`float`: The smaller of ``y`` and ``y`` plus ``height``.
 
         See :mdn:`DOMRectReadOnly/top`.
         """
@@ -82,7 +82,7 @@ class DOMRectReadOnly:
 
     @property
     def right(self) -> float:
-        """:obj:`float`: The larger of :attr:`x` and :attr:`x` plus :attr:`width`.
+        """:obj:`float`: The larger of ``x`` and ``x`` plus ``width``.
 
         See :mdn:`DOMRectReadOnly/right`.
         """
@@ -90,7 +90,7 @@ class DOMRectReadOnly:
 
     @property
     def bottom(self) -> float:
-        """:obj:`float`: The larger of :attr:`y` and :attr:`y` plus :attr:`height`.
+        """:obj:`float`: The larger of ``y`` and ``y`` plus ``height``.
 
         See :mdn:`DOMRectReadOnly/bottom`.
         """
@@ -98,7 +98,7 @@ class DOMRectReadOnly:
 
     @property
     def left(self) -> float:
-        """:obj:`float`: The smaller of :attr:`x` and :attr:`x` plus :attr:`width`.
+        """:obj:`float`: The smaller of ``x`` and ``x`` plus ``width``.
 
         See :mdn:`DOMRectReadOnly/left`.
         """

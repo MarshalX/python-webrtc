@@ -290,7 +290,7 @@ class _SFrameStreamTransformer(Generic[_C]):
 
 
 class _SFrameStream(WebRTCObject[wrtc.SFrameTransform], Generic[_C]):
-    """A GenericTransformStream of SFrame. Frames or buffers written to :attr:`writable` are read back transformed.
+    """A GenericTransformStream of SFrame. Frames or buffers written to ``writable`` are read back transformed.
 
     The type parameter is its chunk type. It's encoded frames by default, to match the streams of the transformer
     it's piped between. Use ``bytes`` for buffers, as in ``SFrameEncryptorStream[bytes]``, or :obj:`SFrameChunk`
@@ -328,7 +328,7 @@ class _SFrameStream(WebRTCObject[wrtc.SFrameTransform], Generic[_C]):
 class SFrameEncryptorStream(_SFrameEncryptorManager, _SFrameStream[_C]):
     """A transform stream that encrypts the frames or buffers written to it with SFrame.
 
-    It has :attr:`readable` and :attr:`writable` like a :obj:`webrtc.TransformStream`, so it can be piped through in
+    It has ``readable`` and ``writable`` like a :obj:`webrtc.TransformStream`, so it can be piped through in
     the worker of an :obj:`webrtc.RTCRtpScriptTransform`. A frame comes out with its data encrypted, and a buffer
     comes out as the :obj:`bytes` of the ciphertext. Until a key is set, chunks are dropped. The type parameter is
     the output type. It's encoded frames by default, and ``SFrameEncryptorStream[bytes]`` handles buffers.
@@ -359,7 +359,7 @@ class SFrameDecryptorStream(
 ):
     """A transform stream that decrypts the SFrame frames or buffers written to it.
 
-    It has :attr:`readable` and :attr:`writable` like a :obj:`webrtc.TransformStream`. A frame comes out with its
+    It has ``readable`` and ``writable`` like a :obj:`webrtc.TransformStream`. A frame comes out with its
     data decrypted, and a buffer comes out as the :obj:`bytes` of the plaintext. A chunk that fails to decrypt is
     dropped and reported by an ``error`` event. The type parameter is the output type. It's encoded frames by
     default, and ``SFrameDecryptorStream[bytes]`` handles buffers.

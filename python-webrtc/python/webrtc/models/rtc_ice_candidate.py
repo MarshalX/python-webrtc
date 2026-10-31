@@ -282,7 +282,7 @@ class RTCIceCandidate:
 
     A :obj:`webrtc.RTCPeerConnection` gathers them (see its ``icecandidate`` event). Each one is sent to the remote
     peer and added there with :meth:`webrtc.RTCPeerConnection.add_ice_candidate`. The constructor doesn't reject an
-    unparsable :attr:`candidate`, and the properties parsed from it are :obj:`None` then. Instances are immutable.
+    unparsable ``candidate``, and the properties parsed from it are :obj:`None` then. Instances are immutable.
 
     See :mdn:`RTCIceCandidate`.
 
@@ -414,7 +414,7 @@ class RTCIceCandidate:
 
     @property
     def type(self) -> RTCIceCandidateType | None:
-        """:obj:`webrtc.RTCIceCandidateType`, optional: How the candidate was found: host, reflexive or relay.
+        """:obj:`webrtc.RTCIceCandidateType`, optional: How the candidate was found, as host, reflexive or relay.
 
         See :mdn:`RTCIceCandidate/type`.
         """
