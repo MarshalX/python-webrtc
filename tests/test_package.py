@@ -5,15 +5,19 @@
 #  that can be found in the LICENSE.md file in the root of the project.
 #
 
-"""The package facade."""
+"""The package facade and its optional subpackages."""
 
 from __future__ import annotations
 
 import ast
+import importlib
 import importlib.util
 import pathlib
 import random
 import sys
+from unittest import mock
+
+import pytest
 
 from tests.isolation import isolated
 
@@ -46,3 +50,14 @@ def test_facade_import_order_does_not_matter() -> None:
             raise AssertionError(msg) from e
 
         assert all(hasattr(module, name) for name in vars(module)['__all__'])
+
+
+@isolated
+def test_pipecat_without_its_extra_names_the_extra() -> None:
+    hidden = mock.patch.dict(sys.modules, {'pipecat': None})
+    missing = pytest.raises(ModuleNotFoundError, match=r'pip install "wrtc\[pipecat\]"')
+
+    with hidden, missing as error:
+        _ = importlib.import_module('webrtc.pipecat')
+
+    assert error.value.name == 'pipecat'

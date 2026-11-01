@@ -49,6 +49,8 @@ import some_library  # its aiortc imports now get webrtc.aiortc
 `aiortc.x` then gives `webrtc.aiortc.x`, and a module the layer lacks raises `ModuleNotFoundError`. Call it first,
 in each process: it raises `RuntimeError` if `aiortc` is imported already.
 
+For Pipecat, use [`webrtc.pipecat`](pipecat.md) instead.
+
 The library's aiortc dependency stays installed but unused. Keep it if the library imports aiortc's dependencies, such
 as `aioice` or `cryptography`, directly.
 

@@ -17,6 +17,7 @@ of date.
 - Handlers are registered with `on`, as a call or a decorator, and can be coroutines.
 - Dictionaries are typed dataclasses, and enums compare equal to the strings of the specifications.
 - Code written for aiortc runs after installing `wrtc[aiortc]` and changing `from aiortc` to `from webrtc.aiortc`.
+- Pipecat bots run on it with `wrtc[pipecat]`, importing their transport from `webrtc.pipecat`.
 - Prebuilt wheels for CPython 3.9 to 3.15 and free-threaded 3.14t and 3.15t, on Linux, macOS and Windows.
 
 ## Start
@@ -25,6 +26,8 @@ of date.
 - {doc}`Choosing a Python WebRTC library <guides/comparison>`: Python WebRTC, aiortc, the LiveKit SDK and GStreamer
   webrtcbin compared, and when each is the better choice.
 - {doc}`Migrating from aiortc <guides/aiortc>`: run aiortc code by changing its imports, and what changes on the way.
+- {doc}`Use with Pipecat <guides/pipecat>`: run Pipecat bots on the engine with `wrtc[pipecat]`, their runner and
+  clients unchanged.
 
 ## Guides
 
@@ -62,6 +65,8 @@ of date.
   speakers.
 - {doc}`Voice agent with Gemini Live <examples/gemini_live>`: a browser talks to Gemini over WebRTC through a Python
   server, which streams the audio to the Live API over a WebSocket.
+- {doc}`Pipecat voice bot <examples/pipecat_bot>`: a Pipecat bot on the development runner, a voice pipeline or an
+  echo with no keys.
 - {doc}`Live stream in the terminal <examples/janus_streaming>`: plays a stream of the public Janus demo server.
 - {doc}`WHIP and WHEP <examples/whip_whep>`: plays a WHEP stream, a public demo by default, or publishes the synthetic
   camera and microphone over WHIP.

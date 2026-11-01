@@ -48,6 +48,13 @@ Talks to the model through your microphone and speakers.
 Talks to Gemini from a browser page, through a Python server that keeps the API key.
 :::
 
+:::{grid-item-card} {octicon}`hubot;1em;sd-mr-1` Pipecat voice bot
+:link: pipecat_bot
+:link-type: doc
+
+A Pipecat bot on the development runner: a voice pipeline, or an echo with no keys.
+:::
+
 :::{grid-item-card} {octicon}`broadcast;1em;sd-mr-1` Live stream in the terminal
 :link: janus_streaming
 :link-type: doc
@@ -72,6 +79,7 @@ recorder
 browser_server
 openai_live
 gemini_live
+pipecat_bot
 janus_streaming
 whip_whep
 ```

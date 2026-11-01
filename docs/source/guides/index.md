@@ -1,5 +1,5 @@
 ---
-description: "Guides to Python WebRTC: connections, data channels, media, events, H.264, field trials, choosing a library and migrating from aiortc."
+description: "Guides to Python WebRTC: connections, data channels, media, events, H.264, field trials, choosing a library, migrating from aiortc and using Pipecat."
 ---
 
 # Guides
@@ -64,6 +64,13 @@ Python WebRTC, aiortc, the LiveKit SDK and GStreamer webrtcbin compared, and whe
 :link-type: doc
 
 Run aiortc code by changing its imports, and what changes on the way.
+:::
+
+:::{grid-item-card} {octicon}`hubot;1em;sd-mr-1` Use with Pipecat
+:link: pipecat
+:link-type: doc
+
+Run Pipecat bots on the engine, with their runner and clients unchanged.
 :::
 
 ::::

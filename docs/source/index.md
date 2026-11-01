@@ -203,6 +203,7 @@ guides/h264
 guides/field-trials
 guides/comparison
 guides/aiortc
+guides/pipecat
 ```
 
 ```{toctree}
