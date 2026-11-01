@@ -150,6 +150,13 @@ Complete programs, ready to copy. The ones with dependencies declare them inline
 uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/janus_streaming.py
 ```
 
+## Pipecat
+
+Install `wrtc[pipecat]` and import the SmallWebRTC transport from `webrtc.pipecat`, and your
+[Pipecat](https://www.pipecat.ai) bot runs on Chrome's engine, with its clients unchanged. For Pipecat's development
+runner, call `webrtc.pipecat.install_alias()`. See [Use with Pipecat](https://wrtc.marshal.dev/guides/pipecat/) and the
+[voice bot example](https://github.com/MarshalX/python-webrtc/blob/main/examples/pipecat_bot.py).
+
 ## Status
 
 Pre-1.0: the API follows the specifications, but compatibility between versions isn't guaranteed until 1.0.0. See

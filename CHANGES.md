@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Add `webrtc.pipecat`, Pipecat's SmallWebRTC transport on the native API, installed with `wrtc[pipecat]`, with `install_alias()` for Pipecat's development runner. See [Use with Pipecat](https://wrtc.marshal.dev/guides/pipecat/) by [@MarshalX](https://github.com/MarshalX)
+* Add a Pipecat voice bot example by [@MarshalX](https://github.com/MarshalX)
 * Add `webrtc.aiortc.install_alias()`, which makes `import aiortc` give the compat layer, for libraries that import aiortc themselves by [@MarshalX](https://github.com/MarshalX)
 * Add aiortc's `rtp`, `jitterbuffer`, `utils` and `clock` modules and the ICE server helpers of `rtcicetransport` to the compat layer by [@MarshalX](https://github.com/MarshalX)
 * Drop a compat layer track's buffered frames when its receiver's `_enabled` is set to `False`, and add the track's `_queue`, for libraries that skip stale frames by [@MarshalX](https://github.com/MarshalX)

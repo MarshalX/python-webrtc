@@ -36,6 +36,15 @@ OPENAI_API_KEY=sk-... uv run https://raw.githubusercontent.com/MarshalX/python-w
 GEMINI_API_KEY=... uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/gemini_live.py
 ```
 
+### [pipecat_bot.py](pipecat_bot.py)
+
+**A Pipecat voice bot on Pipecat's development runner.** An interruptible voice assistant with Deepgram, OpenAI and Cartesia keys; with `--echo`, or without the keys, it echoes your voice. Needs Python 3.11+. Open http://localhost:7860 and press Connect:
+
+```bash
+export DEEPGRAM_API_KEY=... OPENAI_API_KEY=... CARTESIA_API_KEY=...
+uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/pipecat_bot.py
+```
+
 ### [janus_streaming.py](janus_streaming.py)
 
 **Watching a live stream in the terminal.** Plays a stream of the public [Janus](https://janus.conf.meetecho.com/) demo server: the video drawn with colored characters, the audio on your speakers, if there are any, so it runs on a server too. No account or key:

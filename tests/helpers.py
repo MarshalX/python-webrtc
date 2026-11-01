@@ -542,16 +542,21 @@ class _RelaySocket(asyncio.DatagramProtocol):
         if self.peer is None or self.other is None or self.other.transport is None:
             return
 
+        if self.relay.paused:
+            return
+
         self.relay.inspect(data)
         forward = self.other.transport.sendto
         asyncio.get_running_loop().call_later(self.relay.delay, forward, data, self.peer)
 
 
 class UdpRelay:
-    """Relays the packets of two connections through local sockets, which can delay them."""
+    """Relays the packets of two connections through local sockets, which can delay them, or drop them while paused."""
 
     def __init__(self, delay: float = 0) -> None:
         self.delay = delay
+        #: Whether packets are dropped instead of relayed
+        self.paused = False
         #: The DTLS handshake messages sent in packets of their own, by type
         self.handshakes: set[int] = set()
         self._sockets: list[_RelaySocket] = []
@@ -565,15 +570,25 @@ class UdpRelay:
         for pc in (caller, callee):
             await wait_until(lambda pc=pc: pc.ice_gathering_state == 'complete', 'ICE gathering')
 
+        for_callee, for_caller = await self.bridge(caller_candidates, callee_candidates)
+        await _add_ice_candidate(callee, for_callee)
+        await _add_ice_candidate(caller, for_caller)
+
+    async def bridge(
+        self, caller_candidates: list[webrtc.RTCIceCandidate], callee_candidates: list[webrtc.RTCIceCandidate]
+    ) -> tuple[webrtc.RTCIceCandidate, webrtc.RTCIceCandidate]:
+        """Opens the sockets between a candidate of each side: its loopback IPv4 one, or else its first IPv4 one.
+
+        Returns:
+            The caller's candidate moved to its socket, for the callee, and the callee's, for the caller.
+        """
         caller_candidate = _relayable(caller_candidates)
         callee_candidate = _relayable(callee_candidates)
         for_caller = await self._open_socket(caller_candidate)
         for_callee = await self._open_socket(callee_candidate)
         for_caller.other = for_callee
         for_callee.other = for_caller
-
-        await _add_ice_candidate(callee, _moved(caller_candidate, for_caller))
-        await _add_ice_candidate(caller, _moved(callee_candidate, for_callee))
+        return _moved(caller_candidate, for_caller), _moved(callee_candidate, for_callee)
 
     async def _open_socket(self, candidate: webrtc.RTCIceCandidate) -> _RelaySocket:
         """A local socket relaying to the candidate."""

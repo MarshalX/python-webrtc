@@ -63,6 +63,9 @@ jobs:
         # Intel macOS with the full matrix only
         exclude:
           - os: ${{ !(startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'macos-15-intel' || '' }}
+        # the pipecat job's wheel on PRs, untested there
+        include:
+          - { os: ubuntu-latest, python: cp313 }
     env:
       WRTC_CACHE_DIR: ${{ github.workspace }}/.wrtc-cache
       WRTC_ARCHIVE_DIR: ${{ matrix.os == 'windows-latest' && format('{0}/.wrtc-cache/archives', github.workspace) || '' }}
@@ -71,6 +74,8 @@ jobs:
       CIBW_ENVIRONMENT_PASS_LINUX: UV_HTTP_RETRIES WRTC_TEST_TIME_SCALE
       # --gc-on-emit not on tags
       CIBW_TEST_COMMAND: ${{ github.event_name != 'push' && 'pytest -n auto {project}/tests && pytest -n auto {project}/tests --gc-on-emit' || 'pytest -n auto {project}/tests' }}
+      # built only for the pipecat job outside the full matrix
+      CIBW_TEST_SKIP: ${{ matrix.python == 'cp313' && !(startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '*' || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -160,10 +165,39 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: .github/scripts/sanitizers-macos.sh -n auto ${{ matrix.args }}
 
+  # it pulls onnxruntime and numba
+  pipecat:
+    name: pipecat (${{ matrix.os }})
+    needs: wheels
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # PRs: Linux only; every OS with the full matrix
+        os: ${{ fromJSON((startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["ubuntu-latest","macos-15","windows-latest"]' || '["ubuntu-latest"]') }}
+    env:
+      UV_HTTP_RETRIES: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: wheels-${{ matrix.os }}-cp313
+          path: wheelhouse
+      # webrtc from the wheel, the tests from the checkout
+      - run: |
+          uv venv --python 3.13
+          uv pip install wheelhouse/*.whl --group test --group pipecat-test
+      - run: uv run --no-sync pytest -n auto tests/pipecat
+
   # branch protection check
   ci:
     if: always()
-    needs: [lint, sdist, wheels, sanitizers, sanitizers-macos]
+    needs: [lint, sdist, wheels, sanitizers, sanitizers-macos, pipecat]
     runs-on: ubuntu-latest
     steps:
       # a skipped job passes: the sanitizers on tags
