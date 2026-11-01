@@ -242,7 +242,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # aiortc
 The code of webrtc/aiortc/sdp.py, mediastreams.py, rtcconfiguration.py, rtcrtpparameters.py,
-rtcsessiondescription.py, stats.py, contrib/media.py and contrib/signaling.py, copied from it:
+rtcsessiondescription.py, stats.py, rtp.py, jitterbuffer.py, utils.py, clock.py, _ice_servers.py, contrib/media.py and
+contrib/signaling.py, copied from it:
 ```
 Copyright (c) Jeremy Lainé.
 All rights reserved.

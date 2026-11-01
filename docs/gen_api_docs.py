@@ -22,7 +22,15 @@ SECTIONS = {
 # the internals of the package, except the events every interface inherits
 TOP_LEVEL = ['enums', 'exceptions', 'streams', 'utils.events', 'base', 'openh264', 'loopback']
 # internal webrtc.utils modules, without a page
-INTERNAL = ['utils.lifetime', 'utils.loops', 'utils.names', 'utils.operations', 'utils.strings', 'utils.transfer']
+INTERNAL = [
+    'utils.lifetime',
+    'utils.loops',
+    'utils.module_alias',
+    'utils.names',
+    'utils.operations',
+    'utils.strings',
+    'utils.transfer',
+]
 
 # modules of several public classes, or whose class name isn't the best title
 TITLES = {

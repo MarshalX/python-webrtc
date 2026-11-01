@@ -7,8 +7,8 @@
 
 from __future__ import annotations
 
-import pytest
+from importlib.util import find_spec
 
-# the aiortc extra
-_ = pytest.importorskip('av')
-_ = pytest.importorskip('pyee')
+# the aiortc extra; a skip here would fail a run of this directory alone
+if find_spec('av') is None or find_spec('pyee') is None:
+    collect_ignore_glob = ['test_*.py']

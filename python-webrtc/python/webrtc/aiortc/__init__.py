@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from webrtc.aiortc._alias import install_alias as install_alias
 from webrtc.aiortc.events import RTCTrackEvent as RTCTrackEvent
 from webrtc.aiortc.exceptions import InternalError, InvalidAccessError, InvalidStateError, OperationError
 from webrtc.aiortc.mediastreams import AudioStreamTrack, MediaStreamError, MediaStreamTrack, VideoStreamTrack

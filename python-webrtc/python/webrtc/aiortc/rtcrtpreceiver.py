@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import collections
 import fractions
 from dataclasses import dataclass
@@ -33,7 +34,6 @@ from webrtc.aiortc.rtcrtpparameters import (
 from webrtc.aiortc.sdp import parameters_from_sdp
 
 if TYPE_CHECKING:
-    import asyncio
     import datetime as dt
 
     from av.frame import Frame
@@ -184,6 +184,9 @@ class _AudioFrames:
                 self._pending = None
         return frames
 
+    def drop_partial(self) -> None:
+        self._pending = None
+
     def _stamped(self, frame: av.AudioFrame) -> av.AudioFrame:
         frame.pts = self._samples
         frame.sample_rate = self._rate
@@ -216,9 +219,11 @@ class RemoteStreamTrack(MediaStreamTrack):
         if id is not None:
             self._id = id
         self._buffered = True
+        self._processor: webrtc.MediaStreamTrackProcessor | None = None
         self._reader: webrtc.ReadableStreamDefaultReader[webrtc.VideoFrame | webrtc.AudioData] | None = None
         self._converter: _VideoFrames | _AudioFrames | None = None
         self._frames: collections.deque[Frame] = collections.deque()
+        self._frame_queue: _FrameQueue | None = None
 
     @classmethod
     def _of(cls, native: webrtc.MediaStreamTrack, receiver: RTCRtpReceiver | None, id: str | None = None) -> Self:
@@ -242,12 +247,44 @@ class RemoteStreamTrack(MediaStreamTrack):
             buffer = _AUDIO_BUFFER
 
         init = webrtc.MediaStreamTrackProcessorInit(self._native, buffer)
-        self._reader = webrtc.MediaStreamTrackProcessor(init).readable.get_reader()
+        self._processor = webrtc.MediaStreamTrackProcessor(init)
+        self._reader = self._processor.readable.get_reader()
+
+        # a reopened reader keeps the timestamps going
+        if self._converter is not None:
+            return self._reader
         if video:
             self._converter = _VideoFrames()
         else:
             self._converter = _AudioFrames(*_audio_shape(self._receiver))
         return self._reader
+
+    def _release(self) -> None:
+        self._frames.clear()
+        if isinstance(self._converter, _AudioFrames):
+            self._converter.drop_partial()
+        if self._reader is not None:
+            self._reader.cancel().add_done_callback(_retrieved)
+            self._reader = None
+            self._processor = None
+
+    def _ready_frames(self) -> int:
+        """How many frames recv() returns without waiting."""
+        processor = self._processor
+        converter = self._converter
+        if processor is not None and converter is not None:
+            native = processor._native_obj
+            item = native.read()
+            while item is not None:
+                self._frames.extend(converter.convert(processor._wrap_media(item)))
+                item = native.read()
+        return len(self._frames)
+
+    @property
+    def _queue(self) -> _FrameQueue:
+        if self._frame_queue is None:
+            self._frame_queue = _FrameQueue(self)
+        return self._frame_queue
 
     @override
     async def recv(self) -> Frame:
@@ -257,6 +294,9 @@ class RemoteStreamTrack(MediaStreamTrack):
             reader = self._reader if self._reader is not None else self._open()
             media = (await reader.read()).value
             if media is None or self._converter is None:
+                if reader is not self._reader and self.readyState == 'live':
+                    # the receiver was disabled while this read waited
+                    continue
                 self.stop()
                 raise MediaStreamError
             self._frames.extend(self._converter.convert(media))
@@ -265,9 +305,33 @@ class RemoteStreamTrack(MediaStreamTrack):
     @override
     def stop(self) -> None:
         super().stop()
-        if self._reader is not None:
-            self._reader.cancel().add_done_callback(_retrieved)
+        self._release()
         self._native.stop()
+
+
+class _FrameQueue(asyncio.Queue['Frame']):
+    # apps drain it to skip stale frames
+    def __init__(self, track: RemoteStreamTrack) -> None:
+        super().__init__()
+        self._track = track
+
+    @override
+    def qsize(self) -> int:
+        return self._track._ready_frames()
+
+    @override
+    def empty(self) -> bool:
+        return self.qsize() == 0
+
+    @override
+    def get_nowait(self) -> Frame:
+        if self.empty():
+            raise asyncio.QueueEmpty
+        return self._track._frames.popleft()
+
+    @override
+    def task_done(self) -> None:
+        pass
 
 
 def _retrieved(future: asyncio.Future[None]) -> None:
@@ -319,10 +383,21 @@ class _RtpEndpoint(Generic[_N]):
 class RTCRtpReceiver(_RtpEndpoint[webrtc.RTCRtpReceiver]):
     _native_class = webrtc.RTCRtpReceiver
     _track: RemoteStreamTrack | None = None
+    _receiving = True
     track: _ReadOnly[RemoteStreamTrack | None] = _ReadOnly('_track')
 
     def __init__(self, kind: str, transport: RTCDtlsTransport) -> None:
         raise NotImplementedError(_ORTC)
+
+    @property
+    def _enabled(self) -> bool:
+        return self._receiving
+
+    @_enabled.setter
+    def _enabled(self, enabled: bool) -> None:
+        if not enabled and self._track is not None:
+            self._track._release()
+        self._receiving = enabled
 
     def getSynchronizationSources(self) -> list[RTCRtpSynchronizationSource]:
         sources = self._native.get_synchronization_sources()

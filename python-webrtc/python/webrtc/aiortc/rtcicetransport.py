@@ -13,6 +13,12 @@ from typing import TYPE_CHECKING
 from pyee.asyncio import AsyncIOEventEmitter
 
 import webrtc
+from webrtc.aiortc._ice_servers import (
+    STUN_REGEX as STUN_REGEX,
+    TURN_REGEX as TURN_REGEX,
+    connection_kwargs as connection_kwargs,
+    parse_stun_turn_uri as parse_stun_turn_uri,
+)
 from webrtc.aiortc._utils import _emitter, _ice_state, _ReadOnly
 from webrtc.aiortc.rtcconfiguration import RTCIceServer
 

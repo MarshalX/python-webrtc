@@ -153,6 +153,9 @@ extend-exclude = [
     "python-webrtc/python/webrtc/aiortc/contrib/media.py", "python-webrtc/python/webrtc/aiortc/contrib/signaling.py",
     "python-webrtc/python/webrtc/aiortc/rtcconfiguration.py", "python-webrtc/python/webrtc/aiortc/rtcrtpparameters.py",
     "python-webrtc/python/webrtc/aiortc/rtcsessiondescription.py", "python-webrtc/python/webrtc/aiortc/stats.py",
+    "python-webrtc/python/webrtc/aiortc/rtp.py", "python-webrtc/python/webrtc/aiortc/jitterbuffer.py",
+    "python-webrtc/python/webrtc/aiortc/utils.py", "python-webrtc/python/webrtc/aiortc/clock.py",
+    "python-webrtc/python/webrtc/aiortc/_ice_servers.py",
 ]
 
 [tool.ruff.format]
@@ -235,6 +238,9 @@ project-excludes = [
     "python-webrtc/python/webrtc/aiortc/contrib/media.py", "python-webrtc/python/webrtc/aiortc/contrib/signaling.py",
     "python-webrtc/python/webrtc/aiortc/rtcconfiguration.py", "python-webrtc/python/webrtc/aiortc/rtcrtpparameters.py",
     "python-webrtc/python/webrtc/aiortc/rtcsessiondescription.py", "python-webrtc/python/webrtc/aiortc/stats.py",
+    "python-webrtc/python/webrtc/aiortc/rtp.py", "python-webrtc/python/webrtc/aiortc/jitterbuffer.py",
+    "python-webrtc/python/webrtc/aiortc/utils.py", "python-webrtc/python/webrtc/aiortc/clock.py",
+    "python-webrtc/python/webrtc/aiortc/_ice_servers.py",
 ]
 # tests/fuzz runs with its directory on PYTHONPATH (.github/scripts/fuzz.sh)
 search-path = ["python-webrtc/python", "stubs", ".", "tests/fuzz"]
