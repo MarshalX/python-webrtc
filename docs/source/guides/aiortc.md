@@ -94,7 +94,8 @@ Behaves differently:
 - **Data channels.** Messages are limited to 256 KiB between Python WebRTC peers and to 64 KiB with an aiortc peer;
   a larger one raises `TypeError`. A `maxPacketLifeTime` of 0 makes the channel unreliable.
 - **Remote media.** `recv()` buffers about 1 s (30 video frames, 100 audio chunks) and drops the oldest after that,
-  where aiortc queues without limit. Remote video can arrive as `yuv420p10le` or `nv12`, besides `yuv420p`.
+  where aiortc queues without limit. Remote video can arrive as `yuv420p10le` or `nv12`, besides `yuv420p`. Remote
+  audio `recv()` returns silence while no packets arrive.
 - **Track end.** Remote tracks end when the peer closes the connection or you call `close()`. A remote
   `transceiver.stop()` alone doesn't end them.
 - **Stats.** The ids are the engine's. `remote-inbound-rtp` and `remote-outbound-rtp` follow the engine's RTCP interval,

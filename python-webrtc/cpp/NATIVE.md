@@ -130,6 +130,7 @@ Python garbage.
   (`_recheck`): whichever runs last sees the other.
 - An object is kept for the events still owed to it, not for the state it shows (an announced data channel reads
   open before its open event).
+- A `Surfaced` value is pinned before its live value moves, under the writer's lock. A `Surfaced` lock is a leaf.
 - Each class's `_open()` is its delivery gate: once it's false, even queued events don't fire (a stopped track, a
   detached transform, a closed connection). The base gate is "its connection isn't closed". `GATES` in
   `tests/test_lifetime_model.py` lists every class's gate; a new class with events is added there.

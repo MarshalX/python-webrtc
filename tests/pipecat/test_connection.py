@@ -493,6 +493,25 @@ async def test_pings_keep_the_client_connected() -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_ice_restart_offer_counts_as_a_ping() -> None:
+    connection = SmallWebRTCConnection()
+    client = BrowserClient()
+    async with closing(connection, client):
+        await connect_client(connection, client)
+        await connection.connect()
+        await client.wait_channel_open()
+
+        client.ping()
+        await wait_until(connection.is_connected, 'the ping')
+        await wait_until(lambda: not connection.is_connected(), 'the ping to expire', timeout=seconds(5))
+
+        client.pc.restart_ice()
+        await renegotiate(connection, client)
+
+        assert connection.is_connected()
+
+
+@pytest.mark.asyncio
 async def test_disconnect_tells_the_client() -> None:
     connection = SmallWebRTCConnection()
     events = Events(connection)
@@ -757,6 +776,20 @@ async def test_candidates_come_from_the_port_range() -> None:
         assert len(ports) > 0
         assert all(PORT_RANGE[0] <= port <= PORT_RANGE[1] for port in ports)
         assert connection.pc.connection_state == 'connected'
+
+
+@pytest.mark.asyncio
+async def test_a_listening_bot_answers_with_passive_tcp_candidates() -> None:
+    connection = SmallWebRTCConnection(port_range=PORT_RANGE, tcp_listen=True)
+    client = BrowserClient()
+    async with closing(connection, client):
+        await connect_client(connection, client)
+
+        passive = re.findall(
+            r'^a=candidate:\S+ \d+ tcp \d+ \S+ (\d+) typ host tcptype passive', answer_sdp(connection), re.MULTILINE
+        )
+        assert len(passive) > 0
+        assert all(PORT_RANGE[0] <= int(port) <= PORT_RANGE[1] for port in passive)
 
 
 @pytest.mark.asyncio

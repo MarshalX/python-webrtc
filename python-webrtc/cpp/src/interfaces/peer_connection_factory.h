@@ -64,7 +64,7 @@ namespace python_webrtc {
     [[nodiscard]] int networkIgnoreMask() const { return _networkIgnoreMask; }
 
     std::unique_ptr<webrtc::PortAllocator>
-    CreatePortAllocator(const webrtc::PeerConnectionInterface::RTCConfiguration &configuration);
+    CreatePortAllocator(const webrtc::PeerConnectionInterface::RTCConfiguration &configuration, bool tcpListen);
 
     [[nodiscard]] std::shared_ptr<webrtc::BasicNetworkManager> networkManager() const { return _networkManager; }
     [[nodiscard]] std::shared_ptr<webrtc::BasicPacketSocketFactory> packetSocketFactory() const {

@@ -174,8 +174,10 @@ namespace python_webrtc {
       _held.Emit([this, name, args...]() { Emitter::Emit(name, args...); });
     }
 
+    enum class Pin : uint8_t { kNone, kState, kGatheringState };
+
     // reads the states of the transport, on the network thread
-    StateChange TakeSnapshot();
+    StateChange TakeSnapshot(Pin pin);
 
     void OnStateChanged(webrtc::IceTransportInternal * /*unused*/);
 
@@ -191,7 +193,7 @@ namespace python_webrtc {
     // which is found by port and protocol
     std::optional<IceCandidateInit> FindSignaledCandidate(const webrtc::Candidate &candidate);
 
-    void ResolveSignaled(CandidatePair &pair);
+    std::vector<IceCandidateInit> SignaledCandidates();
 
     bool Stopped();
 

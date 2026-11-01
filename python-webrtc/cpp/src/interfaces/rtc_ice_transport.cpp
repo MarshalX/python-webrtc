@@ -33,7 +33,8 @@ namespace python_webrtc {
     // what libwebrtc gives a connection's allocator, on the network thread
     std::unique_ptr<webrtc::PortAllocator> CreateStandalonePortAllocator(const webrtc::Environment &env,
                                                                          PeerConnectionFactory &factory) {
-      auto allocator = CreatePortAllocator(env, factory.networkManager(), factory.packetSocketFactory());
+      auto allocator = CreatePortAllocator(env, factory.networkManager(), factory.packetSocketFactory(),
+                                           /*tcpListen=*/false);
       allocator->Initialize();
       uint32_t flags =
           allocator->flags() | webrtc::PORTALLOCATOR_ENABLE_SHARED_SOCKET | webrtc::PORTALLOCATOR_ENABLE_IPV6_ON_WIFI;
@@ -83,7 +84,7 @@ namespace python_webrtc {
             this, Guard([this](webrtc::IceTransportInternal *transport) { OnGatheringStateChanged(transport); }));
         _subscribed = internal;
       }
-      TakeSnapshot();
+      TakeSnapshot(Pin::kNone);
     });
     // none until its first change, unless read unbound
     _surfacedPair.Changed(true, std::nullopt);
@@ -141,8 +142,8 @@ namespace python_webrtc {
     return registry.Get();
   }
 
-  RTCIceTransport::StateChange RTCIceTransport::TakeSnapshot() {
-    const std::scoped_lock lock(_mutex);
+  RTCIceTransport::StateChange RTCIceTransport::TakeSnapshot(Pin pin) {
+    std::unique_lock lock(_mutex);
     StateChange change{.previousState = _state,
                        .state = _state,
                        .previousGatheringState = _gatheringState,
@@ -150,23 +151,37 @@ namespace python_webrtc {
     if (_stopped || _connectionClosed || _dropped) {
       return change;
     }
+    auto state = webrtc::IceTransportState::kClosed;
+    auto gatheringState = webrtc::IceGatheringState::kIceGatheringComplete;
     auto *internal = _transport->internal();
     if (internal != nullptr) {
       _component = internal->component() == 1 ? RTCIceComponent::kRtp : RTCIceComponent::kRtcp;
       _role = internal->GetIceRole();
-      _state = internal->GetIceTransportState();
-      if (_standalone && _state == webrtc::IceTransportState::kNew && _remoteParameters && !_remoteCandidates.empty()) {
+      state = internal->GetIceTransportState();
+      if (_standalone && state == webrtc::IceTransportState::kNew && _remoteParameters && !_remoteCandidates.empty()) {
         // started with remote candidates: checking, as a transport of its own is from then on, even before it
         // has candidates to check them with
-        _state = webrtc::IceTransportState::kChecking;
+        state = webrtc::IceTransportState::kChecking;
       }
-      _gatheringState = internal->gathering_state();
-    } else {
-      _state = webrtc::IceTransportState::kClosed;
-      _gatheringState = webrtc::IceGatheringState::kIceGatheringComplete;
+      gatheringState = internal->gathering_state();
     }
+
+    if (pin == Pin::kState && state != _state) {
+      _surfacedState.Changed(IsBound(), _state);
+    }
+    if (pin == Pin::kGatheringState && gatheringState != _gatheringState) {
+      _surfacedGatheringState.Changed(IsBound(), _gatheringState);
+    }
+    _state = state;
+    _gatheringState = gatheringState;
+
     change.state = _state;
     change.gatheringState = _gatheringState;
+    lock.unlock();
+
+    if (pin == Pin::kGatheringState && change.gatheringState != change.previousGatheringState) {
+      Parking::At("ice.gatheringstatechange");
+    }
     return change;
   }
 
@@ -179,11 +194,15 @@ namespace python_webrtc {
       if (_transport->internal() != nullptr) {
         return;
       }
+      if (previous != webrtc::IceTransportState::kClosed) {
+        _surfacedState.Changed(IsBound(), previous);
+      }
       _state = webrtc::IceTransportState::kClosed;
     }
     if (previous != webrtc::IceTransportState::kClosed) {
       // closed by a description (like the one bundling its media section on another transport), with its event;
       // a closed connection mutes its transports first, which are closed right away
+      Parking::At("ice.closed");
       EmitState(previous, webrtc::IceTransportState::kClosed);
     }
   }
@@ -193,10 +212,14 @@ namespace python_webrtc {
     {
       const std::scoped_lock lock(_mutex);
       previous = _state;
+      if (previous != webrtc::IceTransportState::kClosed) {
+        _surfacedState.Changed(IsBound(), previous);
+      }
       _state = webrtc::IceTransportState::kClosed;
       _dropped = true;
     }
     if (previous != webrtc::IceTransportState::kClosed) {
+      Parking::At("ice.closed");
       EmitState(previous, webrtc::IceTransportState::kClosed);
     }
   }
@@ -215,7 +238,7 @@ namespace python_webrtc {
   }
 
   void RTCIceTransport::OnStateChanged(webrtc::IceTransportInternal * /*unused*/) {
-    auto change = TakeSnapshot();
+    auto change = TakeSnapshot(Pin::kState);
     if (change.state == change.previousState) {
       return;
     }
@@ -245,12 +268,11 @@ namespace python_webrtc {
   }
 
   void RTCIceTransport::OnGatheringStateChanged(webrtc::IceTransportInternal * /*unused*/) {
-    auto change = TakeSnapshot();
+    auto change = TakeSnapshot(Pin::kGatheringState);
     auto current = change.gatheringState;
     if (current == change.previousGatheringState) {
       return;
     }
-    _surfacedGatheringState.Changed(IsBound(), change.previousGatheringState);
     if (_standalone) {
       // a transport of its own completes by itself, its candidates end first (gather() started gathering,
       // without an event)
@@ -321,19 +343,6 @@ namespace python_webrtc {
     return _surfacedPair.ShownOr(IsBound(), [this]() { return ReadSelectedCandidatePair(); });
   }
 
-  void RTCIceTransport::ResolveSignaled(CandidatePair &pair) {
-    auto &[local, remote, peerReflexive] = pair;
-    if (!peerReflexive) {
-      return;
-    }
-    webrtc::SdpParseError error;
-    auto parsed = webrtc::IceCandidate::Create(remote.sdpMid, remote.sdpMLineIndex, remote.candidate, &error);
-    if (auto signaled = parsed ? FindSignaledCandidate(parsed->candidate()) : std::nullopt) {
-      remote = *signaled;
-      peerReflexive = false;
-    }
-  }
-
   std::optional<RTCIceTransport::CandidatePair> RTCIceTransport::ReadSelectedCandidatePair() {
     std::optional<CandidatePair> result;
     BlockingCallOn(_factory->workerThread(), [&]() {
@@ -354,17 +363,44 @@ namespace python_webrtc {
     return result;
   }
 
-  std::optional<IceCandidateInit> RTCIceTransport::FindSignaledCandidate(const webrtc::Candidate &candidate) {
-    const std::scoped_lock lock(_mutex);
-    for (const auto &signaled : _remoteCandidates) {
+  namespace {
+
+    std::optional<IceCandidateInit> findSignaled(const std::vector<IceCandidateInit> &signaled,
+                                                 const webrtc::Candidate &candidate) {
+      for (const auto &known : signaled) {
+        webrtc::SdpParseError error;
+        auto parsed = webrtc::IceCandidate::Create(known.sdpMid, known.sdpMLineIndex, known.candidate, &error);
+        if (parsed && parsed->candidate().address().port() == candidate.address().port() &&
+            parsed->candidate().protocol() == candidate.protocol()) {
+          return known;
+        }
+      }
+      return std::nullopt;
+    }
+
+    void resolveSignaled(RTCIceTransport::CandidatePair &pair, const std::vector<IceCandidateInit> &signaled) {
+      auto &[local, remote, peerReflexive] = pair;
+      if (!peerReflexive) {
+        return;
+      }
       webrtc::SdpParseError error;
-      auto parsed = webrtc::IceCandidate::Create(signaled.sdpMid, signaled.sdpMLineIndex, signaled.candidate, &error);
-      if (parsed && parsed->candidate().address().port() == candidate.address().port() &&
-          parsed->candidate().protocol() == candidate.protocol()) {
-        return signaled;
+      auto parsed = webrtc::IceCandidate::Create(remote.sdpMid, remote.sdpMLineIndex, remote.candidate, &error);
+      if (auto known = parsed ? findSignaled(signaled, parsed->candidate()) : std::nullopt) {
+        remote = *known;
+        peerReflexive = false;
       }
     }
-    return std::nullopt;
+
+  } // namespace
+
+  std::optional<IceCandidateInit> RTCIceTransport::FindSignaledCandidate(const webrtc::Candidate &candidate) {
+    const std::scoped_lock lock(_mutex);
+    return findSignaled(_remoteCandidates, candidate);
+  }
+
+  std::vector<IceCandidateInit> RTCIceTransport::SignaledCandidates() {
+    const std::scoped_lock lock(_mutex);
+    return _remoteCandidates;
   }
 
   namespace {
@@ -389,13 +425,16 @@ namespace python_webrtc {
   }
 
   void RTCIceTransport::AddRemoteCandidate(const IceCandidateInit &candidate) {
+    std::vector<IceCandidateInit> signaled;
     {
       const std::scoped_lock lock(_mutex);
       addCandidate(_remoteCandidates, candidate);
+      signaled = _remoteCandidates;
     }
-    _surfacedPair.Update([this](std::optional<CandidatePair> &shown) {
+    // copied: a Surfaced lock is a leaf
+    _surfacedPair.Update([&signaled](std::optional<CandidatePair> &shown) {
       if (shown) {
-        ResolveSignaled(*shown);
+        resolveSignaled(*shown, signaled);
       }
     });
   }
@@ -593,7 +632,7 @@ namespace python_webrtc {
   }
 
   void RTCIceTransport::SurfaceCurrent() {
-    BlockingCallOn(_factory->workerThread(), [this]() { TakeSnapshot(); });
+    BlockingCallOn(_factory->workerThread(), [this]() { TakeSnapshot(Pin::kNone); });
     const std::scoped_lock lock(_mutex);
     _surfacedState.Surface(_state);
     _surfacedGatheringState.Surface(_gatheringState);
@@ -624,16 +663,17 @@ namespace python_webrtc {
 
   void RTCIceTransport::CheckSelectedCandidatePair() {
     auto pair = ReadSelectedCandidatePair();
-    std::optional<CandidatePair> previous;
     {
       const std::scoped_lock lock(_mutex);
       if (keyOf(pair) == keyOf(_selectedPair)) {
         return;
       }
-      previous = std::exchange(_selectedPair, pair);
+      if (pair) {
+        _surfacedPair.Changed(IsBound(), _selectedPair);
+      }
+      _selectedPair = pair;
     }
     if (pair) {
-      _surfacedPair.Changed(IsBound(), previous);
       Parking::At("ice.pairchanged");
       Emit("selectedcandidatepairchange", *pair);
     }
@@ -648,7 +688,7 @@ namespace python_webrtc {
 
   void RTCIceTransport::SurfaceSelectedPair(std::optional<CandidatePair> pair) {
     if (pair) {
-      ResolveSignaled(*pair);
+      resolveSignaled(*pair, SignaledCandidates());
     }
     _surfacedPair.Surface(std::move(pair));
   }

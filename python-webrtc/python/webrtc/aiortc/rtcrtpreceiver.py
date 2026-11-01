@@ -139,10 +139,13 @@ class _AudioFrames:
         self._pending: av.AudioFrame | None = None
         self._filled = 0
         self._samples = 0
+        self._origin: int | None = None
+        self._cut = False
 
     def convert(self, media: webrtc.VideoFrame | webrtc.AudioData) -> list[Frame]:
         data = cast('webrtc.AudioData', media)
         with data:
+            self._follow_clock(data.timestamp)
             if data.sample_rate == self._rate and data.number_of_channels in {1, self._channels}:
                 return self._fill(data)
             self._pending = None
@@ -186,6 +189,17 @@ class _AudioFrames:
 
     def drop_partial(self) -> None:
         self._pending = None
+        self._cut = True
+
+    def _follow_clock(self, timestamp: int) -> None:
+        # samples lost in a cut were never counted
+        if self._origin is None:
+            self._origin = timestamp
+        elif self._cut:
+            elapsed = round((timestamp - self._origin) * self._rate / 1_000_000)
+            self._samples = max(self._samples, elapsed)
+            self._resampler = _Resampler()
+        self._cut = False
 
     def _stamped(self, frame: av.AudioFrame) -> av.AudioFrame:
         frame.pts = self._samples
@@ -224,6 +238,8 @@ class RemoteStreamTrack(MediaStreamTrack):
         self._converter: _VideoFrames | _AudioFrames | None = None
         self._frames: collections.deque[Frame] = collections.deque()
         self._frame_queue: _FrameQueue | None = None
+        self._reads = 0
+        self._discarded = 0
 
     @classmethod
     def _of(cls, native: webrtc.MediaStreamTrack, receiver: RTCRtpReceiver | None, id: str | None = None) -> Self:
@@ -249,6 +265,7 @@ class RemoteStreamTrack(MediaStreamTrack):
         init = webrtc.MediaStreamTrackProcessorInit(self._native, buffer)
         self._processor = webrtc.MediaStreamTrackProcessor(init)
         self._reader = self._processor.readable.get_reader()
+        self._discarded = 0
 
         # a reopened reader keeps the timestamps going
         if self._converter is not None:
@@ -272,12 +289,12 @@ class RemoteStreamTrack(MediaStreamTrack):
         """How many frames recv() returns without waiting."""
         processor = self._processor
         converter = self._converter
-        if processor is not None and converter is not None:
-            native = processor._native_obj
-            item = native.read()
-            while item is not None:
-                self._frames.extend(converter.convert(processor._wrap_media(item)))
-                item = native.read()
+        # a waiting recv() owns the native queue
+        if self._reads == 0 and processor is not None and converter is not None:
+            media = processor._take()
+            while media is not None:
+                self._frames.extend(self._convert(converter, media))
+                media = processor._take()
         return len(self._frames)
 
     @property
@@ -292,15 +309,49 @@ class RemoteStreamTrack(MediaStreamTrack):
             raise MediaStreamError
         while len(self._frames) == 0:
             reader = self._reader if self._reader is not None else self._open()
-            media = (await reader.read()).value
+            media = await self._read(reader)
             if media is None or self._converter is None:
                 if reader is not self._reader and self.readyState == 'live':
                     # the receiver was disabled while this read waited
                     continue
                 self.stop()
                 raise MediaStreamError
-            self._frames.extend(self._converter.convert(media))
+            self._frames.extend(self._convert(self._converter, media))
         return self._frames.popleft()
+
+    def _convert(
+        self, converter: _VideoFrames | _AudioFrames, media: webrtc.VideoFrame | webrtc.AudioData
+    ) -> list[Frame]:
+        if isinstance(converter, _AudioFrames) and isinstance(media, webrtc.AudioData):
+            discarded = media._discarded_before
+            if discarded != self._discarded:
+                self._discarded = discarded
+                converter.drop_partial()
+        return converter.convert(media)
+
+    async def _read(
+        self, reader: webrtc.ReadableStreamDefaultReader[webrtc.VideoFrame | webrtc.AudioData]
+    ) -> webrtc.VideoFrame | webrtc.AudioData | None:
+        read = reader.read()
+        self._reads += 1
+        try:
+            return (await read).value
+        except asyncio.CancelledError:
+            self._keep_settled(read)
+            raise
+        finally:
+            self._reads -= 1
+
+    def _keep_settled(
+        self, read: asyncio.Future[webrtc.ReadableStreamReadResult[webrtc.VideoFrame | webrtc.AudioData]]
+    ) -> None:
+        # cancelled after the read settled
+        if not read.done() or read.cancelled() or read.exception() is not None:
+            return
+
+        media = read.result().value
+        if media is not None and self._converter is not None:
+            self._frames.extend(self._convert(self._converter, media))
 
     @override
     def stop(self) -> None:

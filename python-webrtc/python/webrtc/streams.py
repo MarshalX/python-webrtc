@@ -505,7 +505,7 @@ class ReadableStreamDefaultController(Generic[_T]):
 
     def _enqueue(self, chunk: _T) -> None:
         reader = self._stream._reader
-        if reader is not None and len(reader._read_requests) > 0:
+        if reader is not None and reader._has_waiting_reads():
             _settle(reader._read_requests.popleft(), ReadableStreamReadResult(chunk, done=False))
         else:
             try:
@@ -821,7 +821,7 @@ class ReadableStream(Generic[_T]):
             _fail(self._reader._closed, error)
 
     def _has_read_requests(self) -> bool:
-        return self._reader is not None and len(self._reader._read_requests) > 0
+        return self._reader is not None and self._reader._has_waiting_reads()
 
     def _error_stored(self) -> BaseException:
         """The error of an errored stream."""
@@ -944,6 +944,12 @@ class ReadableStreamDefaultReader(Generic[_T]):
             self._closed = _handled(_rejected(error))
         stream._reader = None
         self._stream = None
+
+    def _has_waiting_reads(self) -> bool:
+        """Whether a read waits, dropping canceled ones."""
+        while len(self._read_requests) > 0 and self._read_requests[0].done():
+            _ = self._read_requests.popleft()
+        return len(self._read_requests) > 0
 
     def _settle_read_requests(self, value: ReadableStreamReadResult[_T]) -> None:
         while len(self._read_requests) > 0:

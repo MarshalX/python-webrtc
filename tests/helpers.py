@@ -319,12 +319,18 @@ def _start_adding(pc: webrtc.RTCPeerConnection, candidate: webrtc.RTCIceCandidat
     task.add_done_callback(_adding_candidates.discard)
 
 
-def _trickle(pc: webrtc.RTCPeerConnection, other: webrtc.RTCPeerConnection) -> None:
+def _trickle(
+    pc: webrtc.RTCPeerConnection,
+    other: webrtc.RTCPeerConnection,
+    admits: Callable[[webrtc.RTCIceCandidate], bool] | None = None,
+) -> None:
     """Adds the candidates of a connection to the other one, holding them until it has a remote description."""
     held: list[webrtc.RTCIceCandidate] = []
 
     def on_candidate(event: webrtc.RTCPeerConnectionIceEvent) -> None:
         if event.candidate is None:
+            return
+        if admits is not None and not admits(event.candidate):
             return
         # as signaling would: a candidate before the offer or answer is rejected
         if other.remote_description is None:
@@ -342,10 +348,14 @@ def _trickle(pc: webrtc.RTCPeerConnection, other: webrtc.RTCPeerConnection) -> N
     other.on('signalingstatechange', on_signaling_state)
 
 
-def exchange_ice_candidates(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> None:
-    """Trickles the candidates of each connection to the other one."""
-    _trickle(caller, callee)
-    _trickle(callee, caller)
+def exchange_ice_candidates(
+    caller: webrtc.RTCPeerConnection,
+    callee: webrtc.RTCPeerConnection,
+    admits: Callable[[webrtc.RTCIceCandidate], bool] | None = None,
+) -> None:
+    """Trickles the candidates of each connection to the other, filtered by ``admits``."""
+    _trickle(caller, callee, admits)
+    _trickle(callee, caller, admits)
 
 
 async def connect(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection, timeout: float = WAIT) -> None:
