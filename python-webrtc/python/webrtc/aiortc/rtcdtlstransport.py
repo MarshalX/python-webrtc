@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 
 # attributes are never on the first line, and a newline before them is much faster to find than a line start
 _FINGERPRINT = re.compile(r'\na=fingerprint:(\S+) (\S+)')
+# settable but unused: the engine makes one SHA-256 fingerprint
+X509_DIGEST_ALGORITHMS = {'sha-256': 'SHA256', 'sha-384': 'SHA384', 'sha-512': 'SHA512'}
 
 
 @dataclass

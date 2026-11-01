@@ -1,5 +1,11 @@
 # Change Log
 
+## Unreleased
+
+* Add `webrtc.aiortc.install_alias()`, which makes `import aiortc` give the compat layer, for libraries that import aiortc themselves by [@MarshalX](https://github.com/MarshalX)
+* Add aiortc's `rtp`, `jitterbuffer`, `utils` and `clock` modules and the ICE server helpers of `rtcicetransport` to the compat layer by [@MarshalX](https://github.com/MarshalX)
+* Drop a compat layer track's buffered frames when its receiver's `_enabled` is set to `False`, and add the track's `_queue`, for libraries that skip stale frames by [@MarshalX](https://github.com/MarshalX)
+
 ## Version 0.1.0
 
 **24.10.2026**

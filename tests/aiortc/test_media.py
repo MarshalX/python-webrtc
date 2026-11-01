@@ -28,6 +28,7 @@ from webrtc.aiortc import (
     RTCOutboundRtpStreamStats,
     RTCPeerConnection,
     RTCRtpCodecCapability,
+    RTCRtpReceiver,
     RTCRtpSender,
     RTCSessionDescription,
     RTCStatsReport,
@@ -183,6 +184,99 @@ async def test_unbuffered_relay_reads_the_latest_frame() -> None:
         assert first.pts is not None
         assert second.pts is not None
         assert second.pts - first.pts > 0.3 * 90000
+    finally:
+        await close(caller, callee)
+
+
+async def received_alone(track: MediaStreamTrack) -> tuple[RTCPeerConnection, RTCPeerConnection, RemoteStreamTrack]:
+    """A caller sending the track, a callee and the track it receives."""
+    caller, callee = new_pair()
+    tracks = received_tracks(callee)
+    caller.addTrack(track)
+    await negotiate(caller, callee)
+    return caller, callee, await next_track(tracks)
+
+
+def only_receiver(pc: RTCPeerConnection) -> RTCRtpReceiver:
+    receivers = pc.getReceivers()
+    assert len(receivers) == 1
+    return receivers[0]
+
+
+@pytest.mark.asyncio
+async def test_disabled_receiver_keeps_no_video() -> None:
+    caller, callee, track = await received_alone(VideoStreamTrack())
+    try:
+        receiver = only_receiver(callee)
+        before = await recv_video(track)
+
+        receiver._enabled = False
+        await asyncio.sleep(1)
+        receiver._enabled = True
+        after = await recv_video(track)
+
+        assert before.pts is not None
+        assert after.pts is not None
+        assert after.pts - before.pts > 0.5 * 90000
+    finally:
+        await close(caller, callee)
+
+
+@pytest.mark.asyncio
+async def test_disabled_receiver_keeps_no_audio() -> None:
+    caller, callee, track = await received_alone(AudioStreamTrack())
+    try:
+        receiver = only_receiver(callee)
+        _ = await recv_audio(track)
+
+        receiver._enabled = False
+        await asyncio.sleep(1)
+        receiver._enabled = True
+        _ = await recv_audio(track)
+
+        # a second of audio is 50 frames
+        assert track._queue.qsize() < 10
+    finally:
+        await close(caller, callee)
+
+
+@pytest.mark.asyncio
+async def test_disabling_the_receiver_keeps_a_waiting_read() -> None:
+    """A pending read gets the next frame, not the end of the track."""
+    caller, callee, track = await received_alone(VideoStreamTrack())
+    try:
+        receiver = only_receiver(callee)
+        reading = asyncio.ensure_future(track.recv())
+        await asyncio.sleep(0)
+
+        receiver._enabled = False
+        frame = await asyncio.wait_for(reading, TIMEOUT)
+
+        assert isinstance(frame, av.VideoFrame)
+        assert track.readyState == 'live'
+    finally:
+        await close(caller, callee)
+
+
+@pytest.mark.asyncio
+async def test_queue_drains_the_frames_nobody_read() -> None:
+    caller, callee, track = await received_alone(VideoStreamTrack())
+    try:
+        first = await recv_video(track)
+        await asyncio.sleep(0.5)
+        queue = track._queue
+        queued = queue.qsize()
+
+        while not queue.empty():
+            _ = queue.get_nowait()
+            queue.task_done()
+        latest = await recv_video(track)
+
+        assert isinstance(queue, asyncio.Queue)
+        assert queued >= 5
+        assert first.pts is not None
+        assert latest.pts is not None
+        assert latest.pts - first.pts > 0.3 * 90000
     finally:
         await close(caller, callee)
 

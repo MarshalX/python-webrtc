@@ -33,6 +33,25 @@ startup, see [H.264](h264.md).
 
 Python WebRTC isn't affiliated with or endorsed by aiortc.
 
+## Libraries that import aiortc
+
+A library that imports `aiortc` itself runs on the layer unchanged. Call `webrtc.aiortc.install_alias()` before
+importing it:
+
+```python
+import webrtc.aiortc
+
+webrtc.aiortc.install_alias()
+
+import some_library  # its aiortc imports now get webrtc.aiortc
+```
+
+`aiortc.x` then gives `webrtc.aiortc.x`, and a module the layer lacks raises `ModuleNotFoundError`. Call it first,
+in each process: it raises `RuntimeError` if `aiortc` is imported already.
+
+The library's aiortc dependency stays installed but unused. Keep it if the library imports aiortc's dependencies, such
+as `aioice` or `cryptography`, directly.
+
 ## What differs
 
 Not supported:
@@ -42,7 +61,9 @@ Not supported:
   Transports come from `RTCPeerConnection`.
 - **Certificate import.** `RTCCertificate(key, cert)` raises `NotImplementedError`. Generated certificates are ECDSA,
   with one SHA-256 fingerprint.
-- **Internal modules.** `rtp`, `jitterbuffer`, `clock`, `rate` and `utils` aren't there, and `codecs` has only the
+- **Internal modules.** `rtp`, `jitterbuffer`, `clock` and `utils` are aiortc's code, but the engine's packets never
+  pass through them, so a jitter buffer given to a receiver does nothing. Setting `rtcsctptransport.USERDATA_MAX_LENGTH`
+  or `rtcdtlstransport.X509_DIGEST_ALGORITHMS` does nothing either. `rate` isn't there, and `codecs` has only the
   bitrate constants: no encoder and decoder classes, no `CODECS` or `HEADER_EXTENSIONS` table. `MAX_FRAME_RATE` exists
   but isn't applied, as in aiortc.
 - **An explicit `id` on a non-negotiated data channel.** It's ignored, as the specification says.

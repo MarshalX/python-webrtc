@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 
 # attributes are never on the first line, and a newline before them is much faster to find than a line start
 _SCTP_PORT = re.compile(r'\na=sctp-port:(\d+)')
+# settable but unused: the engine sizes its own chunks
+USERDATA_MAX_LENGTH = 1200
 
 
 @dataclass
