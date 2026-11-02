@@ -152,6 +152,7 @@ class SmallWebRTCConnection(BaseObject):
         connection_timeout_secs: How long after the answer to wait for connecting before closing.
         ice_gathering_timeout_secs: How long an answer waits for candidates at most.
         port_range: The local ports to gather on, as :attr:`webrtc.RTCConfiguration.port_range`.
+        tcp_listen: Whether clients without UDP can connect over TCP, as :attr:`webrtc.RTCConfiguration.tcp_listen`.
 
     Raises:
         TypeError: If ``ice_servers`` mixes URLs and :obj:`IceServer`.
@@ -184,12 +185,14 @@ class SmallWebRTCConnection(BaseObject):
         *,
         ice_gathering_timeout_secs: float = 5.0,
         port_range: tuple[int, int] | None = None,
+        tcp_listen: bool = False,
     ) -> None:
         super().__init__()
         self.ice_servers = _ice_servers_of(ice_servers)
         self.connection_timeout_secs = connection_timeout_secs
         self.ice_gathering_timeout_secs = ice_gathering_timeout_secs
         self.port_range = port_range
+        self.tcp_listen = tcp_listen
 
         self._needed_candidate_types = _needed_candidate_types(self.ice_servers)
         self._connect_invoked = False
@@ -205,7 +208,10 @@ class SmallWebRTCConnection(BaseObject):
 
     def _initialize(self) -> None:
         configuration = webrtc.RTCConfiguration(
-            ice_servers=self.ice_servers, bundle_policy=webrtc.RTCBundlePolicy.max_bundle, port_range=self.port_range
+            ice_servers=self.ice_servers,
+            bundle_policy=webrtc.RTCBundlePolicy.max_bundle,
+            port_range=self.port_range,
+            tcp_listen=self.tcp_listen,
         )
         self._pc = webrtc.RTCPeerConnection(configuration)
         self._pc_id = f'{self.name}-{uuid.uuid4().hex}'
@@ -288,6 +294,9 @@ class SmallWebRTCConnection(BaseObject):
                     self._initialize()
 
                 await self._create_answer(sdp, type)
+                # after an ICE restart, the next ping may wait for an SCTP retransmit
+                if self._last_ping is not None:
+                    self._last_ping = time.monotonic()
                 self._cancel(self._renegotiation_end)
                 self._renegotiation_end = self._spawn(self._end_renegotiation())
         finally:
@@ -342,7 +351,7 @@ class SmallWebRTCConnection(BaseObject):
         self.send_app_message({'type': SIGNALLING_TYPE, 'message': RenegotiateMessage().model_dump()})
 
     def is_connected(self) -> bool:
-        """Whether the bot is ready and the client pinged recently, or is connected if it doesn't ping."""
+        """Whether the bot is ready and the client pinged or offered recently."""
         if not self._connect_invoked or self._closed:
             return False
         if self._last_ping is None:

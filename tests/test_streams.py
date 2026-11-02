@@ -84,6 +84,21 @@ async def test_reads_are_requested_when_called() -> None:
 
 
 @pytest.mark.asyncio
+async def test_canceled_read_leaves_the_chunk_to_the_next_read() -> None:
+    source = Controlled()
+    reader = webrtc.ReadableStream(source, webrtc.QueuingStrategy(high_water_mark=0)).get_reader()
+
+    canceled = reader.read()
+    canceled.cancel()
+    assert not source.controller._has_pending_reads()
+    source.controller.enqueue(1)
+    source.controller.enqueue(2)
+
+    assert await reader.read() == webrtc.ReadableStreamReadResult(value=1, done=False)
+    assert await reader.read() == webrtc.ReadableStreamReadResult(value=2, done=False)
+
+
+@pytest.mark.asyncio
 async def test_async_iteration_and_cancel() -> None:
     """Async for reads every chunk, and breaking out of it cancels the stream."""
     source = Chunks(range(10))

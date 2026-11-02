@@ -71,6 +71,18 @@ through it, like on a Mac without Local Network permission, allow it before the 
 webrtc.allow_loopback()  # or WRTC_ALLOW_LOOPBACK=1
 ```
 
+## Clients without UDP
+
+Without UDP and TURN, a client can reach a server over TCP if the server listens. Set `tcp_listen` on the server
+only:
+
+```python
+config = webrtc.RTCConfiguration(tcp_listen=True, port_range=(40000, 40099))
+```
+
+In Docker, publish `port_range` for TCP too: `-p 40000-40099:40000-40099/udp -p 40000-40099:40000-40099/tcp`.
+Leave it off on clients: when both ends listen, every TCP port pairs with every remote one.
+
 ## States
 
 The state of a connection is in {attr}`~webrtc.RTCPeerConnection.connection_state`, and each change fires

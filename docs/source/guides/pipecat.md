@@ -120,6 +120,8 @@ is a complete bot on the runner.
   candidate, so there the answer waits the whole timeout.
 - **Port range.** `port_range=(low, high)` keeps the bot's candidates in a range of ports. In Docker, publish the same
   range, like `-p 40000-40019:40000-40019/udp`. The runner makes its own handler, so this needs a server of your own.
+- **Clients without UDP.** `tcp_listen=True` lets clients behind a firewall that blocks UDP connect over TCP, without
+  TURN. With `port_range`, publish the range for `/tcp` too. See [Clients without UDP](connections.md#clients-without-udp).
 - **Codecs.** The answer follows the client's offer. For H.264, see [H.264](h264.md).
 
 ## What differs
@@ -147,4 +149,6 @@ Each checked against Pipecat's transport on aiortc, with Pipecat's workaround re
 - `port_range` lets Docker publish only a range of UDP ports ([#1808](https://github.com/pipecat-ai/pipecat/issues/1808), [#1570](https://github.com/pipecat-ai/pipecat/issues/1570)).
 - A bot uses less CPU per session: media stays native, with no PyAV or OpenCV conversions.
 - A client that vanishes is noticed sooner ([#3140](https://github.com/pipecat-ai/pipecat/issues/3140)).
+- Audio resumes right after an ICE restart.
+- Clients without UDP can connect over TCP, without TURN.
 - A dead first TURN server falls back to the next.

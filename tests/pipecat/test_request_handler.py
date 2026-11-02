@@ -129,11 +129,12 @@ async def test_an_offer_and_its_candidates_connect() -> None:
 @pytest.mark.asyncio
 async def test_new_connections_take_the_port_range() -> None:
     client = BrowserClient()
-    async with serving(SmallWebRTCRequestHandler(port_range=(40020, 40039)), client) as (bot, http):
+    async with serving(SmallWebRTCRequestHandler(port_range=(40020, 40039), tcp_listen=True), client) as (bot, http):
         _ = await connect(http, client)
 
         [connection] = bot.connections
         assert connection.port_range == (40020, 40039)
+        assert connection.tcp_listen
         answer = connection.get_answer()
         assert answer is not None
         ports = re.findall(r'^a=candidate:\S+ \d+ udp \d+ \S+ (\d+) typ', answer['sdp'], re.MULTILINE)

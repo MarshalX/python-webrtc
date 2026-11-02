@@ -52,7 +52,7 @@ namespace python_webrtc {
     static void Init(pybind11::module &m);
 
     // the oldest media queued: (VideoFrameBuffer, timestampUs, rotation, rtpTimestamp) or
-    // (bytes, bitsPerSample, sampleRate, channels, frames, timestampUs), or None
+    // (bytes, bitsPerSample, sampleRate, channels, frames, timestampUs, discardedFrames), or None
     pybind11::object Read();
 
     // stops receiving media, dropping what's queued

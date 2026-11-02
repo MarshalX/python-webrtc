@@ -98,6 +98,7 @@ class IceServerInit:
         ...
 class ConfigurationInit:
     alwaysNegotiateDataChannels: bool
+    tcpListen: bool
     @property
     def bundlePolicy(self) -> webrtc.enums.RTCBundlePolicy:
         ...
@@ -821,7 +822,7 @@ class MediaStreamTrackProcessor(Binding):
         ...
     def cancel(self) -> None:
         ...
-    def read(self) -> tuple[VideoFrameBuffer, int, int, int] | tuple[bytes, int, int, int, int, int] | None:
+    def read(self) -> tuple[VideoFrameBuffer, int, int, int] | tuple[bytes, int, int, int, int, int, int] | None:
         ...
     @property
     def discardedFrames(self) -> int:

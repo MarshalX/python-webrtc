@@ -36,7 +36,7 @@ namespace python_webrtc {
     configuration.set_prerenderer_smoothing(false);
 
     webrtc::PeerConnectionDependencies dependencies(this);
-    dependencies.allocator = _factory->CreatePortAllocator(configuration);
+    dependencies.allocator = _factory->CreatePortAllocator(configuration, _configuration.tcpListen);
 
     auto result = _factory->factory()->CreatePeerConnectionOrError(configuration, std::move(dependencies));
 
@@ -686,9 +686,10 @@ namespace python_webrtc {
     {
       const TrackedLock lock(_connectionMutex);
       if (init.alwaysNegotiateDataChannels != _configuration.alwaysNegotiateDataChannels ||
-          init.rtpHeaderEncryptionPolicy != _configuration.rtpHeaderEncryptionPolicy) {
+          init.rtpHeaderEncryptionPolicy != _configuration.rtpHeaderEncryptionPolicy ||
+          init.tcpListen != _configuration.tcpListen) {
         throw RTCException(webrtc::RTCErrorType::INVALID_MODIFICATION,
-                           "alwaysNegotiateDataChannels and rtpHeaderEncryptionPolicy can't be changed");
+                           "alwaysNegotiateDataChannels, rtpHeaderEncryptionPolicy and tcpListen can't be changed");
       }
     }
     auto error = pc->SetConfiguration(init.Apply(pc->GetConfiguration()));

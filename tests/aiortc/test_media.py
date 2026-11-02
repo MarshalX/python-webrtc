@@ -10,15 +10,18 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import datetime as dt
 import fractions
-from typing import TYPE_CHECKING
+import threading
+from typing import TYPE_CHECKING, cast
 
 import av
 import pytest
-from typing_extensions import override
+from typing_extensions import ParamSpec, TypeVar, override
 
 import webrtc
+from tests.helpers import wait_until
 from tests.timing import seconds
 from webrtc.aiortc import (
     AudioStreamTrack,
@@ -41,7 +44,13 @@ from webrtc.aiortc.contrib.media import MediaBlackhole, MediaPlayer, MediaRelay
 from webrtc.aiortc.rtcrtpreceiver import RemoteStreamTrack
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
+
+    from av.frame import Frame
+
+_P = ParamSpec('_P')
+_T = TypeVar('_T')
 
 TIMEOUT = seconds(10)
 #: no STUN server, so gathering is local
@@ -227,15 +236,38 @@ async def test_disabled_receiver_keeps_no_audio() -> None:
     caller, callee, track = await received_alone(AudioStreamTrack())
     try:
         receiver = only_receiver(callee)
-        _ = await recv_audio(track)
+        before = await recv_audio(track)
 
         receiver._enabled = False
         await asyncio.sleep(1)
         receiver._enabled = True
-        _ = await recv_audio(track)
+        after = await recv_audio(track)
 
         # a second of audio is 50 frames
         assert track._queue.qsize() < 10
+        assert before.pts is not None
+        assert after.pts is not None
+        assert after.pts - before.pts > 0.5 * before.sample_rate
+    finally:
+        await close(caller, callee)
+
+
+@pytest.mark.asyncio
+async def test_audio_pts_skip_the_chunks_dropped_unread() -> None:
+    caller, callee, track = await received_alone(AudioStreamTrack())
+    try:
+        before = await recv_audio(track)
+        processor = track._processor
+        assert processor is not None
+
+        await wait_until(
+            lambda: processor.discarded_frames >= rtcrtpreceiver._AUDIO_BUFFER, 'a second of audio dropped', TIMEOUT
+        )
+        after = await recv_audio(track)
+
+        assert before.pts is not None
+        assert after.pts is not None
+        assert after.pts - before.pts > 0.5 * before.sample_rate
     finally:
         await close(caller, callee)
 
@@ -279,6 +311,155 @@ async def test_queue_drains_the_frames_nobody_read() -> None:
         assert latest.pts - first.pts > 0.3 * 90000
     finally:
         await close(caller, callee)
+
+
+def numbered_frame(number: int) -> webrtc.VideoFrame:
+    """A 4x2 frame with its number in the luma."""
+    init = webrtc.VideoFrameBufferInit(format='I420', coded_width=4, coded_height=2, timestamp=number * 1000)
+    return webrtc.VideoFrame(bytes([number] * 8 + [128] * 4), init)
+
+
+def frame_number(frame: Frame) -> int:
+    assert isinstance(frame, av.VideoFrame)
+    return bytes(frame.planes[0])[0]
+
+
+def has_waiting_read(track: RemoteStreamTrack) -> bool:
+    processor = track._processor
+    source = processor._source if processor is not None else None
+    controller = source._controller if source is not None else None
+    return controller is not None and controller._has_pending_reads()
+
+
+async def waiting_recv(track: RemoteStreamTrack) -> asyncio.Future[Frame]:
+    """Starts recv() and returns once it waits on the reader."""
+    reading = asyncio.ensure_future(track.recv())
+    await wait_until(lambda: has_waiting_read(track), 'recv() to wait')
+    return reading
+
+
+@pytest.mark.asyncio
+async def test_queue_size_keeps_the_frame_of_a_waiting_recv() -> None:
+    generator = webrtc.VideoTrackGenerator()
+    writer = generator.writable.get_writer()
+    track = RemoteStreamTrack._of(generator.track, None)
+    try:
+        reading = await waiting_recv(track)
+
+        # qsize() runs before the wakeup
+        written = writer.write(numbered_frame(1))
+        _ = track._queue.qsize()
+        await written
+        first = await asyncio.wait_for(reading, TIMEOUT)
+
+        reading = await waiting_recv(track)
+        processor = track._processor
+        assert processor is not None
+        assert processor._source is not None
+        written = [writer.write(numbered_frame(2)), writer.write(numbered_frame(3))]
+        processor._source.deliver()
+        _ = track._queue.qsize()
+        await asyncio.gather(*written)
+        second = await asyncio.wait_for(reading, TIMEOUT)
+        third = await asyncio.wait_for(track.recv(), TIMEOUT)
+
+        assert [frame_number(first), frame_number(second), frame_number(third)] == [1, 2, 3]
+    finally:
+        track.stop()
+
+
+@pytest.mark.asyncio
+async def test_recv_timed_out_leaves_the_next_frame_to_the_next_recv() -> None:
+    generator = webrtc.VideoTrackGenerator()
+    writer = generator.writable.get_writer()
+    track = RemoteStreamTrack._of(generator.track, None)
+    try:
+        reading = await waiting_recv(track)
+        # what wait_for() does on its timeout
+        reading.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await reading
+
+        await writer.write(numbered_frame(1))
+        await writer.write(numbered_frame(2))
+        frame = await asyncio.wait_for(track.recv(), TIMEOUT)
+
+        assert frame_number(frame) == 1
+    finally:
+        track.stop()
+
+
+@pytest.mark.asyncio
+async def test_recv_canceled_after_its_read_settled_keeps_the_frame() -> None:
+    generator = webrtc.VideoTrackGenerator()
+    writer = generator.writable.get_writer()
+    track = RemoteStreamTrack._of(generator.track, None)
+    try:
+        reading = await waiting_recv(track)
+        assert track._reader is not None
+        request = track._reader._read_requests.popleft()
+
+        # the timeout lands in the same loop turn as the frame
+        request.set_result(webrtc.ReadableStreamReadResult(numbered_frame(1), done=False))
+        reading.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await reading
+
+        await writer.write(numbered_frame(2))
+        frame = await asyncio.wait_for(track.recv(), TIMEOUT)
+
+        assert frame_number(frame) == 1
+    finally:
+        track.stop()
+
+
+def filled_chunk(value: int) -> webrtc.AudioData:
+    """10 ms of 48 kHz stereo audio, every sample the value."""
+    init = webrtc.AudioDataInit(
+        format='s16',
+        sample_rate=48000,
+        number_of_frames=480,
+        number_of_channels=2,
+        timestamp=0,
+        data=value.to_bytes(2, 'little') * 960,
+    )
+    return webrtc.AudioData(init)
+
+
+def chunk_values(frame: Frame) -> list[int]:
+    """The value of each 10 ms chunk of a frame of filled chunks."""
+    assert isinstance(frame, av.AudioFrame)
+    samples = bytes(frame.planes[0])
+    chunk_size = 480 * 2 * 2
+    return [int.from_bytes(samples[start : start + 2], 'little') for start in range(0, len(samples), chunk_size)]
+
+
+@pytest.mark.asyncio
+async def test_audio_drop_after_a_taken_chunk_cuts_after_it() -> None:
+    generator = webrtc.MediaStreamTrackGenerator('audio')
+    writer = generator.writable.get_writer()
+    track = RemoteStreamTrack._of(generator, None)._clone(buffered=False)
+    try:
+        reading = await waiting_recv(track)
+        processor = track._processor
+        assert processor is not None
+        assert processor._source is not None
+
+        written = [writer.write(filled_chunk(1))]
+        processor._source.deliver()
+        # before recv() resumes: 2 is dropped for 3, the queue holding one chunk
+        written += [writer.write(filled_chunk(2)), writer.write(filled_chunk(3))]
+        await asyncio.gather(*written)
+        assert processor.discarded_frames == 1
+        await wait_until(lambda: reading.done() or has_waiting_read(track), 'recv() to take 3')
+        if not reading.done():
+            await writer.write(filled_chunk(4))
+        frame = await asyncio.wait_for(reading, TIMEOUT)
+
+        assert chunk_values(frame) == [3, 4]
+    finally:
+        track.stop()
+        generator.stop()
 
 
 async def relayed_call(relay: MediaRelay, source: MediaStreamTrack, pcs: list[RTCPeerConnection]) -> RTCRtpSender:
@@ -477,6 +658,68 @@ async def test_close_stops_tracks_and_pumps() -> None:
         await close(caller, callee)
 
 
+class GatedExecutor(concurrent.futures.ThreadPoolExecutor):
+    """Holds the next job, once armed, until released."""
+
+    def __init__(self) -> None:
+        super().__init__(max_workers=4)
+        self.armed = False
+        self.entered: concurrent.futures.Future[None] = concurrent.futures.Future()
+        self.release = threading.Event()
+        self.held: concurrent.futures.Future[object] | None = None
+
+    @override
+    def submit(self, fn: Callable[_P, _T], /, *args: _P.args, **kwargs: _P.kwargs) -> concurrent.futures.Future[_T]:
+        if not self.armed:
+            return super().submit(fn, *args, **kwargs)
+
+        self.armed = False
+
+        def gated() -> object:
+            self.entered.set_result(None)
+            _ = self.release.wait()
+            return fn(*args, **kwargs)
+
+        self.held = super().submit(gated)
+        return cast('concurrent.futures.Future[_T]', self.held)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cancel', ['replaceTrack', 'close'])
+async def test_stopped_pump_closes_the_frame_it_was_converting(cancel: str) -> None:
+    gate = GatedExecutor()
+    asyncio.get_running_loop().set_default_executor(gate)
+    caller, callee = new_pair()
+    tracks = received_tracks(callee)
+    try:
+        sender = caller.addTrack(CountingTrack())
+        await negotiate(caller, callee)
+        remote = await next_track(tracks)
+        _ = await recv_video(remote)
+
+        gate.armed = True
+        await asyncio.wrap_future(gate.entered)
+        assert gate.held is not None
+        converted = asyncio.wrap_future(gate.held)
+
+        if cancel == 'replaceTrack':
+            pump = sender._pump
+            assert pump is not None
+            sender.replaceTrack(None)
+            _ = await asyncio.gather(pump, return_exceptions=True)
+        else:
+            await caller.close()
+
+        gate.release.set()
+        frame = await converted
+
+        assert isinstance(frame, webrtc.VideoFrame)
+        assert frame.format is None
+    finally:
+        gate.release.set()
+        await close(caller, callee)
+
+
 def write_media(path: Path) -> None:
     """Writes a second of blank video and silent audio."""
     with av.open(str(path), 'w', format='webm') as container:
@@ -572,6 +815,28 @@ def test_mono_audio_is_copied_to_both_channels() -> None:
     interleaved = memoryview(frame.planes[0]).cast('h')
     mono = memoryview(samples).cast('h')
     assert list(interleaved[0::2]) == list(interleaved[1::2]) == list(mono) * 2
+
+
+def test_audio_pts_follow_the_clock_only_across_a_cut() -> None:
+    frames = rtcrtpreceiver._AudioFrames('stereo', 48000)
+
+    def chunk(timestamp: int) -> webrtc.AudioData:
+        init = webrtc.AudioDataInit(
+            format='s16',
+            sample_rate=48000,
+            number_of_frames=480,
+            number_of_channels=2,
+            timestamp=timestamp,
+            data=bytes(1920),
+        )
+        return webrtc.AudioData(init)
+
+    contiguous = [frame.pts for timestamp in (0, 12_000, 19_000, 31_000) for frame in frames.convert(chunk(timestamp))]
+    frames.drop_partial()
+    after_cut = [frame.pts for timestamp in (3_000_000, 3_010_000) for frame in frames.convert(chunk(timestamp))]
+
+    assert contiguous == [0, 960]
+    assert after_cut == [3 * 48000]
 
 
 def test_pts_keep_increasing_when_rtp_timestamps_start() -> None:

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import ctypes
 import functools
 from typing import TYPE_CHECKING, cast
@@ -21,6 +22,8 @@ from webrtc.aiortc.mediastreams import MediaStreamError, MediaStreamTrack
 from webrtc.aiortc.rtcrtpreceiver import RemoteStreamTrack, _RtpEndpoint
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from av.frame import Frame
     from av.stream import Stream
 
@@ -84,6 +87,22 @@ def _native_audio_data(frame: av.AudioFrame) -> webrtc.AudioData:
     return webrtc.AudioData(init)
 
 
+def _close_converted(converting: asyncio.Future[webrtc.VideoFrame]) -> None:
+    if not converting.cancelled() and converting.exception() is None:
+        converting.result().close()
+
+
+async def _convert_off_loop(frame: av.VideoFrame) -> webrtc.VideoFrame:
+    # converting the pixels takes milliseconds at large sizes
+    converting = asyncio.get_running_loop().run_in_executor(None, _native_video_frame, frame)
+    try:
+        return await asyncio.shield(converting)
+    except asyncio.CancelledError:
+        # a frame converted after its pump stopped is still the pump's to close
+        converting.add_done_callback(_close_converted)
+        raise
+
+
 def _sendable_rate(rate: int) -> bool:
     # the core sends 10 ms chunks of rate // 100 samples
     return rate % 100 == 0 and _MIN_SAMPLE_RATE <= rate <= _MAX_SAMPLE_RATE
@@ -102,15 +121,22 @@ class _NativeMedia:
             frames = [media]
 
         converted: list[webrtc.VideoFrame | webrtc.AudioData] = []
-        for frame in frames:
-            if isinstance(frame, av.VideoFrame) and frame.format.name in _CORE_PIXEL_FORMATS:
-                converted.append(_native_video_frame(frame))
-            elif isinstance(frame, av.VideoFrame):
-                # converting the pixels takes milliseconds at large sizes
-                converted.append(await loop.run_in_executor(None, _native_video_frame, frame))
-            elif isinstance(frame, av.AudioFrame):
-                converted.extend(_native_audio_data(chunk) for chunk in self._audio(frame))
+        try:
+            for frame in frames:
+                await self._convert_into(converted, frame)
+        except BaseException:
+            _close_all(converted)
+            raise
+
         return converted
+
+    async def _convert_into(self, converted: list[webrtc.VideoFrame | webrtc.AudioData], frame: Frame) -> None:
+        if isinstance(frame, av.VideoFrame) and frame.format.name in _CORE_PIXEL_FORMATS:
+            converted.append(_native_video_frame(frame))
+        elif isinstance(frame, av.VideoFrame):
+            converted.append(await _convert_off_loop(frame))
+        elif isinstance(frame, av.AudioFrame):
+            converted.extend(_native_audio_data(chunk) for chunk in self._audio(frame))
 
     def _decode(self, packet: Packet[Stream]) -> list[Frame]:
         if self._decoder is None:
@@ -135,6 +161,24 @@ class _NativeMedia:
         return self._resampler.resample(frame, layout, rate, None)
 
 
+def _close_all(chunks: Iterable[webrtc.VideoFrame | webrtc.AudioData]) -> None:
+    for chunk in chunks:
+        chunk.close()
+
+
+async def _write_all(
+    writer: webrtc.WritableStreamDefaultWriter[webrtc.VideoFrame | webrtc.AudioData],
+    chunks: list[webrtc.VideoFrame | webrtc.AudioData],
+) -> None:
+    unwritten = collections.deque(chunks)
+    try:
+        while len(unwritten) > 0:
+            await writer.write(unwritten.popleft())
+    finally:
+        # the generator closes the chunks it was given
+        _close_all(unwritten)
+
+
 async def _pump(
     track: MediaStreamTrack,
     writer: webrtc.WritableStreamDefaultWriter[webrtc.VideoFrame | webrtc.AudioData],
@@ -143,8 +187,8 @@ async def _pump(
     media = _NativeMedia()
     try:
         while True:
-            for chunk in await media.convert(await track.recv()):
-                await writer.write(chunk)
+            chunks = await media.convert(await track.recv())
+            await _write_all(writer, chunks)
     except MediaStreamError:
         pass
     except Exception:

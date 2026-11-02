@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import webrtc
+import wrtc
 from tests.helpers import (
     connect,
     delivered,
@@ -27,6 +28,7 @@ from tests.helpers import (
     wait_for_ice_gathering_complete,
     wait_until,
 )
+from tests.timing import seconds
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -35,6 +37,18 @@ if TYPE_CHECKING:
 def sctp_transport(pc: webrtc.RTCPeerConnection) -> webrtc.RTCDtlsTransport:
     assert pc.sctp is not None
     return pc.sctp.transport
+
+
+def collected_candidates(pc: webrtc.RTCPeerConnection) -> list[webrtc.RTCIceCandidate]:
+    """Collects the candidates the connection gathers from now on."""
+    candidates: list[webrtc.RTCIceCandidate] = []
+
+    def collect(event: webrtc.RTCPeerConnectionIceEvent) -> None:
+        if event.candidate is not None:
+            candidates.append(event.candidate)
+
+    pc.on('icecandidate', collect)
+    return candidates
 
 
 def colon_separated(digest: str) -> str:
@@ -198,6 +212,33 @@ async def test_once_handles_the_first_dtls_state_change_only(
 
     assert len(every) > 1
     assert first == every[:1]
+
+
+@pytest.mark.asyncio
+async def test_dtls_transport_shows_its_state_until_its_statechange_event(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    caller_candidates = collected_candidates(caller)
+    callee_candidates = collected_candidates(callee)
+    caller.create_data_channel('pinned')
+    # no candidates yet, so neither end connects before both transports are taken
+    await exchange_offer_answer(caller, callee)
+    await asyncio.gather(*(wait_for_ice_gathering_complete(pc) for pc in (caller, callee)))
+    transports = [sctp_transport(pc) for pc in (caller, callee)]
+    changed = [wait_for_event(dtls, 'statechange') for dtls in transports]
+
+    wrtc._testing.park('dtls.statechange')
+    try:
+        adding = [asyncio.ensure_future(callee.add_ice_candidate(candidate)) for candidate in caller_candidates]
+        adding += [asyncio.ensure_future(caller.add_ice_candidate(candidate)) for candidate in callee_candidates]
+        assert await asyncio.to_thread(wrtc._testing.parked, 'dtls.statechange', seconds(10))
+        assert [dtls.state for dtls in transports] == [webrtc.RTCDtlsTransportState.new] * 2
+    finally:
+        wrtc._testing.release('dtls.statechange')
+    await asyncio.gather(*adding)
+
+    await asyncio.gather(*changed)
+    assert all(dtls.state != webrtc.RTCDtlsTransportState.new for dtls in transports)
 
 
 @pytest.mark.asyncio

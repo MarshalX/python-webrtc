@@ -112,9 +112,10 @@ namespace python_webrtc {
   }
 
   std::unique_ptr<webrtc::PortAllocator>
-  PeerConnectionFactory::CreatePortAllocator(const webrtc::PeerConnectionInterface::RTCConfiguration &configuration) {
+  PeerConnectionFactory::CreatePortAllocator(const webrtc::PeerConnectionInterface::RTCConfiguration &configuration,
+                                             bool tcpListen) {
     auto allocator = python_webrtc::CreatePortAllocator(webrtc::CreateEnvironment(_fieldTrials.CreateCopy()),
-                                                        _networkManager, _packetSocketFactory);
+                                                        _networkManager, _packetSocketFactory, tcpListen);
     // as libwebrtc's factory does
     allocator->SetPortRange(configuration.port_allocator_config.min_port, configuration.port_allocator_config.max_port);
     allocator->set_flags(configuration.port_allocator_config.flags);

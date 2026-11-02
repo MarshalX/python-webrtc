@@ -133,6 +133,7 @@ class SmallWebRTCRequestHandler:
         host: The address an ESP32 client reaches the bot at.
         connection_mode: Whether one connection is allowed or any number.
         port_range: The local ports of new connections, as :attr:`webrtc.RTCConfiguration.port_range`.
+        tcp_listen: Whether new connections accept clients without UDP over TCP.
     """
 
     def __init__(
@@ -143,9 +144,11 @@ class SmallWebRTCRequestHandler:
         connection_mode: ConnectionMode = ConnectionMode.MULTIPLE,
         *,
         port_range: tuple[int, int] | None = None,
+        tcp_listen: bool = False,
     ) -> None:
         self._ice_servers = ice_servers
         self._port_range = port_range
+        self._tcp_listen = tcp_listen
         self._esp32_mode = esp32_mode
         self._host = host
         self._connection_mode = connection_mode
@@ -261,7 +264,9 @@ class SmallWebRTCRequestHandler:
         request: SmallWebRTCRequest,
         webrtc_connection_callback: Callable[[SmallWebRTCConnection], Awaitable[None]],
     ) -> SmallWebRTCConnection:
-        connection = SmallWebRTCConnection(ice_servers=self._ice_servers, port_range=self._port_range)
+        connection = SmallWebRTCConnection(
+            ice_servers=self._ice_servers, port_range=self._port_range, tcp_listen=self._tcp_listen
+        )
         await connection.initialize(sdp=request.sdp, type=request.type)
 
         def forget(closed: SmallWebRTCConnection) -> None:

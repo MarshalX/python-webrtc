@@ -22,7 +22,8 @@
   ],
   "RTCConfiguration": [
     "port_range: extra member",
-    "targetLatency: missing member"
+    "targetLatency: missing member",
+    "tcp_listen: extra member"
   ],
   "RTCConfigurationTargetLatency": [
     "missing enum"
