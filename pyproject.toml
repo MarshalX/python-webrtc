@@ -184,7 +184,7 @@ logger-objects = ["webrtc.aiortc._utils.logger"]
 "python-webrtc/python/webrtc/interfaces/rtc_peer_connection.py" = ["PLR0904"]  # the W3C interface
 "python-webrtc/python/webrtc/pipecat/__init__.py" = ["RUF067"]  # names the extra when it's missing
 # the framework's signatures, with positional flags
-"python-webrtc/python/webrtc/pipecat/**" = ["FBT001", "FBT002", "PLR0917"]
+"python-webrtc/python/webrtc/pipecat/**" = ["FBT001", "FBT002", "PLR0913", "PLR0917"]
 # aiortc's names and signatures; its docs document the API
 "python-webrtc/python/webrtc/aiortc/**" = ["D1", "RUF067", "PLC0414", "N802", "N803", "FBT001", "FBT002", "PLR0913", "PLR0917"]
 # user callbacks error the stream, as the specification says; handler errors go to the loop's exception handler

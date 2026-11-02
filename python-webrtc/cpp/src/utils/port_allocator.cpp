@@ -98,10 +98,10 @@ namespace python_webrtc {
     class ConnectionPortAllocator : private Owned, public webrtc::BasicPortAllocator {
     public:
       ConnectionPortAllocator(const webrtc::Environment &env, std::shared_ptr<webrtc::NetworkManager> networks,
-                              std::shared_ptr<webrtc::PacketSocketFactory> sockets)
+                              std::shared_ptr<webrtc::PacketSocketFactory> sockets, bool tcpListen)
           : Owned(std::move(networks), std::move(sockets)), BasicPortAllocator(env, &view, this->sockets.get()) {
-        // active TCP candidates only, or every TCP port connects to every remote one (interfaces²)
-        set_allow_tcp_listen(false);
+        // off by default: when both ends listen, every TCP port connects to every remote one (interfaces²)
+        set_allow_tcp_listen(tcpListen);
       }
 
       webrtc::PortAllocatorSession *CreateSessionInternal(absl::string_view contentName, int component,
@@ -118,8 +118,9 @@ namespace python_webrtc {
 
   std::unique_ptr<webrtc::PortAllocator> CreatePortAllocator(const webrtc::Environment &env,
                                                              std::shared_ptr<webrtc::NetworkManager> networks,
-                                                             std::shared_ptr<webrtc::PacketSocketFactory> sockets) {
-    return std::make_unique<ConnectionPortAllocator>(env, std::move(networks), std::move(sockets));
+                                                             std::shared_ptr<webrtc::PacketSocketFactory> sockets,
+                                                             bool tcpListen) {
+    return std::make_unique<ConnectionPortAllocator>(env, std::move(networks), std::move(sockets), tcpListen);
   }
 
 } // namespace python_webrtc

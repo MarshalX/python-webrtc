@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import collections
-import contextlib
 import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -332,6 +331,7 @@ class AudioPacer:
                 next_time = loop.time()
 
             self._drop_abandoned_writes()
+            # every frame on its time: arrivals off their RTP timestamps grow the client's jitter buffer
             if len(self._writes) > 0:
                 next_time += await self._send_audio() / self._sample_rate
                 if self._interrupted:
@@ -339,15 +339,12 @@ class AudioPacer:
                     self._interrupted = False
                     next_time = max(next_time, loop.time())
                 next_time = self._caught_up(next_time, loop.time())
-                # coarse timers wake late, and the next delay is shorter for it
-                await asyncio.sleep(max(next_time - loop.time(), 0))
             elif self._auto_silence:
                 await self._send_silence()
                 # keeps up through late wakes, but isn't caught up on after a stall
                 next_time = max(next_time + frame_secs, loop.time() - _SILENCE_SLACK_SECS)
-                # a write during the silence starts at once
-                if await self._written_within(next_time - loop.time()):
-                    next_time = loop.time()
+            # coarse timers wake late, and the next delay is shorter for it
+            await asyncio.sleep(max(next_time - loop.time(), 0))
 
     @staticmethod
     def _caught_up(next_time: float, now: float) -> float:
@@ -379,16 +376,6 @@ class AudioPacer:
         self._written.clear()
         _ = await self._written.wait()
         return True
-
-    async def _written_within(self, timeout: float) -> bool:
-        """Waits up to a time for a write; returns whether one is there."""
-        self._written.clear()
-        self._drop_abandoned_writes()
-        if len(self._writes) == 0 and timeout > 0:
-            with contextlib.suppress(asyncio.TimeoutError):
-                _ = await asyncio.wait_for(self._written.wait(), timeout)
-            self._drop_abandoned_writes()
-        return len(self._writes) > 0
 
     async def _send_silence(self) -> None:
         silence = bytes(self._frame_samples * self._silence_channels * _SAMPLE_BYTES)

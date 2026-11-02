@@ -13,6 +13,7 @@
 #include "../utils/buffer.h"
 #include "../utils/gil.h"
 #include "../utils/libwebrtc_thread.h"
+#include "../utils/parking.h"
 
 namespace python_webrtc {
 
@@ -96,11 +97,15 @@ namespace python_webrtc {
       const std::scoped_lock lock(_mutex);
       previous = _state;
       changed = _state != information.state();
+      if (changed) {
+        _surfacedState.Changed(IsBound(), previous);
+      }
       _state = information.state();
       _certificates = copyCertificates(information);
     }
 
     if (changed) {
+      Parking::At("dtls.statechange");
       if (information.state() == webrtc::DtlsTransportState::kFailed) {
         // libwebrtc tells no more than that the handshake failed
         webrtc::RTCError error(webrtc::RTCErrorType::OPERATION_ERROR_WITH_DATA, "The DTLS transport failed");

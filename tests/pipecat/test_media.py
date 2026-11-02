@@ -435,8 +435,8 @@ async def test_catching_up_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_write_during_silence_starts_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    # long frames, so waiting for the next one would show
+async def test_a_write_during_silence_waits_for_its_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    # long frames, so sending at once would show
     frame_ms = 200
     monkeypatch.setattr('webrtc.pipecat._media.SENT_AUDIO_FRAME_MS', frame_ms)
     async with pacing() as (pacer, received):
@@ -446,10 +446,29 @@ async def test_a_write_during_silence_starts_at_once(monkeypatch: pytest.MonkeyP
 
         assert await pacer.write(tone(frame_ms / 1000), 1)
 
-        # returns at once, not at the next frame
         elapsed = loop.time() - start
-        assert elapsed < seconds(0.05)
+        assert frame_ms / 1000 / 2 < elapsed < seconds(frame_ms / 1000 * 1.5)
         await wait_until(lambda: received.loud() > 0, 'the audio')
+
+
+@pytest.mark.asyncio
+async def test_a_write_within_a_frame_of_the_last_leaves_no_silence(monkeypatch: pytest.MonkeyPatch) -> None:
+    frame_ms = 200
+    frame_samples = RATE * frame_ms // 1000
+    monkeypatch.setattr('webrtc.pipecat._media.SENT_AUDIO_FRAME_MS', frame_ms)
+    async with pacing() as (pacer, received):
+        await wait_until(lambda: received.chunks > 0, 'the first silence')
+        start = len(received.samples)
+
+        audio = tone(frame_ms / 1000)
+        assert await pacer.write(audio, 1)
+        # a write returns as its frame starts, so the next one is due a frame later
+        await asyncio.sleep(0.5 * frame_ms / 1000)
+        assert await pacer.write(audio, 1)
+
+        await wait_until(lambda: received.loud(start) == 2 * loud_samples(audio), 'both writes')
+        loud = [i for i, sample in enumerate(received.samples[start:]) if abs(sample) > SILENCE]
+        assert loud[-1] - loud[0] < frame_samples * 5 // 2
 
 
 @pytest.mark.asyncio

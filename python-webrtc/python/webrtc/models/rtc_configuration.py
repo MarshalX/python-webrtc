@@ -175,6 +175,8 @@ class RTCConfiguration(Dictionary):
             is set.
         port_range (:obj:`tuple` of two :obj:`int`, optional): The lowest and the highest local UDP and TCP port
             to use, for firewalls that only allow a range. This option is specific to this library.
+        tcp_listen (:obj:`bool`, optional): Whether to offer passive TCP candidates, for peers without UDP. Set it
+            on the server only. Can't be changed. Specific to this library.
         certificates (:obj:`list` of :obj:`webrtc.RTCCertificate`, optional): The certificates to authenticate
             with. They're generated if omitted. They can't be changed, and leaving them out of
             :meth:`webrtc.RTCPeerConnection.set_configuration` keeps the current ones.
@@ -192,6 +194,7 @@ class RTCConfiguration(Dictionary):
     rtcp_mux_policy: RTCRtcpMuxPolicy | RTCRtcpMuxPolicyValue = RTCRtcpMuxPolicy.require
     ice_candidate_pool_size: int = 0
     port_range: tuple[int, int] | None = None
+    tcp_listen: bool = False
     certificates: list[RTCCertificate] | None = None
     always_negotiate_data_channels: bool = False
     rtp_header_encryption_policy: RTCRtpHeaderEncryptionPolicy | RTCRtpHeaderEncryptionPolicyValue = (
@@ -224,6 +227,7 @@ class RTCConfiguration(Dictionary):
             raise ValueError(msg)
         native.iceCandidatePoolSize = pool_size
         native.alwaysNegotiateDataChannels = bool(self.always_negotiate_data_channels)
+        native.tcpListen = bool(self.tcp_listen)
         native.rtpHeaderEncryptionPolicy = self.rtp_header_encryption_policy
 
         if self.certificates is not None:
@@ -258,6 +262,7 @@ class RTCConfiguration(Dictionary):
             rtcp_mux_policy=native.rtcpMuxPolicy,
             ice_candidate_pool_size=native.iceCandidatePoolSize,
             port_range=port_range,
+            tcp_listen=native.tcpListen,
             certificates=certificates,
             always_negotiate_data_channels=native.alwaysNegotiateDataChannels,
             rtp_header_encryption_policy=native.rtpHeaderEncryptionPolicy,
@@ -277,6 +282,8 @@ class RTCConfiguration(Dictionary):
     iceCandidatePoolSize: ClassVar[Alias[int]] = alias('ice_candidate_pool_size')
     #: Alias for :attr:`port_range`
     portRange: ClassVar[Alias[tuple[int, int] | None]] = alias('port_range')
+    #: Alias for :attr:`tcp_listen`
+    tcpListen: ClassVar[Alias[bool]] = alias('tcp_listen')
     #: Alias for :attr:`always_negotiate_data_channels`
     alwaysNegotiateDataChannels: ClassVar[Alias[bool]] = alias('always_negotiate_data_channels')
     #: Alias for :attr:`rtp_header_encryption_policy`

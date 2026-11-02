@@ -65,6 +65,19 @@ def test_set_configuration_defaults(create_pc: CreatePC) -> None:
     assert pc.get_configuration().ice_servers == []
 
 
+def test_tcp_listen_is_kept_and_can_not_change(create_pc: CreatePC) -> None:
+    pc = create_pc(webrtc.RTCConfiguration(tcp_listen=True))
+
+    configuration = pc.get_configuration()
+    assert configuration.tcp_listen
+    assert configuration.tcpListen
+    pc.set_configuration(configuration)
+
+    with pytest.raises(webrtc.InvalidModificationError):
+        pc.set_configuration(dataclasses.replace(configuration, tcp_listen=False))
+    assert not create_pc().get_configuration().tcp_listen
+
+
 def test_set_configuration_of_closed_connection(pc: webrtc.RTCPeerConnection) -> None:
     """A closed connection can't be configured."""
     pc.close()

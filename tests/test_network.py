@@ -17,7 +17,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 import webrtc
-from tests.helpers import connect, open_descriptors, wait_for_event, wait_for_ice_gathering_complete, wait_until
+from tests.helpers import (
+    connect,
+    exchange_ice_candidates,
+    exchange_offer_answer,
+    open_descriptors,
+    wait_for_event,
+    wait_for_ice_gathering_complete,
+    wait_until,
+)
 from tests.timing import seconds
 
 if TYPE_CHECKING:
@@ -65,6 +73,58 @@ async def test_tcp_candidates_are_active_and_listen_nowhere(create_pc: CreatePC)
     candidates = _tcp_candidates(pc.local_description.sdp)
     assert len(candidates) > 0
     assert all('tcptype active' in candidate for candidate in candidates)
+
+
+#: ports no other test gathers on
+TCP_LISTEN_PORT_RANGE = (40100, 40199)
+
+
+async def _gathered_tcp_candidates(pc: webrtc.RTCPeerConnection) -> list[webrtc.RTCIceCandidate]:
+    pc.create_data_channel('tcp')
+    await pc.set_local_description()
+    await wait_for_ice_gathering_complete(pc)
+
+    assert pc.local_description is not None
+    lines = _tcp_candidates(pc.local_description.sdp)
+    return [webrtc.RTCIceCandidate(line, sdp_m_line_index=0) for line in lines]
+
+
+@pytest.mark.asyncio
+async def test_tcp_listen_offers_passive_candidates_in_the_port_range(create_pc: CreatePC) -> None:
+    low, high = TCP_LISTEN_PORT_RANGE
+    listening = create_pc(webrtc.RTCConfiguration(tcp_listen=True, port_range=TCP_LISTEN_PORT_RANGE))
+    default = create_pc()
+
+    passive = await _gathered_tcp_candidates(listening)
+    active = await _gathered_tcp_candidates(default)
+
+    assert len(passive) > 0
+    assert all(candidate.tcp_type == webrtc.RTCIceTcpCandidateType.passive for candidate in passive)
+    assert all(candidate.port is not None and low <= candidate.port <= high for candidate in passive)
+    assert all(candidate.tcp_type == webrtc.RTCIceTcpCandidateType.active for candidate in active)
+
+
+def _is_tcp(candidate: webrtc.RTCIceCandidate) -> bool:
+    return candidate.protocol == webrtc.RTCIceProtocol.tcp
+
+
+@pytest.mark.asyncio
+async def test_tcp_listen_connects_without_udp(create_pc: CreatePC) -> None:
+    caller = create_pc()
+    callee = create_pc(webrtc.RTCConfiguration(tcp_listen=True))
+    caller.create_data_channel('tcp')
+    exchange_ice_candidates(caller, callee, admits=_is_tcp)
+
+    await exchange_offer_answer(caller, callee)
+
+    def connected() -> bool:
+        return all(pc.connection_state == webrtc.RTCPeerConnectionState.connected for pc in (caller, callee))
+
+    await wait_until(connected, 'both connections to connect over TCP')
+    assert caller.sctp is not None
+    pair = caller.sctp.transport.ice_transport.get_selected_candidate_pair()
+    assert pair is not None
+    assert pair.local.protocol == webrtc.RTCIceProtocol.tcp
 
 
 @pytest.mark.asyncio

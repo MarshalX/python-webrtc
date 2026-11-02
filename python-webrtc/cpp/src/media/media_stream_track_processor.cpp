@@ -181,6 +181,7 @@ namespace python_webrtc {
   pybind11::object MediaStreamTrackProcessor::Read() {
     std::optional<Item> item;
     bool ended = false;
+    uint64_t discarded = 0;
     {
       const gil_release release;
       const std::scoped_lock lock(_mutex);
@@ -189,6 +190,7 @@ namespace python_webrtc {
         _queue.pop_front();
       }
       ended = _ended;
+      discarded = _discardedFrames;
     }
     if (ended && !item) {
       // the sink is detached here rather than on the thread that ended the track
@@ -209,7 +211,7 @@ namespace python_webrtc {
     auto &audio = std::get<AudioItem>(*item);
     const pybind11::bytes data = Bytes(audio.data.data(), audio.data.size());
     return pybind11::make_tuple(data, audio.bitsPerSample, audio.sampleRate, audio.channels, audio.frames,
-                                audio.timestampUs);
+                                audio.timestampUs, discarded);
   }
 
 } // namespace python_webrtc

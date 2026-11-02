@@ -33,7 +33,7 @@ DEFAULT_VIDEO_BUFFER_SIZE = 1
 #: How many 10 ms chunks of audio are queued for reads by default, which makes 100 ms in all
 DEFAULT_AUDIO_BUFFER_SIZE = 10
 _MAX_BUFFER_SIZE = 65535
-# the members of a native item of video: the buffer, timestamp, rotation and RTP timestamp (6 for audio)
+# buffer, timestamp, rotation, RTP timestamp
 _VIDEO_ITEM_SIZE = 4
 
 
@@ -96,10 +96,10 @@ class _TrackSource:
             msg = 'the stream of the processor has not started'
             raise RuntimeError(msg)
         while controller._has_pending_reads():
-            item = native.read()
-            if item is None:
+            media = self._processor._take()
+            if media is None:
                 break
-            controller.enqueue(self._processor._wrap_media(item))
+            controller.enqueue(media)
         if native.ended and controller._can_close_or_enqueue():
             controller.close()
 
@@ -164,10 +164,10 @@ class MediaStreamTrackProcessor(WebRTCObject[wrtc.MediaStreamTrackProcessor], Ev
             if self._source is not None:
                 self._source.deliver()
 
-    @staticmethod
-    def _wrap_media(
-        item: tuple[wrtc.VideoFrameBuffer, int, int, int] | tuple[bytes, int, int, int, int, int],
-    ) -> VideoFrame | AudioData:
+    def _take(self) -> VideoFrame | AudioData | None:
+        item = self._native_obj.read()
+        if item is None:
+            return None
         if len(item) == _VIDEO_ITEM_SIZE:
             return VideoFrame._from_native(item)
         return AudioData._from_native(item)

@@ -60,6 +60,7 @@ namespace python_webrtc {
         .def_readwrite("rtcpMuxPolicy", &ConfigurationInit::rtcpMuxPolicy)
         .def_readwrite("iceCandidatePoolSize", &ConfigurationInit::iceCandidatePoolSize)
         .def_readwrite("portRange", &ConfigurationInit::portRange)
+        .def_readwrite("tcpListen", &ConfigurationInit::tcpListen)
         .def_readwrite("alwaysNegotiateDataChannels", &ConfigurationInit::alwaysNegotiateDataChannels)
         .def_readwrite("rtpHeaderEncryptionPolicy", &ConfigurationInit::rtpHeaderEncryptionPolicy)
         .def_readwrite("certificates", &ConfigurationInit::certificates);

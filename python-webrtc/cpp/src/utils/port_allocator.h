@@ -17,10 +17,11 @@
 
 namespace python_webrtc {
 
-  // A connection's allocator: gathers again only on real network changes, never listens on TCP; network thread
+  // A connection's allocator: gathers again only on real network changes; network thread
   std::unique_ptr<webrtc::PortAllocator> CreatePortAllocator(const webrtc::Environment &env,
                                                              std::shared_ptr<webrtc::NetworkManager> networks,
-                                                             std::shared_ptr<webrtc::PacketSocketFactory> sockets);
+                                                             std::shared_ptr<webrtc::PacketSocketFactory> sockets,
+                                                             bool tcpListen);
 
 } // namespace python_webrtc
 

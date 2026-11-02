@@ -199,6 +199,7 @@ class AudioData(Closable):
     _frames: int
     _channels: int
     _timestamp: int
+    _discarded_before: int = 0
 
     def __init__(self, init: AudioDataInit) -> None:
         format = _sample_format(init.format)
@@ -225,12 +226,12 @@ class AudioData(Closable):
         self._timestamp = timestamp
 
     @classmethod
-    def _from_native(cls, native: tuple[bytes, int, int, int, int, int]) -> AudioData:
-        """Samples of a track, interleaved: the data, bits per sample, sample rate, channels, frames and timestamp."""
-        data, bits_per_sample, sample_rate, channels, frames, timestamp = native
+    def _from_native(cls, native: tuple[bytes, int, int, int, int, int, int]) -> AudioData:
+        data, bits_per_sample, sample_rate, channels, frames, timestamp, discarded_before = native
         audio = cls.__new__(cls)
         format = _TRACK_FORMATS[bits_per_sample]
         audio._set(data, _Layout(format, float(sample_rate), frames, channels), timestamp)
+        audio._discarded_before = discarded_before
         return audio
 
     def _take(self) -> AudioData:

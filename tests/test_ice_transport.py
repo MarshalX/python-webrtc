@@ -32,6 +32,7 @@ from tests.helpers import (
     wait_until,
 )
 from tests.timing import seconds
+from webrtc.utils.loops import LoopState
 
 #: the shortest valid ICE password
 PASSWORD = 'p' * 22
@@ -260,6 +261,60 @@ async def test_selected_pair_changes_with_its_event(
     caller.close()
 
     assert ice.get_selected_candidate_pair() is None
+
+
+@pytest.mark.asyncio
+async def test_transport_bundled_away_shows_its_state_until_its_close_event(
+    caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection
+) -> None:
+    caller.add_transceiver('audio')
+    video = caller.add_transceiver('video')
+    await caller.set_local_description()
+    transport = video.sender.transport
+    assert transport is not None
+    ice = transport.ice_transport
+    closed = wait_for_event(ice, 'statechange')
+
+    await callee.set_remote_description(cast('webrtc.RTCSessionDescription', caller.local_description))
+    await callee.set_local_description()
+
+    wrtc._testing.park('ice.closed')
+    try:
+        answering = asyncio.ensure_future(
+            caller.set_remote_description(cast('webrtc.RTCSessionDescription', callee.local_description))
+        )
+        # closed natively, before its event
+        assert await asyncio.to_thread(wrtc._testing.parked, 'ice.closed', seconds(5))
+        assert ice.state == webrtc.RTCIceTransportState.new
+
+        # as any event of the connection does
+        LoopState.of(asyncio.get_running_loop()).update(caller)
+    finally:
+        wrtc._testing.release('ice.closed')
+    await answering
+
+    await closed
+    assert ice.state == webrtc.RTCIceTransportState.closed
+
+
+@pytest.mark.asyncio
+async def test_gathering_shows_new_until_gather_surfaces_it() -> None:
+    ice = webrtc.RTCIceTransport()
+    completed = wait_for_event(ice, 'gatheringstatechange')
+
+    wrtc._testing.park('ice.gatheringstatechange')
+    try:
+        gathering = asyncio.ensure_future(asyncio.to_thread(ice.gather))
+        assert await asyncio.to_thread(wrtc._testing.parked, 'ice.gatheringstatechange', seconds(5))
+        assert ice.gathering_state == webrtc.RTCIceGathererState.new
+    finally:
+        wrtc._testing.release('ice.gatheringstatechange')
+    await gathering
+    assert ice.gathering_state != webrtc.RTCIceGathererState.new
+
+    await completed
+    assert ice.gathering_state == webrtc.RTCIceGathererState.complete
+    ice.stop()
 
 
 async def offered_audio(caller: webrtc.RTCPeerConnection, callee: webrtc.RTCPeerConnection) -> webrtc.RTCIceTransport:

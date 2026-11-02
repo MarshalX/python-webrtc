@@ -40,6 +40,7 @@ namespace python_webrtc {
         webrtc::PeerConnectionInterface::RtcpMuxPolicy::kRtcpMuxPolicyRequire;
     int iceCandidatePoolSize = 0;
     std::optional<std::pair<int, int>> portRange;
+    bool tcpListen = false;
     bool alwaysNegotiateDataChannels = false;
     // cryptex (RFC 9335), offered by default
     webrtc::CryptoOptions::Srtp::CryptexPolicy rtpHeaderEncryptionPolicy =

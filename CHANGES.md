@@ -7,6 +7,11 @@
 * Add `webrtc.aiortc.install_alias()`, which makes `import aiortc` give the compat layer, for libraries that import aiortc themselves by [@MarshalX](https://github.com/MarshalX)
 * Add aiortc's `rtp`, `jitterbuffer`, `utils` and `clock` modules and the ICE server helpers of `rtcicetransport` to the compat layer by [@MarshalX](https://github.com/MarshalX)
 * Drop a compat layer track's buffered frames when its receiver's `_enabled` is set to `False`, and add the track's `_queue`, for libraries that skip stale frames by [@MarshalX](https://github.com/MarshalX)
+* Fix a video frame leak in the compat layer when a sender's track is replaced or stopped by [@MarshalX](https://github.com/MarshalX)
+* Add `RTCConfiguration.tcp_listen` for clients without UDP, also on `webrtc.pipecat`'s connection and request handler. See [Clients without UDP](https://wrtc.marshal.dev/guides/connections/#clients-without-udp) by [@MarshalX](https://github.com/MarshalX)
+* Fix ICE and DTLS transport states changing before their events by [@MarshalX](https://github.com/MarshalX)
+* Fix compat layer audio `pts` falling behind after dropped audio by [@MarshalX](https://github.com/MarshalX)
+* Fix a cancelled stream read losing the next chunk by [@MarshalX](https://github.com/MarshalX)
 
 ## Version 0.1.0
 
