@@ -250,8 +250,13 @@ if os.environ.get('READTHEDOCS', '') == 'True':
 
 # -- OpenGraph ---------------------------------------------------
 ogp_site_url = 'https://wrtc.marshal.dev/'
-# the social preview of the GitHub repository
-ogp_image = 'https://repository-images.githubusercontent.com/444007147/cbcbf096-57d3-4715-93b0-4dba751db76a'
+ogp_image = 'https://wrtc.marshal.dev/_static/img/og-image.png'
+ogp_image_alt = 'Python WebRTC logo'
+ogp_custom_meta_tags = (
+    '<meta name="twitter:card" content="summary_large_image">',
+    '<meta property="og:image:width" content="1280">',
+    '<meta property="og:image:height" content="640">',
+)
 ogp_type = 'article'
 ogp_enable_meta_description = True
 ogp_social_cards = {'enable': False}

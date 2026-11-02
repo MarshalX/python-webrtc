@@ -40,7 +40,7 @@ webrtcbin. This page compares them as of 24 October 2026, with a source for ever
 | Python                    | 3.9–3.15                   | 3.10+                    | 3.9+                         | 3.10–3.14             |
 | Wheels                    | Linux, macOS, Windows      | pure Python              | Linux, macOS, Windows        | macOS, Windows        |
 | Tested with               | browsers' web-platform-tests | own suite, browser interop | own suite                 | own unit tests        |
-| Latest release            | 0.1.0 beta, Oct 2026       | 1.15.0 stable, Jul 2026  | 1.1.21, Oct 2026             | 1.28.8, Oct 2026      |
+| Latest release            | 0.2.0 beta, Nov 2026       | 1.15.0 stable, Jul 2026  | 1.1.21, Oct 2026             | 1.28.8, Oct 2026      |
 
 — means the documentation doesn't say.
 

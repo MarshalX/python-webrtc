@@ -4,6 +4,8 @@ description: "Chrome's WebRTC engine with the browser API, in Python: peer conne
 
 # Python WebRTC
 
+<img src="_static/img/logo.png" alt="Python WebRTC logo" class="home-logo" width="250" height="175">
+
 **Chrome's WebRTC engine, with the browser API, in Python.**
 
 Python WebRTC binds libwebrtc M152, the engine inside Chrome, and exposes it through the W3C APIs you already know
@@ -13,6 +15,15 @@ asyncio. Talk to browsers, servers, SFUs and AI agents peer-to-peer, with no ven
 ```bash
 pip install wrtc
 ```
+
+<picture class="home-demo dark:hidden">
+  <source type="image/avif" srcset="_static/img/demo-light.avif">
+  <img src="_static/img/demo-light.gif" alt="A browser page sends its camera to a Python server, which sends it back in grayscale and answers a chat message over a data channel" loading="lazy">
+</picture>
+<picture class="home-demo hidden dark:block">
+  <source type="image/avif" srcset="_static/img/demo-dark.avif">
+  <img src="_static/img/demo-dark.gif" alt="A browser page sends its camera to a Python server, which sends it back in grayscale and answers a chat message over a data channel" loading="lazy">
+</picture>
 
 :::{tip}
 Coming from aiortc? Install `wrtc[aiortc]`, change `from aiortc` to `from webrtc.aiortc`, and your code runs on Chrome's

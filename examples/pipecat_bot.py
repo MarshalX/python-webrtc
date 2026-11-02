@@ -13,6 +13,7 @@
 
     export DEEPGRAM_API_KEY=... OPENAI_API_KEY=... CARTESIA_API_KEY=...
     uv run pipecat_bot.py
+    uv run pipecat_bot.py --language pl
     uv run pipecat_bot.py --echo
 
 Open http://localhost:7860 and press Connect. With the three keys, the bot listens with Deepgram, answers with OpenAI
@@ -37,6 +38,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import TransportParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -74,14 +76,19 @@ def echo_pipeline(transport: webrtc.pipecat.SmallWebRTCTransport) -> Pipeline:
 class VoiceBot:
     """Speech to text, the model, and text to speech; the user's speech interrupts the bot."""
 
-    def __init__(self) -> None:
+    def __init__(self, language: Language) -> None:
+        instructions = f'{INSTRUCTIONS} Answer in the language with the code {language}.'
+
         self.context = LLMContext()
-        self.stt = DeepgramSTTService(api_key=os.environ['DEEPGRAM_API_KEY'])
+        self.stt = DeepgramSTTService(
+            api_key=os.environ['DEEPGRAM_API_KEY'], settings=DeepgramSTTService.Settings(language=language)
+        )
         self.llm = OpenAILLMService(
-            api_key=os.environ['OPENAI_API_KEY'], settings=OpenAILLMService.Settings(system_instruction=INSTRUCTIONS)
+            api_key=os.environ['OPENAI_API_KEY'], settings=OpenAILLMService.Settings(system_instruction=instructions)
         )
         self.tts = CartesiaTTSService(
-            api_key=os.environ['CARTESIA_API_KEY'], settings=CartesiaTTSService.Settings(voice=VOICE)
+            api_key=os.environ['CARTESIA_API_KEY'],
+            settings=CartesiaTTSService.Settings(voice=VOICE, language=language),
         )
 
     def pipeline(self, transport: webrtc.pipecat.SmallWebRTCTransport) -> Pipeline:
@@ -107,7 +114,7 @@ def voice_bot(args: argparse.Namespace) -> VoiceBot | None:
         logger.warning(f'{", ".join(missing)} not set: echoing your voice back')
         return None
 
-    return VoiceBot()
+    return VoiceBot(args.language)
 
 
 async def bot(runner_args: SmallWebRTCRunnerArguments) -> None:
@@ -146,6 +153,9 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--echo', action='store_true', help='send your voice back, with no keys needed')
+    parser.add_argument(
+        '--language', type=Language, default=Language.EN, help='the language to listen and answer in, like pl'
+    )
     run(parser)
 
 

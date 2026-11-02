@@ -13,6 +13,7 @@ export DEEPGRAM_API_KEY=... OPENAI_API_KEY=... CARTESIA_API_KEY=...
 uv run https://raw.githubusercontent.com/MarshalX/python-webrtc/main/examples/pipecat_bot.py
 ```
 
+It listens and answers in English; `--language pl` picks another language that Deepgram and Cartesia both support.
 With `--echo`, or without the keys, it sends your voice back. Open <http://localhost:7860> and press Connect.
 
 ```{literalinclude} ../../../examples/pipecat_bot.py

@@ -1,17 +1,27 @@
 # Change Log
 
-## Unreleased
+## Version 0.2.0
 
-* Add `webrtc.pipecat`, Pipecat's SmallWebRTC transport on the native API, installed with `wrtc[pipecat]`, with `install_alias()` for Pipecat's development runner. See [Use with Pipecat](https://wrtc.marshal.dev/guides/pipecat/) by [@MarshalX](https://github.com/MarshalX)
-* Add a Pipecat voice bot example by [@MarshalX](https://github.com/MarshalX)
-* Add `webrtc.aiortc.install_alias()`, which makes `import aiortc` give the compat layer, for libraries that import aiortc themselves by [@MarshalX](https://github.com/MarshalX)
-* Add aiortc's `rtp`, `jitterbuffer`, `utils` and `clock` modules and the ICE server helpers of `rtcicetransport` to the compat layer by [@MarshalX](https://github.com/MarshalX)
-* Drop a compat layer track's buffered frames when its receiver's `_enabled` is set to `False`, and add the track's `_queue`, for libraries that skip stale frames by [@MarshalX](https://github.com/MarshalX)
-* Fix a video frame leak in the compat layer when a sender's track is replaced or stopped by [@MarshalX](https://github.com/MarshalX)
-* Add `RTCConfiguration.tcp_listen` for clients without UDP, also on `webrtc.pipecat`'s connection and request handler. See [Clients without UDP](https://wrtc.marshal.dev/guides/connections/#clients-without-udp) by [@MarshalX](https://github.com/MarshalX)
-* Fix ICE and DTLS transport states changing before their events by [@MarshalX](https://github.com/MarshalX)
-* Fix compat layer audio `pts` falling behind after dropped audio by [@MarshalX](https://github.com/MarshalX)
-* Fix a cancelled stream read losing the next chunk by [@MarshalX](https://github.com/MarshalX)
+**02.11.2026**
+
+**🤖 Pipecat bots run on the engine: install `wrtc[pipecat]` and change the imports, and clients stay as they are. See [Use with Pipecat](https://wrtc.marshal.dev/guides/pipecat/)**
+
+**🧩 More libraries built on aiortc run on the compat layer unchanged, with `webrtc.aiortc.install_alias()`**
+
+**🔌 Clients that can't use UDP reach a server over TCP, without TURN, with `RTCConfiguration.tcp_listen`. See [Clients without UDP](https://wrtc.marshal.dev/guides/connections/#clients-without-udp)**
+
+* Add `webrtc.pipecat`, Pipecat's SmallWebRTC transport on the native API, installed with `wrtc[pipecat]`, with `install_alias()` for Pipecat's development runner by [@MarshalX](https://github.com/MarshalX) in [#277](https://github.com/MarshalX/python-webrtc/pull/277)
+* Add a Pipecat voice bot example, with an echo that needs no keys by [@MarshalX](https://github.com/MarshalX) in [#277](https://github.com/MarshalX/python-webrtc/pull/277)
+* Add `webrtc.aiortc.install_alias()`, which makes `import aiortc` give the compat layer, for libraries that import aiortc themselves by [@MarshalX](https://github.com/MarshalX) in [#276](https://github.com/MarshalX/python-webrtc/pull/276)
+* Add aiortc's `rtp`, `jitterbuffer`, `utils` and `clock` modules and the ICE server helpers of `rtcicetransport` to the compat layer by [@MarshalX](https://github.com/MarshalX) in [#276](https://github.com/MarshalX/python-webrtc/pull/276)
+* Drop a compat layer track's buffered frames when its receiver's `_enabled` is set to `False`, and add the track's `_queue`, for libraries that skip stale frames by [@MarshalX](https://github.com/MarshalX) in [#276](https://github.com/MarshalX/python-webrtc/pull/276)
+* Add `RTCConfiguration.tcp_listen` for clients without UDP, also on `webrtc.pipecat`'s connection and request handler by [@MarshalX](https://github.com/MarshalX) in [#278](https://github.com/MarshalX/python-webrtc/pull/278)
+* Add a library comparison guide, a README demo and copy-page actions to the docs by [@MarshalX](https://github.com/MarshalX) in [#271](https://github.com/MarshalX/python-webrtc/pull/271)
+* Fix a video frame leak in the compat layer when a sender's track is replaced or stopped by [@MarshalX](https://github.com/MarshalX) in [#278](https://github.com/MarshalX/python-webrtc/pull/278)
+* Fix compat layer audio `pts` falling behind after dropped audio by [@MarshalX](https://github.com/MarshalX) in [#278](https://github.com/MarshalX/python-webrtc/pull/278)
+* Fix a cancelled stream read losing the next chunk by [@MarshalX](https://github.com/MarshalX) in [#278](https://github.com/MarshalX/python-webrtc/pull/278)
+* Fix ICE and DTLS transport states changing before their events by [@MarshalX](https://github.com/MarshalX) in [#278](https://github.com/MarshalX/python-webrtc/pull/278)
+* Fix the docs' contrast, mobile overflow and dead API links by [@MarshalX](https://github.com/MarshalX) in [#275](https://github.com/MarshalX/python-webrtc/pull/275)
 
 ## Version 0.1.0
 

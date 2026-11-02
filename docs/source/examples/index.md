@@ -34,7 +34,7 @@ Writes received video and audio to raw files.
 Sends your camera back from Python in grayscale, with a chat over a data channel.
 :::
 
-:::{grid-item-card} {octicon}`unmute;1em;sd-mr-1` Voice chat with OpenAI GPT-Live
+:::{grid-item-card} <img src="../_static/img/libs/openai.svg" alt="" class="lib-logo" width="20" height="20"> Voice chat with OpenAI GPT-Live
 :link: openai_live
 :link-type: doc
 
@@ -48,7 +48,7 @@ Talks to the model through your microphone and speakers.
 Talks to Gemini from a browser page, through a Python server that keeps the API key.
 :::
 
-:::{grid-item-card} {octicon}`hubot;1em;sd-mr-1` Pipecat voice bot
+:::{grid-item-card} <img src="../_static/img/libs/pipecat.svg" alt="" class="lib-logo" width="20" height="20"> Pipecat voice bot
 :link: pipecat_bot
 :link-type: doc
 
@@ -70,6 +70,8 @@ Plays a WHEP stream in the terminal, or publishes one over WHIP.
 :::
 
 ::::
+
+Python WebRTC isn't affiliated with the companies and projects named here, and their logos belong to their owners.
 
 ```{toctree}
 :hidden:
