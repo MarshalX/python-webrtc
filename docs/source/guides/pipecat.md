@@ -121,7 +121,7 @@ is a complete bot on the runner.
 - **Port range.** `port_range=(low, high)` keeps the bot's candidates in a range of ports. In Docker, publish the same
   range, like `-p 40000-40019:40000-40019/udp`. The runner makes its own handler, so this needs a server of your own.
 - **Clients without UDP.** `tcp_listen=True` lets clients behind a firewall that blocks UDP connect over TCP, without
-  TURN. With `port_range`, publish the range for `/tcp` too. See [Clients without UDP](connections.md#clients-without-udp).
+  TURN. Clients must reach the bot's own address. See [Clients without UDP](connections.md#clients-without-udp).
 - **Codecs.** The answer follows the client's offer. For H.264, see [H.264](h264.md).
 
 ## What differs

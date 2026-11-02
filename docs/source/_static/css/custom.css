@@ -153,3 +153,26 @@ dl.py.class > dd > dl.py.attribute:not(:has(> dd > *)) > dt {
         margin: 0 0 0.5rem;
     }
 }
+
+#content img.lib-logo {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  max-width: none;
+  margin: 0 0.35rem 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: #fff;
+  vertical-align: text-bottom;
+}
+
+.home-logo {
+  margin: 0 auto 1.5rem;
+}
+
+.home-demo img {
+  margin: 1.5rem auto;
+  max-width: 100%;
+  height: auto;
+}

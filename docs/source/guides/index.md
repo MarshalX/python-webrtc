@@ -66,7 +66,7 @@ Python WebRTC, aiortc, the LiveKit SDK and GStreamer webrtcbin compared, and whe
 Run aiortc code by changing its imports, and what changes on the way.
 :::
 
-:::{grid-item-card} {octicon}`hubot;1em;sd-mr-1` Use with Pipecat
+:::{grid-item-card} <img src="../_static/img/libs/pipecat.svg" alt="" class="lib-logo" width="20" height="20"> Use with Pipecat
 :link: pipecat
 :link-type: doc
 

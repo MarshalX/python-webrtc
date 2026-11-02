@@ -80,8 +80,10 @@ only:
 config = webrtc.RTCConfiguration(tcp_listen=True, port_range=(40000, 40099))
 ```
 
-In Docker, publish `port_range` for TCP too: `-p 40000-40099:40000-40099/udp -p 40000-40099:40000-40099/tcp`.
-Leave it off on clients: when both ends listen, every TCP port pairs with every remote one.
+Passive candidates carry the server's own address, and STUN doesn't map TCP, so clients must reach that address
+directly: a public address, or `--network host` in Docker. Publishing ports on Docker's bridge network isn't enough.
+Each connection listens on its own port, so size `port_range` for your connections, and open it for TCP in the
+firewall. Leave it off on clients: when both ends listen, every TCP port pairs with every remote one.
 
 ## States
 

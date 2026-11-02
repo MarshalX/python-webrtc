@@ -49,7 +49,25 @@ import some_library  # its aiortc imports now get webrtc.aiortc
 `aiortc.x` then gives `webrtc.aiortc.x`, and a module the layer lacks raises `ModuleNotFoundError`. Call it first,
 in each process: it raises `RuntimeError` if `aiortc` is imported already.
 
-For Pipecat, use [`webrtc.pipecat`](pipecat.md) instead.
+| Library | Status |
+| --- | --- |
+| <img src="../_static/img/libs/gradio.svg" alt="" class="lib-logo" width="20" height="20"> [Gradio](https://github.com/gradio-app/gradio) `gr.WebRTC` | ✅ Tested: audio echo and video flip on the unreleased preview of [PR #13965](https://github.com/gradio-app/gradio/pull/13965). `video_bitrate` isn't applied |
+| <img src="../_static/img/libs/pipecat.svg" alt="" class="lib-logo" width="20" height="20"> [Pipecat](https://github.com/pipecat-ai/pipecat) | ✅ Tested: its SmallWebRTC tests pass. Better on [`webrtc.pipecat`](pipecat.md), which works with existing bots too |
+| <img src="../_static/img/libs/fastrtc.png" alt="" class="lib-logo" width="20" height="20"> [FastRTC](https://github.com/gradio-app/fastrtc) | ✅ Tested: audio echo and video flip on 0.0.34 |
+| <img src="../_static/img/libs/agentscope.svg" alt="" class="lib-logo" width="20" height="20"> [AgentScope](https://github.com/agentscope-ai/agentscope) | 🔍 Audited |
+| <img src="../_static/img/libs/livetalking.png" alt="" class="lib-logo" width="20" height="20"> [LiveTalking](https://github.com/lipku/LiveTalking) | 🔍 Audited |
+| <img src="../_static/img/libs/getstream.png" alt="" class="lib-logo" width="20" height="20"> [Vision Agents](https://github.com/GetStream/Vision-Agents) | 🔍 Audited |
+| <img src="../_static/img/libs/vidgear.png" alt="" class="lib-logo" width="20" height="20"> [VidGear](https://github.com/abhiTronix/vidgear) | 🔍 Audited |
+| <img src="../_static/img/libs/roboflow.svg" alt="" class="lib-logo" width="20" height="20"> [Roboflow Inference](https://github.com/roboflow/inference) | 🔍 Audited |
+| [streamlit-webrtc](https://github.com/whitphx/streamlit-webrtc) | 🔍 Audited |
+| [unitree_webrtc_connect](https://github.com/legion1581/unitree_webrtc_connect) | 🔍 Audited |
+| <img src="../_static/img/libs/getstream.png" alt="" class="lib-logo" width="20" height="20"> [stream-py](https://github.com/GetStream/stream-py) | 🔍 Audited |
+| <img src="../_static/img/libs/simli.png" alt="" class="lib-logo" width="20" height="20"> [Simli](https://github.com/simliai/simli-client-py) | 🔍 Audited |
+
+✅ Tested means run on the layer. 🔍 Audited means their code was read and the layer has the aiortc names they use, so they
+should work, but they haven't been run on it yet.
+
+Python WebRTC isn't affiliated with these projects, and their logos belong to their owners.
 
 The library's aiortc dependency stays installed but unused. Keep it if the library imports aiortc's dependencies, such
 as `aioice` or `cryptography`, directly.
