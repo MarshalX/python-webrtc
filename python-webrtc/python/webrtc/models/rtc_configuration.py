@@ -282,6 +282,7 @@ class RTCConfiguration(Dictionary):
     iceCandidatePoolSize: ClassVar[Alias[int]] = alias('ice_candidate_pool_size')
     #: Alias for :attr:`port_range`
     portRange: ClassVar[Alias[tuple[int, int] | None]] = alias('port_range')
+    #: Alias for :attr:`tcp_listen`
     tcpListen: ClassVar[Alias[bool]] = alias('tcp_listen')
     #: Alias for :attr:`always_negotiate_data_channels`
     alwaysNegotiateDataChannels: ClassVar[Alias[bool]] = alias('always_negotiate_data_channels')
