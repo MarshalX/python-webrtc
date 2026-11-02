@@ -1,5 +1,11 @@
 # Change Log
 
+## Version 0.2.1
+
+**02.11.2026**
+
+* Fix `wrtc[pipecat]` missing FastAPI, which `webrtc.pipecat.request_handler` imports by [@MarshalX](https://github.com/MarshalX)
+
 ## Version 0.2.0
 
 **02.11.2026**

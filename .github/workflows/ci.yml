@@ -191,7 +191,10 @@ jobs:
       # webrtc from the wheel, the tests from the checkout
       - run: |
           uv venv --python 3.13
-          uv pip install wheelhouse/*.whl --group test --group pipecat-test
+          uv pip install "$(ls wheelhouse/*.whl)[pipecat]"
+      # the extra alone has to cover what the package imports
+      - run: uv run --no-sync python -c "import webrtc.pipecat.request_handler"
+      - run: uv pip install --group test --group pipecat-test
       - run: uv run --no-sync pytest -n auto tests/pipecat
 
   # branch protection check

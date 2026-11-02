@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "wrtc"  # "webrtc" isn't allowed on PyPI
-version = "0.2.0"
+version = "0.2.1"
 description = "Chrome's WebRTC engine (libwebrtc M152), with the browser API, in Python"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -60,7 +60,7 @@ Author = "https://github.com/MarshalX"
 [project.optional-dependencies]
 aiortc = ["pyee>=13,<15", "av>=14,<18"]
 # 3.11+ as the framework; it deprecates over a major version
-pipecat = ["pipecat-ai>=1.15,<2; python_version >= '3.11'"]
+pipecat = ["pipecat-ai>=1.15,<2; python_version >= '3.11'", "fastapi>=0.115.6,<1; python_version >= '3.11'"]
 
 [dependency-groups]
 test = ["pytest>=8", "pytest-asyncio>=0.24", "pytest-timeout>=2.3", "pytest-xdist>=3.8.0", "psutil>=7.2"]
