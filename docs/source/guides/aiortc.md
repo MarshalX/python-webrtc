@@ -54,7 +54,7 @@ in each process: it raises `RuntimeError` if `aiortc` is imported already.
 | <img src="../_static/img/libs/gradio.svg" alt="" class="lib-logo" width="20" height="20"> [Gradio](https://github.com/gradio-app/gradio) `gr.WebRTC` | ✅ Tested: audio echo and video flip on the unreleased preview of [PR #13965](https://github.com/gradio-app/gradio/pull/13965). `video_bitrate` isn't applied |
 | <img src="../_static/img/libs/pipecat.svg" alt="" class="lib-logo" width="20" height="20"> [Pipecat](https://github.com/pipecat-ai/pipecat) | ✅ Tested: its SmallWebRTC tests pass. Better on [`webrtc.pipecat`](pipecat.md), which works with existing bots too |
 | <img src="../_static/img/libs/fastrtc.png" alt="" class="lib-logo" width="20" height="20"> [FastRTC](https://github.com/gradio-app/fastrtc) | ✅ Tested: audio echo and video flip on 0.0.34 |
-| <img src="../_static/img/libs/agentscope.svg" alt="" class="lib-logo" width="20" height="20"> [AgentScope](https://github.com/agentscope-ai/agentscope) | 🔍 Audited |
+| <img src="../_static/img/libs/agentscope.svg" alt="" class="lib-logo" width="20" height="20"> [AgentScope](https://github.com/agentscope-ai/agentscope) | ✅ Tested: voice calls from its web client in Chrome, with interruption and hang-up, on `main` at 782bd43 |
 | <img src="../_static/img/libs/livetalking.png" alt="" class="lib-logo" width="20" height="20"> [LiveTalking](https://github.com/lipku/LiveTalking) | 🔍 Audited |
 | <img src="../_static/img/libs/getstream.png" alt="" class="lib-logo" width="20" height="20"> [Vision Agents](https://github.com/GetStream/Vision-Agents) | 🔍 Audited |
 | <img src="../_static/img/libs/vidgear.png" alt="" class="lib-logo" width="20" height="20"> [VidGear](https://github.com/abhiTronix/vidgear) | 🔍 Audited |
